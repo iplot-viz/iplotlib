@@ -156,7 +156,7 @@ class ADataAccess(ABC):
 
     def __init__(self,parent=None):
         self.shost = None
-        self.uport = None
+        self.sport = None
         self.errcode = 0
         self.errdesc = ""
         self.UCR = None
@@ -164,7 +164,7 @@ class ADataAccess(ABC):
     
     def setHostInfo(self,hostname,port):
         self.shost = hostname
-        self.port = port
+        self.sport = port
 
     @abstractmethod
     def connect(self,udah="localhost",port=3090):

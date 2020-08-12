@@ -164,10 +164,6 @@ class AbstractPlotObj(ABC):
     def applyProc(self):
         return
 
-    def retrieveAllData(self):
-        for i in range(len(self.signals)):
-            self.retrieveData(self.signals[i])
-
     def getStatus(self):
         statuses = []
         sigAndStat = {}
