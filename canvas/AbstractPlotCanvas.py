@@ -147,14 +147,14 @@ class AbstractPlotCanvas(ABC):
         #for i in range(self.ntot):
          #   self.axSet.append(self.figure.add_subplot(self.nrows,self.ncols,i+1))
      
-    def appendVariables(self,signame,pulsenb,tsS,tsE,isnew,transform,hialias):
+    def appendSignals(self,signame,pulsenb,tsS,tsE,isnew,transform,hialias):
         if hialias not in self.serverList.keys():
             return -1
-        return self.appendVariablesInt(signame,pulsenb,tsS,tsE,isnew,
+        return self.appendSignalsInt(signame,pulsenb,tsS,tsE,isnew,
         transform,self.serverList[hialias])
 
     @abstractmethod
-    def appendVariablesInt(self,signame,pulsenb,tsS,tsE,isnew,transform,da):
+    def appendSignalsInt(self,signame,pulsenb,tsS,tsE,isnew,transform,da):
         pass
     
     @abstractmethod
@@ -190,7 +190,7 @@ class AbstractPlotCanvas(ABC):
         self.currpi = 0
 
     @abstractmethod
-    def FetchAndPlotD(self):
+    def fetchAndPlotD(self):
         pass
 
     def getSignalStatuses(self):
