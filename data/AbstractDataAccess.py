@@ -155,7 +155,7 @@ class ADataAccess(ABC):
 
 
     def __init__(self,parent=None):
-        self.udahost = None
+        self.shost = None
         self.uport = None
         self.errcode = 0
         self.errdesc = ""
@@ -163,7 +163,7 @@ class ADataAccess(ABC):
         self.connected = False
     
     def setHostInfo(self,hostname,port):
-        self.server = hostname
+        self.shost = hostname
         self.port = port
 
     @abstractmethod
