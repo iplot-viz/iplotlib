@@ -29,6 +29,8 @@ class QtGnuplotCanvas(QtOverlayPlotCanvas):
         layout = QVBoxLayout()
         self.setLayout(layout)
         self.gnuplot_widget = QtGnuplotWidget()
+        self.gnuplot_widget.setStyleSheet('border: 1px solid red')
+
         layout.addWidget(self.gnuplot_widget)
 
         status = self.__init_gnuplot()
