@@ -4,11 +4,11 @@ from PyQt5 import QtCore
 from PyQt5.QtCore import QPoint, Qt, QRect, QRectF
 from PyQt5.QtGui import QPainter, QPen, QBrush, QColor
 
-from qt.QtCanvasTool import QtCanvasTool
+from qt.QtOverlayCanvasTool import QtOverlayCanvasTool
 from qt.QtPlotCanvas import QtPlotCanvas
 
 
-class QtZoomTool(QtCanvasTool):
+class QtOverlayZoomTool(QtOverlayCanvasTool):
 
     def __init__(self):
         self.rect_start: QPoint = None
@@ -58,8 +58,8 @@ class QtZoomTool(QtCanvasTool):
     def __reset(canvas: QtPlotCanvas):
         for c_axis, plot in zip(canvas.axes_list(), canvas.plots()):
             for index, axis in enumerate(plot.axes):
-                c_axis[index]['min'] = axis.min
-                c_axis[index]['max'] = axis.max
+                c_axis[index].begin = axis.begin
+                c_axis[index].end = axis.end
         canvas.replot()
 
     def __distance(self, start: QPoint, end: QPoint) -> float:
@@ -70,12 +70,15 @@ class QtZoomTool(QtCanvasTool):
         p2 = canvas.scene_to_graph(end.x(), end.y())
         print("ZOOM tool: rect " + str(p1) + " , " + str(p2) +" canvas="+str(canvas))
         for a in canvas.axes_list():
+            print("AL: " + str(a[0]) + str(a[1]))
             if len(a) > 1:
-                a[0]['min'] = p1.x() if p1.x() < p2.x() else p2.x()
-                a[0]['max'] = p1.x() if p1.x() > p2.x() else p2.x()
+                a[0].begin = p1.x() if p1.x() < p2.x() else p2.x()
+                a[0].end = p1.x() if p1.x() > p2.x() else p2.x()
 
-                a[1]['min'] = p1.y() if p1.y() < p2.y() else p2.y()
-                a[1]['max'] = p1.y() if p1.y() > p2.y() else p2.y()
+                a[1].begin = p1.y() if p1.y() < p2.y() else p2.y()
+                a[1].end = p1.y() if p1.y() > p2.y() else p2.y()
+
+                print("AL2: " + str(a[0]) + str(a[1]))
 
                 canvas.replot()
 

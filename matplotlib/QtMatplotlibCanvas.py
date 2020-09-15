@@ -1,12 +1,15 @@
+from abc import abstractmethod
+
 from PyQt5 import QtGui
-from PyQt5.QtCore import QPointF
-from PyQt5.QtWidgets import QWidget, QVBoxLayout
+from PyQt5.QtCore import QPointF, QRectF
+from PyQt5.QtWidgets import QVBoxLayout
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
-# from qtconsole.qt import QtGui
+from copy import copy
 
-from api.Plot import Plot
-from qt.QtPlotCanvas import QtPlotCanvas
+from iplotlib.Plot import Plot
+from iplotlib.Axis import RangeAxis
+from qt.QtOverlayPlotCanvas import QtOverlayPlotCanvas
 from qt.QtCanvasOverlay import QtCanvasOverlay
 
 """
@@ -14,47 +17,57 @@ Qt matplotlib canvas implementation
 """
 
 
-class QtMatplotlibCanvas(QtPlotCanvas):
-
+class QtMatplotlibCanvas(QtOverlayPlotCanvas):
 
     def __init__(self):
-        super(QtMatplotlibCanvas, self).__init__()
+        super().__init__()
         self.all_plots = []
         self.all_axes = []
         self.axes = None
 
         fig, axes = plt.subplots()
         self.axes = [axes]
-        self.matplotlib_widget = FigureCanvas(fig)
+        self._matplotlib_widget = FigureCanvas(fig)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
-        layout.addWidget(self.matplotlib_widget)
+        layout.addWidget(self._matplotlib_widget)
 
-        self.overlay = QtCanvasOverlay(self.matplotlib_widget)
+        self.overlay = QtCanvasOverlay(self._matplotlib_widget)
 
     def plot(self, plot: Plot = None):
         self.all_plots.append(plot)
-        self.all_axes.append([{"min":a.min,"max":a.max} for a in plot.axes])
+        self.all_axes.append([copy(a) for a in plot.axes])
         self.replot()
 
-    def activateTool(self, tool):
-        self.overlay.activateTool(tool)
-
     def replot(self):
-        for a in self.all_axes:
-                if len(a) > 0:
-                    self.axes[0].set_xlim([a[0]['min'], a[0]['max']])
-                if len(a) > 1:
-                    self.axes[0].set_ylim([a[1]['min'], a[1]['max']])
-        if self.axes:
-            print("APD: " + str(self.all_plots[0].data))
-            self.axes[0].plot(self.all_plots[0].data[0],self.all_plots[0].data[1], "bx",color="blue")
+        if len(self.axes):
+            self.axes[0].clear()
 
-        event = QtGui.QResizeEvent(self.matplotlib_widget.size(), self.matplotlib_widget.size())
-        self.matplotlib_widget.resizeEvent(event)
+        for a in self.all_axes:
+            if len(a) > 0 and issubclass(type(a[0]), RangeAxis):
+                xaxis = a[0]
+                if xaxis.begin is not None and xaxis.end is not None:
+                    self.axes[0].set_xlim([xaxis.begin, xaxis.end])
+
+            if len(a) > 1 and issubclass(type(a[1]), RangeAxis):
+                yaxis = a[1]
+                if yaxis.begin is not None and yaxis.end is not None:
+                    self.axes[0].set_ylim([yaxis.begin, yaxis.end])
+        if self.axes:
+            plot = self.all_plots[0]
+            self.axes[0].plot(plot.data[0], plot.data[1], "bx", color="blue", label=plot.title)
+            if plot.title is not None:
+                self.axes[0].legend()
+
+        event = QtGui.QResizeEvent(self._matplotlib_widget.size(), self._matplotlib_widget.size())
+        self._matplotlib_widget.resizeEvent(event)
 
     def scene_to_graph(self, x, y):
         y_offset = self.axes[0].get_ylim()[0] + self.axes[0].get_ylim()[1]
         x_g, y_g = self.axes[0].transData.inverted().transform([x, y])
         return QPointF(x_g, -(y_g - y_offset))
+
+    @abstractmethod
+    def graphArea(self) -> QRectF:
+        pass

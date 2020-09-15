@@ -18,4 +18,5 @@ class QtPlotCanvasToolbar(QGroupBox):
         rb: QRadioButton = self.sender()
         if rb.isChecked():
             for c in self.canvases:
-                c.activateTool(rb.tool_class())
+                if c.overlay is not None:
+                    c.overlay.activateTool(rb.tool_class())

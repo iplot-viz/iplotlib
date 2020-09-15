@@ -12,7 +12,7 @@ TODO: Tools should redraw when size of the canvas changes in order to reflect ra
 """
 
 
-class QtCanvasTool(ABC):
+class QtOverlayCanvasTool(ABC):
 
     @abstractmethod
     def process_paint(self, painter: QPainter):

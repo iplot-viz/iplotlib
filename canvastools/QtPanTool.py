@@ -2,11 +2,11 @@ from PyQt5 import QtCore
 from PyQt5.QtCore import QPoint, Qt
 from PyQt5.QtGui import QPainter
 
-from qt.QtCanvasTool import QtCanvasTool
+from qt.QtOverlayCanvasTool import QtOverlayCanvasTool
 from qt.QtPlotCanvas import QtPlotCanvas
 
 
-class QtPanTool(QtCanvasTool):
+class QtOverlayPanTool(QtOverlayCanvasTool):
 
     def __init__(self):
         self.mouse_pressed: bool = False
@@ -24,10 +24,10 @@ class QtPanTool(QtCanvasTool):
                 print("Pan tool: moving by ("+str(dx)+","+str(dy)+") canvas="+str(canvas))
                 for a in canvas.axes_list():
                     if len(a) > 1:
-                        a[0]['min'] += dx
-                        a[0]['max'] += dx
-                        a[1]['min'] += dy
-                        a[1]['max'] += dy
+                        a[0].begin += dx
+                        a[0].end += dx
+                        a[1].begin += dy
+                        a[1].end += dy
 
                         canvas.replot()
             return True
@@ -60,6 +60,6 @@ class QtPanTool(QtCanvasTool):
     def __reset(canvas: QtPlotCanvas):
         for c_axis, plot in zip(canvas.axes_list(), canvas.plots()):
             for index, axis in enumerate(plot.axes):
-                c_axis[index]['min'] = axis.min
-                c_axis[index]['max'] = axis.max
+                c_axis[index].min = axis.min
+                c_axis[index].max = axis.max
         canvas.replot()

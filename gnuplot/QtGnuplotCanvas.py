@@ -1,20 +1,23 @@
-from PyQt5 import QtGui
-from PyQt5.QtCore import QProcess, QByteArray, QPoint, QPointF, Qt
-from PyQt5.QtWidgets import QWidget, QSizePolicy, QVBoxLayout
-from gnuplot.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
-from qt.QtCanvasOverlay import QtCanvasOverlay
-from api.Plot import Plot
-from qt.QtPlotCanvas import QtPlotCanvas
+from abc import abstractmethod
 
+from PyQt5.QtCore import QProcess, QByteArray, QPointF, Qt, QRectF
+from PyQt5.QtWidgets import QWidget, QVBoxLayout
+from gnuplot.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
+
+from iplotlib.Axis import RangeAxis
+from qt.QtCanvasOverlay import QtCanvasOverlay
+from iplotlib.Plot import Plot
+from qt.QtOverlayPlotCanvas import QtOverlayPlotCanvas
+from copy import copy
 """
 Qt gnuplot canvas implementation
 """
 
 
-class QtGnuplotCanvas(QtPlotCanvas):
+class QtGnuplotCanvas(QtOverlayPlotCanvas):
 
     def __init__(self, gnuplot_path: str = "gnuplot"):
-        super(QtGnuplotCanvas, self).__init__()
+        super().__init__()
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.all_plots = []
         self.all_axes = []
@@ -33,14 +36,10 @@ class QtGnuplotCanvas(QtPlotCanvas):
         #TODO: We should run "set terminal" alone first and check if qt terminal is available
         if status:
             self.overlay = QtCanvasOverlay(self.gnuplot_widget)
-            self.__exec_and_read("set term qt widget \"" + self.gnuplot_widget.serverName() + "\" size " + str(self.gnuplot_widget.geometry().width()) + "," + str(self.gnuplot_widget.geometry().height()), 0)
-
-            self.__exec_and_read("set xrange [-20:20]", 0)
-            self.__exec_and_read("set yrange [-30:30]", 0)
-            self.__exec_and_read("set multiplot", 0)
-            self.__exec_and_read("plot x*x", 0)
-            # self.__exec_and_read("plot x w l lt 3", 0)
-            self.__exec_and_read("unset multiplot", 0)
+            self.__exec("set term qt widget '{}' size {},{}".format(
+                self.gnuplot_widget.serverName(),
+                self.gnuplot_widget.geometry().width(),
+                self.gnuplot_widget.geometry().height()))
         else:
             self.overlay = None
             print("Error initializing gnuplot process")
@@ -50,25 +49,37 @@ class QtGnuplotCanvas(QtPlotCanvas):
 
     def plot(self, plot: Plot = None):
         self.all_plots.append(plot)
-        self.all_axes.append([{"min":a.min,"max":a.max} for a in plot.axes])
+        self.all_axes.append([copy(a) for a in plot.axes])
         self.replot()
 
     def replot(self):
         for a in self.all_axes:
-            if len(a) > 0:
-                self.__exec_and_read("set xrange ["+str(a[0]['min'])+":"+str(a[0]['max'])+"]")
-            if len(a) > 1:
-                self.__exec_and_read("set yrange ["+str(a[1]['min'])+":"+str(a[1]['max'])+"]")
+            if len(a) > 0 and issubclass(type(a[0]), RangeAxis):
+                xaxis = a[0]
+                if xaxis.begin is not None and xaxis.end is not None:
+                    self.__exec_and_read("set xrange [{}:{}]".format(xaxis.begin, xaxis.end))
+
+            if len(a) > 1 and issubclass(type(a[1]), RangeAxis):
+                yaxis = a[1]
+                if yaxis.begin is not None and yaxis.end is not None:
+                    self.__exec_and_read("set yrange [{}:{}]".format(yaxis.begin, yaxis.end))
+
         if self.all_axes:
-            self.__exec_and_read("plot '-'")
-            for x,y in zip(self.all_plots[0].data[0],self.all_plots[0].data[1]):
+            plot = self.all_plots[0]
+            if plot.title is not None:
+                self.__exec_and_read("plot '-' title '{}'".format(plot.title))
+            else:
+                self.__exec_and_read("plot '-'")
+
+            for x, y in zip(plot.data[0], plot.data[1]):
                 self.__exec(str(x)+" "+str(y))
             self.__exec("e")
+
         self.gnuplot_widget.replot()
 
-    def activateTool(self, tool):
-        if self.overlay is not None:
-            self.overlay.activateTool(tool)
+    @abstractmethod
+    def graphArea(self) -> QRectF:
+        pass
 
     def __init_gnuplot(self):
         self.gnuplot_process = QProcess()
@@ -77,8 +88,7 @@ class QtGnuplotCanvas(QtPlotCanvas):
         self.gnuplot_process.waitForStarted()
         return self.gnuplot_process.state() != QProcess.NotRunning
 
-    #TODO: Is there a way to avoid copying here?
-    def __exec(self, command:str):
+    def __exec(self, command: str):
         command_array = QByteArray()
         command_array.append(command+'\n')
         self.gnuplot_process.write(command_array)

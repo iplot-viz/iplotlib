@@ -1,9 +1,9 @@
 from abc import abstractmethod
 
-from PyQt5.QtCore import QSize, QPointF
+from PyQt5.QtCore import QSize, QPointF, QRectF
 from PyQt5.QtWidgets import QWidget
 
-from api.Plot import Plot
+from iplotlib.Plot import Plot
 
 """
 Main abstraction of a Qt plot canvas.
@@ -22,14 +22,18 @@ class QtPlotCanvas(QWidget):
         pass
 
     @abstractmethod
-    def activateTool(self, tool):
-        pass
+    def get_overlay(self):
+        return self.overlay
 
     def plots(self) -> list:
         return self.all_plots
 
     def axes_list(self) -> list:
         return self.all_axes
+
+    @abstractmethod
+    def graphArea(self) -> QRectF:
+        pass
 
     @abstractmethod
     def scene_to_graph(self, x, y) -> QPointF:

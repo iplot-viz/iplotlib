@@ -3,14 +3,14 @@ from PyQt5.QtCore import QPoint, Qt, QRect
 from PyQt5.QtGui import QPainter, QPen, QBrush, QColor
 from PyQt5.QtWidgets import QWidget
 
-from qt.QtCanvasTool import QtCanvasTool
+from qt.QtOverlayCanvasTool import QtOverlayCanvasTool
 from qt.QtPlotCanvas import QtPlotCanvas
 
 
-class QtCrosshairTool(QtCanvasTool):
+class QtOverlayCrosshairTool(QtOverlayCanvasTool):
 
     tooltip_color: int = Qt.red
-    tooltip_background: int = QColor(200,200,200)
+    tooltip_background: int = QColor(200, 200, 200)
     tooltip_rect: QRect = QRect(10, 15, 10, 10)
 
     mouse_pos: QPoint = None

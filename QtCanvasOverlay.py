@@ -1,7 +1,7 @@
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
-from qt import QtCanvasTool
+from qt import QtOverlayCanvasTool
 
 """
 This class represents an overlay layer that is put on plot canvas
@@ -12,14 +12,14 @@ Additional objects such as crosshair are drawn on this overlay
 class QtCanvasOverlay(QWidget):
 
     def __init__(self, parent=None):
-        QWidget.__init__(self, parent)
-        self.activeTool: QtCanvasTool = None  # TODO: In the future make it a list
+        super().__init__(parent=parent)
+        self.activeTool: QtOverlayCanvasTool = None  # TODO: In the future make it a list
         self.setMouseTracking(True)
         self.installEventFilter(self)
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setGeometry(0, 0, self.parent().geometry().width(), self.parent().geometry().height())
 
-    def activateTool(self, tool:QtCanvasTool):
+    def activateTool(self, tool: QtOverlayCanvasTool):
         self.activeTool = tool
 
     def paintEvent(self, e):
