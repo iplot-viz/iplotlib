@@ -2,7 +2,7 @@ from abc import abstractmethod
 
 from PyQt5.QtCore import QProcess, QByteArray, QPointF, Qt, QRectF
 from PyQt5.QtWidgets import QWidget, QVBoxLayout
-from gnuplot.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
+from gnuplotwidget.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
 
 from iplotlib.Axis import RangeAxis
 from qt.QtCanvasOverlay import QtCanvasOverlay
@@ -63,7 +63,7 @@ class QtGnuplotCanvas(QtOverlayPlotCanvas):
             if len(a) > 0 and issubclass(type(a[0]), RangeAxis):
                 xaxis = a[0]
                 if xaxis.begin is not None and xaxis.end is not None:
-                    print("set xrange [{}:{}]".format(xaxis.begin, xaxis.end))
+                    # print("set xrange [{}:{}]".format(xaxis.begin, xaxis.end))
                     self.__exec_and_read("set xrange [{}:{}]".format(xaxis.begin, xaxis.end))
 
             if len(a) > 1 and issubclass(type(a[1]), RangeAxis):
