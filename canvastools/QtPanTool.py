@@ -21,13 +21,13 @@ class QtOverlayPanTool(QtOverlayCanvasTool):
                 pos = canvas.scene_to_graph(event.localPos().x(), event.localPos().y())
                 dx = self.move_start.x() - pos.x()
                 dy = self.move_start.y() - pos.y()
-                print("Pan tool: moving by ("+str(dx)+","+str(dy)+") canvas="+str(canvas))
                 for a in canvas.axes_list():
                     if len(a) > 1:
+                        print("Pan tool: moving by " + str(dx) + " cur=" + str(a[0]))
                         a[0].begin += dx
                         a[0].end += dx
-                        a[1].begin += dy
-                        a[1].end += dy
+                        # a[1].begin += dy
+                        # a[1].end += dy
 
                         canvas.replot()
             return True
@@ -60,6 +60,6 @@ class QtOverlayPanTool(QtOverlayCanvasTool):
     def __reset(canvas: QtPlotCanvas):
         for c_axis, plot in zip(canvas.axes_list(), canvas.plots()):
             for index, axis in enumerate(plot.axes):
-                c_axis[index].min = axis.min
-                c_axis[index].max = axis.max
+                c_axis[index].begin = axis.begin
+                c_axis[index].end = axis.end
         canvas.replot()
