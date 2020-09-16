@@ -20,6 +20,7 @@ Qt matplotlib canvas implementation
 class QtMatplotlibCanvas(QtOverlayPlotCanvas):
 
     def __init__(self):
+        self.plotStyles = ['bx', 'rx', 'yx']
         super().__init__()
         self.all_plots = []
         self.all_axes = []
@@ -55,10 +56,10 @@ class QtMatplotlibCanvas(QtOverlayPlotCanvas):
                 if yaxis.begin is not None and yaxis.end is not None:
                     self.axes[0].set_ylim([yaxis.begin, yaxis.end])
         if self.axes:
-            plot = self.all_plots[0]
-            self.axes[0].plot(plot.data[0], plot.data[1], "bx", color="blue", label=plot.title)
-            if plot.title is not None:
-                self.axes[0].legend()
+            for i, plot in enumerate(self.all_plots):
+                self.axes[0].plot(plot.data[0], plot.data[1], "bx", color=plot.style.color, label=plot.title)
+                if plot.title is not None:
+                    self.axes[0].legend()
 
         event = QtGui.QResizeEvent(self._matplotlib_widget.size(), self._matplotlib_widget.size())
         self._matplotlib_widget.resizeEvent(event)
