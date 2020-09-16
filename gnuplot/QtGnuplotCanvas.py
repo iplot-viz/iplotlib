@@ -8,7 +8,8 @@ from iplotlib.Axis import RangeAxis
 from qt.QtCanvasOverlay import QtCanvasOverlay
 from iplotlib.Plot import Plot
 from qt.QtOverlayPlotCanvas import QtOverlayPlotCanvas
-from copy import copy
+from copy import copy, deepcopy
+
 """
 Qt gnuplot canvas implementation
 """
@@ -28,7 +29,7 @@ class QtGnuplotCanvas(QtOverlayPlotCanvas):
 
         layout = QVBoxLayout()
         self.setLayout(layout)
-        self.gnuplot_widget = QtGnuplotWidget()
+        self.gnuplot_widget = QtGnuplotWidget(self)
         self.gnuplot_widget.setStyleSheet('border: 1px solid red')
 
         layout.addWidget(self.gnuplot_widget)
@@ -38,10 +39,6 @@ class QtGnuplotCanvas(QtOverlayPlotCanvas):
         #TODO: We should run "set terminal" alone first and check if qt terminal is available
         if status:
             self.overlay = QtCanvasOverlay(self.gnuplot_widget)
-            self.__exec("set term qt widget '{}' size {},{}".format(
-                self.gnuplot_widget.serverName(),
-                self.gnuplot_widget.geometry().width(),
-                self.gnuplot_widget.geometry().height()))
         else:
             self.overlay = None
             print("Error initializing gnuplot process")
@@ -51,14 +48,22 @@ class QtGnuplotCanvas(QtOverlayPlotCanvas):
 
     def plot(self, plot: Plot = None):
         self.all_plots.append(plot)
-        self.all_axes.append([copy(a) for a in plot.axes])
+        self.all_axes.append([deepcopy(a) for a in plot.axes])
         self.replot()
 
     def replot(self):
+        # print("GNuplot canvas size: " + str(self.gnuplot_widget.geometry()))
+
+        self.__exec("set term qt widget '{}' size {},{}".format(
+            self.gnuplot_widget.serverName(),
+            self.gnuplot_widget.geometry().width(),
+            self.gnuplot_widget.geometry().height()))
+
         for a in self.all_axes:
             if len(a) > 0 and issubclass(type(a[0]), RangeAxis):
                 xaxis = a[0]
                 if xaxis.begin is not None and xaxis.end is not None:
+                    print("set xrange [{}:{}]".format(xaxis.begin, xaxis.end))
                     self.__exec_and_read("set xrange [{}:{}]".format(xaxis.begin, xaxis.end))
 
             if len(a) > 1 and issubclass(type(a[1]), RangeAxis):
