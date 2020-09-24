@@ -2,7 +2,7 @@ from abc import abstractmethod
 
 from PyQt5.QtCore import QProcess, QByteArray, QPointF, Qt, QRectF
 from PyQt5.QtWidgets import QWidget, QVBoxLayout
-from gnuplotwidget.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
+from qt.gnuplotwidget.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
 
 from iplotlib.Axis import RangeAxis
 from qt.QtCanvasOverlay import QtCanvasOverlay
@@ -52,7 +52,6 @@ class QtGnuplotCanvas(QtOverlayPlotCanvas):
         self.replot()
 
     def replot(self):
-        # print("GNuplot canvas size: " + str(self.gnuplot_widget.geometry()))
 
         self.__exec("set term qt widget '{}' size {},{}".format(
             self.gnuplot_widget.serverName(),
