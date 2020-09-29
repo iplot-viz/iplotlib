@@ -42,3 +42,5 @@ class QtPlotCanvas(QWidget):
     # This will be applied as initial size
     def sizeHint(self):
         return QSize(900, 200)
+
+

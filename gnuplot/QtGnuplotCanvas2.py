@@ -11,13 +11,22 @@ from qt.gnuplotwidget.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
 
 class QtGnuplotCanvas2(QtPlotCanvas):
 
-    def __init__(self, parent, canvas: GnuplotCanvas = None):
-        super().__init__()
+    def __init__(self, parent=None, plots=None, canvas: GnuplotCanvas = None):
+        super().__init__(parent)
+        self.setMouseTracking(True)
+        self.installEventFilter(self)
+
         self.__real_size_known = False  # Ugly hack but it seems than similar method is present in official gnuplot src
-        self.gnuplot_canvas = canvas
+        if canvas is None:
+            if plots is not None:
+                self.gnuplot_canvas = GnuplotCanvas(plots)
+            else:
+                self.gnuplot_canvas = GnuplotCanvas()
+        else:
+            self.gnuplot_canvas = canvas
+
         self.qt_canvas = QtGnuplotWidget(self)
         layout = QVBoxLayout()
-        # self.setStyleSheet("background-color: white; border: 1px solid red;")
         self.setLayout(layout)
 
         layout.addWidget(self.createToolbar())
@@ -27,7 +36,7 @@ class QtGnuplotCanvas2(QtPlotCanvas):
         self.gnuplot_canvas.write("set term qt widget '{}' size {},{} font 'Arial,8' noenhanced".format(
             self.qt_canvas.serverName(),
             self.qt_canvas.geometry().width(),
-            self.qt_canvas.geometry().height()),True)
+            self.qt_canvas.geometry().height()), True)
         self.gnuplot_canvas.process_layout()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
@@ -41,3 +50,8 @@ class QtGnuplotCanvas2(QtPlotCanvas):
         refresh_button.clicked.connect(self.replot)
         toolbar.addWidget(refresh_button)
         return toolbar
+
+
+    def eventFilter(self, source, event):
+        # print("Process event: " + str(event))
+        return False
