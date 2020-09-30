@@ -19,7 +19,6 @@ class QtGnuplotCanvas2(QtPlotCanvas):
 
         self.gnuplot_canvas = GnuplotCanvas(canvas)
 
-
         self.__real_size_known = False  # Ugly hack but it seems than similar method is present in official gnuplot src
 
         self.qt_canvas = QtGnuplotWidget(self)
@@ -50,10 +49,10 @@ class QtGnuplotCanvas2(QtPlotCanvas):
         toolbar.addWidget(refresh_button)
         return toolbar
 
-
     def eventFilter(self, source, event):
         self.handleEvent(self.createEvent(event))
         return False
 
     def handleEvent(self,event):
-        print("GNUPLOT: handle event: " + str(event))
+        # print("GNUPLOT: handle event: " + str(event))
+        pass

@@ -65,8 +65,7 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
         else:
             print("No figure given")
 
-    def click(self,event):
-        print("CLCK!")
+    def click(self, event):
         if event.dblclick:
             self.toolbar.home()
 
@@ -75,49 +74,3 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
             self.matplotlib_canvas.figure.tight_layout()
 
 
-    def eventFilter(self, source, event):
-        # print("Event filter")
-        if event.type() == QtCore.QEvent.MouseMove:
-            ret = MouseEvent()
-            ret.type = "mouseMove"
-            ret.x, ret.y = self.qt_canvas.mouseEventCoords(event.pos())
-            self.matplotlib_canvas.handleEvent(ret)
-        elif event.type() == QtCore.QEvent.MouseButtonPress:
-            ret = MouseEvent()
-            ret.type = "mousePress"
-            ret.x, ret.y = self.qt_canvas.mouseEventCoords(event.pos())
-            if event.button() == QtCore.Qt.LeftButton:
-                ret.button = "left"
-            elif event.button() == QtCore.Qt.RightButton:
-                ret.button = "right"
-            self.matplotlib_canvas.handleEvent(ret)
-        elif event.type() == QtCore.QEvent.MouseButtonRelease:
-            ret = MouseEvent()
-            ret.type = "mouseRelease"
-            ret.x, ret.y = self.qt_canvas.mouseEventCoords(event.pos())
-            if event.button() == QtCore.Qt.LeftButton:
-                ret.button = "left"
-            elif event.button() == QtCore.Qt.RightButton:
-                ret.button = "right"
-            self.matplotlib_canvas.handleEvent(ret)
-        elif event.type() == QtCore.QEvent.MouseButtonDblClick:
-            ret = MouseEvent()
-            ret.type = "mouseDoubleClick"
-            ret.x, ret.y = self.qt_canvas.mouseEventCoords(event.pos())
-            if event.button() == QtCore.Qt.LeftButton:
-                ret.button = "left"
-                self.toolbar.home()
-            elif event.button() == QtCore.Qt.RightButton:
-                ret.button = "right"
-            self.matplotlib_canvas.handleEvent(ret)
-        return False
-
-    def enableTool(self, tool):
-        if tool == "crosshair":
-            self.matplotlib_canvas.activate_cursor()
-            self.toolbar.set_cursor(self.matplotlib_canvas.cursor)
-        elif tool == "zoom":
-            self.matplotlib_canvas.deactivate_cursor()
-            self.toolbar.zoom()
-        elif tool == "pan":
-            pass
