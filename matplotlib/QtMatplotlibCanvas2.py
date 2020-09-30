@@ -66,4 +66,3 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
         if self.matplotlib_canvas is not None and self.matplotlib_canvas.figure is not None:
             self.matplotlib_canvas.figure.tight_layout()
 
-
