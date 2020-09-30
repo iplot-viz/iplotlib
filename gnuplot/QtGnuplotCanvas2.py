@@ -1,6 +1,6 @@
 from time import sleep
 
-from PyQt5.QtCore import QSize
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QResizeEvent
 from PyQt5.QtWidgets import QVBoxLayout, QPushButton, QToolBar
 
@@ -12,23 +12,23 @@ from qt.gnuplotwidget.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
 
 class QtGnuplotCanvas2(QtPlotCanvas):
 
-    def __init__(self, canvas: Canvas = None, parent=None, toolbar=False):
+    def __init__(self, canvas: Canvas = None, parent=None, toolbar=False, intercept_mouse=False):
         super().__init__(parent)
-        self.setMouseTracking(True)
-        self.installEventFilter(self)
 
         self.gnuplot_canvas = GnuplotCanvas(canvas)
 
-        self.__real_size_known = False  # Ugly hack but it seems than similar method is present in official gnuplot src
-
         self.qt_canvas = QtGnuplotWidget(self)
-        layout = QVBoxLayout()
-        self.setLayout(layout)
+        self.setLayout(QVBoxLayout())
+
+        if intercept_mouse:
+            self.setMouseTracking(True)
+            self.installEventFilter(self)
+            self.qt_canvas.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         if toolbar:
-            layout.addWidget(self.createToolbar())
+            self.layout().addWidget(self.createToolbar())
 
-        layout.addWidget(self.qt_canvas)
+        self.layout().addWidget(self.qt_canvas)
 
     def replot(self):
         self.gnuplot_canvas.write("set term qt widget '{}' size {},{} font 'Arial,8' noenhanced".format(
@@ -38,9 +38,8 @@ class QtGnuplotCanvas2(QtPlotCanvas):
         self.gnuplot_canvas.process_layout()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
-        # if self.isVisible() and not self.__real_size_known:
-        self.__real_size_known = True
         self.replot()
+
 
     def createToolbar(self):
         toolbar = QToolBar()
@@ -50,9 +49,5 @@ class QtGnuplotCanvas2(QtPlotCanvas):
         return toolbar
 
     def eventFilter(self, source, event):
-        self.handleEvent(self.createEvent(event))
+        print("GNUPLOT: handle event: " + str(event))
         return False
-
-    def handleEvent(self,event):
-        # print("GNUPLOT: handle event: " + str(event))
-        pass
