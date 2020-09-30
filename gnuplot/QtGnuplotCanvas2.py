@@ -1,13 +1,11 @@
-from time import sleep
-
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QResizeEvent
 from PyQt5.QtWidgets import QVBoxLayout, QPushButton, QToolBar
+from qt.gnuplotwidget.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
 
 from iplotlib.Canvas import Canvas
 from iplotlib_gnuplot.GnuplotCanvas import GnuplotCanvas
 from qt.QtPlotCanvas import QtPlotCanvas
-from qt.gnuplotwidget.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
 
 
 class QtGnuplotCanvas2(QtPlotCanvas):
