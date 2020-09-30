@@ -1,5 +1,5 @@
 from PyQt5.QtGui import QResizeEvent
-from PyQt5.QtWidgets import QGridLayout, QWidget
+from PyQt5.QtWidgets import QGridLayout
 
 from iplotlib.Canvas import Canvas
 from iplotlib_gnuplot.GnuplotCanvas import GnuplotCanvas
