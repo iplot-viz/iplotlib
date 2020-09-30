@@ -40,9 +40,9 @@ class QtGnuplotCanvas2(QtPlotCanvas):
         self.gnuplot_canvas.process_layout()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
-        if self.isVisible() and not self.__real_size_known:
-            self.__real_size_known = True
-            self.replot()
+        # if self.isVisible() and not self.__real_size_known:
+        self.__real_size_known = True
+        self.replot()
 
     def createToolbar(self):
         toolbar = QToolBar()
@@ -53,5 +53,8 @@ class QtGnuplotCanvas2(QtPlotCanvas):
 
 
     def eventFilter(self, source, event):
-        # print("Process event: " + str(event))
+        self.handleEvent(self.createEvent(event))
         return False
+
+    def handleEvent(self,event):
+        print("GNUPLOT: handle event: " + str(event))
