@@ -1,20 +1,13 @@
-from collections import Sequence
-
-import matplotlib
 from PyQt5 import QtGui, QtCore
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QResizeEvent
 from PyQt5.QtWidgets import QVBoxLayout
-from matplotlib.backend_bases import FigureCanvasBase
-from matplotlib.backends.backend_qt5 import FigureCanvasQT
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
 from iplotlib.Canvas import Canvas
-from iplotlib.ui.Event import MouseEvent
 from iplotlib_matplotlib.MatplotlibCanvas import MatplotlibCanvas
 from qt.QtPlotCanvas import QtPlotCanvas
-import matplotlib.pyplot as plt
 
 """
 A Qt widget holding matplotlib figure along with passing mouse events
