@@ -10,6 +10,7 @@ from matplotlib.backends.backend_qt5 import FigureCanvasQT
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
+from iplotlib.Canvas import Canvas
 from iplotlib.ui.Event import MouseEvent
 from iplotlib_matplotlib.MatplotlibCanvas import MatplotlibCanvas
 from qt.QtPlotCanvas import QtPlotCanvas
@@ -22,25 +23,22 @@ A Qt widget holding matplotlib figure along with passing mouse events
 
 class QtMatplotlibCanvas2(QtPlotCanvas):
 
-    def __init__(self, parent=None, plots=None, matplotlib_canvas: MatplotlibCanvas = None, enableToolbar: bool = False):
+    def __init__(self, canvas: Canvas = None, parent=None, plots=None, enableToolbar: bool = False, intercept_mouse=False):
         super().__init__(parent)
-        self.setMouseTracking(True)
-        self.installEventFilter(self)
+        if intercept_mouse:
+            self.setMouseTracking(True)
+            self.installEventFilter(self)
+
+        self.matplotlib_canvas = MatplotlibCanvas(canvas)
+
 
         layout = QVBoxLayout()
-
-        if matplotlib_canvas is None:
-            if plots is not None:
-                self.matplotlib_canvas = MatplotlibCanvas(plots)
-            else:
-                self.matplotlib_canvas = MatplotlibCanvas()
-        else:
-            self.matplotlib_canvas = matplotlib_canvas
 
         self.setLayout(layout)
         if self.matplotlib_canvas.figure:
             self.qt_canvas = FigureCanvas(self.matplotlib_canvas.figure)
-            self.qt_canvas.setAttribute(Qt.WA_TransparentForMouseEvents)
+            if intercept_mouse:
+                self.qt_canvas.setAttribute(Qt.WA_TransparentForMouseEvents)
 
             self.qt_canvas.setCursor(QtGui.QCursor(QtCore.Qt.CrossCursor))
             self.toolbar = NavigationToolbar(self.qt_canvas, self)
@@ -53,20 +51,32 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
             self.matplotlib_canvas.figure.canvas.updateGeometry()
 
             self.matplotlib_canvas.figure.tight_layout()
-            # self.matplotlib_canvas.activate_cursor()
+
+            if self.matplotlib_canvas.canvas.mouse_mode == "zoom":
+                self.toolbar.zoom()
+                self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
+
+            elif self.matplotlib_canvas.canvas.mouse_mode == "pan":
+                self.toolbar.pan()
+
+            if canvas.crosshair_enabled:
+                self.matplotlib_canvas.activate_cursor()
 
         else:
-            print("No figure given to qtmaplotlibanvas")
+            print("No figure given")
+
+    def click(self,event):
+        print("CLCK!")
+        if event.dblclick:
+            self.toolbar.home()
 
     def resizeEvent(self, event: QResizeEvent):
-        # self.qt_canvas.mouseMoveEvent()
         if self.matplotlib_canvas is not None and self.matplotlib_canvas.figure is not None:
-            print("RESIZE; " + str(self.geometry()) + " and " + str(self.qt_canvas.geometry()))
             self.matplotlib_canvas.figure.tight_layout()
 
 
     def eventFilter(self, source, event):
-
+        # print("Event filter")
         if event.type() == QtCore.QEvent.MouseMove:
             ret = MouseEvent()
             ret.type = "mouseMove"
@@ -90,7 +100,16 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
             elif event.button() == QtCore.Qt.RightButton:
                 ret.button = "right"
             self.matplotlib_canvas.handleEvent(ret)
-
+        elif event.type() == QtCore.QEvent.MouseButtonDblClick:
+            ret = MouseEvent()
+            ret.type = "mouseDoubleClick"
+            ret.x, ret.y = self.qt_canvas.mouseEventCoords(event.pos())
+            if event.button() == QtCore.Qt.LeftButton:
+                ret.button = "left"
+                self.toolbar.home()
+            elif event.button() == QtCore.Qt.RightButton:
+                ret.button = "right"
+            self.matplotlib_canvas.handleEvent(ret)
         return False
 
     def enableTool(self, tool):

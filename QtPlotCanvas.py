@@ -16,9 +16,6 @@ A Qt plot canvas is used to plot multiple plots and present them in form of a Qt
 
 class QtPlotCanvas(QWidget):
 
-    def enableTool(self,tool):
-        print("ENABLE", tool)
-
     def createEvent(self,event):
         ret = MouseEvent()
         if event.type() == QtCore.QEvent.MouseMove:
@@ -33,34 +30,6 @@ class QtPlotCanvas(QWidget):
             # print("Unknown event: " + str(event.type()))
             pass
         return ret
-
-    # Old api, will be deprecated
-
-    @abstractmethod
-    def plot(self, plot: Plot = None):
-        pass
-
-    @abstractmethod
-    def replot(self):
-        pass
-
-    @abstractmethod
-    def get_overlay(self):
-        return self.overlay
-
-    def plots(self) -> list:
-        return self.all_plots
-
-    def axes_list(self) -> list:
-        return self.all_axes
-
-    @abstractmethod
-    def graphArea(self) -> QRectF:
-        pass
-
-    @abstractmethod
-    def scene_to_graph(self, x, y) -> QPointF:
-        pass
 
     # This will be applied as initial size
     def sizeHint(self):
