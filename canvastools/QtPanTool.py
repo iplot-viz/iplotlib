@@ -18,18 +18,13 @@ class QtOverlayPanTool(QtOverlayCanvasTool):
     def process_event(self, canvas: QtPlotCanvas, event):
         if event.type() == QtCore.QEvent.MouseMove:
             if self.mouse_pressed:
-                pos = canvas.scene_to_graph(event.localPos().x(), event.localPos().y())
-                dx = self.move_start.x() - pos.x()
-                dy = self.move_start.y() - pos.y()
-                for a in canvas.axes_list():
-                    if len(a) > 1:
-                        print("Pan tool: moving by " + str(dx) + " cur=" + str(a[0]))
-                        a[0].begin += dx
-                        a[0].end += dx
-                        # a[1].begin += dy
-                        # a[1].end += dy
+                pos = canvas._gnuplot_canvas.to_graph(event.localPos().x(), event.localPos().y())
+                dx = self.move_start[0] - pos[0]
+                dy = self.move_start[1] - pos[1]
+                print("Pan tool: moving by " + str(dy))
+                b = canvas._gnuplot_canvas.plot_range
 
-                        canvas.replot()
+                canvas._gnuplot_canvas.set_bounds(b[0]+dx, b[1]+dy, b[2]+dx, b[3]+dy)
             return True
 
         elif event.type() == QtCore.QEvent.Enter:
@@ -41,7 +36,7 @@ class QtOverlayPanTool(QtOverlayCanvasTool):
 
         elif event.type() == QtCore.QEvent.MouseButtonPress:
             if event.button() == Qt.LeftButton:
-                self.move_start = canvas.scene_to_graph(event.localPos().x(), event.localPos().y())
+                self.move_start = canvas._gnuplot_canvas.to_graph(event.localPos().x(), event.localPos().y())
                 self.mouse_pressed = True
             return True
 
@@ -52,6 +47,9 @@ class QtOverlayPanTool(QtOverlayCanvasTool):
                 self.__reset(canvas)
             return True
 
+        elif event.type() == QtCore.QEvent.MouseButtonDblClick:
+            if event.button() == Qt.LeftButton:
+                canvas._gnuplot_canvas.reset_bounds()
         elif event.type() != 12:
             # print("UNKNOWN EVENT " + str(event.type()))
             pass

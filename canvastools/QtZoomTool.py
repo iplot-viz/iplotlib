@@ -13,17 +13,28 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
     def __init__(self):
         self.rect_start: QPoint = None
         self.mouse_pos: QPoint = None
+        self.graph_bounds = None
 
     def process_paint(self, painter: QPainter):
         if self.rect_start is not None:
             painter.setPen(QPen(Qt.red, 1, Qt.DashLine))
-            painter.fillRect(self.rect_start.x(), self.rect_start.y(), self.mouse_pos.x()-self.rect_start.x(), self.mouse_pos.y()-self.rect_start.y(), QBrush(QColor(255, 0, 255, 64)))
-            painter.drawRect(self.rect_start.x(), self.rect_start.y(), self.mouse_pos.x()-self.rect_start.x(), self.mouse_pos.y()-self.rect_start.y())
-            # painter.drawRect(self.rect_start.x(), self.rect_start.y(), self.mouse_pos.x()-self.rect_start.x(), self.mouse_pos.y()-self.rect_start.y())
-            # painter.drawRect(QRectF(self.rect_start,(self.mouse_pos-self.rect_start) ))
+            x1, y1, x2, y2 = self.rect_start.x(), self.rect_start.y(), self.mouse_pos.x(), self.mouse_pos.y()
+            if self.graph_bounds:
+                x1 = self.__limit(x1, self.graph_bounds[0], self.graph_bounds[2])
+                x2 = self.__limit(x2, self.graph_bounds[0], self.graph_bounds[2])
+                y1 = self.__limit(y1, painter.viewport().height()-self.graph_bounds[3], painter.viewport().height()-self.graph_bounds[1])
+                y2 = self.__limit(y2, painter.viewport().height()-self.graph_bounds[3], painter.viewport().height()-self.graph_bounds[1])
+
+
+            painter.fillRect(x1, y1, x2-x1, y2-y1, QBrush(QColor(255, 0, 255, 64)))
+            painter.drawRect(x1, y1, x2-x1, y2-y1)
 
 
     def process_event(self, canvas: QtPlotCanvas, event):
+
+        if hasattr(canvas, "_gnuplot_canvas"):
+            self.graph_bounds = canvas._gnuplot_canvas.terminal_range
+
         if event.type() == QtCore.QEvent.MouseMove:
             self.mouse_pos = event.localPos()
             return True
@@ -49,6 +60,9 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
             elif event.button() == Qt.RightButton:
                 self.__reset(canvas)
             return True
+        elif event.type() == QtCore.QEvent.MouseButtonDblClick:
+            if event.button() == Qt.LeftButton:
+                canvas._gnuplot_canvas.reset_bounds()
 
         elif event.type() != 12:
             # print("UNKNOWN EVENT " + str(event.type()))
@@ -63,23 +77,21 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
         canvas.replot()
 
     def __distance(self, start: QPoint, end: QPoint) -> float:
+        if start is None or end is None:
+            return 0
         return sqrt((start.x()-end.x())**2 + (start.y()-end.y())**2)
 
     def __do_zoom(self, canvas: QtPlotCanvas, start: QPoint, end: QPoint):
-        p1 = canvas.scene_to_graph(start.x(), start.y())
-        p2 = canvas.scene_to_graph(end.x(), end.y())
-        print("ZOOM tool: rect " + str(p1) + " , " + str(p2) +" canvas="+str(canvas))
-        for a in canvas.axes_list():
-            print("AL: " + str(a[0]) + str(a[1]))
-            if len(a) > 1:
-                a[0].begin = p1.x() if p1.x() < p2.x() else p2.x()
-                a[0].end = p1.x() if p1.x() > p2.x() else p2.x()
+        if hasattr(canvas, "_gnuplot_canvas"):
+            gs = canvas._gnuplot_canvas.to_graph(start.x(), start.y())
+            ge = canvas._gnuplot_canvas.to_graph(end.x(), end.y())
+            canvas._gnuplot_canvas.set_bounds(gs[0], gs[1], ge[0], ge[1])
 
-                a[1].begin = p1.y() if p1.y() < p2.y() else p2.y()
-                a[1].end = p1.y() if p1.y() > p2.y() else p2.y()
 
-                print("AL2: " + str(a[0]) + str(a[1]))
 
-                canvas.replot()
-
-        pass
+    def __limit(self, val, lo, hi):
+        if val < lo:
+            return lo
+        if val > hi:
+            return hi
+        return val
