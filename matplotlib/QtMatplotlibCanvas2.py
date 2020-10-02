@@ -13,7 +13,7 @@ from qt.QtPlotCanvas import QtPlotCanvas
 A Qt widget holding matplotlib figure along with passing mouse events
 """
 
-
+#TODO: Remember axes ranges
 class QtMatplotlibCanvas2(QtPlotCanvas):
 
     def __init__(self, canvas: Canvas = None, parent=None, plots=None, enableToolbar: bool = False, intercept_mouse=False):
@@ -51,6 +51,8 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
             elif self.matplotlib_canvas.canvas.mouse_mode == "pan":
                 self.toolbar.pan()
+                self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
+
 
             if canvas.crosshair_enabled:
                 self.matplotlib_canvas.activate_cursor()

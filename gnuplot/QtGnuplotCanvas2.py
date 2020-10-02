@@ -32,7 +32,7 @@ class QtGnuplotCanvas2(QtPlotCanvas):
         self.gnuplot_canvas.write("set term qt widget '{}' size {},{} font 'Arial,8' noenhanced".format(
             self.qt_canvas.serverName(),
             self.qt_canvas.geometry().width(),
-            self.qt_canvas.geometry().height()), True)
+            self.qt_canvas.geometry().height()))
         self.gnuplot_canvas.process_layout()
 
     def resizeEvent(self, event: QResizeEvent) -> None:

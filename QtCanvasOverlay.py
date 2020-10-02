@@ -13,19 +13,19 @@ class QtCanvasOverlay(QWidget):
 
     def __init__(self, parent=None,dependentOverlays=[]):
         super().__init__(parent=parent)
-        self.dependentOverlays=[]
+        self.dependentOverlays = []
         self.activeTool: QtOverlayCanvasTool = None  # TODO: In the future make it a list
         self.setMouseTracking(True)
         self.installEventFilter(self)
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setGeometry(0, 0, self.parent().geometry().width(), self.parent().geometry().height())
 
+
     def activateTool(self, tool: QtOverlayCanvasTool):
         self.activeTool = tool
 
     def paintEvent(self, e):
         self.setGeometry(0, 0, self.parent().geometry().width(), self.parent().geometry().height())  # TODO: Can actually be done only on resize, not needed for every paint
-
 
         if self.activeTool is not None:
             self.activeTool.process_paint(QPainter(self))
@@ -38,6 +38,6 @@ class QtCanvasOverlay(QWidget):
     def eventFilter(self, source, event):
 
         if self.activeTool is not None:
-            if self.activeTool.process_event(self.parent().parent(), event):
+            if self.activeTool.process_event(self.parent(), event):
                 self.update()
         return False
