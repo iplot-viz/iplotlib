@@ -57,8 +57,8 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
                     self.__do_zoom(canvas, self.rect_start, event.localPos())
 
                 self.rect_start = None
-            elif event.button() == Qt.RightButton:
-                self.__reset(canvas)
+            # elif event.button() == Qt.RightButton:
+            #     self.__reset(canvas)
             return True
         elif event.type() == QtCore.QEvent.MouseButtonDblClick:
             if event.button() == Qt.LeftButton:
@@ -67,14 +67,6 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
         elif event.type() != 12:
             # print("UNKNOWN EVENT " + str(event.type()))
             pass
-
-    @staticmethod
-    def __reset(canvas: QtPlotCanvas):
-        for c_axis, plot in zip(canvas.axes_list(), canvas.plots()):
-            for index, axis in enumerate(plot.axes):
-                c_axis[index].begin = axis.begin
-                c_axis[index].end = axis.end
-        canvas.replot()
 
     def __distance(self, start: QPoint, end: QPoint) -> float:
         if start is None or end is None:
@@ -85,7 +77,7 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
         if hasattr(canvas, "_gnuplot_canvas"):
             gs = canvas._gnuplot_canvas.to_graph(start.x(), start.y())
             ge = canvas._gnuplot_canvas.to_graph(end.x(), end.y())
-            canvas._gnuplot_canvas.set_bounds(gs[0], gs[1], ge[0], ge[1])
+            canvas._gnuplot_canvas.set_bounds(gs[0], gs[1], ge[0], ge[1], replot=True, save_history=True)
 
 
 
