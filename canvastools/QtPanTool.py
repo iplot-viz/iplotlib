@@ -22,7 +22,7 @@ class QtOverlayPanTool(QtOverlayCanvasTool):
                 delta = self.move_start - pos
                 bounds = canvas._gnuplot_canvas.plot_range
                 print("Pan tool: moving by " + str(delta) + " Current: " + str(bounds))
-                canvas._gnuplot_canvas.set_bounds(bounds[0]+delta.x(), bounds[1]+delta.y(), bounds[2]+delta.x(), bounds[3]+delta.y())
+                canvas._gnuplot_canvas.set_bounds(bounds[0]+delta.x(), bounds[1]+delta.y(), bounds[2]+delta.x(), bounds[3]+delta.y(), replot=True)
             return True
 
         elif event.type() == QtCore.QEvent.Enter:
