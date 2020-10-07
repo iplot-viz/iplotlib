@@ -5,8 +5,6 @@ class QtPlotCanvasToolbar(QGroupBox):
 
     tools = {"crosshair": "Crosshair", "zoom": "Zoom", "pan": "Pan"}
 
-
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.canvases = []
@@ -22,7 +20,6 @@ class QtPlotCanvasToolbar(QGroupBox):
     def selected(self):
         rb: QRadioButton = self.sender()
         if rb.isChecked():
-            print("Checked: " + str(rb.tool_label))
             for canvas in self.canvases:
                 print("Enabling for canvas: " + str(canvas))
                 canvas.enableTool(rb.tool_label)
