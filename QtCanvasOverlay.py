@@ -1,3 +1,4 @@
+from PyQt5 import QtCore, QtGui
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
@@ -19,6 +20,7 @@ class QtCanvasOverlay(QWidget):
         self.installEventFilter(self)
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setGeometry(0, 0, self.parent().geometry().width(), self.parent().geometry().height())
+        self.setFocusPolicy(Qt.StrongFocus)
 
 
     def activateTool(self, tool: QtOverlayCanvasTool):
@@ -36,8 +38,17 @@ class QtCanvasOverlay(QWidget):
             pass
 
     def eventFilter(self, source, event):
+        # print("E" + str(event) + " type: " + str(event.type())  + " vs: " + str(QtGui.QKeyEvent))
+
+        if event.type() == QtCore.QEvent.KeyPress:
+            if event.text() == 'p':
+                self.parent()._gnuplot_canvas.prev()
+            elif event.text() == 'n':
+                self.parent()._gnuplot_canvas.next()
+
 
         if self.activeTool is not None:
             if self.activeTool.process_event(self.parent(), event):
                 self.update()
+
         return False
