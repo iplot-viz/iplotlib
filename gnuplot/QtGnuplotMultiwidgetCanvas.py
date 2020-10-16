@@ -1,15 +1,19 @@
+from PyQt5.QtCore import QMetaObject, Qt, pyqtSlot
 from PyQt5.QtGui import QResizeEvent
-from PyQt5.QtWidgets import QGridLayout
+from PyQt5.QtWidgets import QGridLayout, QPushButton, QSizePolicy, QWidget
 
 from iplotlib.Canvas import Canvas
 from iplotlib_gnuplot.GnuplotCanvas import GnuplotCanvas
 from qt.QtCanvasOverlay import QtCanvasOverlay
 from qt.QtPlotCanvas import QtPlotCanvas
+from qt.gnuplot.QtGnuplotWidget2 import QtGnuplotWidget2
 from qt.gnuplotwidget.pyqt5gnuplotwidget.PyGnuplotWidget import QtGnuplotWidget
 
 from qt.canvastools.QtCrosshairTool import QtOverlayCrosshairTool
 from qt.canvastools.QtPanTool import QtOverlayPanTool
 from qt.canvastools.QtZoomTool import QtOverlayZoomTool
+
+import sip
 
 """
 A plot canvas that uses multiple widgets in order to place multiple gnuplot graphs on a grid
@@ -21,14 +25,31 @@ class QtGnuplotMultiwidgetCanvas(QtPlotCanvas):
 
     def __init__(self, canvas: Canvas = None, parent=None):
         super().__init__(parent)
+        self.setLayout(QGridLayout())
+        self.canvas = None
+        self.set_canvas(canvas)
+
+    def set_canvas(self,canvas):
+        self.hide()  # Hide/Show will cause only one resizeEvent per widget. Plot will be redrawn then
+
+        items = [self.layout().itemAt(i) for i in range(self.layout().count())]
+        for item in items:
+            self.layout().removeItem(item)
+            item.widget().cleanup()
+            sip.delete(item.widget())
+
         if canvas:
             self.canvas = canvas
-            self.setLayout(QGridLayout())
             self.layout().setSpacing(0)
             for i in range(canvas.cols):
                 for j in range(canvas.rows):
-                    widget = QtGnuplotWidget(self)
-                    widget.setStyleSheet("border:0px none")
+                    policy = QSizePolicy(QSizePolicy.Expanding,QSizePolicy.Expanding,QSizePolicy.Frame)
+                    policy.setVerticalStretch(2)
+                    policy.setHorizontalStretch(2)
+                    # widget = QtGnuplotWidget(self)
+                    widget = QtGnuplotWidget2(self)
+                    widget.setSizePolicy(policy)
+                    widget.setStyleSheet("border:1px solid red")
                     self.layout().addWidget(widget, j, i)
 
             for i, col in enumerate(self.canvas.plots):
@@ -52,18 +73,7 @@ class QtGnuplotMultiwidgetCanvas(QtPlotCanvas):
                                                                         horizontal=self.canvas.crosshair_horizontal,
                                                                         linewidth=self.canvas.crosshair_line_width,
                                                                         color=self.canvas.crosshair_color)
-
-    def replot(self):
-        for i, col in enumerate(self.canvas.plots):
-            for j, plot in enumerate(col):
-                if plot:
-                    widget = self.layout().itemAtPosition(j, i).widget()
-                    gnuplot_canvas = widget._gnuplot_canvas
-                    gnuplot_canvas.write("set term qt widget '{}' size {},{} font 'Arial,8' noenhanced".format(
-                        widget.serverName(),
-                        widget.geometry().width(),
-                        widget.geometry().height()), True)
-                    gnuplot_canvas.process_layout()
+        self.show()
 
     def next(self):
         for i, col in enumerate(self.canvas.plots):
@@ -79,5 +89,3 @@ class QtGnuplotMultiwidgetCanvas(QtPlotCanvas):
                     widget = self.layout().itemAtPosition(j, i).widget()
                     widget._gnuplot_canvas.prev()
 
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        self.replot()
