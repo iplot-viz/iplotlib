@@ -20,9 +20,6 @@ public:
 	QtGnuplotWidget(QWidget* parent /TransferThis/ =0 );
 	//QtGnuplotWidget(int id = 0, QtGnuplotEventHandler* eventHandler = 0, QWidget* parent = 0);
 	QString serverName();
-	QSize plotAreaSize() const;
-	double sceneToGraph(int axis, double coord) const;
-	void replot();
 
 
 
