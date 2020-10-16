@@ -61,8 +61,6 @@ QtGnuplotWidget::QtGnuplotWidget(QWidget* parent)
 {
 	m_eventHandler = 0;
 	init();
-	qDebug() << " QtGnuplotWidget constructor!" << this->serverName();
-
 }
 
 QtGnuplotWidget::QtGnuplotWidget(int id, QtGnuplotEventHandler* eventHandler, QWidget* parent)
@@ -81,7 +79,7 @@ void QtGnuplotWidget::init()
 	m_ctrlQ = true;
 	m_backgroundColor = Qt::white;
 	m_antialias = true;
-	m_replotOnResize = false;
+	m_replotOnResize = true;
 	m_statusLabelActive = false;
 	m_skipResize = false;
 
@@ -134,33 +132,9 @@ void QtGnuplotWidget::setViewMatrix()
 	m_view->resetTransform();
 }
 
-
-
 void QtGnuplotWidget::processEvent(QtGnuplotEventType type, QDataStream& in)
 {
 	// Plot is done. Emit a signal and forward to the scene
-//	if (type==GESetCurrentWindow ) qDebug() << "QtGnuplotWidget::processEvent type=GESetCurrentWindow";
-//	else if (type==GEInitWindow ) qDebug() << "QtGnuplotWidget::processEvent type=GEInitWindow";
-//	else if (type==GECloseWindow ) qDebug() << "QtGnuplotWidget::processEvent type=GECloseWindow";
-//	else if (type==GEExit ) qDebug() << "QtGnuplotWidget::processEvent type=GEExit";
-//	else if (type==GEPersist ) qDebug() << "QtGnuplotWidget::processEvent type=GEPersist";
-//
-//	else if (type==GEStatusText ) qDebug() << "QtGnuplotWidget::processEvent type=GEStatusText";
-//	else if (type==GETitle ) qDebug() << "QtGnuplotWidget::processEvent type=GETitle";
-//	else if (type==GESetCtrl ) qDebug() << "QtGnuplotWidget::processEvent type=GESetCtrl";
-//	else if (type==GESetPosition ) qDebug() << "QtGnuplotWidget::processEvent type=GESetPosition";
-//	else if (type==GEPID ) qDebug() << "QtGnuplotWidget::processEvent type=GEPID";
-//
-//	else if (type==GESetWidgetSize ) qDebug() << "QtGnuplotWidget::processEvent type=GESetWidgetSize";
-//	else if (type==GECursor ) qDebug() << "QtGnuplotWidget::processEvent type=GECursor";
-//
-//	else if (type==GEPenColor ) qDebug() << "QtGnuplotWidget::processEvent type=GEPenColor";
-//	else if (type==GEBackgroundColor ) qDebug() << "QtGnuplotWidget::processEvent type=GEBackgroundColor";
-//	else if (type==GEBrushStyle ) qDebug() << "QtGnuplotWidget::processEvent type=GEBrushStyle";
-//	else if (type==GEPenStyle ) qDebug() << "QtGnuplotWidget::processEvent type=GEPenStyle";
-//	else if (type==GEPointSize ) qDebug() << "QtGnuplotWidget::processEvent type=GEPointSize";
-//	else if (type==GELineWidth ) qDebug() << "QtGnuplotWidget::processEvent type=GELineWidth";
-
 	if (type == GEDone)
 	{
 		emit plotDone();
@@ -175,12 +149,12 @@ void QtGnuplotWidget::processEvent(QtGnuplotEventType type, QDataStream& in)
 		m_lastSizeRequest = s;
 		m_view->resetTransform();
 		QWidget* viewport = m_view->viewport();
-//		qDebug() << "QtGnuplotWidget::processEvent Size request" << s << size() << " / viewport" << m_view->maximumViewportSize();
-//		qDebug() << " widget size   " << size();
-//		qDebug() << " view size     " << m_view->size();
-//		qDebug() << " viewport size " << viewport->size();
-//		qDebug() << " last size req." << m_lastSizeRequest;
-
+/*		qDebug() << "QtGnuplotWidget::processEvent Size request" << s << size() << " / viewport" << m_view->maximumViewportSize();
+		qDebug() << " widget size   " << size();
+		qDebug() << " view size     " << m_view->size();
+		qDebug() << " viewport size " << viewport->size();
+		qDebug() << " last size req." << m_lastSizeRequest;
+*/
 		// Qt has no reliable mechanism to set the size of widget while having
 		// it resizable. So we heuristically use the resize function to set the
 		// size of the plotting area when the plot window is already displayed.
@@ -217,7 +191,6 @@ void QtGnuplotWidget::processEvent(QtGnuplotEventType type, QDataStream& in)
 		QString status;
 		in >> status;
 		setStatusText(status);
-//		qDebug() << "GEStatusText: " << status;
 	}
 	else if (type == GECopyClipboard)
 	{
@@ -245,35 +218,23 @@ void QtGnuplotWidget::processEvent(QtGnuplotEventType type, QDataStream& in)
 		m_scene->processEvent(type, in);
 }
 
-double QtGnuplotWidget::sceneToGraph(int axis, double coord) const{
-    return this->m_scene->sceneToGraph(axis,coord);
-}
-
-void QtGnuplotWidget::replot(){
-	m_eventHandler->postTermEvent(GE_replot, 0, 0, 0, 0, this);
-}
-
 void QtGnuplotWidget::resizeEvent(QResizeEvent* event)
 {
 	QWidget* viewport = m_view->viewport();
-//	qDebug() << "QtGnuplotWidget::resizeEvent" << isVisible();
-//	qDebug() << " event->size   " << event->size();
-//	qDebug() << " event->oldSize" << event->oldSize();
-//	qDebug() << " widget size   " << size();
-//	qDebug() << " view size     " << m_view->size();
-//	qDebug() << " viewport size " << viewport->size();
-//	qDebug() << " last size req." << m_lastSizeRequest;
-//	qDebug() << " Scene rect." << m_scene->sceneRect();
-//	qDebug() << " m_skipResize2." << m_skipResize;
-
-
+/*	qDebug() << "QtGnuplotWidget::resizeEvent" << isVisible();
+	qDebug() << " event->size   " << event->size();
+	qDebug() << " event->oldSize" << event->oldSize();
+	qDebug() << " widget size   " << size();
+	qDebug() << " view size     " << m_view->size();
+	qDebug() << " viewport size " << viewport->size();
+	qDebug() << " last size req." << m_lastSizeRequest;
+*/
 	m_statusLabel->move(viewport->width() - m_statusLabel->width(), 0);
-//			m_eventHandler->postTermEvent(GE_replot, 0, 0, 0, 0, this);
 
 	// We only inform gnuplot of a new size, and not of the first resize event
 	if ((viewport->size() != m_lastSizeRequest) && (m_lastSizeRequest != QSize(-1, -1)) && !m_skipResize)
 	{
-//		qDebug() << " -> Sending event" << isActive();
+//		qDebug() << " -> Sending event";
 		m_eventHandler->postTermEvent(GE_fontprops,viewport->size().width(),
 		                               viewport->size().height(), 0, 0, this);
 		if (m_replotOnResize && isActive())

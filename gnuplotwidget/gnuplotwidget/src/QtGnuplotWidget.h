@@ -105,9 +105,6 @@ public:
 
 	void loadSettings(const QSettings& settings);
 	void saveSettings(QSettings& settings) const;
-	double sceneToGraph(int axis, double coord) const;
-	void replot();
-
 
 public slots:
 	void copyToClipboard();
@@ -130,9 +127,8 @@ private:
 private:
 	int m_id;
 	bool m_active;
-	QGraphicsView* m_view;
 	QtGnuplotScene* m_scene;
-
+	QGraphicsView* m_view;
 	QLabel* m_statusLabel;
 	QSize m_lastSizeRequest;
 	QSize m_sizeHint;

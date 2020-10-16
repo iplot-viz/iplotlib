@@ -180,64 +180,6 @@ void QtGnuplotScene::update_key_box(const QRectF rect)
 
 void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 {
-
-//	if (type==GESetCurrentWindow ) qDebug() << "QtGnuplotScene::processEvent type=GESetCurrentWindow";
-//	else if (type==GEInitWindow ) qDebug() << "QtGnuplotScene::processEvent type=GEInitWindow";
-//	else if (type==GECloseWindow ) qDebug() << "QtGnuplotScene::processEvent type=GECloseWindow";
-//	else if (type==GEExit ) qDebug() << "QtGnuplotScene::processEvent type=GEExit";
-//	else if (type==GEPersist ) qDebug() << "QtGnuplotScene::processEvent type=GEPersist";
-//
-//	else if (type==GEStatusText ) qDebug() << "QtGnuplotScene::processEvent type=GEStatusText";
-//	else if (type==GETitle ) qDebug() << "QtGnuplotScene::processEvent type=GETitle";
-//	else if (type==GESetCtrl ) qDebug() << "QtGnuplotScene::processEvent type=GESetCtrl";
-//	else if (type==GESetPosition ) qDebug() << "QtGnuplotScene::processEvent type=GESetPosition";
-//	else if (type==GEPID ) qDebug() << "QtGnuplotScene::processEvent type=GEPID";
-//
-//	else if (type==GESetWidgetSize ) qDebug() << "QtGnuplotScene::processEvent type=GESetWidgetSize";
-//	else if (type==GECursor ) qDebug() << "QtGnuplotScene::processEvent type=GECursor";
-//
-//	else if (type==GEPenColor ) {} //qDebug() << "QtGnuplotScene::processEvent type=GEPenColor";
-//	else if (type==GEBackgroundColor ) qDebug() << "QtGnuplotScene::processEvent type=GEBackgroundColor";
-//	else if (type==GEBrushStyle ) qDebug() << "QtGnuplotScene::processEvent type=GEBrushStyle";
-//	else if (type==GEPenStyle ) {} // qDebug() << "QtGnuplotScene::processEvent type=GEPenStyle = " << type ;
-//	else if (type==GEPointSize ) qDebug() << "QtGnuplotScene::processEvent type=GEPointSize";
-//	else if (type==GELineWidth ) qDebug() << "QtGnuplotScene::processEvent type=GELineWidth = "<< type; // 1017
-//	else if (type==GEFillBox ) qDebug() << "QtGnuplotScene::processEvent type=GEFillBox = " << type ;
-//	else if (type==GEPutText ) qDebug() << "QtGnuplotScene::processEvent type=GEPutText = " << type ;
-//	else if (type==GEFilledPolygon ) qDebug() << "QtGnuplotScene::processEvent type=GEFilledPolygon = " << type ;
-//	else if (type==GETextAngle ) qDebug() << "QtGnuplotScene::processEvent type=GETextAngle = " << type ;
-//	else if (type==GETextAlignment ) qDebug() << "QtGnuplotScene::processEvent type=GETextAlignment = " << type ;
-//	else if (type==GEPoint ) qDebug() << "QtGnuplotScene::processEvent type=GEPoint = " << type ;
-//	else if (type==GEClear ) qDebug() << "QtGnuplotScene::processEvent type=GEClear = " << type ;
-//	else if (type==GEZoomStart ) qDebug() << "QtGnuplotScene::processEvent type=GEZoomStart = " << type ;
-//	else if (type==GEZoomStop ) qDebug() << "QtGnuplotScene::processEvent type=GEZoomStop = " << type ;
-//	else if (type==GECopyClipboard ) qDebug() << "QtGnuplotScene::processEvent type=GECopyClipboard = " << type ;
-//	else if (type==GEMove ) qDebug() << "QtGnuplotScene::processEvent type=GEMove = " << type ;
-//	else if (type==GEVector ) {} //qDebug() << "QtGnuplotScene::processEvent type=GEVector = " << type ;
-//	else if (type==GELineTo ) qDebug() << "QtGnuplotScene::processEvent type=GELineTo = " << type ;
-//	else if (type==GESetFont ) {} // qDebug() << "QtGnuplotScene::processEvent type=GESetFont = " << type ;
-//	else if (type==GEEnhancedFlush ) qDebug() << "QtGnuplotScene::processEvent type=GEEnhancedFlush = " << type ;
-//	else if (type==GEEnhancedFinish ) qDebug() << "QtGnuplotScene::processEvent type=GEEnhancedFinish = " << type ;
-//	else if (type==GEImage ) qDebug() << "QtGnuplotScene::processEvent type=GEImage = " << type ;
-//	else if (type==GESetSceneSize ) qDebug() << "QtGnuplotScene::processEvent type=GESetSceneSize = " << type ;
-//	else if (type==GERaise ) qDebug() << "QtGnuplotScene::processEvent type=GERaise = " << type ;
-//	else if (type==GEWrapCursor ) qDebug() << "QtGnuplotScene::processEvent type=GEWrapCursor = " << type ;
-//	else if (type==GEScale ) qDebug() << "QtGnuplotScene::processEvent type=GEScale = " << type ;
-//	else if (type==GEActivate ) qDebug() << "QtGnuplotScene::processEvent type=GEActivate = " << type ;
-//	else if (type==GEDesactivate ) qDebug() << "QtGnuplotScene::processEvent type=GEDesactivate = " << type ;
-//	else if (type==GELayer ) qDebug() << "QtGnuplotScene::processEvent type=GELayer = " << type ;
-//	else if (type==GEPlotNumber ) qDebug() << "QtGnuplotScene::processEvent type=GEPlotNumber = " << type ;
-//	else if (type==GEHypertext ) qDebug() << "QtGnuplotScene::processEvent type=GEHypertext = " << type ;
-//	else if (type==GETextBox ) qDebug() << "QtGnuplotScene::processEvent type=GETextBox = " << type ;
-//	else if (type==GEModPlots ) qDebug() << "QtGnuplotScene::processEvent type=GEModPlots = " << type ;
-//	else if (type==GEAfterPlot ) qDebug() << "QtGnuplotScene::processEvent type=GEAfterPlot = " << type ;
-//	else if (type==GEFontMetricRequest ) qDebug() << "QtGnuplotScene::processEvent type=GEFontMetricRequest = " << type ;
-//	else if (type==GEDashPattern ) qDebug() << "QtGnuplotScene::processEvent type=GEDashPattern = " << type ;
-//
-//	else  qDebug() << "QtGnuplotScene::processEvent type=" << type;
-
-
-
 	if ((type != GEMove) && (type != GEVector) && !m_currentPolygon.empty())
 	{
 		QPointF point = m_currentPolygon.last();
@@ -417,9 +359,6 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 		flushCurrentPointsItem();
 		QPoint point; in >> point;
 		QString text; in >> text;
-
-//		qDebug() << "PUTTEXT: " << text;
-
 		QGraphicsTextItem* textItem = addText(text, m_font);
 		textItem->setDefaultTextColor(m_currentPen.color());
 		positionText(textItem, point);
@@ -589,10 +528,6 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 	{
 		flushCurrentPointsItem();
 		int newPlotNumber;  in >> newPlotNumber;
-
-//	    qDebug() << "PLOTNUMBER: num: " << newPlotNumber << " TOTAL: " << m_plot_group.count();
-
-
 		if (newPlotNumber >= m_plot_group.count()) {
 			// Initialize list of elements for next group
 			m_currentGroup.clear();
@@ -609,9 +544,6 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 		in >> ops_i;
 		in >> plotno;
 		enum QtGnuplotModPlots ops = (enum QtGnuplotModPlots) ops_i;
-
-//	    qDebug() << "MODPLOTS: ops: " << ops_i << " i:" << i << " plotno: " << plotno << " group_count: " << m_plot_group.count();
-
 
 		/* FIXME: This shouldn't happen, but it does. */
 		if (i > m_plot_group.count())

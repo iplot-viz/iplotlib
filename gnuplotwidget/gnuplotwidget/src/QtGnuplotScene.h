@@ -76,8 +76,6 @@ public:
 	virtual void keyPressEvent(QKeyEvent* event);
 	virtual void keyReleaseEvent(QKeyEvent* event);
 	void processEvent(QtGnuplotEventType type, QDataStream& in);
-	double sceneToGraph(int axis, double coord) const;
-
 
 private:
 	void resetItems();
@@ -90,6 +88,7 @@ private:
 	QPolygonF& clipPolygon(QPolygonF& polygon, bool checkDiag = true) const;
 	QPointF&   clipPoint(QPointF& point) const;
 	QRectF&    clipRect(QRectF& point) const;
+	double sceneToGraph(int axis, double coord) const;
 	void update_key_box(const QRectF rect);
 
 private:
