@@ -18,29 +18,35 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
     def __init__(self, canvas: Canvas = None, parent=None, plots=None, enableToolbar: bool = False, intercept_mouse=False):
         super().__init__(parent)
+        self.setLayout(QVBoxLayout())
 
-        if intercept_mouse:
-            self.setMouseTracking(True)
-            self.installEventFilter(self)
+        self.matplotlib_canvas = None
+        self.qt_canvas = None
 
+        if canvas is not None:
+            self.set_canvas(canvas,intercept_mouse=intercept_mouse,enable_toolbar=enableToolbar)
+
+    def set_canvas(self,canvas, intercept_mouse = False, enable_toolbar = False):
         self.matplotlib_canvas = MatplotlibCanvas(canvas)
 
-        layout = QVBoxLayout()
+        if self.qt_canvas is not None:
+            self.qt_canvas.setParent(None) #TODO: should be a better way to do this
 
-        self.setLayout(layout)
         if self.matplotlib_canvas.figure:
             self.qt_canvas = FigureCanvas(self.matplotlib_canvas.figure)
             if intercept_mouse:
+                self.setMouseTracking(True)
+                self.installEventFilter(self)
                 self.qt_canvas.setAttribute(Qt.WA_TransparentForMouseEvents)
 
             self.qt_canvas.setCursor(QtGui.QCursor(QtCore.Qt.CrossCursor))
             self.toolbar = NavigationToolbar(self.qt_canvas, self)
-            if enableToolbar:
-                layout.addWidget(self.toolbar)
+            if enable_toolbar:
+                self.layout().addWidget(self.toolbar)
             else:
                 self.toolbar.setVisible(False)
 
-            layout.addWidget(self.qt_canvas)
+            self.layout().addWidget(self.qt_canvas)
             self.matplotlib_canvas.figure.canvas.updateGeometry()
 
             self.matplotlib_canvas.figure.tight_layout()
@@ -58,6 +64,7 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
         else:
             print("No figure given")
+        pass
 
     def click(self, event):
         if event.dblclick:
