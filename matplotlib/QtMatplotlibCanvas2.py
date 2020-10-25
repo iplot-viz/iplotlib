@@ -1,5 +1,7 @@
+from abc import ABCMeta
+
 from PyQt5 import QtGui, QtCore
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QMargins, Qt
 from PyQt5.QtGui import QResizeEvent
 from PyQt5.QtWidgets import QVBoxLayout
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -16,56 +18,48 @@ A Qt widget holding matplotlib figure along with passing mouse events
 
 class QtMatplotlibCanvas2(QtPlotCanvas):
 
-    def __init__(self, canvas: Canvas = None, parent=None, plots=None, enableToolbar: bool = False, intercept_mouse=False):
+    def __init__(self, canvas: Canvas = None, parent=None):
         super().__init__(parent)
         self.setLayout(QVBoxLayout())
-
+        self.layout().setContentsMargins(QMargins())
         self.matplotlib_canvas = None
         self.qt_canvas = None
+        self.toolbar = None
+        self.mouse_mode = None
+        self.set_canvas(canvas)
 
-        if canvas is not None:
-            self.set_canvas(canvas,intercept_mouse=intercept_mouse,enable_toolbar=enableToolbar)
+    def set_canvas(self, canvas):
+        if canvas:
+            self.matplotlib_canvas = MatplotlibCanvas(canvas)
 
-    def set_canvas(self,canvas, intercept_mouse = False, enable_toolbar = False):
-        self.matplotlib_canvas = MatplotlibCanvas(canvas)
+            if self.qt_canvas is not None:
+                self.qt_canvas.setParent(None)
 
-        if self.qt_canvas is not None:
-            self.qt_canvas.setParent(None) #TODO: should be a better way to do this
-
-        if self.matplotlib_canvas.figure:
-            self.qt_canvas = FigureCanvas(self.matplotlib_canvas.figure)
-            if intercept_mouse:
-                self.setMouseTracking(True)
-                self.installEventFilter(self)
-                self.qt_canvas.setAttribute(Qt.WA_TransparentForMouseEvents)
-
-            self.qt_canvas.setCursor(QtGui.QCursor(QtCore.Qt.CrossCursor))
-            self.toolbar = NavigationToolbar(self.qt_canvas, self)
-            if enable_toolbar:
-                self.layout().addWidget(self.toolbar)
-            else:
+            if self.matplotlib_canvas.figure:
+                self.qt_canvas = FigureCanvas(self.matplotlib_canvas.figure)
+                self.toolbar = NavigationToolbar(self.qt_canvas, self)
                 self.toolbar.setVisible(False)
 
-            self.layout().addWidget(self.qt_canvas)
-            self.matplotlib_canvas.figure.canvas.updateGeometry()
+                self.layout().addWidget(self.qt_canvas)
 
-            self.matplotlib_canvas.figure.tight_layout()
+                self.set_mouse_mode(self.mouse_mode or canvas.mouse_mode)
 
-            if self.matplotlib_canvas.canvas.mouse_mode == "zoom":
+    def set_mouse_mode(self, mode: str):
+        self.mouse_mode = mode
+
+        if self.toolbar:
+            if mode == Canvas.MOUSE_MODE_CROSSHAIR:
+                self.toolbar._active = 'PAN'
+                self.toolbar.pan()
+                self.matplotlib_canvas.activate_cursor()
+            elif mode == Canvas.MOUSE_MODE_PAN:
+                self.toolbar.pan()
+                self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
+            elif mode == Canvas.MOUSE_MODE_ZOOM:
                 self.toolbar.zoom()
                 self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
 
-            elif self.matplotlib_canvas.canvas.mouse_mode == "pan":
-                self.toolbar.pan()
-                self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
-
-            if canvas.crosshair_enabled:
-                self.matplotlib_canvas.activate_cursor()
-
-        else:
-            print("No figure given")
-        pass
-
+    """Return to home position on double click"""
     def click(self, event):
         if event.dblclick:
             self.toolbar.home()
@@ -75,8 +69,3 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
             self.toolbar.forward()
         elif event.text() == 'p':
             self.toolbar.back()
-
-    def resizeEvent(self, event: QResizeEvent):
-        if self.matplotlib_canvas is not None and self.matplotlib_canvas.figure is not None:
-            self.matplotlib_canvas.figure.tight_layout()
-            # pass

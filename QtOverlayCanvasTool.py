@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+from PyQt5.QtCore import QObject
 from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import QWidget
 
@@ -12,14 +13,15 @@ TODO: Tools should redraw when size of the canvas changes in order to reflect ra
 """
 
 
-class QtOverlayCanvasTool(ABC):
+class QtOverlayCanvasTool(QObject):
 
-    @abstractmethod
-    def process_paint(self, painter: QPainter):
+    def __init__(self):
+        super().__init__()
+
+    def process_paint(self, widget, painter: QPainter):
         pass
 
-    @abstractmethod
-    def process_event(self, canvas: QtPlotCanvas, event):
+    def process_event(self, widget, event):
         pass
 
     def __repr__(self):

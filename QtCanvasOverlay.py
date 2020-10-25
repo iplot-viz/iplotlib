@@ -12,16 +12,15 @@ Additional objects such as crosshair are drawn on this overlay
 
 class QtCanvasOverlay(QWidget):
 
-    def __init__(self, parent=None,dependentOverlays=[]):
+    def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.dependentOverlays = []
-        self.activeTool: QtOverlayCanvasTool = None  # TODO: In the future make it a list
+        self.activeTool: QtOverlayCanvasTool = None
         self.setMouseTracking(True)
         self.installEventFilter(self)
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setGeometry(0, 0, self.parent().geometry().width(), self.parent().geometry().height())
         self.setFocusPolicy(Qt.StrongFocus)
-
 
     def activateTool(self, tool: QtOverlayCanvasTool):
         self.activeTool = tool
@@ -30,11 +29,10 @@ class QtCanvasOverlay(QWidget):
         self.setGeometry(0, 0, self.parent().geometry().width(), self.parent().geometry().height())  # TODO: Can actually be done only on resize, not needed for every paint
 
         if self.activeTool is not None:
-            self.activeTool.process_paint(QPainter(self))
+            self.activeTool.process_paint(self.parent(), QPainter(self))
             for overlay in self.dependentOverlays:
                 if overlay is not self:
                     overlay.update()
-                    # self.activeTool.process_paint(QPainter(overlay))
             pass
 
     def eventFilter(self, source, event):

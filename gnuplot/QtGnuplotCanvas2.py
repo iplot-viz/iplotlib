@@ -10,22 +10,13 @@ from qt.QtPlotCanvas import QtPlotCanvas
 
 class QtGnuplotCanvas2(QtPlotCanvas):
 
-    def __init__(self, canvas: Canvas = None, parent=None, toolbar=False, intercept_mouse=False):
+    def __init__(self, canvas: Canvas = None, parent=None):
         super().__init__(parent)
 
         self.gnuplot_canvas = GnuplotCanvas(canvas)
-
         self.qt_canvas = QtGnuplotWidget(self)
+
         self.setLayout(QVBoxLayout())
-
-        if intercept_mouse:
-            self.setMouseTracking(True)
-            self.installEventFilter(self)
-            self.qt_canvas.setAttribute(Qt.WA_TransparentForMouseEvents)
-
-        if toolbar:
-            self.layout().addWidget(self.createToolbar())
-
         self.layout().addWidget(self.qt_canvas)
 
     def replot(self):
@@ -37,15 +28,3 @@ class QtGnuplotCanvas2(QtPlotCanvas):
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         self.replot()
-
-
-    def createToolbar(self):
-        toolbar = QToolBar()
-        refresh_button = QPushButton("Refresh")
-        refresh_button.clicked.connect(self.replot)
-        toolbar.addWidget(refresh_button)
-        return toolbar
-
-    def eventFilter(self, source, event):
-        print("GNUPLOT: handle event: " + str(event))
-        return False

@@ -1,5 +1,8 @@
-from PyQt5.QtCore import QSize
+from abc import ABC, ABCMeta, abstractmethod
+
+from PyQt5.QtCore import QPoint, QPointF, QSize
 from PyQt5.QtWidgets import QWidget
+from iplotlib.Canvas import Canvas
 
 """
 Main abstraction of a Qt plot canvas.
@@ -9,9 +12,13 @@ A Qt plot canvas is used to plot multiple plots and present them in form of a Qt
 
 class QtPlotCanvas(QWidget):
 
-    # This will be applied as initial size
-    #TODO: Can be directly related to the size of the canvas grid
+    @abstractmethod
+    def set_mouse_mode(self, mode: str):
+        """Sets mouse mode of this canvas"""
+
+    @abstractmethod
+    def set_canvas(self, canvas: Canvas):
+        """Updates canvas"""
+
     def sizeHint(self):
         return QSize(900, 400)
-
-

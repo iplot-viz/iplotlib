@@ -15,7 +15,7 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
         self.mouse_pos: QPoint = None
         self.graph_bounds = None
 
-    def process_paint(self, painter: QPainter):
+    def process_paint(self, widget, painter: QPainter):
         if self.rect_start is not None:
             painter.setPen(QPen(Qt.red, 1, Qt.DashLine))
             x1, y1, x2, y2 = self.rect_start.x(), self.rect_start.y(), self.mouse_pos.x(), self.mouse_pos.y()
@@ -25,15 +25,14 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
                 y1 = self.__limit(y1, painter.viewport().height()-self.graph_bounds[3], painter.viewport().height()-self.graph_bounds[1])
                 y2 = self.__limit(y2, painter.viewport().height()-self.graph_bounds[3], painter.viewport().height()-self.graph_bounds[1])
 
-
             painter.fillRect(x1, y1, x2-x1, y2-y1, QBrush(QColor(255, 0, 255, 64)))
             painter.drawRect(x1, y1, x2-x1, y2-y1)
 
 
-    def process_event(self, canvas: QtPlotCanvas, event):
+    def process_event(self, widget, event):
 
-        if hasattr(canvas, "_gnuplot_canvas"):
-            self.graph_bounds = canvas._gnuplot_canvas.terminal_range
+        if hasattr(widget, "_gnuplot_canvas"):
+            self.graph_bounds = widget._gnuplot_canvas.terminal_range
 
         if event.type() == QtCore.QEvent.MouseMove:
             self.mouse_pos = event.localPos()
@@ -54,7 +53,7 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
         elif event.type() == QtCore.QEvent.MouseButtonRelease:
             if event.button() == Qt.LeftButton:
                 if self.__distance(self.rect_start, event.localPos()) > 10:
-                    self.__do_zoom(canvas, self.rect_start, event.localPos())
+                    self.__do_zoom(widget, self.rect_start, event.localPos())
 
                 self.rect_start = None
             # elif event.button() == Qt.RightButton:
@@ -62,7 +61,7 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
             return True
         elif event.type() == QtCore.QEvent.MouseButtonDblClick:
             if event.button() == Qt.LeftButton:
-                canvas._gnuplot_canvas.reset_bounds()
+                widget._gnuplot_canvas.reset_bounds()
 
         elif event.type() != 12:
             # print("UNKNOWN EVENT " + str(event.type()))
@@ -73,11 +72,11 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
             return 0
         return sqrt((start.x()-end.x())**2 + (start.y()-end.y())**2)
 
-    def __do_zoom(self, canvas: QtPlotCanvas, start: QPoint, end: QPoint):
-        if hasattr(canvas, "_gnuplot_canvas"):
-            gs = canvas._gnuplot_canvas.to_graph(start.x(), start.y())
-            ge = canvas._gnuplot_canvas.to_graph(end.x(), end.y())
-            canvas._gnuplot_canvas.set_bounds(gs[0], gs[1], ge[0], ge[1], replot=True, save_history=True)
+    def __do_zoom(self, widget, start: QPoint, end: QPoint):
+        if hasattr(widget, "_gnuplot_canvas"):
+            gs = widget._gnuplot_canvas.to_graph(start.x(), start.y())
+            ge = widget._gnuplot_canvas.to_graph(end.x(), end.y())
+            widget._gnuplot_canvas.set_bounds(gs[0], gs[1], ge[0], ge[1], replot=True, save_history=True)
 
 
 
