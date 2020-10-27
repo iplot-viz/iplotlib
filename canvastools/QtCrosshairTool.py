@@ -62,7 +62,8 @@ class QtOverlayCrosshairTool(QtOverlayCanvasTool):
         if event.type() == QtCore.QEvent.MouseMove:
             if not self.mouse_stay:
                 self.graph_pos = widget.screen_to_graph(event.localPos())
-                self.crosshairMoved.emit(self.graph_pos)
+                if self.graph_pos is not None:
+                    self.crosshairMoved.emit(self.graph_pos)
 
             return True
 
