@@ -18,7 +18,7 @@ A Qt widget holding matplotlib figure along with passing mouse events
 
 class QtMatplotlibCanvas2(QtPlotCanvas):
 
-    def __init__(self, canvas: Canvas = None, parent=None):
+    def __init__(self, canvas: Canvas = None, parent=None, tight_layout=True):
         super().__init__(parent)
         self.setLayout(QVBoxLayout())
         self.layout().setContentsMargins(QMargins())
@@ -26,11 +26,13 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
         self.qt_canvas = None
         self.toolbar = None
         self.mouse_mode = None
+        self.tight_layout = tight_layout
+
         self.set_canvas(canvas)
 
     def set_canvas(self, canvas):
         if canvas:
-            self.matplotlib_canvas = MatplotlibCanvas(canvas)
+            self.matplotlib_canvas = MatplotlibCanvas(canvas, tight_layout=self.tight_layout)
 
             if self.qt_canvas is not None:
                 self.qt_canvas.setParent(None)
