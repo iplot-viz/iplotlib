@@ -31,14 +31,15 @@ class QtOverlayCrosshairTool(QtOverlayCanvasTool):
         if self.graph_pos is not None:
             screen_pos = widget.graph_to_screen(self.graph_pos)
 
-            painter.setPen(QPen(QColor(self.color), self.linewidth, Qt.SolidLine))
-            min_x, min_y, max_x, max_y = (0, 0, painter.viewport().width(), painter.viewport().height())
-            if self.graph_screen_bounds:
-                min_x, min_y, max_x, max_y = self.graph_screen_bounds
-            if self.vertical and min_x <= screen_pos.x() <= max_x:
-                painter.drawLine(screen_pos.x(), painter.viewport().height()-min_y, screen_pos.x(), painter.viewport().height()-max_y)
-            if self.horizontal and (painter.viewport().height()-max_y) <= screen_pos.y() <= (painter.viewport().height()-min_y):
-                painter.drawLine(min_x, screen_pos.y(), max_x, screen_pos.y())
+            if screen_pos is not None:
+                painter.setPen(QPen(QColor(self.color), self.linewidth, Qt.SolidLine))
+                min_x, min_y, max_x, max_y = (0, 0, painter.viewport().width(), painter.viewport().height())
+                if self.graph_screen_bounds:
+                    min_x, min_y, max_x, max_y = self.graph_screen_bounds
+                if self.vertical and min_x <= screen_pos.x() <= max_x:
+                    painter.drawLine(screen_pos.x(), painter.viewport().height()-min_y, screen_pos.x(), painter.viewport().height()-max_y)
+                if self.horizontal and (painter.viewport().height()-max_y) <= screen_pos.y() <= (painter.viewport().height()-min_y):
+                    painter.drawLine(min_x, screen_pos.y(), max_x, screen_pos.y())
 
         if self.graph_pos is not None:
             painter.setPen(QPen(self.tooltip_color, 1, Qt.SolidLine))
