@@ -1,14 +1,17 @@
 from abc import ABCMeta
 
+import matplotlib
 from PyQt5 import QtGui, QtCore
-from PyQt5.QtCore import QMargins, Qt
+from PyQt5.QtCore import QMargins, QMetaObject, Qt, pyqtSlot
 from PyQt5.QtGui import QResizeEvent
-from PyQt5.QtWidgets import QVBoxLayout
+from PyQt5.QtWidgets import QAction, QStyle, QVBoxLayout
+from matplotlib.backend_bases import _Mode
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
 from iplotlib.Canvas import Canvas
 from iplotlib_matplotlib.MatplotlibCanvas import MatplotlibCanvas
+from matplotlib.widgets import MultiCursor
 from qt.QtPlotCanvas import QtPlotCanvas
 
 """
@@ -30,9 +33,23 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
         self.set_canvas(canvas)
 
+
+    def draw_in_main_thread(self):
+        QMetaObject.invokeMethod(self, "flush_draw_queue")
+
+    @pyqtSlot()
+    def flush_draw_queue(self):
+        if self.matplotlib_canvas:
+            self.matplotlib_canvas.process_work_queue()
+
     def set_canvas(self, canvas):
+        if self.matplotlib_canvas and self.matplotlib_canvas.figure:
+            self.matplotlib_canvas.figure.clear()
+            self.matplotlib_canvas.deactivate_cursor()
+
         if canvas:
-            self.matplotlib_canvas = MatplotlibCanvas(canvas, tight_layout=self.tight_layout)
+            print("Using matplotlib: {} interactive={}".format(matplotlib.__version__, matplotlib.is_interactive()))
+            self.matplotlib_canvas = MatplotlibCanvas(canvas, tight_layout=self.tight_layout, mpl_flush_method=self.draw_in_main_thread)
 
             if self.qt_canvas is not None:
                 self.qt_canvas.setParent(None)
@@ -46,13 +63,22 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
                 self.set_mouse_mode(self.mouse_mode or canvas.mouse_mode)
 
+    def process_canvas_toolbar(self, toolbar):
+
+        def apply_tight_layout():
+            self.matplotlib_canvas.figure.tight_layout()
+            self.matplotlib_canvas.figure.canvas.draw()
+
+        toolbar.addSeparator()
+        toolbar.addAction(self.style().standardIcon(getattr(QStyle, "SP_FileDialogListView")), "Layout", apply_tight_layout)
+
     def set_mouse_mode(self, mode: str):
         self.mouse_mode = mode
 
         if self.toolbar:
             if mode == Canvas.MOUSE_MODE_CROSSHAIR:
-                self.toolbar._active = 'PAN'
-                self.toolbar.pan()
+                self.toolbar.mode = _Mode.NONE
+                self.toolbar.canvas.widgetlock.release(self.toolbar)
                 self.matplotlib_canvas.activate_cursor()
             elif mode == Canvas.MOUSE_MODE_PAN:
                 self.toolbar.pan()
@@ -71,3 +97,13 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
             self.toolbar.forward()
         elif event.text() == 'p':
             self.toolbar.back()
+
+
+    def back(self):
+        if self.toolbar:
+            self.toolbar.back()
+
+    def forward(self):
+        if self.toolbar:
+            self.toolbar.forward()
+

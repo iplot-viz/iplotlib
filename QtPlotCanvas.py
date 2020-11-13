@@ -13,6 +13,18 @@ A Qt plot canvas is used to plot multiple plots and present them in form of a Qt
 class QtPlotCanvas(QWidget):
 
     @abstractmethod
+    def back(self):
+        """history: back"""
+
+    @abstractmethod
+    def forward(self):
+        """history: forward"""
+
+    @abstractmethod
+    def process_canvas_toolbar(self, toolbar):
+        """Post process canvas toolbar, add custom canvas-specific buttons etc..."""
+
+    @abstractmethod
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
 
