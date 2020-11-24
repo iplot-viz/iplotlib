@@ -75,19 +75,28 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
     def set_mouse_mode(self, mode: str):
         self.mouse_mode = mode
 
-        if self.toolbar:
+        def reset_tool():
+            self.toolbar.mode = _Mode.NONE
+            self.matplotlib_canvas.deactivate_cursor()
+
+        reset_tool()
+
+        if self.toolbar and self.mouse_mode is not None:
             if mode == Canvas.MOUSE_MODE_CROSSHAIR:
-                self.toolbar.mode = _Mode.NONE
                 self.toolbar.canvas.widgetlock.release(self.toolbar)
                 self.matplotlib_canvas.activate_cursor()
             elif mode == Canvas.MOUSE_MODE_PAN:
+                self.matplotlib_canvas.deactivate_cursor()
                 self.toolbar.pan()
                 self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
             elif mode == Canvas.MOUSE_MODE_ZOOM:
+                self.matplotlib_canvas.deactivate_cursor()
                 self.toolbar.zoom()
                 self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
+            elif mode == Canvas.MOUSE_MODE_SELECT:
+                pass
 
-    """Return to home position on double click"""
+    """Additional callback to allow for returning to home after ouble click"""
     def click(self, event):
         if event.dblclick:
             self.toolbar.home()
@@ -97,7 +106,6 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
             self.toolbar.forward()
         elif event.text() == 'p':
             self.toolbar.back()
-
 
     def back(self):
         if self.toolbar:
