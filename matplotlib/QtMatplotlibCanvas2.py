@@ -76,8 +76,9 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
         self.mouse_mode = mode
 
         def reset_tool():
-            self.toolbar.mode = _Mode.NONE
-            self.matplotlib_canvas.deactivate_cursor()
+            if self.toolbar:
+                self.toolbar.mode = _Mode.NONE
+                self.matplotlib_canvas.deactivate_cursor()
 
         reset_tool()
 
