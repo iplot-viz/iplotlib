@@ -62,15 +62,16 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
                 self.layout().addWidget(self.qt_canvas)
 
                 self.set_mouse_mode(self.mouse_mode or canvas.mouse_mode)
+                QMetaObject.invokeMethod(self, "apply_tight_layout")
+
+    @pyqtSlot()
+    def apply_tight_layout(self):
+        self.matplotlib_canvas.figure.tight_layout()
+        self.matplotlib_canvas.figure.canvas.draw()
 
     def process_canvas_toolbar(self, toolbar):
-
-        def apply_tight_layout():
-            self.matplotlib_canvas.figure.tight_layout()
-            self.matplotlib_canvas.figure.canvas.draw()
-
         toolbar.addSeparator()
-        toolbar.addAction(self.style().standardIcon(getattr(QStyle, "SP_FileDialogListView")), "Layout", apply_tight_layout)
+        toolbar.addAction(self.style().standardIcon(getattr(QStyle, "SP_FileDialogListView")), "Layout", self.apply_tight_layout)
 
     def set_mouse_mode(self, mode: str):
         self.mouse_mode = mode
@@ -115,4 +116,3 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
     def forward(self):
         if self.toolbar:
             self.toolbar.forward()
-
