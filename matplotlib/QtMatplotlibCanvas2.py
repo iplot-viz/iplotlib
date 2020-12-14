@@ -66,8 +66,9 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
     @pyqtSlot()
     def apply_tight_layout(self):
-        self.matplotlib_canvas.figure.tight_layout()
-        self.matplotlib_canvas.figure.canvas.draw()
+        if self.matplotlib_canvas is not None:
+            self.matplotlib_canvas.figure.tight_layout()
+            self.matplotlib_canvas.figure.canvas.draw()
 
     def process_canvas_toolbar(self, toolbar):
         toolbar.addSeparator()
