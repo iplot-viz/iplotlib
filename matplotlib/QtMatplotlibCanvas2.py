@@ -1,3 +1,4 @@
+import dataclasses
 from abc import ABCMeta
 
 import matplotlib
@@ -23,6 +24,8 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
     def __init__(self, canvas: Canvas = None, parent=None, tight_layout=True):
         super().__init__(parent)
+        self.original_canvas = None
+        self.current_canvas = None
         self.setLayout(QVBoxLayout())
         self.layout().setContentsMargins(QMargins())
         self.matplotlib_canvas = None
@@ -43,6 +46,7 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
             self.matplotlib_canvas.process_work_queue()
 
     def set_canvas(self, canvas):
+        self.current_canvas = canvas
         if self.matplotlib_canvas and self.matplotlib_canvas.figure:
             self.matplotlib_canvas.figure.clear()
             self.matplotlib_canvas.deactivate_cursor()
@@ -88,6 +92,8 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
             if mode == Canvas.MOUSE_MODE_CROSSHAIR:
                 self.toolbar.canvas.widgetlock.release(self.toolbar)
                 self.matplotlib_canvas.activate_cursor()
+                self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
+
             elif mode == Canvas.MOUSE_MODE_PAN:
                 self.matplotlib_canvas.deactivate_cursor()
                 self.toolbar.pan()
@@ -97,12 +103,19 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
                 self.toolbar.zoom()
                 self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
             elif mode == Canvas.MOUSE_MODE_SELECT:
+                self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
                 pass
 
     """Additional callback to allow for returning to home after ouble click"""
     def click(self, event):
+        print("CLICK",event)
         if event.dblclick:
-            self.toolbar.home()
+            if event.button == 3 and event.inaxes is not None:
+                print("ZOOM TO", event.inaxes._plot)
+                self.select_plot(event.inaxes._plot)
+
+            else:
+                self.toolbar.home()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent):
         if event.text() == 'n':
@@ -117,3 +130,17 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
     def forward(self):
         if self.toolbar:
             self.toolbar.forward()
+
+
+    def select_plot(self, plot):
+        if self.original_canvas is None:
+            self.original_canvas = self.current_canvas
+            new_canvas = dataclasses.replace(self.original_canvas)
+            new_canvas.cols = 1
+            new_canvas.rows = 1
+            new_canvas.plots = [[]]
+            new_canvas.add_plot(plot)
+            self.set_canvas(new_canvas)
+        else:
+            self.set_canvas(self.original_canvas)
+            self.original_canvas = None
