@@ -108,10 +108,8 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
     """Additional callback to allow for returning to home after ouble click"""
     def click(self, event):
-        print("CLICK",event)
         if event.dblclick:
-            if event.button == 3 and event.inaxes is not None:
-                print("ZOOM TO", event.inaxes._plot)
+            if self.mouse_mode == Canvas.MOUSE_MODE_SELECT and event.button == 1 and event.inaxes is not None:
                 self.select_plot(event.inaxes._plot)
 
             else:
