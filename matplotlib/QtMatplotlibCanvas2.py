@@ -24,19 +24,17 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
     def __init__(self, canvas: Canvas = None, parent=None, tight_layout=True):
         super().__init__(parent)
-        self.original_canvas = None
-        self.current_canvas = None
         self.setLayout(QVBoxLayout())
         self.layout().setContentsMargins(QMargins())
-        self.matplotlib_canvas = None
+
         self.qt_canvas = None
         self.toolbar = None
         self.mouse_mode = None
         self.tight_layout = tight_layout
 
+        self.matplotlib_canvas = MatplotlibCanvas(tight_layout=tight_layout, mpl_flush_method=self.draw_in_main_thread)
         self.set_canvas(canvas)
 
-        self.focused_plot = None
 
     def draw_in_main_thread(self):
         QMetaObject.invokeMethod(self, "flush_draw_queue")
@@ -46,20 +44,19 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
         if self.matplotlib_canvas:
             self.matplotlib_canvas.process_work_queue()
 
-    def set_canvas(self, canvas):
-        self.current_canvas = canvas
-        if self.matplotlib_canvas and self.matplotlib_canvas.figure:
-            self.matplotlib_canvas.figure.clear()
+    def set_canvas(self, canvas, focus_plot=None):
+        if self.matplotlib_canvas:
             self.matplotlib_canvas.deactivate_cursor()
 
         if canvas:
             print("Using matplotlib: {} interactive={}".format(matplotlib.__version__, matplotlib.is_interactive()))
-            self.matplotlib_canvas = MatplotlibCanvas(canvas, tight_layout=self.tight_layout, mpl_flush_method=self.draw_in_main_thread)
+            self.matplotlib_canvas.process_iplotlib_canvas(canvas)
 
             if self.qt_canvas is not None:
                 self.qt_canvas.setParent(None)
 
             if self.matplotlib_canvas.figure:
+
                 self.qt_canvas = FigureCanvas(self.matplotlib_canvas.figure)
                 self.toolbar = NavigationToolbar(self.qt_canvas, self)
                 self.toolbar.setVisible(False)
@@ -70,10 +67,8 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
                 QMetaObject.invokeMethod(self, "apply_tight_layout")
 
     def get_canvas(self):
-        if self.matplotlib_canvas:
-            return self.matplotlib_canvas.canvas
-        else:
-            return None
+        return self.matplotlib_canvas.canvas if self.matplotlib_canvas else None
+
 
     @pyqtSlot()
     def apply_tight_layout(self):
@@ -113,12 +108,11 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
                 self.matplotlib_canvas.figure.canvas.mpl_connect('button_press_event', self.click)
                 pass
 
-    """Additional callback to allow for returning to home after ouble click"""
     def click(self, event):
+        """Additional callback to allow for focusing on one plot and returning home after double click"""
         if event.dblclick:
             if self.mouse_mode == Canvas.MOUSE_MODE_SELECT and event.button == 1 and event.inaxes is not None:
-                self.select_plot(event.inaxes._plot)
-
+                self.focus_plot(event.inaxes._plot)
             else:
                 self.toolbar.home()
 
@@ -137,15 +131,12 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
             self.toolbar.forward()
 
 
-    def select_plot(self, plot):
-        if self.original_canvas is None:
-            self.original_canvas = self.current_canvas
-            new_canvas = dataclasses.replace(self.original_canvas)
-            new_canvas.cols = 1
-            new_canvas.rows = 1
-            new_canvas.plots = [[]]
-            new_canvas.add_plot(plot)
-            self.set_canvas(new_canvas)
+
+    def focus_plot(self, plot):
+        """Toggle focus on one plot on/off"""
+        if self.matplotlib_canvas.focused_plot is None:
+            self.matplotlib_canvas.focus_plot(plot)
         else:
-            self.set_canvas(self.original_canvas)
-            self.original_canvas = None
+            self.matplotlib_canvas.unfocus_plot()
+
+        self.matplotlib_canvas.figure.canvas.draw()
