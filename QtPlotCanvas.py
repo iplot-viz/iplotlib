@@ -32,5 +32,9 @@ class QtPlotCanvas(QWidget):
     def set_canvas(self, canvas: Canvas):
         """Updates canvas"""
 
+    @abstractmethod
+    def get_canvas(self):
+        """Gets current canvas"""
+
     def sizeHint(self):
         return QSize(900, 400)

@@ -36,6 +36,7 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
         self.set_canvas(canvas)
 
+        self.focused_plot = None
 
     def draw_in_main_thread(self):
         QMetaObject.invokeMethod(self, "flush_draw_queue")
@@ -67,6 +68,12 @@ class QtMatplotlibCanvas2(QtPlotCanvas):
 
                 self.set_mouse_mode(self.mouse_mode or canvas.mouse_mode)
                 QMetaObject.invokeMethod(self, "apply_tight_layout")
+
+    def get_canvas(self):
+        if self.matplotlib_canvas:
+            return self.matplotlib_canvas.canvas
+        else:
+            return None
 
     @pyqtSlot()
     def apply_tight_layout(self):
