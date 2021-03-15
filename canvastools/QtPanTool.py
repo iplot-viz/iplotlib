@@ -1,9 +1,7 @@
 from PyQt5 import QtCore
-from PyQt5.QtCore import QPoint, Qt, QPointF, pyqtSignal
+from PyQt5.QtCore import QPointF, Qt, pyqtSignal
 from PyQt5.QtGui import QPainter
-
-from qt.QtOverlayCanvasTool import QtOverlayCanvasTool
-from qt.QtPlotCanvas import QtPlotCanvas
+from iplotlib.qt.QtOverlayCanvasTool import QtOverlayCanvasTool
 
 
 class QtOverlayPanTool(QtOverlayCanvasTool):

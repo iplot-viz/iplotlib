@@ -2,7 +2,7 @@ from abc import ABC, ABCMeta, abstractmethod
 
 from PyQt5.QtCore import QPoint, QPointF, QSize
 from PyQt5.QtWidgets import QWidget
-from iplotlib.Canvas import Canvas
+from iplotlib.core.Canvas import Canvas
 
 """
 Main abstraction of a Qt plot canvas.

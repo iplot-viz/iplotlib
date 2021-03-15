@@ -1,11 +1,9 @@
 from math import sqrt
 
 from PyQt5 import QtCore
-from PyQt5.QtCore import QPoint, Qt, QRect, QRectF
-from PyQt5.QtGui import QPainter, QPen, QBrush, QColor
-
-from qt.QtOverlayCanvasTool import QtOverlayCanvasTool
-from qt.QtPlotCanvas import QtPlotCanvas
+from PyQt5.QtCore import QPoint, Qt
+from PyQt5.QtGui import QBrush, QColor, QPainter, QPen
+from iplotlib.qt.QtOverlayCanvasTool import QtOverlayCanvasTool
 
 
 class QtOverlayZoomTool(QtOverlayCanvasTool):

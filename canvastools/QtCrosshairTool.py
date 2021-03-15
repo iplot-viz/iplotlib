@@ -1,10 +1,9 @@
 from PyQt5 import QtCore
 from PyQt5.QtCore import QPoint, QPointF, Qt, QRect, pyqtSignal
-from PyQt5.QtGui import QPainter, QPen, QBrush, QColor
-from PyQt5.QtWidgets import QWidget
+from PyQt5.QtGui import QPainter, QPen, QColor
 
-from qt.QtOverlayCanvasTool import QtOverlayCanvasTool
-from qt.QtPlotCanvas import QtPlotCanvas
+
+from iplotlib.qt.QtOverlayCanvasTool import QtOverlayCanvasTool
 
 
 class QtOverlayCrosshairTool(QtOverlayCanvasTool):
