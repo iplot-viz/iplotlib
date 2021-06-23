@@ -1,0 +1,3 @@
+target = PyGnuplotWidget
+sources = sipPyGnuplotWidgetcmodule.cpp sipPyGnuplotWidgetQtGnuplotWidget.cpp sipPyGnuplotWidgetQtGnuplotScene.cpp sipPyGnuplotWidgetQtGnuplotEventHandler.cpp sipPyGnuplotWidgetQtGnuplotEventReceiver.cpp
+headers = sipAPIPyGnuplotWidget.h
