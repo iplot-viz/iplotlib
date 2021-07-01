@@ -11,6 +11,14 @@ class JSONExporter:
     In order to preserve correct types for collection items the type name is additionally saved in '_type' property
     """
 
+    TYPE_ALIASES = {
+        "iplotlib.Canvas.Canvas": "iplotlib.core.canvas.Canvas",
+        "iplotlib.Plot.Plot2D": "iplotlib.core.plot.PlotXY",
+        "iplotlib.Axis.LinearAxis": "iplotlib.core.axis.LinearAxis",
+        "iplotlib.Signal.UDAPulse": "iplotlib.data_access.dataAccessSignal.DataAccessSignal"
+
+    }
+
     def to_json(self, obj):
         return json.dumps(obj, cls=DataclassNumpyJSONEncoder, indent=4)
 
@@ -30,9 +38,14 @@ class JSONExporter:
                 m = getattr(m, comp)
             return m
 
+        def create_klass_using_aliases(kls: str):
+            type_alias = self.TYPE_ALIASES.get(kls)
+            return create_klass(kls) if type_alias is None else create_klass(type_alias)
+
+
         if isinstance(d, Dict):
             if d.get("_type") is not None:
-                klass = create_klass(d.get("_type"))
+                klass = create_klass_using_aliases(d.get("_type"))
             else:
                 return {k: self.dataclass_from_dict(v) for (k, v) in d.items()}
 

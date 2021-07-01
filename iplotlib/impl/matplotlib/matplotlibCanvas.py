@@ -135,7 +135,8 @@ class MatplotlibCanvas:
                     if cur[0] != cur2[0] or cur[1] != cur2[1]:
                         other_axis.set_xlim(cur)
 
-            for a in affected_axes:
+            # print(f"Affecred axes: {affected_axes}")
+            for a_idx, a in enumerate(affected_axes):
                 ranges_hash = hash((*a.get_xlim(), *a.get_ylim()))
                 current_hash = self.axes_ranges.get(id(a))
 
@@ -154,15 +155,19 @@ class MatplotlibCanvas:
 
                     def update_range_axis(range_axis, axis_index, mpl_axes):
                         """Updates RangeAxis instances begin and end to mpl_axis limits. Works also on stacked axes"""
+                        print(f"\tupdate_range_axis: {range_axis} for {a}")
                         if isinstance(range_axis, Collection):
+                            print(f"\tCOLLECTION: {axis_index} / {a_idx}")
                             subranges = []
                             for stack_axis in range_axis:
                                 #FIXME: Use mpl_get_axis here
+                                print(f"\t\telement: {stack_axis}")
                                 if axis_index == 0:
                                     a_min, a_max = update_single_range_axis(stack_axis, axis_index, a)
                                 else:
                                     if isinstance(stack_axis, RangeAxis):
                                         a_min, a_max = NanosecondHelper.mpl_get_lim(mpl_axes, axis_index)
+                                        print(f"\t\telementlims: {a_min}/{a_max} lims: {mpl_axes.get_ylim()}")
                                         stack_axis.begin, stack_axis.end = a_min, a_max
                                     else:
                                         a_min, a_max = None, None
@@ -388,74 +393,77 @@ class MatplotlibCanvas:
             signal_data = signal.get_data()
             # autosize_axis_from_data(mpl_axes, mpl_axes._plot, signal, signal_data,0)
             # autosize_axis_from_data(mpl_axes, mpl_axes._plot, signal, signal_data, 1)
+            if mpl_axes is not None:
+                existing = self.mpl_shapes.get(id(signal))
+                style = self.get_signal_style(signal, canvas=mpl_axes._canvas, plot=mpl_axes._plot)
+                step = style.pop('step', None)
+                data = NanosecondHelper.mpl_axes_transform_data(mpl_axes, signal_data)
 
-            existing = self.mpl_shapes.get(id(signal))
-            style = self.get_signal_style(signal, canvas=mpl_axes._canvas, plot=mpl_axes._plot)
-            step = style.pop('step', None)
-            data = NanosecondHelper.mpl_axes_transform_data(mpl_axes, signal_data)
+                if existing is None:
+                    logger.info(F"DRawing new line: {data}")
+                    params = dict(**style)
+                    draw_function = mpl_axes.plot
+                    if step is not None and step != "None":
+                        params["where"] = step
+                        draw_function = mpl_axes.step
 
-            if existing is None:
-                logger.info(F"DRawing new line: {data}")
-                params = dict(**style)
-                draw_function = mpl_axes.plot
-                if step is not None and step != "None":
-                    params["where"] = step
-                    draw_function = mpl_axes.step
+                    line = draw_function(data[0], data[1], **params)
+                    self.mpl_shapes[id(signal)] = [line]
 
-                line = draw_function(data[0], data[1], **params)
-                self.mpl_shapes[id(signal)] = [line]
-
-            else:
-                existing[0][0].set_xdata(data[0])
-                existing[0][0].set_ydata(data[1])
-                mpl_axes.figure.canvas.draw()
+                else:
+                    existing[0][0].set_xdata(data[0])
+                    existing[0][0].set_ydata(data[1])
+                    mpl_axes.figure.canvas.draw()
 
         def update_envelope(mpl_axes, signal):
             signal_data = signal.get_data()
             # autosize_axis_from_data(mpl_axes, mpl_axes._plot, signal, signal_data)
+            if mpl_axes is not None:
+                existing = self.mpl_shapes.get(id(signal))
+                style = self.get_signal_style(signal, canvas=mpl_axes._canvas, plot=mpl_axes._plot)
+                step = style.pop('step', None)
 
-            existing = self.mpl_shapes.get(id(signal))
-            style = self.get_signal_style(signal, canvas=mpl_axes._canvas, plot=mpl_axes._plot)
-            step = style.pop('step', None)
+                data = NanosecondHelper.mpl_axes_transform_data(mpl_axes, signal_data)
 
-            data = NanosecondHelper.mpl_axes_transform_data(mpl_axes, signal_data)
+                if existing is None:
 
-            if existing is None:
+                    params = dict(**style)
+                    draw_function = mpl_axes.plot
+                    if step is not None and step != "None":
+                        params["where"] = step
+                        draw_function = mpl_axes.step
 
-                params = dict(**style)
-                draw_function = mpl_axes.plot
-                if step is not None and step != "None":
-                    params["where"] = step
-                    draw_function = mpl_axes.step
+                    line = draw_function(data[0], data[1], **params)
+                    params["color"] = params.get("color") or line[0].get_color()
+                    params["label"] = '_nolegend_'
+                    line2 = draw_function(data[0], data[2], **params)
+                    area = mpl_axes.fill_between(data[0], data[1], data[2], alpha=0.3, color=params.get('color'), step=step)
+                    self.mpl_shapes[id(signal)] = [line, line2, area]
+                else:
 
-                line = draw_function(data[0], data[1], **params)
-                params["color"] = params.get("color") or line[0].get_color()
-                params["label"] = '_nolegend_'
-                line2 = draw_function(data[0], data[2], **params)
-                area = mpl_axes.fill_between(data[0], data[1], data[2], alpha=0.3, color=params.get('color'), step=step)
-                self.mpl_shapes[id(signal)] = [line, line2, area]
-            else:
-
-                existing[0][0].set_xdata(data[0])
-                existing[0][0].set_ydata(data[1])
-                existing[1][0].set_xdata(data[0])
-                existing[1][0].set_ydata(data[2])
-                existing[2].remove()
-                existing.pop()
-                existing.append(
-                    mpl_axes.fill_between(data[0], data[1], data[2], alpha=0.3, color=existing[1][0].get_color(), step=step)
-                )
-                mpl_axes.figure.canvas.draw()
+                    existing[0][0].set_xdata(data[0])
+                    existing[0][0].set_ydata(data[1])
+                    existing[1][0].set_xdata(data[0])
+                    existing[1][0].set_ydata(data[2])
+                    existing[2].remove()
+                    existing.pop()
+                    existing.append(
+                        mpl_axes.fill_between(data[0], data[1], data[2], alpha=0.3, color=existing[1][0].get_color(), step=step)
+                    )
+                    mpl_axes.figure.canvas.draw()
 
         if signal is None:
             return
 
         mpl_axes = self.mpl_axes.get(id(signal))
 
-        if hasattr(signal, "envelope") and signal.envelope:
-            update_envelope(mpl_axes, signal)
+        if mpl_axes is not None:
+            if hasattr(signal, "envelope") and signal.envelope:
+                update_envelope(mpl_axes, signal)
+            else:
+                update_line(mpl_axes, signal)
         else:
-            update_line(mpl_axes, signal)
+            logger.error(f"Matplotlib AXES not found for signal {signal}. This should not happen")
 
 
         show_legend = nvl_prop("legend", signal, mpl_axes._plot, mpl_axes._canvas)

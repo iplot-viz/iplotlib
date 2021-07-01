@@ -91,7 +91,6 @@ class CanvasToolbar(QToolBar):
 
     def show_preferences(self):
         all_canvases = [qt_canvas.get_canvas() for qt_canvas in self.qt_canvases]
-        print("BINDING CANVASES: ", all_canvases)
         self.preferences_window.bind_canvases(all_canvases)
         self.preferences_window.show()
 

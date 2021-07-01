@@ -56,7 +56,6 @@ class PreferencesWindow(QMainWindow):
         if len(item.indexes()) > 0:
             for i in item.indexes():
                 data = i.data(Qt.UserRole)
-                print(F"ITEM SELECTED {item} indexes: {item.indexes()} data: {data}")
                 index = list(self.forms.keys()).index(type(data))
                 self.right_column.setCurrentIndex(index)
                 if isinstance(self.right_column.currentWidget(), PreferencesForm):
@@ -168,10 +167,8 @@ class BeanItemModel(QAbstractItemModel):
 
 
     def data(self, index: QModelIndex, role: int = ...) -> typing.Any:
-        print(F"** GET DATA {index.column()}")
         if self.form and self.form.model is not None and self.form.fields is not None:
             field = self.get_field(index.column())
-            print(F"\tFIELD: {field}")
             if field.widget is not None and hasattr(field.widget, '_items'):
 
                 key = getattr(self.form.model, field.property)
@@ -184,15 +181,13 @@ class BeanItemModel(QAbstractItemModel):
                 try:
                     return self._to_view(field, self.form.model)
                 except Exception as e:
-
+                    pass
                     print(F"ERROR for getattr {field.property} model: {self.form.model}: {e}")
         return ""
 
     def setData(self, index: QModelIndex, value: typing.Any, role: int = ...) -> bool:
-        print(F"** SET DATA {index.column()} value={value}")
         if self.form and self.form.model is not None and self.form.fields is not None:
             field = self.get_field(index.column())
-            print(F"\tFIELDx: {field} model: {self.form.model}")
 
             if field.widget is not None and hasattr(field.widget, '_items'):
                 keys = list(field.widget._items.keys())
@@ -200,7 +195,6 @@ class BeanItemModel(QAbstractItemModel):
             else:
                 if hasattr(self.form.model, field.property):
                     cur_type = type(getattr(self.form.model, field.property))
-                    print(F"CURTYPE: {cur_type.__name__}")
                     value = ConversionHelper.asType(value, cur_type)
 
                 setattr(self.form.model, field.property, value)
@@ -225,7 +219,6 @@ class BeanItemModel(QAbstractItemModel):
         return self.createIndex(row, column)
 
     def _to_view(self, field, model):
-        print(F"* TO_VIEW {field} model={model}")
         value = getattr(model, field.property)
         return "" if value is None else str(value)
 
@@ -275,7 +268,6 @@ class PreferencesForm(QWidget):
                         self.mapper.addMapping(field.widget, index)
 
     def set_model(self, obj):
-        print("*** SET_MODEL:",obj)
         self.model = obj
         self.mapper.toFirst()
 
