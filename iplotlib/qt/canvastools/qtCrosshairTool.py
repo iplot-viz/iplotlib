@@ -1,6 +1,6 @@
-from PyQt5 import QtCore
-from PyQt5.QtCore import QPoint, QPointF, Qt, QRect, pyqtSignal
-from PyQt5.QtGui import QPainter, QPen, QColor
+from qtpy import QtCore
+from qtpy.QtCore import QPoint, QPointF, Qt, QRect, Signal
+from qtpy.QtGui import QPainter, QPen, QColor
 
 
 from iplotlib.qt.qtOverlayCanvasTool import QtOverlayCanvasTool
@@ -8,8 +8,8 @@ from iplotlib.qt.qtOverlayCanvasTool import QtOverlayCanvasTool
 
 class QtOverlayCrosshairTool(QtOverlayCanvasTool):
 
-    crosshairMoved = pyqtSignal(QPointF)
-    crosshairLeave = pyqtSignal()
+    crosshairMoved = Signal(QPointF)
+    crosshairLeave = Signal()
 
     def __init__(self, vertical=True, horizontal=True, linewidth=1, color="red"):
         super().__init__()

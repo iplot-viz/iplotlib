@@ -2,9 +2,9 @@ import os
 from functools import partial
 from typing import Collection
 
-from PyQt5.QtCore import QMargins, Qt, pyqtSignal
-from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QAction, QActionGroup, QFileDialog, QMainWindow, QMessageBox, QSizePolicy, QToolBar
+from qtpy.QtCore import QMargins, Qt, Signal
+from qtpy.QtGui import QIcon
+from qtpy.QtWidgets import QAction, QActionGroup, QFileDialog, QMainWindow, QMessageBox, QSizePolicy, QToolBar
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.qt.preferencesWindow import PreferencesWindow
@@ -17,14 +17,14 @@ logger = ls.get_logger(__name__)
 
 class CanvasToolbar(QToolBar):
 
-    toolSelected = pyqtSignal(str)
-    undo = pyqtSignal()
-    redo = pyqtSignal()
-    detach = pyqtSignal()
-    export_json = pyqtSignal()
-    import_json = pyqtSignal()
-    redraw = pyqtSignal()
-    preferences = pyqtSignal()
+    toolSelected = Signal(str)
+    undo = Signal()
+    redo = Signal()
+    detach = Signal()
+    export_json = Signal()
+    import_json = Signal()
+    redraw = Signal()
+    preferences = Signal()
 
     def __init__(self, parent=None, attach_parent=None, qt_canvas=None):
         super().__init__(parent)

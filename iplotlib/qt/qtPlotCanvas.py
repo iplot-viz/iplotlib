@@ -1,7 +1,7 @@
 from abc import abstractmethod
 
-from PyQt5.QtCore import QMargins, QSize, Qt
-from PyQt5.QtWidgets import QVBoxLayout, QWidget
+from qtpy.QtCore import QMargins, QSize, Qt
+from qtpy.QtWidgets import QVBoxLayout, QWidget
 
 from iplotlib.core.canvas import Canvas
 

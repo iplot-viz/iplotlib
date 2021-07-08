@@ -1,9 +1,9 @@
 from threading import Timer
 
 import matplotlib
-from PyQt5 import QtGui
-from PyQt5.QtCore import QMargins, QMetaObject, Qt, pyqtSlot
-from PyQt5.QtWidgets import QSizePolicy, QStyle, QVBoxLayout
+from qtpy import QtGui
+from qtpy.QtCore import QMargins, QMetaObject, Qt, Slot
+from qtpy.QtWidgets import QSizePolicy, QStyle, QVBoxLayout
 from matplotlib.backend_bases import _Mode
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -42,7 +42,7 @@ class QtMatplotlibCanvas(QtPlotCanvas):
     def draw_in_main_thread(self):
         QMetaObject.invokeMethod(self, "flush_draw_queue")
 
-    @pyqtSlot()
+    @Slot()
     def flush_draw_queue(self):
         if self.matplotlib_canvas:
             self.matplotlib_canvas.process_work_queue()
@@ -59,7 +59,7 @@ class QtMatplotlibCanvas(QtPlotCanvas):
     def get_canvas(self):
         return self.matplotlib_canvas.canvas if self.matplotlib_canvas else None
 
-    @pyqtSlot()
+    @Slot()
     def apply_tight_layout(self):
         self.matplotlib_canvas.figure.tight_layout()
         self.matplotlib_canvas.figure.canvas.draw()

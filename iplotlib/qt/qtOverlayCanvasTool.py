@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-from PyQt5.QtCore import QObject
-from PyQt5.QtGui import QPainter
+from qtpy.QtCore import QObject
+from qtpy.QtGui import QPainter
 
 """
 This abstract class represents a canvas tool, usually interacts with events such as keyboard or mouse

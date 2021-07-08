@@ -3,9 +3,9 @@ import typing
 from collections import namedtuple
 from typing import Collection, NamedTuple
 
-from PyQt5.QtCore import QAbstractItemModel, QEvent, QMargins, QModelIndex, Qt, pyqtProperty, pyqtSignal
-from PyQt5.QtGui import QKeyEvent, QStandardItem, QStandardItemModel
-from PyQt5.QtWidgets import QApplication, QCheckBox, QColorDialog, QComboBox, QDataWidgetMapper, QDoubleSpinBox, QFormLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QSizePolicy, QSpinBox, \
+from qtpy.QtCore import QAbstractItemModel, QEvent, QMargins, QModelIndex, Qt, Property, Signal
+from qtpy.QtGui import QKeyEvent, QStandardItem, QStandardItemModel
+from qtpy.QtWidgets import QApplication, QCheckBox, QColorDialog, QComboBox, QDataWidgetMapper, QDoubleSpinBox, QFormLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QSizePolicy, QSpinBox, \
     QSplitter, QStackedWidget, QTreeView, QVBoxLayout, QWidget
 
 from core.axis import Axis
@@ -20,7 +20,7 @@ from iplotlib.data_access.dataAccessSignal import DataAccessSignal
 #FIXME: Colorpicker seems to stick its value (change one plot color to red, then second plot color to white then show colorpicker on first to see results)
 class PreferencesWindow(QMainWindow):
 
-    apply = pyqtSignal()
+    apply = Signal()
 
     def __init__(self, parent=None):
         super().__init__()
@@ -238,7 +238,7 @@ FormField = namedtuple('FormField', ['label', 'property', 'widget', 'converter']
 # TODO: Range changes should be included as canvas property: for entire canvas or for plots
 class PreferencesForm(QWidget):
 
-    applySignal = pyqtSignal()
+    applySignal = Signal()
 
     def __init__(self, label: str = None):
         super().__init__()
@@ -413,7 +413,7 @@ class ColorPicker(QWidget):
         self.setProperty("rgbValue", '#{:02X}{:02X}{:02X}'.format(color.red(), color.green(), color.blue()))
         QApplication.postEvent(self, QKeyEvent(QEvent.KeyPress, Qt.Key_Enter, Qt.NoModifier))
 
-    @pyqtProperty(str, user=True)
+    @Property(str, user=True)
     def rgbValue(self):
         return self.selectedColor
 

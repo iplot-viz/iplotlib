@@ -1,7 +1,7 @@
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import *
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
+from qtpy import QtCore, QtGui
+from qtpy.QtCore import *
+from qtpy.QtGui import *
+from qtpy.QtWidgets import *
 from iplotlib.qt.qtOverlayCanvasTool import QtOverlayCanvasTool
 
 

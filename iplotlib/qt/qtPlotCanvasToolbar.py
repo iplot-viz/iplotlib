@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QHBoxLayout, QRadioButton, QGroupBox
+from qtpy.QtWidgets import QHBoxLayout, QRadioButton, QGroupBox
 
 
 # class QtPlotCanvasToolbar(QGroupBox):

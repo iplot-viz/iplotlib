@@ -1,8 +1,8 @@
 from math import sqrt
 
-from PyQt5 import QtCore
-from PyQt5.QtCore import QPoint, Qt
-from PyQt5.QtGui import QBrush, QColor, QPainter, QPen
+from qtpy import QtCore
+from qtpy.QtCore import QPoint, Qt
+from qtpy.QtGui import QBrush, QColor, QPainter, QPen
 from iplotlib.qt.qtOverlayCanvasTool import QtOverlayCanvasTool
 
 

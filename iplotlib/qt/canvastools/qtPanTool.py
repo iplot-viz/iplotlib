@@ -1,12 +1,12 @@
-from PyQt5 import QtCore
-from PyQt5.QtCore import QPointF, Qt, pyqtSignal
-from PyQt5.QtGui import QPainter
+from qtpy import QtCore
+from qtpy.QtCore import QPointF, Qt, Signal
+from qtpy.QtGui import QPainter
 from iplotlib.qt.qtOverlayCanvasTool import QtOverlayCanvasTool
 
 
 class QtOverlayPanTool(QtOverlayCanvasTool):
 
-    panAction = pyqtSignal(float,float,float,float)
+    panAction = Signal(float,float,float,float)
 
     def __init__(self):
         super().__init__()
