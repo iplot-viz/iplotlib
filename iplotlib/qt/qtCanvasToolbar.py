@@ -85,9 +85,9 @@ class CanvasToolbar(QToolBar):
         if qt_canvas is not None:
             if isinstance(qt_canvas, Collection):
                 for _ in qt_canvas:
-                    self.connect(_)
+                    self._connect(_)
             else:
-                self.connect(qt_canvas)
+                self._connect(qt_canvas)
 
     def show_preferences(self):
         all_canvases = [qt_canvas.get_canvas() for qt_canvas in self.qt_canvases]
@@ -95,7 +95,7 @@ class CanvasToolbar(QToolBar):
         self.preferences_window.bind_canvases(all_canvases)
         self.preferences_window.show()
 
-    def connect(self, qt_canvas: QtPlotCanvas):
+    def _connect(self, qt_canvas: QtPlotCanvas):
 
         def detach():
             detachable_widget = self.parent()
