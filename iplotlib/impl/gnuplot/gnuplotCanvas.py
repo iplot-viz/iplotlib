@@ -59,7 +59,6 @@ class GnuplotCanvas:
                     if self.start_plot_range is None:
                         self.start_plot_range = (float(x1), float(y1), float(x2), float(y2))
 
-        print("Gnuplot process exited..")
 
     def process_layout(self):
         self.write("reset")
@@ -131,7 +130,7 @@ class GnuplotCanvas:
         self.__trigger_bounds_update()
 
     def process_event(self, event):
-        print("Processing event",event)
+        pass
 
     def prev(self):
         if self._bounds_history_idx > 0:
@@ -165,7 +164,6 @@ class GnuplotCanvas:
                 self._bounds_history_idx += 1
             self._bounds_history.append((x1, y1, x2, y2))
             self._bounds_history_idx += 1
-            print("History index is now: " + str(self._bounds_history_idx))
 
 
 
@@ -199,6 +197,5 @@ class GnuplotCanvas:
 
     def __apply_historic_bounds(self):
         if 0 <= self._bounds_history_idx < len(self._bounds_history):
-            print("** RESTORING HISTORY BOUNDS at index" + str(self._bounds_history_idx))
             bounds = self._bounds_history[self._bounds_history_idx]
             self.set_bounds(bounds[0], bounds[1], bounds[2], bounds[3], replot=True, save_history=False)

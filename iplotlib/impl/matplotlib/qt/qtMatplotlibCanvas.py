@@ -126,3 +126,6 @@ class QtMatplotlibCanvas(QtPlotCanvas):
             self.matplotlib_canvas.unfocus_plot()
 
         self.matplotlib_canvas.figure.canvas.draw()
+
+    def unfocus_plot(self):
+        self.matplotlib_canvas.unfocus_plot()

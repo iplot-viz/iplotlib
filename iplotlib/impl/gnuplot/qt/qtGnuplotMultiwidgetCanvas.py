@@ -102,7 +102,6 @@ class QtGnuplotMultiwidgetCanvas(QtPlotCanvas):
         self.show()
 
     def set_mouse_mode(self, mode: str):
-        print("SET MOUSE MODE", mode)
         self.mouse_mode = mode
         for widget in self.gnuplot_widgets:
             if hasattr(widget,"_overlay"):
@@ -145,7 +144,6 @@ class QtGnuplotMultiwidgetCanvas(QtPlotCanvas):
                 widget.update()
 
     def _panAction(self, x1, y1, x2, y2):
-        print("Canvas_pan_action", x1, y1, x2, y2)
         for widget in self.gnuplot_widgets:
             if widget._gnuplot_canvas:
                 widget._gnuplot_canvas.process_event(None)

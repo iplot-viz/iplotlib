@@ -68,6 +68,9 @@ class Canvas(ABC):
     shared_x_axis: bool = False
     autoscale: bool = True
 
+    """Indicates that when we switch to full mode for a stacked plot we should put entire stacked plot in full mode or only one of the subplots"""
+    full_mode_all_stack = False
+
     """Auto redraw canvas every X seconds"""
     auto_refresh: int = 0
 

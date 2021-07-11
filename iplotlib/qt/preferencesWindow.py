@@ -182,7 +182,6 @@ class BeanItemModel(QAbstractItemModel):
                     return self._to_view(field, self.form.model)
                 except Exception as e:
                     pass
-                    print(F"ERROR for getattr {field.property} model: {self.form.model}: {e}")
         return ""
 
     def setData(self, index: QModelIndex, value: typing.Any, role: int = ...) -> bool:

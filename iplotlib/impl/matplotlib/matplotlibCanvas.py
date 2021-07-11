@@ -150,24 +150,19 @@ class MatplotlibCanvas:
                         if isinstance(range_axis, RangeAxis):
                             logger.info(F"*Axis update {id(range_axis)} xmin={a.get_xlim()[0]} xmax={a.get_xlim()[1]} delta={a.get_xlim()[1] - a.get_xlim()[0]} ")
                             range_axis.begin, range_axis.end = NanosecondHelper.mpl_get_lim(mpl_axes, axis_index)
-                            print(F"UPDATED {range_axis}")
                             return [range_axis.begin, range_axis.end]
 
                     def update_range_axis(range_axis, axis_index, mpl_axes):
                         """Updates RangeAxis instances begin and end to mpl_axis limits. Works also on stacked axes"""
-                        print(f"\tupdate_range_axis: {range_axis} for {a}")
                         if isinstance(range_axis, Collection):
-                            print(f"\tCOLLECTION: {axis_index} / {a_idx}")
                             subranges = []
                             for stack_axis in range_axis:
                                 #FIXME: Use mpl_get_axis here
-                                print(f"\t\telement: {stack_axis}")
                                 if axis_index == 0:
                                     a_min, a_max = update_single_range_axis(stack_axis, axis_index, a)
                                 else:
                                     if isinstance(stack_axis, RangeAxis):
                                         a_min, a_max = NanosecondHelper.mpl_get_lim(mpl_axes, axis_index)
-                                        print(f"\t\telementlims: {a_min}/{a_max} lims: {mpl_axes.get_ylim()}")
                                         stack_axis.begin, stack_axis.end = a_min, a_max
                                     else:
                                         a_min, a_max = None, None
@@ -187,7 +182,6 @@ class MatplotlibCanvas:
 
                         for signal in a._signals:
                             if hasattr(signal, "set_ranges"):
-                                print(F"*** SETTING RANGES {ranges[0]}({type(ranges[0])}) and {ranges[1]}({type(ranges[1])}) ")
                                 signal.set_ranges([ranges[0], ranges[1]])
 
                 if self.axes_update_timer:
@@ -373,7 +367,6 @@ class MatplotlibCanvas:
                         if isinstance(plot.axes[axis_idx], RangeAxis):
 
                             new_axis_range = NanosecondHelper.mpl_get_lim(axes, axis_idx)
-                            print(F"\tAXIS IS RANGE axis {axis_idx} mpl_axis limits: {new_axis_range}")
                             if plot.axes[axis_idx].begin is None:
                                 new_axis_range = data[axis_idx][0], new_axis_range[1]
                             if plot.axes[axis_idx].end is None:
@@ -400,7 +393,6 @@ class MatplotlibCanvas:
                 data = NanosecondHelper.mpl_axes_transform_data(mpl_axes, signal_data)
 
                 if existing is None:
-                    logger.info(F"DRawing new line: {data}")
                     params = dict(**style)
                     draw_function = mpl_axes.plot
                     if step is not None and step != "None":
@@ -462,21 +454,20 @@ class MatplotlibCanvas:
                 update_envelope(mpl_axes, signal)
             else:
                 update_line(mpl_axes, signal)
+
+            show_legend = nvl_prop("legend", signal, mpl_axes._plot, mpl_axes._canvas)
+            if show_legend:
+                #TODO: According to SO:50325907 calling legend may be delayed after tight_layout
+                mpl_axes.legend(prop={'size': self.legend_size})
+
+            if hasattr(signal, "units"):
+                yaxis = mpl_axes.get_yaxis()
+                if hasattr(yaxis, "_label") and not yaxis._label:
+                    label = group_data_units(mpl_axes, 1)
+                    if label:
+                        yaxis.set_label_text(label)
         else:
-            logger.error(f"Matplotlib AXES not found for signal {signal}. This should not happen")
-
-
-        show_legend = nvl_prop("legend", signal, mpl_axes._plot, mpl_axes._canvas)
-        if show_legend:
-            #TODO: According to SO:50325907 calling legend may be delayed after tight_layout
-            mpl_axes.legend(prop={'size': self.legend_size})
-
-        if hasattr(signal, "units"):
-            yaxis = mpl_axes.get_yaxis()
-            if hasattr(yaxis, "_label") and not yaxis._label:
-                label = group_data_units(mpl_axes, 1)
-                if label:
-                    yaxis.set_label_text(label)
+            logger.error(f"Matplotlib AXES not found for signal {signal}. This should not happen. SIGNAL_ID: {id(signal)} AXES: {mpl_axes}")
 
 
     @_run_in_one_thread
