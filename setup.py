@@ -21,7 +21,7 @@ setuptools.setup(
     },
     author="Lana Abadie",
     author_email="lana.abadie@iter.org",
-    description="Data processing for applications using IDSs or CBS",
+    description="ITER plotting library",
     long_description=long_description,
     url="https://git.iter.org/scm/vis/iplotlib.git",
     project_urls={
