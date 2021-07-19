@@ -3,13 +3,12 @@ import sys
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QMainWindow
 
-from iplotlib.qt.qtCanvasToolbar import CanvasToolbar
-
 import iplotLogging.setupLogger as ls
+from iplotlib.qt.qtCanvasToolbar import CanvasToolbar
 
 logger = ls.get_logger(__name__)
 
-#TODO: We should have a step in qtCanvas that prepares the canvas before showing it, therefore we can edit existing mpl plots before they are shown on the screen
+
 class QStandaloneCanvas:
     """A standalone canvas that is itself a Qt application that can be shown using the run method,
     separate class is needed for this since instantiating anything that extends QObject is not

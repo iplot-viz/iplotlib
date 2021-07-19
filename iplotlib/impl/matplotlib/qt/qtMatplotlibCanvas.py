@@ -1,6 +1,3 @@
-from threading import Timer
-
-import matplotlib
 from qtpy import QtGui
 from qtpy.QtCore import QMargins, QMetaObject, Qt, Slot
 from qtpy.QtWidgets import QSizePolicy, QStyle, QVBoxLayout
@@ -8,9 +5,12 @@ from matplotlib.backend_bases import _Mode
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
+import iplotLogging.setupLogger as ls
 from iplotlib.core.canvas import Canvas
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibCanvas
 from iplotlib.qt.qtPlotCanvas import QtPlotCanvas
+
+logger = ls.get_logger(__name__)
 
 
 class QtMatplotlibCanvas(QtPlotCanvas):
@@ -100,7 +100,8 @@ class QtMatplotlibCanvas(QtPlotCanvas):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         if event.dblclick:
             if self.mouse_mode == Canvas.MOUSE_MODE_SELECT and event.button == 1 and event.inaxes is not None:
-                self.focus_plot(event.inaxes._plot)
+                logger.info(f"Plot clicked: {event.inaxes}. Plot: {event.inaxes._plot} stack_key: {event.inaxes._plot_stack_key}")
+                self.focus_plot(event.inaxes._plot, event.inaxes._plot_stack_key)
             else:
                 self.mpl_toolbar.home()
 
@@ -118,10 +119,11 @@ class QtMatplotlibCanvas(QtPlotCanvas):
         if self.mpl_toolbar:
             self.mpl_toolbar.forward()
 
-    def focus_plot(self, plot):
+    def focus_plot(self, plot, stack_key):
         """Toggle focus on one plot on/off"""
         if self.matplotlib_canvas.focused_plot is None:
-            self.matplotlib_canvas.focus_plot(plot)
+
+            self.matplotlib_canvas.focus_plot(plot, stack_key)
         else:
             self.matplotlib_canvas.unfocus_plot()
 

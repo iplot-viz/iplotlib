@@ -1,4 +1,3 @@
-import collections
 import functools
 import threading
 from contextlib import ExitStack
@@ -9,10 +8,6 @@ from typing import Collection
 
 import numpy
 import numpy as np
-from iplotlib.core.axis import LinearAxis, RangeAxis
-from iplotlib.core.canvas import Canvas
-from iplotlib.core.plot import Plot
-from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from matplotlib.axis import Tick
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -20,19 +15,24 @@ from matplotlib.text import Annotation, Text
 from matplotlib.widgets import MultiCursor
 from pandas.plotting import register_matplotlib_converters
 
-
 import iplotLogging.setupLogger as ls
+from iplotlib.core.axis import LinearAxis, RangeAxis
+from iplotlib.core.canvas import Canvas
+from iplotlib.core.plot import Plot
+from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 
 logger = ls.get_logger(__name__)
 
+
 class MatplotlibCanvas:
 
-    def __init__(self, canvas: Canvas = None, tight_layout=True, mpl_flush_method=None, focus_plot=None):
+    def __init__(self, canvas: Canvas = None, tight_layout=True, mpl_flush_method=None, focus_plot=None, focused_plot_stack=None):
         self.canvas = canvas
         self.cursors = []
         self.legend_size = 8  # legend font size
         self.tight_layout = tight_layout
         self.focused_plot = focus_plot
+        self.focused_plot_stack = focused_plot_stack
 
         self.axes_update_timer_delay = 2
         self.axes_update_timer = None
@@ -120,7 +120,6 @@ class MatplotlibCanvas:
                         else:
                             self.process_iplotlib_plot(canvas, plot, gridspec[j:j + row_span, i:i + col_span])
 
-
     def process_iplotlib_plot(self, canvas: Canvas, plot: Plot, griditem):
 
         def axis_update_callback(axis):
@@ -193,47 +192,57 @@ class MatplotlibCanvas:
         if not isinstance(plot, Plot):
             raise Exception("Not a Plot instance: " + str(plot))
 
-        subgrid = griditem.subgridspec(len(plot.signals.keys()), 1, hspace=0)
+        vertical_stack_size = len(plot.signals.keys())
+        if not canvas.full_mode_all_stack and self.focused_plot_stack is not None:
+            vertical_stack_size = 1
+
+        subgrid = griditem.subgridspec(vertical_stack_size, 1, hspace=0)
 
         axes = None
 
         for stack_idx, stack_key in enumerate(sorted(plot.signals.keys())):
-            stack_signals = plot.signals.get(stack_key) or list()
-            axes = self.figure.add_subplot(subgrid[stack_idx, 0], sharex=axes)
-            axes._xy_lim_changes = 0
-            axes._signals = []
-            axes._plot = plot
-            axes._canvas = canvas
-            axes._signal_shapes = {}
-            axes.set_xmargin(0)
-            axes.set_autoscalex_on(True)
-            axes.set_autoscaley_on(True)
+            if canvas.full_mode_all_stack or self.focused_plot_stack is None or (self.focused_plot_stack == stack_key):
+                stack_signals = plot.signals.get(stack_key) or list()
+                vertical_stack_index = stack_idx
+                if not canvas.full_mode_all_stack and self.focused_plot_stack is not None:
+                    vertical_stack_index = 0
 
-            axes._grid = nvl(plot.grid, canvas.grid)
-            toggle_grid(axes)
+                axes = self.figure.add_subplot(subgrid[vertical_stack_index, 0], sharex=axes)
+                axes._xy_lim_changes = 0
+                axes._signals = []
+                axes._plot = plot
+                axes._plot_stack_key = stack_key
+                axes._canvas = canvas
+                axes._signal_shapes = {}
+                axes.set_xmargin(0)
+                axes.set_autoscalex_on(True)
+                axes.set_autoscaley_on(True)
 
-            if plot.title is not None:
-                font_color = nvl(plot.font_color, canvas.font_color, 'black')
-                font_size = nvl(plot.font_size, canvas.font_size)
+                axes._grid = nvl(plot.grid, canvas.grid)
+                toggle_grid(axes)
 
-                axes.set_title(plot.title, color=font_color, size=font_size)
+                if plot.title is not None:
+                    font_color = nvl(plot.font_color, canvas.font_color, 'black')
+                    font_size = nvl(plot.font_size, canvas.font_size)
 
-            # If this is a stacked plot the X axis should be visible only on the bottom plot of the stack
-            axes.get_xaxis()._hidden = not (True if stack_idx + 1 == len(plot.signals.values()) else False)
-            toggle_axis(axes.get_xaxis())
+                    axes.set_title(plot.title, color=font_color, size=font_size)
 
-            axes._plot_instance = plot
+                # If this is a stacked plot the X axis should be visible only on the bottom plot of the stack
+                axes.get_xaxis()._hidden = not (True if stack_idx + 1 == len(plot.signals.values()) else False)
+                toggle_axis(axes.get_xaxis())
 
-            for axis_idx in range(len(plot.axes)):
-                if isinstance(plot.axes[axis_idx], Collection):
-                    self.process_iplotlib_axis(canvas, plot, axis_idx, axes, plot.axes[axis_idx][stack_idx])
-                else:
-                    self.process_iplotlib_axis(canvas, plot, axis_idx, axes)
+                axes._plot_instance = plot
 
-            for signal_idx, signal in enumerate(stack_signals):
-                axes._signals.append(signal)
-                self.mpl_axes[id(signal)] = axes
-                self.refresh_signal(signal)
+                for axis_idx in range(len(plot.axes)):
+                    if isinstance(plot.axes[axis_idx], Collection):
+                        self.process_iplotlib_axis(canvas, plot, axis_idx, axes, plot.axes[axis_idx][stack_idx])
+                    else:
+                        self.process_iplotlib_axis(canvas, plot, axis_idx, axes)
+
+                for signal_idx, signal in enumerate(stack_signals):
+                    axes._signals.append(signal)
+                    self.mpl_axes[id(signal)] = axes
+                    self.refresh_signal(signal)
 
         # Register update callbacks after all stack signals have been created, maybe should be later extended
         if not canvas.streaming:
@@ -294,8 +303,9 @@ class MatplotlibCanvas:
         styledata["step"] = nvl_prop("step", signal, plot, canvas)
         return styledata
 
-    def focus_plot(self, plot):
+    def focus_plot(self, plot, stack_key):
         self.focused_plot = plot
+        self.focused_plot_stack = stack_key
         self.process_iplotlib_canvas(self.canvas)
 
     def unfocus_plot(self):
@@ -320,6 +330,7 @@ class MatplotlibCanvas:
                             set_x_axis_range(plot, begin, end)
 
             self.focused_plot = None
+            self.focused_plot_stack = None
             self.process_iplotlib_canvas(self.canvas)
 
     @_run_in_one_thread

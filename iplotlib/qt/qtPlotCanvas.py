@@ -1,13 +1,13 @@
 from abc import abstractmethod
 
-from qtpy.QtCore import QMargins, QSize, Qt
-from qtpy.QtWidgets import QVBoxLayout, QWidget
+from qtpy.QtCore import QSize
+from qtpy.QtWidgets import QWidget
 
 from iplotlib.core.canvas import Canvas
 
-#TODO: if we have two canvases two canvases should be present in the preferences tree
-#TODO: Remove the detach button and make it MINT-specific
-#TODO: Add possibility of MOUSEMODE/state between canvases (show crosshair/pan/zoom) between two canvases, possibility of handling events independently
+
+# TODO: Remove the detach button and make it MINT-specific
+# TODO: Add possibility of MOUSEMODE/state between canvases (show crosshair/pan/zoom) between two canvases, possibility of handling events independently
 class QtPlotCanvas(QWidget):
     """
     Base class for all Qt related canvas implementaions
