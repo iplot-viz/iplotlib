@@ -4,18 +4,11 @@ A high-level abstract plotting library. In development
 | Graphics|GUI|
 |----------|:-------------:|
 | matplotlib|PyQt5, PySide2|
-| vispy|PyQt5, PySide2|
+| gnuplot|PyQt5|
 | vtk|PyQt5, PySide2|
 
 # Requirements
-1. `dataAccess >= 0.0.1`
-2. `logging2 >= 0.0.1`
-3. `matplotlib >= 3.3.3`
-4. `pandas >= 1.2.3`
-5. `proc >= 0.0.1`
-6. `PySide2 >= 5.14.2`
-7. `PyQt5 >= 5.15.1`
-
+See [requirements.txt](/requirements.txt)
 
 # Install on sdcc-login nodes
 1. Download repository
