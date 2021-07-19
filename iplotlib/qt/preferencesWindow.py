@@ -1,19 +1,18 @@
 import os
 import typing
 from collections import namedtuple
-from typing import Collection, NamedTuple
+from typing import Collection
 
 from qtpy.QtCore import QAbstractItemModel, QEvent, QMargins, QModelIndex, Qt, Property, Signal
 from qtpy.QtGui import QKeyEvent, QStandardItem, QStandardItemModel
-from qtpy.QtWidgets import QApplication, QCheckBox, QColorDialog, QComboBox, QDataWidgetMapper, QDoubleSpinBox, QFormLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QSizePolicy, QSpinBox, \
-    QSplitter, QStackedWidget, QTreeView, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QApplication, QCheckBox, QColorDialog, QComboBox, QDataWidgetMapper, QFormLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QSizePolicy, QSpinBox, QSplitter, \
+    QStackedWidget, QTreeView, QVBoxLayout, QWidget
 
-from core.axis import Axis
 from impl.matplotlib.matplotlibCanvas import ConversionHelper
-from iplotlib.core.signal import ArraySignal
-from iplotlib.core.canvas import Canvas
 from iplotlib.core.axis import LinearAxis
+from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
+from iplotlib.core.signal import ArraySignal
 from iplotlib.data_access.dataAccessSignal import DataAccessSignal
 
 
@@ -320,18 +319,11 @@ class CanvasForm(PreferencesForm):
     def __init__(self):
         super().__init__("Canvas")
         canvas_fields = [
-            ("Title", "title", QLineEdit()),
-            ("Font size", "font_size", self.default_fontsize_widget()),
-            ("Shared x axis", "shared_x_axis", QCheckBox()),
-            ("Grid", "grid", QCheckBox()),
-            ("Legend", "legend", QCheckBox()),
-            ("Font color", "font_color", ColorPicker()),
-            ("Line style", "line_style", self.default_linestyle_widget()),
-            ("Line size", "line_size", self.default_linesize_widget()),
-            ("Marker", "marker", self.default_marker_widget()),
-            ("Marker size", "marker_size", self.default_markersize_widget()),
-            ("Line Path", "step", self.default_linepath_widget())
-        ]
+            ("Title", "title", QLineEdit()), ("Font size", "font_size", self.default_fontsize_widget()), ("Shared x axis", "shared_x_axis", QCheckBox()), ("Grid", "grid", QCheckBox()),
+
+            ("Legend", "legend", QCheckBox()), ("Font color", "font_color", ColorPicker()), ("Line style", "line_style", self.default_linestyle_widget()),
+            ("Line size", "line_size", self.default_linesize_widget()), ("Marker", "marker", self.default_marker_widget()), ("Marker size", "marker_size", self.default_markersize_widget()),
+            ("Line Path", "step", self.default_linepath_widget()), ("Focus all plots in stack", "full_mode_all_stack", QCheckBox())]
         self.add_fields(canvas_fields)
 
 
