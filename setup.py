@@ -36,11 +36,10 @@ setuptools.setup(
     packages=setuptools.find_packages(where="."),
     python_requires=">=3.8",
     install_requires=[
-        "dataAccess >= 0.0.0",
-        "logging2 >= 0.0.0",
+        "dataAccess >= 0.6.0",
         "matplotlib >= 3.3.3",
         "vtk >= 10.0.0rc0",
-        "pandas >= 1.2.3",
+        "pandas >= 1.2.0",
         "PySide2 >= 5.14.2"
     ],
     package_data = {
