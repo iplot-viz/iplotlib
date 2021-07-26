@@ -1,9 +1,14 @@
 #!/bin/bash
-module purge &&
-export VTK_PATH=/home/ITER/panchuj/public/vtk-gcc-10.2.0-Release/lib64
-export VTK_PYTHON_PATH=${VTK_PATH}/python3.8/site-packages
-export PYTHONPATH=${PYTHONPATH}:${VTK_PYTHON_PATH}:../ &&
-export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${VTK_PATH} &&
-module load UDA-CCS/2.1.2-foss-2020b &&
-module load PySide2/5.14.2-GCCcore-10.2.0 &&
+
+# Clean slate
+module purge
+
+# Data Access library
+module load DataAccess/0.0.0-foss-2020b # brings in [proc/0.0.0, logging2/0.0.0, uda-ccs/2.1.2]-foss-2020b
+
+# Graphics backend requirements
 module load matplotlib/3.3.3-foss-2020b
+module load VTK/10.0.0.rc0-foss-2020b
+
+# Graphical User Interface backends
+module load PySide2/5.14.2.3-GCCcore-10.2.0

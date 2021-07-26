@@ -15,7 +15,7 @@ setuptools.setup(
         "setuptools-git-versioning"
     ],
     version_config={
-        "starting_version": "0.1.0",
+        "starting_version": "0.0.0",
         "template": "{tag}",
         "dirty_template": "{tag}.{ccount}.{sha}",
     },
@@ -36,13 +36,12 @@ setuptools.setup(
     packages=setuptools.find_packages(where="."),
     python_requires=">=3.8",
     install_requires=[
-        "dataAccess >= 0.0.1",
-        "logging2 >= 0.0.1",
+        "dataAccess >= 0.0.0",
+        "logging2 >= 0.0.0",
         "matplotlib >= 3.3.3",
+        "vtk >= 10.0.0rc0",
         "pandas >= 1.2.3",
-        "proc >= 0.0.1",
-        "PySide2 >= 5.14.2",
-        "PyQt5 >= 5.15.1"
+        "PySide2 >= 5.14.2"
     ],
     package_data = {
         "iplotlib.qt": ["icons/*.png"]
