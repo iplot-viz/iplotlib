@@ -10,7 +10,7 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.qt.preferencesWindow import PreferencesWindow
 from iplotlib.qt.qtPlotCanvas import QtPlotCanvas
 
-import logging2.setupLogger as ls
+import iplotLogging.setupLogger as ls
 
 logger = ls.get_logger(__name__)
 

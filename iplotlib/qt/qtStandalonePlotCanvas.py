@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow
 
 from iplotlib.qt.qtCanvasToolbar import CanvasToolbar
 
-import logging2.setupLogger as ls
+import iplotLogging.setupLogger as ls
 
 logger = ls.get_logger(__name__)
 

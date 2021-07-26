@@ -1,7 +1,7 @@
 from matplotlib.ticker import ScalarFormatter
 import pandas
 
-import logging2.setupLogger as ls
+import iplotLogging.setupLogger as ls
 
 logger = ls.get_logger(__name__)
 

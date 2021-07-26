@@ -36,7 +36,7 @@ setuptools.setup(
     packages=setuptools.find_packages(where="."),
     python_requires=">=3.8",
     install_requires=[
-        "dataAccess >= 0.6.0",
+        "iplotProcessing >= 0.6.0",
         "matplotlib >= 3.3.3",
         "vtk >= 10.0.0rc0",
         "pandas >= 1.2.0",

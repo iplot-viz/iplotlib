@@ -2,13 +2,12 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 import numpy as np
-from samba.dcerpc.dns import name_packet
 
 from iplotlib.core.signal import ArraySignal
-from proc.data import hash_code
+from iplotProcessing.data import hash_code
 
 
-import logging2.setupLogger as ls
+import iplotLogging.setupLogger as ls
 
 logger = ls.get_logger(__name__)
 
