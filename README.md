@@ -8,7 +8,7 @@ A high-level abstract plotting library. In development
 | vtk|PyQt5, PySide2|
 
 # Requirements
-See [requirements.txt](/requirements.txt)
+See [requirements.txt](https://git.iter.org/projects/VIS/repos/iplotlib/browse/requirements.txt?at=refs%2Fheads%2Fdevelop)
 
 # Install on sdcc-login nodes
 1. Download repository
@@ -23,12 +23,9 @@ See [requirements.txt](/requirements.txt)
 3. Install requirements.
     For strict versioning:
     ```bash
-    pip install -r requirements-codac.txt
+    pip install -r requirements.txt
     ```
-    For flexible versioning:
-    ```bash
-    pip install -r requirements-generic.txt
-    ```
+
 4. Install `iplotlib`
     ``` bash
     pip install --user .
