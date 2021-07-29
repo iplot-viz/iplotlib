@@ -11,4 +11,5 @@ module load matplotlib/3.3.3-foss-2020b
 module load VTK/10.0.0.rc0-foss-2020b
 
 # Graphical User Interface backends
-module load PySide2/5.14.2.3-GCCcore-10.2.0
+module load QtPy/1.9.0-GCCcore-10.2.0
+export QT_API=pyside2
