@@ -40,6 +40,7 @@ setuptools.setup(
         "matplotlib >= 3.3.3",
         "vtk >= 10.0.0rc0",
         "pandas >= 1.2.0",
+        "qtpy >= 1.9.0",
         "PySide2 >= 5.14.2"
     ],
     package_data = {
