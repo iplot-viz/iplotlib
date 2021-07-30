@@ -164,6 +164,10 @@ class VTKCanvas(Canvas):
             # Plot each signal
             for signal in signals:
                 self.refresh_signal(signal, chart)
+        
+        if isinstance(element, vtkChartMatrix):
+            element.LabelOuter(vtkVector2i(0, 0), vtkVector2i(0, stack_sz - 1))
+
 
     @staticmethod
     def add_vtk_chart(matrix: vtkChartMatrix,
