@@ -1,7 +1,6 @@
 # Fixed requirements for CODAC Core System
 iplotProcessing==0.6.0
 matplotlib==3.3.3
-vtk==10.0.0rc0
 pandas==1.2.0
 qtpy==1.9.0
 # grepped from [MINT/pom.xml](https://git.iter.org/projects/VIS/repos/mint/browse/pom.xml)
