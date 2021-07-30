@@ -39,8 +39,7 @@ setuptools.setup(
         "iplotProcessing >= 0.6.0",
         "matplotlib >= 3.3.3",
         "pandas >= 1.2.0",
-        "qtpy >= 1.9.0",
-        "PySide2 >= 5.14.2"
+        "qtpy >= 1.9.0"
     ],
     package_data = {
         "iplotlib.qt": ["icons/*.png"]
