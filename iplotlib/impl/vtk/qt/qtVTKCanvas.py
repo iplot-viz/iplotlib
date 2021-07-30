@@ -25,7 +25,8 @@ except AssertionError:
 
 
 class QtVTKCanvas(QtPlotCanvas):
-    """A derived QWidget built by instructions of MetaQtPlotCanvas.
+    """A Qt container widget that emebeds a VTKCanvas.
+        See set_canvas, get_canvas
     """
 
     def __init__(self, parent: QWidget = None, **kwargs):
