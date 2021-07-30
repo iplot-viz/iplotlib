@@ -1,6 +1,3 @@
-from iplotLogging import setupLogger as sl
-from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor, PyQtImpl
-from vtkmodules.vtkRenderingCore import vtkRenderer
 import inspect
 import qtpy
 
@@ -14,8 +11,10 @@ import vtkmodules.qt
 vtkmodules.qt.PyQtImpl = qtpy.API_NAME
 
 # vtk requirements
+from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor, PyQtImpl
 
 # iplot utilities
+from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__, "DEBUG")
 
 try:
