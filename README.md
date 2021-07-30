@@ -8,7 +8,7 @@ A high-level abstract plotting library. In development
 | vtk|PyQt5, PySide2|
 
 # Requirements
-See [requirements.txt](https://git.iter.org/projects/VIS/repos/iplotlib/browse/requirements.txt?at=refs%2Fheads%2Fdevelop)
+See [requirements.txt](https://git.iter.org/projects/VIS/repos/iplotlib/browse/requirements.txt)
 
 # Install on sdcc-login nodes
 1. Download repository
