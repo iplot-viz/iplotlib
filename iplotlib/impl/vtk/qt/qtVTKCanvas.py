@@ -2,6 +2,7 @@ import inspect
 import qtpy
 
 from qtpy.QtWidgets import QVBoxLayout, QWidget
+from qtpy.QtGui import QResizeEvent
 
 from iplotlib.impl.vtk.vtkCanvas import VTKCanvas, Canvas
 from iplotlib.qt.qtPlotCanvas import QtPlotCanvas
@@ -47,6 +48,20 @@ class QtVTKCanvas(QtPlotCanvas):
 
         # Let the view render its scene into our render window
         self._vtk_canvas.view.SetRenderWindow(self._qvtk_render_widget.GetRenderWindow())
+
+    def resizeEvent(self, event: QResizeEvent):
+        size = event.size()
+        if not size.width():
+            size.setWidth(5)
+        
+        if not size.height():
+            size.setHeight(5)
+
+        newEv = QResizeEvent(size, event.oldSize())
+        self._vtk_canvas.resize(size.width(), size.height())
+        logger.info(f"Resize {newEv.oldSize()} -> {newEv.size()}")
+
+        return super().resizeEvent(newEv)
 
     def back(self):
         """history: back"""
