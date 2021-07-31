@@ -11,10 +11,14 @@ from iplotlib.impl.vtk import utils as vtkImplUtils
 import vtkmodules.vtkRenderingOpenGL2
 # needed for runtime vtk-opengl libs
 import vtkmodules.vtkRenderingContextOpenGL2
-from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i
+from vtkmodules.vtkCommonColor import vtkNamedColors
+from vtkmodules.vtkCommonDataModel import vtkColor4d, vtkTable, vtkVector2i, vtkRectd, vtkRecti
+from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine
 from vtkmodules.vtkViewsContext2D import vtkContextView
-from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkPlot, vtkPlotLine
+from vtkmodules.vtkRenderingCore import vtkTextProperty
+from vtkmodules.vtkRenderingContext2D import vtkContextItem, vtkContextScene, vtkMarkerUtilities
 from vtkmodules.util import numpy_support
+from vtkmodules.vtkPythonContext2D import vtkPythonItem
 
 from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__, "DEBUG")
@@ -23,6 +27,55 @@ logger = sl.get_logger(__name__, "DEBUG")
 class InvalidPlotException(Exception):
     def __init__(self, *args: object) -> None:
         super().__init__(*args)
+
+
+
+class CanvasTitleItem(object):
+    def __init__(self, title: str):
+        self.title = title
+        self.appearance = vtkTextProperty()
+        self.appearance.SetFontSize(22)
+        self.appearance.SetColor(0., 0., 0.)
+        self.debug_rect = False
+
+    def Initialize(self, vtkSelf):
+        return True
+
+    def Paint(self, vtkSelf, context2D):
+
+        context2D.ApplyTextProp(self.appearance)
+        bds = [0., 0., 0., 0.] # xmin, ymin, width, height
+        context2D.ComputeStringBounds(self.title, bds)
+        rect = bds
+        rect[0] += (0.5 * (1. - bds[2]))
+        rect[1] += (0.5 * (1. - bds[3]))
+        context2D.DrawStringRect(rect, self.title)
+        
+        # Draw a yellow rect to debug paint region.
+        if self.debug_rect:
+            pen = context2D.GetPen()
+
+            penColor = [0, 0, 0]
+            pen.GetColor(penColor)
+            penWidth = pen.GetWidth()
+
+            brush = context2D.GetBrush()
+            brushColor = [0, 0, 0, 0]
+            brush.GetColor(brushColor)
+
+
+            pen.SetColor([200, 200, 30])
+            brush.SetColor([200, 200, 30])
+            brush.SetOpacity(128)
+
+            context2D.DrawPolygon([0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0], 4)
+
+            pen.SetWidth(penWidth)
+            pen.SetColor(penColor)
+            brush.SetColor(brushColor[:3])
+            brush.SetOpacity(brushColor[3])
+
+        return True
 
 
 @dataclass
@@ -41,10 +94,47 @@ class VTKCanvas(Canvas):
         self.matrix = vtkChartMatrix()
         self.matrix.SetGutterX(50)
         self.matrix.SetGutterY(50)
+        self.matrix.SetBorderTop(0)
 
         self.scene.AddItem(self.matrix)
 
         self._plot_lookup = dict()
+
+        self._title_region = vtkContextArea()
+        axisLeft = self._title_region.GetAxis(vtkAxis.LEFT)
+        axisRight = self._title_region.GetAxis(vtkAxis.RIGHT)
+        axisBottom = self._title_region.GetAxis(vtkAxis.BOTTOM)
+        axisTop = self._title_region.GetAxis(vtkAxis.TOP)
+        axisTop.SetVisible(False)
+        axisRight.SetVisible(False)
+        axisLeft.SetVisible(False)
+        axisBottom.SetVisible(False)
+        axisTop.SetMargins(0, 0)
+        axisRight.SetMargins(0, 0)
+        axisLeft.SetMargins(0, 0)
+        axisBottom.SetMargins(0, 0)
+        self._title_region.SetDrawAreaBounds(vtkRectd(0., 0., 1., 1.))
+        self._title_region.SetFillViewport(False)
+        self._title_region.SetShowGrid(False)
+        self.scene.AddItem(self._title_region)
+
+        self.title_scale = 0.1
+        self._title_item = vtkPythonItem()
+        self._py_title_item = CanvasTitleItem("")
+        self._title_item.SetPythonObject(self._py_title_item)
+        self._title_item.SetVisible(True)
+        self._title_region.GetDrawAreaItem().AddItem(self._title_item)
+
+        # Both elements will stretch to fill their rects.
+        self.matrix.SetFillStrategy(vtkChartMatrix.StretchType.CUSTOM)
+        self._title_region.SetDrawAreaResizeBehavior(vtkContextArea.DARB_FixedRect)
+
+    def resize(self, w: int, h: int):
+        title_height = int(self.title_scale * h)
+        chart_height = h - title_height - 22 # typical window decoration height
+
+        self._title_region.SetFixedRect(vtkRecti(0, chart_height, w, title_height))
+        self.matrix.SetRect(vtkRecti(0, 0, w, chart_height))
 
     def clear(self):
         self.matrix.SetSize(vtkVector2i(0, 0))
@@ -53,7 +143,6 @@ class VTKCanvas(Canvas):
         """This method analyzes the iplotlib canvas data structure and maps it
         onto a vtkChartMatrix
         """
-
         # 1. Clear layout.
         self.clear()
 
@@ -66,12 +155,30 @@ class VTKCanvas(Canvas):
             j = 0
 
             for plot in column:
-                
+
                 self.refresh_plot(plot, i, j)
 
                 # Increment row number carefully. (for next iteration)
                 j += plot.row_span if isinstance(plot, Plot) else 1
 
+        # 4. Translate pure canvas properties
+        if self.title is not None:
+            logger.info(f"Setting canvas title: {self.title}")
+            self._py_title_item.title = self.title
+
+
+        if self.font_color:
+            c4d = vtkColor4d()
+            vtkNamedColors().GetColor(self.font_color, c4d)
+
+            textProp = self._py_title_item.text_appearance
+            textProp.SetColor(c4d.GetRed(), c4d.GetGreen(), c4d.GetBlue())
+
+            # vtkNamedColors().GetColor(self.font_bg_color, c4d)
+            # textProp.SetBackgroundRGBA(c4d.GetRed(), c4d.GetGreen(), c4d.GetBlue(), c4d.GetAlpha())
+
+            # vtkNamedColors().GetColor(self.font_frame_color, c4d)
+            # textProp.SetFrameColor(c4d.GetRed(), c4d.GetGreen(), c4d.GetBlue())
 
     def get_internal_row_id(self, r: int, plot: Plot) -> int:
         """This method accounts for the difference in row numbering convention
@@ -113,11 +220,11 @@ class VTKCanvas(Canvas):
         plot = self._plot_lookup.get(id(signal))
         if plot is None and chart is not None:
             # TODO: Use functional bag for envelope plots
-            plot = self.add_vtk_line_plot(chart, signal.title, data[0], data[1], True)
+            plot = self.add_vtk_line_plot(
+                chart, signal.title, data[0], data[1], True)
             self._plot_lookup.update({id(signal): plot})
         else:
             self.plot_line(plot, data[0], data[1], signal.title, True)
-        
 
     def refresh_plot(self, plot: Plot, column: int, row: int):
         """Refresh a specific plot
@@ -164,10 +271,9 @@ class VTKCanvas(Canvas):
             # Plot each signal
             for signal in signals:
                 self.refresh_signal(signal, chart)
-        
+
         if isinstance(element, vtkChartMatrix):
             element.LabelOuter(vtkVector2i(0, 0), vtkVector2i(0, stack_sz - 1))
-
 
     @staticmethod
     def add_vtk_chart(matrix: vtkChartMatrix,

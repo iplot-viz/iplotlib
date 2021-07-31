@@ -12,6 +12,12 @@
     + In order to update the layout, the exposed API is of the form `refresh_[construct]`. 
     + Here *construct* could mean one of *plot*, *signal*. 
     + There is another method named simply `refresh` and not `refresh_canvas` for obvious reasons. This method calls the `refresh_[plot/signal]` variants by traversing the Canvas::plots data member.
+    + For the canvas title, use a vtkPythonItem and paint the string. Compute string bounds with VTK and set 
+      the bounding rectangle for the title.
+      + **Debugging tip**: Set `self._py_title_item.debug_rect=True` to draw a light yellow rectangle for the title context area.
+    + Resize event is received from QtVTKCanvas.
+      + Resize title's rectangular area.
+      + Resize chart matrix rectangular area.
   + The core linkage to VTK+Qt is implemented under `iplotlib/impl/vtk/qt/qtVTKCanvas.py`
     + Again, for simplicity and clean API, it subclasses the abstract iplotlib `QtPlotCanvas`
     + VTK provides Qt embed capabilities via `QVTKRenderWindowInteractor`.
