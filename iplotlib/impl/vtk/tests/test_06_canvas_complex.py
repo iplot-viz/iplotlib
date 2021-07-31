@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import unittest
 from iplotlib.core.plot import Plot
 from iplotlib.core.signal import ArraySignal
@@ -6,12 +7,13 @@ from iplotlib.impl.vtk.vtkCanvas import VTKCanvas
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.QAppTestAdapter import QAppTestAdapter
 
+
 class VTKCanvasTesting(QAppTestAdapter):
 
     def setUp(self):
 
         # A 2col x 3row canvas
-        self.vtk_canvas = VTKCanvas(3, 2)
+        self.vtk_canvas = VTKCanvas(3, 2, title = os.path.basename(__file__))
 
         plot11 = Plot(col_span=2)
         signal11 = ArraySignal(title="Signal_a_1.1")
