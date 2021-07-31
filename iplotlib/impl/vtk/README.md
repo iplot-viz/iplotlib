@@ -29,9 +29,9 @@
 This implementation uses the latest development features of VTK. Two specific pull-requests to mainline VTK are necessary.
     
 + [8053](https://gitlab.kitware.com/vtk/vtk/-/merge_requests/8053): Merged
-+ [8228](https://gitlab.kitware.com/vtk/vtk/-/merge_requests/8228): Pending approval
++ [8228](https://gitlab.kitware.com/vtk/vtk/-/merge_requests/8228): Merged
 
-Hence it is necessary to pull in the master branch and build VTK from source for now. I've built VTK in my home directory. This corresponds to 8228 PR.
+Hence it is necessary to pull in the master branch and build VTK from source for now. I've built VTK in my home directory. 
 
 Here is my environ.sh
 ```bash
