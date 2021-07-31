@@ -171,7 +171,7 @@ class VTKCanvas(Canvas):
             c4d = vtkColor4d()
             vtkNamedColors().GetColor(self.font_color, c4d)
 
-            textProp = self._py_title_item.text_appearance
+            textProp = self._py_title_item.appearance
             textProp.SetColor(c4d.GetRed(), c4d.GetGreen(), c4d.GetBlue())
 
             # vtkNamedColors().GetColor(self.font_bg_color, c4d)
