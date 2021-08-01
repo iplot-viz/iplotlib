@@ -6,7 +6,7 @@ from iplotlib.core.signal import ArraySignal
 from iplotlib.impl.vtk.vtkCanvas import VTKCanvas
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.QAppTestAdapter import QAppTestAdapter
-from vtkmodules import vtkRenderingOpenGL2
+from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
 
 
 class VTKCanvasTesting(QAppTestAdapter):
@@ -75,11 +75,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         self.assertEqual(size[0], 2)
         self.assertEqual(size[1], 3)
         
-    @unittest.skipIf(not hasattr(vtkRenderingOpenGL2, "vtkXOpenGLRenderWindow") and
-                    not hasattr(vtkRenderingOpenGL2, "vtkWin32OpenGLRenderWindow") and
-                    not hasattr(vtkRenderingOpenGL2, "vtkCocoaOpenGLRenderWindow") and
-                    not hasattr(vtkRenderingOpenGL2, "vtkIOSRenderWindow"),
-                     "VTK was built in headless mode.")
+    @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
     def test_visuals(self):
         self.vtk_canvas.refresh()
 
