@@ -8,7 +8,7 @@ from qtpy.QtGui import QKeyEvent, QStandardItem, QStandardItemModel
 from qtpy.QtWidgets import QApplication, QCheckBox, QColorDialog, QComboBox, QDataWidgetMapper, QFormLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QSizePolicy, QSpinBox, QSplitter, \
     QStackedWidget, QTreeView, QVBoxLayout, QWidget
 
-from impl.matplotlib.matplotlibCanvas import ConversionHelper
+from iplotlib.impl.matplotlib.matplotlibCanvas import ConversionHelper
 from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
