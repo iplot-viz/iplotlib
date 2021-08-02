@@ -42,6 +42,7 @@ class ArraySignal(Signal):
     marker: str = None
     marker_size: int = None
     step: str = None
+    hi_precision_data: bool = None
 
     def __post_init__(self):
         super().__post_init__()

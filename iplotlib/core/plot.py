@@ -66,6 +66,8 @@ class PlotXY(Plot):
     marker: str = None
     marker_size: int = None
     step: str = None
+    """Boolean that suggests the data is sensitive to round off errors and requires special handling"""
+    hi_precision_data: bool = None
 
     dec_samples: int = None
 
