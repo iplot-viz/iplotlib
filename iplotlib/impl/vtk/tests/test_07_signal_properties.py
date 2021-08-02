@@ -1,0 +1,126 @@
+import numpy as np
+import os
+import unittest
+from iplotlib.core.plot import Plot
+from iplotlib.core.signal import ArraySignal
+from iplotlib.impl.vtk.vtkCanvas import VTKCanvas
+from iplotlib.impl.vtk.utils import regression_test
+from iplotlib.impl.vtk.tests.QAppTestAdapter import QAppTestAdapter
+from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
+
+class VTKCanvasTesting(QAppTestAdapter):
+
+    def setUp(self) -> None:
+
+        # A 1col x 7row canvas
+        self.vtk_canvas = VTKCanvas(6, 1, title = os.path.basename(__file__), legend=True, grid=True)
+
+        n_samples = 10
+        x_lo_prec = np.linspace(0, 2 * np.math.pi, n_samples, dtype=np.float32)
+        y_lo_prec = np.sin(x_lo_prec)
+        
+        # A plot with 5 signals for color testing
+        colors = ["blue", "chocolate", "orange_red", "cadmium_yellow", "emerald_green"]
+        plot = Plot(title="Color")
+        for i in range(5):
+            signal = ArraySignal(
+                title=f"{colors[i]}",
+                color=colors[i],
+                hi_precision_data=False
+            )
+            signal.set_data([x_lo_prec, y_lo_prec + np.array([i] * n_samples)])
+            plot.add_signal(signal)
+        self.vtk_canvas.add_plot(plot)
+        
+        # A plot with 3 signals for line style testing
+        line_styles = ["solid", "dashed", "dotted"]
+        plot = Plot(title="LineStyle")
+        for i in range(3):
+            signal = ArraySignal(
+                title=f"{line_styles[i]}",
+                color=colors[i],
+                line_style=line_styles[i],
+                hi_precision_data=False
+            )
+            signal.set_data([x_lo_prec, y_lo_prec + np.array([i] * n_samples)])
+            plot.add_signal(signal)
+        self.vtk_canvas.add_plot(plot)
+
+        # A plot with 3 signals for line size testing
+        line_sizes = [2, 3, 4]
+        plot = Plot(title="LineSize")
+        for i in range(3):
+            signal = ArraySignal(
+                title=f"LineSize-{line_sizes[i]}",
+                color=colors[i],
+                line_size=line_sizes[i],
+                hi_precision_data=False
+            )
+            signal.set_data([x_lo_prec, y_lo_prec + np.array([i] * n_samples)])
+            plot.add_signal(signal)
+        self.vtk_canvas.add_plot(plot)
+
+        # A plot with 5 signals for marker-style testing
+        markers = ['x', 'o', 'square', 'diamond', 'circle']
+        plot = Plot(title="Marker")
+        for i in range(5):
+            signal = ArraySignal(
+                title=f"{markers[i]}",
+                color=colors[i],
+                marker=markers[i],
+                hi_precision_data=False
+            )
+            signal.set_data([x_lo_prec, y_lo_prec + np.array([i] * n_samples)])
+            plot.add_signal(signal)
+        self.vtk_canvas.add_plot(plot)
+
+        # A plot with 3 signals for marker-size testing
+        marker_sizes = [8, 12, 14]
+        plot = Plot(title="MarkerSize")
+        for i in range(3):
+            signal = ArraySignal(
+                title=f"{marker_sizes[i]}",
+                color=colors[i],
+                marker=markers[i],
+                marker_size=marker_sizes[i],
+                hi_precision_data=False
+            )
+            signal.set_data([x_lo_prec, y_lo_prec + np.array([i] * n_samples)])
+            plot.add_signal(signal)
+        self.vtk_canvas.add_plot(plot)
+
+        # A plot with 3 signals to test various kind of stepping draw styles
+        step_types = [None, "steps-mid", "steps-post", "steps-pre"]
+        plot = Plot(title="Step")
+        for i in range(4):
+            signal = ArraySignal(
+                title=f"{step_types[i]}",
+                color=colors[i],
+                marker='x',
+                step=step_types[i],
+                hi_precision_data=False
+            )
+            signal.set_data([x_lo_prec, y_lo_prec + np.array([i] * n_samples)])
+            plot.add_signal(signal)
+        self.vtk_canvas.add_plot(plot)
+
+        return super().setUp()
+
+    def tearDown(self):
+        return super().tearDown()
+
+    @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
+    def test_visuals(self):
+        self.vtk_canvas.refresh()
+
+        self.canvas.resize(800, 1080)
+        self.canvas.set_canvas(self.vtk_canvas)
+        self.canvas.show()
+        self.canvas.get_qvtk_render_widget().Initialize()
+        self.canvas.get_qvtk_render_widget().Render()
+
+        renWin = self.canvas.get_qvtk_render_widget().GetRenderWindow()
+        self.assertTrue(regression_test(__file__, renWin))
+
+if __name__ == "__main__":
+    unittest.main()

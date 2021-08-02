@@ -1,3 +1,4 @@
+from iplotlib.core.property_manager import PropertyManager
 import numpy as np
 import typing
 from dataclasses import dataclass
@@ -23,11 +24,11 @@ from vtkmodules.vtkPythonContext2D import vtkPythonItem
 from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__, "DEBUG")
 
+AXIS_MAP = [vtkAxis.BOTTOM, vtkAxis.LEFT]
 
 class InvalidPlotException(Exception):
     def __init__(self, *args: object) -> None:
         super().__init__(*args)
-
 
 
 class CanvasTitleItem(object):
@@ -44,13 +45,13 @@ class CanvasTitleItem(object):
     def Paint(self, vtkSelf, context2D):
 
         context2D.ApplyTextProp(self.appearance)
-        bds = [0., 0., 0., 0.] # xmin, ymin, width, height
+        bds = [0., 0., 0., 0.]  # xmin, ymin, width, height
         context2D.ComputeStringBounds(self.title, bds)
         rect = bds
         rect[0] += (0.5 * (1. - bds[2]))
         rect[1] += (0.5 * (1. - bds[3]))
         context2D.DrawStringRect(rect, self.title)
-        
+
         # Draw a yellow rect to debug paint region.
         if self.debug_rect:
             pen = context2D.GetPen()
@@ -62,7 +63,6 @@ class CanvasTitleItem(object):
             brush = context2D.GetBrush()
             brushColor = [0, 0, 0, 0]
             brush.GetColor(brushColor)
-
 
             pen.SetColor([200, 200, 30])
             brush.SetColor([200, 200, 30])
@@ -88,6 +88,7 @@ class VTKCanvas(Canvas):
         """
         super().__post_init__()
 
+        self.property_manager = PropertyManager()
         self.view = vtkContextView()
         self.scene = self.view.GetScene()
 
@@ -98,7 +99,8 @@ class VTKCanvas(Canvas):
 
         self.scene.AddItem(self.matrix)
 
-        self._plot_lookup = dict()
+        self._plot_impl_lookup = dict() # Signal -> vtkPlot
+        self._plot_lookup = dict() # reverse lookup i.e, Signal -> Plot
 
         self._title_region = vtkContextArea()
         axisLeft = self._title_region.GetAxis(vtkAxis.LEFT)
@@ -127,13 +129,15 @@ class VTKCanvas(Canvas):
 
         # Both elements will stretch to fill their rects.
         self.matrix.SetFillStrategy(vtkChartMatrix.StretchType.CUSTOM)
-        self._title_region.SetDrawAreaResizeBehavior(vtkContextArea.DARB_FixedRect)
+        self._title_region.SetDrawAreaResizeBehavior(
+            vtkContextArea.DARB_FixedRect)
 
     def resize(self, w: int, h: int):
         title_height = int(self.title_scale * h)
-        chart_height = h - title_height - 22 # typical window decoration height
+        chart_height = h - title_height - 22  # typical window decoration height
 
-        self._title_region.SetFixedRect(vtkRecti(0, chart_height, w, title_height))
+        self._title_region.SetFixedRect(
+            vtkRecti(0, chart_height, w, title_height))
         self.matrix.SetRect(vtkRecti(0, 0, w, chart_height))
 
     def clear(self):
@@ -143,13 +147,16 @@ class VTKCanvas(Canvas):
         """This method analyzes the iplotlib canvas data structure and maps it
         onto a vtkChartMatrix
         """
-        # 1. Clear layout.
+        # 1. update property hierarchy
+        self.property_manager.update(self)
+
+        # 2. Clear layout.
         self.clear()
 
-        # 2. Allocate
+        # 3. Allocate
         self.matrix.SetSize(vtkVector2i(self.cols, self.rows))
 
-        # 3. Fill canvas with charts
+        # 4. Fill canvas with charts
         for i, column in enumerate(self.plots):
 
             j = 0
@@ -161,11 +168,10 @@ class VTKCanvas(Canvas):
                 # Increment row number carefully. (for next iteration)
                 j += plot.row_span if isinstance(plot, Plot) else 1
 
-        # 4. Translate pure canvas properties
+        # 5. Translate pure canvas properties
         if self.title is not None:
             logger.info(f"Setting canvas title: {self.title}")
             self._py_title_item.title = self.title
-
 
         if self.font_color:
             c4d = vtkColor4d()
@@ -217,21 +223,29 @@ class VTKCanvas(Canvas):
         if len(data) < 2:
             return
 
-        plot_impl = self._plot_lookup.get(id(signal)) # type: vtkPlot
+        # acquire/update properties
+        plot = self._plot_lookup.get(id(signal)) # type: Plot
+        self.property_manager.acquire_signal_from_plot(plot, signal)
+
+        # Create backend objects
+        plot_impl = self._plot_impl_lookup.get(id(signal))  # type: vtkPlot
         if plot_impl is None and chart is not None:
             # TODO: Use functional bag for envelope plots
-            plot_impl = self.add_vtk_line_plot(
-                chart, signal.title, data[0], data[1], True)
-            self._plot_lookup.update({id(signal): plot_impl})
+            if isinstance(signal, ArraySignal):
+                plot_impl = self.add_vtk_line_plot(
+                    chart, signal.title, data[0], data[1], signal.hi_precision_data)
+                self._plot_impl_lookup.update({id(signal): plot_impl})
         else:
-            self.plot_line(plot_impl, data[0], data[1], signal.title, True)
+            if isinstance(signal, ArraySignal):
+                self.plot_line(
+                    plot_impl, data[0], data[1], signal.title, signal.hi_precision_data)
 
-        # translate properties
+        # Translate abstract properties to backend
         plot_impl.SetLabel(signal.title)
         if isinstance(signal, ArraySignal):
 
             if signal.color is not None:
-                plot_impl.SetColor(vtkImplUtils.get_color4ub(signal.color))
+                plot_impl.SetColor(*vtkImplUtils.get_color4ub(signal.color))
 
             # line style, width if supported by hardware.
             pen = plot_impl.GetPen()
@@ -273,6 +287,8 @@ class VTKCanvas(Canvas):
         if not isinstance(plot, Plot):
             return
 
+        self.property_manager.acquire_plot_from_canvas(self, plot)
+
         # Invert row id for vtk
         row_id = self.get_internal_row_id(row, plot)
 
@@ -303,12 +319,43 @@ class VTKCanvas(Canvas):
             else:
                 chart = element
 
+            # translate plot properties to chart
+            if plot.title is not None:
+                chart.SetTitle(plot.title)
+                appearance = chart.GetTitleProperties() # type: vtkTextProperty
+                if plot.font_color is not None:
+                    appearance.SetColor(*vtkImplUtils.get_color3d(plot.font_color))
+                if plot.font_size is not None:
+                    appearance.SetFontSize(plot.font_size)
+
+            if plot.legend is not None:
+                chart.SetShowLegend(plot.legend)
+            
+            if isinstance(plot, PlotXY):
+                if plot.grid is not None:
+                    chart.GetAxis(vtkAxis.BOTTOM).SetGridVisible(plot.grid)
+                    chart.GetAxis(vtkAxis.LEFT).SetGridVisible(plot.grid)
+                for ax_id, ax in enumerate(plot.axes):
+                    ax_impl = chart.GetAxis(AXIS_MAP[ax_id])
+                    if plot.grid is not None:
+                        ax_impl.SetGridVisible(plot.grid)
+                    if ax.label is not None:
+                        ax_impl.SetTitle(ax.label)
+                        appearance = chart.GetTitleProperties() # type: vtkTextProperty
+                        if ax.font_color is not None:
+                            appearance.SetColor(*vtkImplUtils.get_color3d(ax.font_color))
+                        if ax.font_size is not None:
+                            appearance.SetFontSize(ax.font_size)
+
             # Plot each signal
             for signal in signals:
+                self._plot_lookup.update({id(signal): plot})
                 self.refresh_signal(signal, chart)
+
 
         if isinstance(element, vtkChartMatrix):
             element.LabelOuter(vtkVector2i(0, 0), vtkVector2i(0, stack_sz - 1))
+
 
     @staticmethod
     def add_vtk_chart(matrix: vtkChartMatrix,
@@ -379,6 +426,10 @@ class VTKCanvas(Canvas):
         plot.SetInputData(table, 0, 1)
 
     def set_draw_style(self, plot: vtkPlot, drawstyle=None):
+
+        if drawstyle is None:
+            return
+
         table = plot.GetInput()
         c0 = table.GetColumn(0)
         c1 = table.GetColumn(1)
@@ -388,24 +439,14 @@ class VTKCanvas(Canvas):
         var_name = c1.GetName()
         bitSequencing = table.GetNumberOfColumns() > 2
 
-        if drawstyle is not None:
-            newxs = []
-            newys = []
-            for i in range(numPoints - 1):
-                newxs.append(xs[i])
-                newys.append(ys[i])
-                for newx, newy in vtkImplUtils.step_function(i, xs, ys, drawstyle):
-                    newxs.append(newx)
-                    newys.append(newy)
-            newxs.append(xs[-1])
-            newys.append(ys[-1])
-            self.plot_line(plot, newxs, newys, var_name, bitSequencing)
-        else:
-            newxs = []
-            newys = []
-            for i in range(0, numPoints - 1, 2):
-                newxs.append(xs[i])
-                newys.append(ys[i])
-            newxs.append(xs[-1])
-            newys.append(ys[-1])
-            self.plot_line(plot, newxs, newys, var_name, bitSequencing)
+        newxs = []
+        newys = []
+        for i in range(numPoints - 1):
+            newxs.append(xs[i])
+            newys.append(ys[i])
+            for newx, newy in vtkImplUtils.step_function(i, xs, ys, drawstyle):
+                newxs.append(newx)
+                newys.append(newy)
+        newxs.append(xs[-1])
+        newys.append(ys[-1])
+        self.plot_line(plot, newxs, newys, var_name, bitSequencing)

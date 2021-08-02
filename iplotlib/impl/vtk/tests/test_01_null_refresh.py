@@ -10,5 +10,9 @@ class VTKCanvasTesting(unittest.TestCase):
         self.vtk_canvas = VTKCanvas(0, 0)
         self.vtk_canvas.refresh()
 
+        size = self.vtk_canvas.matrix.GetSize()
+        self.assertEqual(size[0], 0)
+        self.assertEqual(size[1], 0)
+
 if __name__ == "__main__":
     unittest.main()
