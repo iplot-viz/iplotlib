@@ -3,8 +3,8 @@ import typing
 from dataclasses import dataclass
 
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.plot import Plot
-from iplotlib.core.signal import Signal
+from iplotlib.core.plot import Plot, PlotXY
+from iplotlib.core.signal import ArraySignal, Signal
 from iplotlib.impl.vtk import utils as vtkImplUtils
 
 # needed for runtime vtk-opengl libs
@@ -16,7 +16,7 @@ from vtkmodules.vtkCommonDataModel import vtkColor4d, vtkTable, vtkVector2i, vtk
 from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine
 from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.vtkRenderingCore import vtkTextProperty
-from vtkmodules.vtkRenderingContext2D import vtkContextItem, vtkContextScene, vtkMarkerUtilities
+from vtkmodules.vtkRenderingContext2D import vtkContextItem, vtkContextScene, vtkMarkerUtilities, vtkPen
 from vtkmodules.util import numpy_support
 from vtkmodules.vtkPythonContext2D import vtkPythonItem
 
@@ -217,14 +217,49 @@ class VTKCanvas(Canvas):
         if len(data) < 2:
             return
 
-        plot = self._plot_lookup.get(id(signal))
-        if plot is None and chart is not None:
+        plot_impl = self._plot_lookup.get(id(signal)) # type: vtkPlot
+        if plot_impl is None and chart is not None:
             # TODO: Use functional bag for envelope plots
-            plot = self.add_vtk_line_plot(
+            plot_impl = self.add_vtk_line_plot(
                 chart, signal.title, data[0], data[1], True)
-            self._plot_lookup.update({id(signal): plot})
+            self._plot_lookup.update({id(signal): plot_impl})
         else:
-            self.plot_line(plot, data[0], data[1], signal.title, True)
+            self.plot_line(plot_impl, data[0], data[1], signal.title, True)
+
+        # translate properties
+        plot_impl.SetLabel(signal.title)
+        if isinstance(signal, ArraySignal):
+
+            if signal.color is not None:
+                plot_impl.SetColor(vtkImplUtils.get_color4ub(signal.color))
+
+            # line style, width if supported by hardware.
+            pen = plot_impl.GetPen()
+            if signal.line_size is not None:
+                pen.SetWidth(signal.line_size)
+            if signal.line_style == "solid":
+                pen.SetLineType(vtkPen.SOLID_LINE)
+            elif signal.line_style == "dashed":
+                pen.SetLineType(vtkPen.DASH_LINE)
+            elif signal.line_style == "dotted":
+                pen.SetLineType(vtkPen.DOT_LINE)
+
+            # marker style, size
+            if signal.marker_size is not None:
+                plot_impl.SetMarkerSize(signal.marker_size)
+            if signal.marker == 'x':
+                plot_impl.SetMarkerStyle(vtkMarkerUtilities.CROSS)
+            elif signal.marker == '+':
+                plot_impl.SetMarkerStyle(vtkMarkerUtilities.PLUS)
+            elif signal.marker == "square":
+                plot_impl.SetMarkerStyle(vtkMarkerUtilities.SQUARE)
+            elif signal.marker == 'o' or signal.marker == "circle":
+                plot_impl.SetMarkerStyle(vtkMarkerUtilities.CIRCLE)
+            elif signal.marker == "diamond":
+                plot_impl.SetMarkerStyle(vtkMarkerUtilities.DIAMOND)
+
+            # steps
+            self.set_draw_style(plot_impl, signal.step)
 
     def refresh_plot(self, plot: Plot, column: int, row: int):
         """Refresh a specific plot
