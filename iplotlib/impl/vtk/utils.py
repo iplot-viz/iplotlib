@@ -2,14 +2,74 @@ import datetime
 import numpy as np
 import os
 import shutil
+import typing
 
-from vtkmodules.vtkCommonDataModel import vtkImageData
+from vtkmodules.vtkCommonDataModel import vtkColor4d, vtkColor3d, vtkColor4ub, vtkColor3ub, vtkImageData
+from vtkmodules.vtkCommonColor import vtkNamedColors
 from vtkmodules.vtkImagingCore import vtkImageDifference
 from vtkmodules.vtkIOImage import vtkPNGReader, vtkJPEGReader, vtkPNGWriter, vtkJPEGWriter, vtkPostScriptWriter
 from vtkmodules.vtkRenderingCore import vtkRenderWindow, vtkWindowToImageFilter
 
 import logging
 logger = logging.getLogger(__name__)
+vtkColors = vtkNamedColors()
+
+
+def get_color4d(color: str) -> typing.Tuple[float]:
+    """See [VTKNamedColorPatches](https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
+    for valid color names
+
+    Args:
+        color (str): a valid color name
+
+    Returns:
+        typing.Tuple[float]: r, g, b, a (0. ... 1.)
+    """
+    c4d = vtkColor4d()
+    vtkColors.GetColor(color, c4d)
+    return (c4d.GetRed(), c4d.GetGreen(), c4d.GetBlue(), c4d.GetAlpha())
+
+def get_color4ub(color: str) -> typing.Tuple[int]:
+    """See [VTKNamedColorPatches](https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
+    for valid color names
+
+    Args:
+        color (str): a valid color name
+
+    Returns:
+        typing.Tuple[int]: r, g, b, a (0 ... 255)
+    """
+    c4ub = vtkColor4ub()
+    vtkColors.GetColor(color, c4ub)
+    return (c4ub.GetRed(), c4ub.GetGreen(), c4ub.GetBlue(), c4ub.GetAlpha())
+
+def get_color3d(color: str) -> typing.Tuple[float]:
+    """See [VTKNamedColorPatches](https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
+    for valid color names
+
+    Args:
+        color (str): a valid color name
+
+    Returns:
+        typing.Tuple[float]: r, g, b (0. ... 1.)
+    """
+    c3d = vtkColor3d()
+    vtkColors.GetColor(color, c3d)
+    return (c3d.GetRed(), c3d.GetGreen(), c3d.GetBlue())
+
+def get_color3ub(color: str) -> typing.Tuple[int]:
+    """See [VTKNamedColorPatches](https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
+    for valid color names
+
+    Args:
+        color (str): a valid color name
+
+    Returns:
+        typing.Tuple[int]: r, g, b (0 ... 255)
+    """
+    c3ub = vtkColor3ub()
+    vtkColors.GetColor(color, c3ub)
+    return (c3ub.GetRed(), c3ub.GetGreen(), c3ub.GetBlue())
 
 def read_image(fname: str) -> vtkImageData:
 
@@ -87,7 +147,19 @@ def regression_test(test_src: str, renWin: vtkRenderWindow) -> bool:
         return True
 
 
-def step_function(i, xs, ys, step_type):
+def step_function(i: int, xs, ys, step_type: str):
+    """See [steps-demo](https://matplotlib.org/stable/gallery/lines_bars_and_markers/step_demo.html)
+    for meaning of step_type
+
+    Args:
+        i (int): an index into xs, ys
+        xs (sequence): array of x values
+        ys (sequence): array of y values
+        step_type (str): step type- valid args are steps/steps-pre, steps-mid, steps-post
+
+    Returns:
+        np.ndarray: a new point either pre, mid or post
+    """
     x, y = xs[i], ys[i]
     xp, yp = xs[i + 1], ys[i + 1]
     xmid = (x + xp) * 0.5
