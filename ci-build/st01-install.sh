@@ -18,3 +18,9 @@ try python3 -m pip --disable-pip-version-check install . --prefix=${PREFIX_DIR}
 
 export PYTHONPATH=${PYTHONPATH}:$(get_abs_filename "./${PREFIX_DIR}")
 try python3 -c "import iplotlib"
+
+# Stash
+tar -cvzf ${PREFIX_DIR}.tar.gz ./${PREFIX_DIR}
+
+# Clean up
+try rm -r ${PREFIX_DIR}
