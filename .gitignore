@@ -7,6 +7,8 @@ moc_*.cpp
 .qmake.stash
 *.so
 *.so.*
+*.coverage
+*.html
 iplotlib/impl/gnuplot/qt/widget/gnuplotwidget/Makefile
 iplotlib/impl/gnuplot/qt/widget/pyqt5gnuplotwidget/sip*.h
 iplotlib/impl/gnuplot/qt/widget/pyqt5gnuplotwidget/sip*.cpp
