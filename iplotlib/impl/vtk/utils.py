@@ -118,7 +118,7 @@ def compare_images(valid: vtkImageData, test: vtkImageData) -> float:
     return comparator.GetThresholdedError(), comparator.GetOutput()
 
 
-def regression_test(test_src: str, renWin: vtkRenderWindow) -> bool:
+def regression_test(test_src: str, renWin: vtkRenderWindow, threshold = 0.15) -> bool:
     test_fname = os.path.basename(test_src)
     dirname = os.path.dirname(test_src)
     baseline_dir = os.path.join(dirname, "baseline")
@@ -139,7 +139,7 @@ def regression_test(test_src: str, renWin: vtkRenderWindow) -> bool:
     error, diff = compare_images(read_image(
         valid_image_name), read_image(test_image_name))
 
-    if error > 0.15:
+    if error > threshold:
         write_image(diff_image_name, diff)
         return False
     else:
