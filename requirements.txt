@@ -7,3 +7,4 @@ qtpy==1.9.0
 # pyside2==5.14.2
 pyqt5==5.15.2  # To be deprecated in favour of PySide2 where available (LGPL preferred to GPL)
 pyqt5sip.version=12.8.1
+vtk==9.0.20210806.dev0
