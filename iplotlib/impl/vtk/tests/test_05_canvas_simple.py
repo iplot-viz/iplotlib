@@ -1,7 +1,7 @@
 import numpy as np
 import os
 import unittest
-from iplotlib.core.plot import Plot
+from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import ArraySignal
 from iplotlib.impl.vtk.vtkCanvas import VTKCanvas
 from iplotlib.impl.vtk.utils import regression_test
@@ -19,7 +19,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         signal11 = ArraySignal(title="Signal1.1")
         signal11.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
-        plot11 = Plot()
+        plot11 = PlotXY()
         plot11.add_signal(signal11)
         self.vtk_canvas.add_plot(plot11, 0)
 
@@ -27,7 +27,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         signal12 = ArraySignal(title="Signal1.2")
         signal12.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
-        plot12 = Plot()
+        plot12 = PlotXY()
         plot12.add_signal(signal12)
         self.vtk_canvas.add_plot(plot12, 0)
 
@@ -35,7 +35,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         signal21 = ArraySignal(title="Signal2.1")
         signal21.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
-        plot21 = Plot()
+        plot21 = PlotXY()
         plot21.add_signal(signal21)
         self.vtk_canvas.add_plot(plot21, 1)
 
@@ -43,7 +43,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         signal22 = ArraySignal(title="Signal2.2")
         signal22.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
-        plot22 = Plot()
+        plot22 = PlotXY()
         plot22.add_signal(signal22)
         self.vtk_canvas.add_plot(plot22, 1)
 
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     # signal11 = ArraySignal(title="Signal1.1")
     # signal11.set_data([np.array([0., 1., 2., 3.]),
     #                     np.array([0., 1., 2., 3.])])
-    # plot11 = Plot()
+    # plot11 = PlotXY()
     # plot11.add_signal(signal11)
     # vtk_canvas.add_plot(plot11, 0)
 
@@ -99,7 +99,7 @@ if __name__ == "__main__":
     # signal12 = ArraySignal(title="Signal1.2")
     # signal12.set_data([np.array([0., 1., 2., 3.]),
     #                     np.array([0., 1., 2., 3.])])
-    # plot12 = Plot()
+    # plot12 = PlotXY()
     # plot12.add_signal(signal12)
     # vtk_canvas.add_plot(plot12, 0)
 
@@ -107,7 +107,7 @@ if __name__ == "__main__":
     # signal21 = ArraySignal(title="Signal2.1")
     # signal21.set_data([np.array([0., 1., 2., 3.]),
     #                     np.array([0., 1., 2., 3.])])
-    # plot21 = Plot()
+    # plot21 = PlotXY()
     # plot21.add_signal(signal21)
     # vtk_canvas.add_plot(plot21, 1)
 
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     # signal22 = ArraySignal(title="Signal2.2")
     # signal22.set_data([np.array([0., 1., 2., 3.]),
     #                     np.array([0., 1., 2., 3.])])
-    # plot22 = Plot()
+    # plot22 = PlotXY()
     # plot22.add_signal(signal22)
     # vtk_canvas.add_plot(plot22, 1)
     # vtk_canvas.refresh()
