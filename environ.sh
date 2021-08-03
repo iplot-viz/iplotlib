@@ -44,6 +44,9 @@ case $toolchain in
 
     # Graphical User Interface backends
     try module load QtPy/1.9.0-GCCcore-10.2.0
+
+    # Testing/Coverage requirements
+    try module load coverage/5.5-GCCcore-10.2.0
     ;;
 
   "intel")
@@ -58,6 +61,9 @@ case $toolchain in
 
     # Graphical User Interface backends
     try module load QtPy/1.9.0-GCCcore-10.2.0
+
+    # Testing/Coverage requirements
+    try module load coverage/5.5-GCCcore-10.2.0
     ;;
    *)
     echo "Unknown toolchain $toolchain"
