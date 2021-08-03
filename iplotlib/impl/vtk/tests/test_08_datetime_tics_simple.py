@@ -63,7 +63,8 @@ class VTKCanvasTesting(QAppTestAdapter):
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
     def test_visuals(self):
         self.vtk_canvas.refresh()
-
+        
+        self.canvas.resize(800, 1080)
         self.canvas.set_canvas(self.vtk_canvas)
         self.canvas.show()
         self.canvas.get_qvtk_render_widget().Initialize()
