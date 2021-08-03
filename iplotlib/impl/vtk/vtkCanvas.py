@@ -21,7 +21,7 @@ from vtkmodules.vtkCommonDataModel import vtkColor4d, vtkTable, vtkVector2f, vtk
 from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine, vtkPlotPoints
 from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.vtkRenderingCore import vtkTextProperty
-from vtkmodules.vtkRenderingContext2D import vtkContext2D, vtkContextMapper2D, vtkContextItem, vtkContextScene, vtkMarkerUtilities, vtkPen
+from vtkmodules.vtkRenderingContext2D import vtkContext2D, vtkContextMapper2D, vtkContextMouseEvent, vtkContextItem, vtkContextScene, vtkMarkerUtilities, vtkPen
 from vtkmodules.util import numpy_support
 from vtkmodules.vtkPythonContext2D import vtkPythonItem
 
@@ -736,6 +736,8 @@ class VTKCanvas(Canvas):
         self.matrix.SetRect(vtkRecti(0, 0, w, chart_height))
 
     def clear(self):
+        self._plot_impl_lookup.clear()
+        self._plot_lookup.clear()
         self.matrix.SetSize(vtkVector2i(0, 0))
         self.custom_tickers.clear()
         self.crosshair.clear()
@@ -753,7 +755,7 @@ class VTKCanvas(Canvas):
         # 3. Allocate
         self.matrix.SetSize(vtkVector2i(self.cols, self.rows))
 
-        # 4. Fill canvas with charts
+        # 4.1 Fill canvas with charts
         for i, column in enumerate(self.plots):
 
             j = 0
@@ -765,6 +767,10 @@ class VTKCanvas(Canvas):
                 # Increment row number carefully. (for next iteration)
                 j += plot.row_span if isinstance(plot, Plot) else 1
 
+        # 4.2 canvas applicable mouse mode
+        self.crosshair_enabled = (self.mouse_mode == Canvas.MOUSE_MODE_CROSSHAIR)
+
+        # 4.3 Crosshair widget
         self.crosshair.resize()
         for cursor, _ in self.crosshair.cursors:  # type: CrosshairCursor,
             cursor.lc['h'] = self.crosshair_color
@@ -773,6 +779,7 @@ class VTKCanvas(Canvas):
             cursor.lw['v'] = self.crosshair_line_width
             cursor.lv['h'] = self.crosshair_horizontal
             cursor.lv['v'] = self.crosshair_vertical
+
 
         # 5. Translate pure canvas properties
         if self.title is not None:
@@ -941,6 +948,20 @@ class VTKCanvas(Canvas):
 
             if chart not in self.crosshair.charts and self.crosshair_enabled:
                 self.crosshair.charts.append(chart)
+
+            chart.SetActionToButton(vtkChart.PAN, vtkContextMouseEvent.NO_BUTTON)
+            chart.SetActionToButton(vtkChart.ZOOM, vtkContextMouseEvent.NO_BUTTON)
+            chart.SetActionToButton(vtkChart.ZOOM_AXIS, vtkContextMouseEvent.NO_BUTTON)
+            chart.SetActionToButton(vtkChart.SELECT, vtkContextMouseEvent.NO_BUTTON)
+            chart.SetActionToButton(vtkChart.SELECT_RECTANGLE, vtkContextMouseEvent.NO_BUTTON)
+            chart.SetActionToButton(vtkChart.CLICK_AND_DRAG, vtkContextMouseEvent.NO_BUTTON)
+
+            if self.mouse_mode == Canvas.MOUSE_MODE_PAN:
+                chart.SetActionToButton(vtkChart.PAN, vtkContextMouseEvent.LEFT_BUTTON)
+            elif self.mouse_mode == Canvas.MOUSE_MODE_SELECT:
+                chart.SetActionToButton(vtkChart.SELECT, vtkContextMouseEvent.LEFT_BUTTON)
+            elif self.mouse_mode == Canvas.MOUSE_MODE_ZOOM:
+                chart.SetActionToButton(vtkChart.SELECT, vtkContextMouseEvent.LEFT_BUTTON)
 
             # translate plot properties to chart
             draw_title = not stacked or (stacked and i == stack_sz - 1)

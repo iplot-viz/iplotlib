@@ -79,7 +79,7 @@ class QtVTKCanvas(QtPlotCanvas):
 
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
-        self._vtk_canvas.crosshair_enabled = (mode == Canvas.MOUSE_MODE_CROSSHAIR)
+        self._vtk_canvas.mouse_mode = mode
 
     def mouse_move_callback(self, obj, ev):
         mousePos = obj.GetEventPosition()
