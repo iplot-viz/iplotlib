@@ -523,44 +523,67 @@ class CrosshairCursor(object):
 
 
 class CrosshairCursorWidget:
-    def __init__(self, canvas: vtkChartMatrix, charts: typing.List[vtkChart],
+    def __init__(self, matrix: vtkChartMatrix, charts: typing.List[vtkChart],
                  **kwargs):
-        self.canvas = canvas
-        self.charts = charts
+        self.matrix = matrix
+        self.charts = []
         self.rootPlotPos = [0, 0]
         self.cursors = []
+        self.cursor_kwargs = kwargs
 
-        scene = self.canvas.GetScene()
-        if scene is None:
+        self.scene = self.matrix.GetScene()
+        if self.scene is None:
             return
+
+        self.resize()
+
+    def resize(self):
+
         for _ in range(len(self.charts)):
-            cursor = CrosshairCursor(**kwargs)
+            cursor = CrosshairCursor(self.cursor_kwargs)
             item = vtkPythonItem()
             item.SetPythonObject(cursor)
             item.SetVisible(False)
             self.cursors.append([cursor, item])
-            scene.AddItem(item)
+            self.scene.AddItem(item)
 
     def clear(self):
+        for _, item in self.cursors:
+            self.scene.RemoveItem(item)
+        self.cursors.clear()
+        self.charts.clear()
+
+    def hide(self):
         for _, item in self.cursors:
             item.SetVisible(False)
 
     def onMove(self, mousePos: tuple):
-        scene = self.canvas.GetScene()
+        scene = self.matrix.GetScene()
         if scene is None:
             return
+
         screenToScene = scene.GetTransform()
         scenePos = [0, 0]
         screenToScene.TransformPoints(mousePos, scenePos, 1)
 
-        self.clear()
-        eventInChartPos = self.canvas.GetChartIndex(vtkVector2f(scenePos))
-        logger.debug(f"Mouse in chart {eventInChartPos}")
-        if eventInChartPos.GetX() < 0 or eventInChartPos.GetY() < 0:
-            return
+        self.hide()
 
-        eventInChart = self.canvas.GetChart(eventInChartPos)
-        plotRoot = eventInChart.GetPlot(0)
+        def _get_plot_root(matrix: vtkChartMatrix):
+
+            elementIndex = matrix.GetChartIndex(vtkVector2f(scenePos))
+            logger.debug(f"Mouse in element {elementIndex}")
+
+            if elementIndex.GetX() < 0 or elementIndex.GetY() < 0:
+                return
+
+            chart = matrix.GetChart(elementIndex)
+            subMatrix = matrix.GetChartMatrix(elementIndex)
+            if chart is None and subMatrix is not None:
+                return _get_plot_root(subMatrix)
+            elif chart is not None and subMatrix is None:
+                return chart.GetPlot(0)
+
+        plotRoot = _get_plot_root(self.matrix)
         if plotRoot is None:
             return
 
@@ -655,17 +678,21 @@ class VTKCanvas(Canvas):
         """
         super().__post_init__()
 
-        self.custom_tickers = {}
-        self.property_manager = PropertyManager()
         self.view = vtkContextView()
         self.scene = self.view.GetScene()
-
         self.matrix = vtkChartMatrix()
+        self.scene.AddItem(self.matrix)
+        self.custom_tickers = {}
+        self.crosshair = CrosshairCursorWidget(self.matrix,
+                                               [],
+                                               horizOn=True,
+                                               hLineW=1,
+                                               vLineW=1)
+        self.property_manager = PropertyManager()
+
         self.matrix.SetGutterX(50)
         self.matrix.SetGutterY(50)
         self.matrix.SetBorderTop(0)
-
-        self.scene.AddItem(self.matrix)
 
         self._plot_impl_lookup = dict()  # Signal -> vtkPlot
         self._plot_lookup = dict()  # reverse lookup i.e, Signal -> Plot
@@ -711,6 +738,7 @@ class VTKCanvas(Canvas):
     def clear(self):
         self.matrix.SetSize(vtkVector2i(0, 0))
         self.custom_tickers.clear()
+        self.crosshair.clear()
 
     def refresh(self):
         """This method analyzes the iplotlib canvas data structure and maps it
@@ -736,6 +764,15 @@ class VTKCanvas(Canvas):
 
                 # Increment row number carefully. (for next iteration)
                 j += plot.row_span if isinstance(plot, Plot) else 1
+
+        self.crosshair.resize()
+        for cursor, _ in self.crosshair.cursors:  # type: CrosshairCursor,
+            cursor.lc['h'] = self.crosshair_color
+            cursor.lc['v'] = self.crosshair_color
+            cursor.lw['h'] = self.crosshair_line_width
+            cursor.lw['v'] = self.crosshair_line_width
+            cursor.lv['h'] = self.crosshair_horizontal
+            cursor.lv['v'] = self.crosshair_vertical
 
         # 5. Translate pure canvas properties
         if self.title is not None:
@@ -805,7 +842,7 @@ class VTKCanvas(Canvas):
                 else:
                     ticker.precisionOff()
             else:
-                logger.warn(
+                logger.warning(
                     "refresh_signal called but date-time ticker unitialized.")
 
         # Create backend objects
@@ -901,6 +938,9 @@ class VTKCanvas(Canvas):
                 chart = self.add_vtk_chart(element, 0, i)
             else:
                 chart = element
+
+            if chart not in self.crosshair.charts and self.crosshair_enabled:
+                self.crosshair.charts.append(chart)
 
             # translate plot properties to chart
             draw_title = not stacked or (stacked and i == stack_sz - 1)

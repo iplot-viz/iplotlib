@@ -1,4 +1,5 @@
 import inspect
+from PySide2.QtWidgets import QDialog, QMessageBox
 import qtpy
 
 from qtpy.QtWidgets import QVBoxLayout, QWidget
@@ -12,6 +13,7 @@ import vtkmodules.qt
 vtkmodules.qt.PyQtImpl = qtpy.API_NAME
 
 # vtk requirements
+from vtkmodules.vtkCommonCore import vtkCommand
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor, PyQtImpl
 
 # iplot utilities
@@ -49,6 +51,10 @@ class QtVTKCanvas(QtPlotCanvas):
         # Let the view render its scene into our render window
         self._vtk_canvas.view.SetRenderWindow(self._qvtk_render_widget.GetRenderWindow())
 
+        # callback to process mouse movements
+        self.mouse_move_cb_tag = self._qvtk_render_widget.AddObserver(
+            vtkCommand.MouseMoveEvent, self.mouse_move_callback)
+
     def resizeEvent(self, event: QResizeEvent):
         size = event.size()
         if not size.width():
@@ -73,7 +79,11 @@ class QtVTKCanvas(QtPlotCanvas):
 
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
-        pass
+        self._vtk_canvas.crosshair_enabled = (mode == Canvas.MOUSE_MODE_CROSSHAIR)
+
+    def mouse_move_callback(self, obj, ev):
+        mousePos = obj.GetEventPosition()
+        self._vtk_canvas.crosshair.onMove(mousePos)
 
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
