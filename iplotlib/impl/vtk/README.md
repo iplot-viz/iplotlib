@@ -18,6 +18,7 @@
     + Resize event is received from QtVTKCanvas.
       + Resize title's rectangular area.
       + Resize chart matrix rectangular area.
+    + DateTime ticker logic is covered in [slides](https://confluence.iter.org/display/PMA/Meeting%2C+Notes+and+Actions?preview=/316087944/316087965/Handling%20of%2064-bit%20data.pptx)
   + The core linkage to VTK+Qt is implemented under `iplotlib/impl/vtk/qt/qtVTKCanvas.py`
     + Again, for simplicity and clean API, it subclasses the abstract iplotlib `QtPlotCanvas`
     + VTK provides Qt embed capabilities via `QVTKRenderWindowInteractor`.

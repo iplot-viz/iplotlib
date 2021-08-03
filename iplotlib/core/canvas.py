@@ -45,7 +45,7 @@ class Canvas(ABC):
 
     step: str = None
 
-    hi_precision_data: bool = None
+    hi_precision_data: bool = False
     dec_samples: int = 1000
     """Should the plot legend be shown"""
     legend: bool = True
