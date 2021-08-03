@@ -1,0 +1,76 @@
+import numpy as np
+import os
+import unittest
+from iplotlib.core.plot import PlotXY
+from iplotlib.core.signal import ArraySignal
+from iplotlib.impl.vtk.vtkCanvas import VTKCanvas
+from iplotlib.impl.vtk.utils import regression_test
+from iplotlib.impl.vtk.tests.QAppTestAdapter import QAppTestAdapter
+from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
+
+class VTKCanvasTesting(QAppTestAdapter):
+
+    def setUp(self) -> None:
+        ts = 1_000_000_000
+        te = ts + 8_000_000_000_000 * 32
+        xs = np.arange(ts, te, 8_000_000_000_000, dtype=np.uint64)
+        ys = np.sin(np.linspace(-1, 1, len(xs)))
+        # A 2col x 2row canvas
+        self.vtk_canvas = VTKCanvas(2, 2, title = os.path.basename(__file__))
+
+        # A plot in top-left with 1 signal.
+        signal11 = ArraySignal(title="Signal1.1", hi_precision_data=False)
+        signal11.set_data([xs, ys])
+        plot11 = PlotXY(title="DateTime=True, HiPrecision=False")
+        plot11.axes[0].is_date = True
+        plot11.add_signal(signal11)
+        self.vtk_canvas.add_plot(plot11, 0)
+
+        # A plot in bottom-left with 2 stacked signal.
+        signal121 = ArraySignal(title="Signal1.2.1")
+        signal121.set_data([xs, ys])
+        plot12 = PlotXY(title="DateTime=True, HiPrecision=False")
+        plot12.axes[0].is_date = True
+        plot12.add_signal(signal121)
+        signal122 = ArraySignal(title="Signal1.2.2")
+        signal122.set_data([xs, ys + np.sin(xs)])
+        plot12.add_signal(signal122, 2)
+        self.vtk_canvas.add_plot(plot12, 0)
+
+        # A plot in top-right with 1 signal.
+        signal21 = ArraySignal(title="Signal2.1")
+        signal21.set_data([xs, ys])
+        plot21 = PlotXY(title="DateTime=True, HiPrecision=False")
+        plot21.axes[0].is_date = True
+        plot21.add_signal(signal21)
+        self.vtk_canvas.add_plot(plot21, 1)
+
+        # A plot in bottom-right with 1 signal.
+        signal22 = ArraySignal(title="Signal2.2")
+        signal22.set_data([xs, ys])
+        plot22 = PlotXY(title="DateTime=False, HiPrecision=False")
+        plot22.add_signal(signal22)
+        self.vtk_canvas.add_plot(plot22, 1)
+
+        return super().setUp()
+
+    def tearDown(self):
+        return super().tearDown()
+
+    def test_refresh(self):
+        self.vtk_canvas.refresh()
+
+    @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
+    def test_visuals(self):
+        self.vtk_canvas.refresh()
+
+        self.canvas.set_canvas(self.vtk_canvas)
+        self.canvas.show()
+        self.canvas.get_qvtk_render_widget().Initialize()
+        self.canvas.get_qvtk_render_widget().Render()
+
+        renWin = self.canvas.get_qvtk_render_widget().GetRenderWindow()
+        self.assertTrue(regression_test(__file__, renWin))
+
+if __name__ == "__main__":
+    unittest.main()
