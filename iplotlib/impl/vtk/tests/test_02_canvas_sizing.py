@@ -9,7 +9,7 @@ class VTKCanvasTesting(unittest.TestCase):
         self.vtk_canvas = VTKCanvas(2, 2)
         return super().setUp()
 
-    def test_refresh(self):
+    def test_02_canvas_sizing_refresh(self):
 
         self.assertEqual(self.vtk_canvas.cols, 2)
         self.assertEqual(self.vtk_canvas.rows, 2)

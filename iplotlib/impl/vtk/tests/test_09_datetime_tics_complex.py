@@ -61,11 +61,11 @@ class VTKCanvasTesting(QAppTestAdapter):
     def tearDown(self):
         return super().tearDown()
 
-    def test_refresh(self):
+    def test_09_datetime_tics_complex_refresh(self):
         self.vtk_canvas.refresh()
 
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
-    def test_visuals(self):
+    def test_09_datetime_tics_complex_visuals(self):
 
         self.canvas.set_canvas(self.vtk_canvas)
         self.canvas.update()

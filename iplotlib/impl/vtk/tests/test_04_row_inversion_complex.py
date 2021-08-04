@@ -16,7 +16,7 @@ class VTKCanvasTesting(unittest.TestCase):
 
         return super().setUp()
 
-    def test_internal_row_id(self):
+    def test_04_row_inversion_complex(self):
         
         valid_internal_row_ids = [4, 2, 0]
 

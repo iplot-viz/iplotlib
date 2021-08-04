@@ -16,6 +16,8 @@ class VTKCanvasTesting(QAppTestAdapter):
 
     def setUp(self):
 
+        super().setUp()
+
         # A 2col x 3row canvas
         self.vtk_canvas = CanvasFactory.new(
             "vtk", 3, 2, title=os.path.basename(__file__))
@@ -75,16 +77,15 @@ class VTKCanvasTesting(QAppTestAdapter):
         # by default horizontal is off
         self.vtk_canvas.enable_crosshair(horizontal=True)
 
-        return super().setUp()
 
     def tearDown(self):
         return super().tearDown()
 
-    def test_refresh(self):
+    def test_10_crosshair_refresh(self):
         self.vtk_canvas.refresh()
 
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
-    def test_visuals(self):
+    def test_10_crosshair_visuals(self):
 
         self.canvas.set_canvas(self.vtk_canvas)
         self.canvas.set_mouse_mode(Canvas.MOUSE_MODE_CROSSHAIR)

@@ -6,7 +6,7 @@ class VTKCanvasTesting(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
 
-    def test_null_refresh(self):
+    def test_01_null_refresh(self):
         self.vtk_canvas = VTKCanvas(0, 0)
         self.vtk_canvas.refresh()
 

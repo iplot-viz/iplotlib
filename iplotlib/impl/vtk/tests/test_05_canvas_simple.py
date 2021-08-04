@@ -54,7 +54,7 @@ class VTKCanvasTesting(QAppTestAdapter):
     def tearDown(self):
         return super().tearDown()
 
-    def test_refresh(self):
+    def test_05_canvas_simple_refresh(self):
 
         self.assertEqual(self.vtk_canvas.cols, 2)
         self.assertEqual(self.vtk_canvas.rows, 2)
@@ -66,7 +66,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         self.assertEqual(size[1], 2)
 
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
-    def test_visuals(self):
+    def test_05_canvas_simple_visuals(self):
 
         self.canvas.set_canvas(self.vtk_canvas)
         self.canvas.update()
