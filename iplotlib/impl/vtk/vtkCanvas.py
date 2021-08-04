@@ -19,14 +19,14 @@ from vtkmodules.vtkCommonColor import vtkNamedColors
 from vtkmodules.vtkCommonCore import vtkAbstractArray, vtkStringArray
 from vtkmodules.vtkCommonDataModel import vtkColor4d, vtkTable, vtkVector2f, vtkVector2i, vtkRectd, vtkRecti
 from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine, vtkPlotPoints
-from vtkmodules.vtkViewsContext2D import vtkContextView
+from vtkmodules.vtkPythonContext2D import vtkPythonItem
 from vtkmodules.vtkRenderingCore import vtkTextProperty
 from vtkmodules.vtkRenderingContext2D import vtkContext2D, vtkContextMapper2D, vtkContextMouseEvent, vtkContextItem, vtkContextScene, vtkMarkerUtilities, vtkPen
+from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.util import numpy_support
-from vtkmodules.vtkPythonContext2D import vtkPythonItem
 
 from iplotLogging import setupLogger as sl
-logger = sl.get_logger(__name__, "DEBUG")
+logger = sl.get_logger(__name__, "INFO")
 
 AXIS_MAP = [vtkAxis.BOTTOM, vtkAxis.LEFT]
 
@@ -755,7 +755,11 @@ class VTKCanvas(Canvas):
         # 3. Allocate
         self.matrix.SetSize(vtkVector2i(self.cols, self.rows))
 
-        # 4.1 Fill canvas with charts
+        # 4.1 crosshair is a canvas wide mouse mode
+        self.crosshair_enabled = (
+            self.mouse_mode == Canvas.MOUSE_MODE_CROSSHAIR)
+
+        # 4.2 Fill canvas with charts
         for i, column in enumerate(self.plots):
 
             j = 0
@@ -767,9 +771,6 @@ class VTKCanvas(Canvas):
                 # Increment row number carefully. (for next iteration)
                 j += plot.row_span if isinstance(plot, Plot) else 1
 
-        # 4.2 canvas applicable mouse mode
-        self.crosshair_enabled = (self.mouse_mode == Canvas.MOUSE_MODE_CROSSHAIR)
-
         # 4.3 Crosshair widget
         self.crosshair.resize()
         for cursor, _ in self.crosshair.cursors:  # type: CrosshairCursor,
@@ -779,7 +780,6 @@ class VTKCanvas(Canvas):
             cursor.lw['v'] = self.crosshair_line_width
             cursor.lv['h'] = self.crosshair_horizontal
             cursor.lv['v'] = self.crosshair_vertical
-
 
         # 5. Translate pure canvas properties
         if self.title is not None:
@@ -849,8 +849,13 @@ class VTKCanvas(Canvas):
                 else:
                     ticker.precisionOff()
             else:
-                logger.warning(
-                    "refresh_signal called but date-time ticker unitialized.")
+                is_date = True
+                for ax in plot.axes:
+                    if (isinstance(ax, LinearAxis)):
+                        is_date &= ax.is_date
+                if is_date:
+                    logger.warning(
+                        "refresh_signal called but date-time ticker unitialized.")
 
         # Create backend objects
         plot_impl = self._plot_impl_lookup.get(id(signal))  # type: vtkPlot
@@ -949,19 +954,32 @@ class VTKCanvas(Canvas):
             if chart not in self.crosshair.charts and self.crosshair_enabled:
                 self.crosshair.charts.append(chart)
 
-            chart.SetActionToButton(vtkChart.PAN, vtkContextMouseEvent.NO_BUTTON)
-            chart.SetActionToButton(vtkChart.ZOOM, vtkContextMouseEvent.NO_BUTTON)
-            chart.SetActionToButton(vtkChart.ZOOM_AXIS, vtkContextMouseEvent.NO_BUTTON)
-            chart.SetActionToButton(vtkChart.SELECT, vtkContextMouseEvent.NO_BUTTON)
-            chart.SetActionToButton(vtkChart.SELECT_RECTANGLE, vtkContextMouseEvent.NO_BUTTON)
-            chart.SetActionToButton(vtkChart.CLICK_AND_DRAG, vtkContextMouseEvent.NO_BUTTON)
+            # Mouse mode handled for each chart.
+            chart.SetActionToButton(
+                vtkChart.PAN, vtkContextMouseEvent.NO_BUTTON)
+            chart.SetActionToButton(
+                vtkChart.ZOOM, vtkContextMouseEvent.NO_BUTTON)
+            chart.SetActionToButton(
+                vtkChart.ZOOM_AXIS, vtkContextMouseEvent.NO_BUTTON)
+            chart.SetActionToButton(
+                vtkChart.SELECT, vtkContextMouseEvent.NO_BUTTON)
+            chart.SetActionToButton(
+                vtkChart.SELECT_RECTANGLE, vtkContextMouseEvent.NO_BUTTON)
+            chart.SetActionToButton(
+                vtkChart.CLICK_AND_DRAG, vtkContextMouseEvent.NO_BUTTON)
+
+            # Turn off zoom with mouse wheel.
+            chart.ZoomWithMouseWheelOff()
 
             if self.mouse_mode == Canvas.MOUSE_MODE_PAN:
-                chart.SetActionToButton(vtkChart.PAN, vtkContextMouseEvent.LEFT_BUTTON)
+                chart.SetActionToButton(
+                    vtkChart.PAN, vtkContextMouseEvent.LEFT_BUTTON)
             elif self.mouse_mode == Canvas.MOUSE_MODE_SELECT:
-                chart.SetActionToButton(vtkChart.SELECT, vtkContextMouseEvent.LEFT_BUTTON)
+                chart.SetActionToButton(
+                    vtkChart.SELECT, vtkContextMouseEvent.LEFT_BUTTON)
             elif self.mouse_mode == Canvas.MOUSE_MODE_ZOOM:
-                chart.SetActionToButton(vtkChart.SELECT, vtkContextMouseEvent.LEFT_BUTTON)
+                chart.SetActionToButton(
+                    vtkChart.ZOOM, vtkContextMouseEvent.LEFT_BUTTON)
 
             # translate plot properties to chart
             draw_title = not stacked or (stacked and i == stack_sz - 1)
