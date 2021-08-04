@@ -118,32 +118,32 @@ def compare_images(valid: vtkImageData, test: vtkImageData) -> float:
     return comparator.GetThresholdedError(), comparator.GetOutput()
 
 
-def regression_test(test_src: str, renWin: vtkRenderWindow, threshold = 0.15) -> bool:
-    test_fname = os.path.basename(test_src)
-    dirname = os.path.dirname(test_src)
-    baseline_dir = os.path.join(dirname, "baseline")
+def regression_test(valid_image_abs_path: str, renWin: vtkRenderWindow, threshold = 0.15) -> bool:
+    valid_image_name = os.path.basename(valid_image_abs_path)
+    test_image_name = valid_image_name.replace("valid", "test")
+    diff_image_name = valid_image_name.replace("valid", "diff")
+    
+    baseline_dir = os.path.dirname(valid_image_abs_path)
+    tests_dir = os.path.dirname(baseline_dir)
 
-    image_fname = test_fname.replace(".py", ".png")
-    valid_image_name = os.path.join(
-        baseline_dir, image_fname.replace("test", "valid"))
-    test_image_name = os.path.join(dirname, image_fname)
-    diff_image_name = os.path.join(dirname, image_fname.replace("test", "diff"))
+    test_image_path = os.path.join(tests_dir, test_image_name)
+    diff_image_path = os.path.join(tests_dir, diff_image_name)
 
-    screenshot(renWin, fname=test_image_name)
+    screenshot(renWin, fname=test_image_path)
 
-    if not os.path.exists(valid_image_name):
-        logger.warning(f"Valid image does not exist. Creating {valid_image_name}")
-        shutil.move(test_image_name, valid_image_name)
+    if not os.path.exists(valid_image_abs_path):
+        logger.warning(f"Valid image does not exist. Creating {valid_image_abs_path}")
+        shutil.move(test_image_path, valid_image_abs_path)
         return False
 
     error, diff = compare_images(read_image(
-        valid_image_name), read_image(test_image_name))
+        valid_image_abs_path), read_image(test_image_path))
 
     if error > threshold:
-        write_image(diff_image_name, diff)
+        write_image(diff_image_path, diff)
         return False
     else:
-        os.remove(test_image_name)
+        os.remove(test_image_path)
         return True
 
 
