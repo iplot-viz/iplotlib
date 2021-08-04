@@ -1,0 +1,1 @@
+from iplotlib.impl.vtk.vtkCanvas import VTKCanvas
