@@ -1,27 +1,30 @@
 import numpy as np
 import os
 import unittest
-from iplotlib.core.plot import Plot
+from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import ArraySignal
-from iplotlib.impl.vtk.vtkCanvas import VTKCanvas
+from iplotlib.impl import CanvasFactory
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.QAppTestAdapter import QAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
+
 
 class VTKCanvasTesting(QAppTestAdapter):
 
     def setUp(self) -> None:
 
-        # A 1col x 7row canvas
-        self.vtk_canvas = VTKCanvas(6, 1, title = os.path.basename(__file__), legend=True, grid=True)
+        # A 1col x 6row canvas
+        self.vtk_canvas = CanvasFactory.new(
+            "vtk", 6, 1, title=os.path.basename(__file__), legend=True, grid=True)
 
         n_samples = 10
         x_lo_prec = np.linspace(0, 2 * np.math.pi, n_samples, dtype=np.float32)
         y_lo_prec = np.sin(x_lo_prec)
-        
+
         # A plot with 5 signals for color testing
-        colors = ["blue", "chocolate", "orange_red", "cadmium_yellow", "emerald_green"]
-        plot = Plot(title="Color")
+        colors = ["blue", "chocolate", "orange_red",
+                  "cadmium_yellow", "emerald_green"]
+        plot = PlotXY(title="Color")
         for i in range(5):
             signal = ArraySignal(
                 title=f"{colors[i]}",
@@ -31,10 +34,10 @@ class VTKCanvasTesting(QAppTestAdapter):
             signal.set_data([x_lo_prec, y_lo_prec + np.array([i] * n_samples)])
             plot.add_signal(signal)
         self.vtk_canvas.add_plot(plot)
-        
+
         # A plot with 3 signals for line style testing
         line_styles = ["solid", "dashed", "dotted"]
-        plot = Plot(title="LineStyle")
+        plot = PlotXY(title="LineStyle")
         for i in range(3):
             signal = ArraySignal(
                 title=f"{line_styles[i]}",
@@ -48,7 +51,7 @@ class VTKCanvasTesting(QAppTestAdapter):
 
         # A plot with 3 signals for line size testing
         line_sizes = [2, 3, 4]
-        plot = Plot(title="LineSize")
+        plot = PlotXY(title="LineSize")
         for i in range(3):
             signal = ArraySignal(
                 title=f"LineSize-{line_sizes[i]}",
@@ -62,7 +65,7 @@ class VTKCanvasTesting(QAppTestAdapter):
 
         # A plot with 5 signals for marker-style testing
         markers = ['x', 'o', 'square', 'diamond', 'circle']
-        plot = Plot(title="Marker")
+        plot = PlotXY(title="Marker")
         for i in range(5):
             signal = ArraySignal(
                 title=f"{markers[i]}",
@@ -76,7 +79,7 @@ class VTKCanvasTesting(QAppTestAdapter):
 
         # A plot with 3 signals for marker-size testing
         marker_sizes = [8, 12, 14]
-        plot = Plot(title="MarkerSize")
+        plot = PlotXY(title="MarkerSize")
         for i in range(3):
             signal = ArraySignal(
                 title=f"{marker_sizes[i]}",
@@ -91,7 +94,7 @@ class VTKCanvasTesting(QAppTestAdapter):
 
         # A plot with 3 signals to test various kind of stepping draw styles
         step_types = [None, "steps-mid", "steps-post", "steps-pre"]
-        plot = Plot(title="Step")
+        plot = PlotXY(title="Step")
         for i in range(4):
             signal = ArraySignal(
                 title=f"{step_types[i]}",
@@ -111,16 +114,20 @@ class VTKCanvasTesting(QAppTestAdapter):
 
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
     def test_visuals(self):
-        self.vtk_canvas.refresh()
 
-        self.canvas.resize(800, 1080)
         self.canvas.set_canvas(self.vtk_canvas)
+        self.canvas.update()
         self.canvas.show()
-        self.canvas.get_qvtk_render_widget().Initialize()
-        self.canvas.get_qvtk_render_widget().Render()
+        self.canvas.get_render_widget().Initialize()
+        self.canvas.get_render_widget().Render()
 
-        renWin = self.canvas.get_qvtk_render_widget().GetRenderWindow()
-        self.assertTrue(regression_test(__file__, renWin))
+        renWin = self.canvas.get_render_widget().GetRenderWindow()
+        valid_image_name = os.path.basename(__file__).replace(
+            "test", "valid").replace(".py", ".png")
+        valid_image_path = os.path.join(os.path.join(
+            os.path.dirname(__file__), "baseline"), valid_image_name)
+        self.assertTrue(regression_test(valid_image_path, renWin))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,7 +3,7 @@ import os
 import unittest
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import ArraySignal
-from iplotlib.impl.vtk.vtkCanvas import VTKCanvas
+from iplotlib.impl import CanvasFactory
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.QAppTestAdapter import QAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
@@ -14,48 +14,59 @@ class VTKCanvasTesting(QAppTestAdapter):
     def setUp(self):
 
         # A 2col x 3row canvas
-        self.vtk_canvas = VTKCanvas(3, 2, title = os.path.basename(__file__))
+        self.vtk_canvas = CanvasFactory.new(
+            "vtk", 3, 2, title=os.path.basename(__file__))
 
         plot11 = PlotXY(col_span=2)
         signal11 = ArraySignal(title="Signal_a_1.1")
-        signal11.set_data([np.array([0., 1., 2., 3.]), np.array([0., 1., 2., 3.])])
+        signal11.set_data([np.array([0., 1., 2., 3.]),
+                          np.array([0., 1., 2., 3.])])
         plot11.add_signal(signal11)
         signal11 = ArraySignal(title="Signal_b_1.1")
-        signal11.set_data([np.array([0., 1., 2., 3.]), np.array([1., 2., 3., 4.])])
+        signal11.set_data([np.array([0., 1., 2., 3.]),
+                          np.array([1., 2., 3., 4.])])
         plot11.add_signal(signal11)
         signal11 = ArraySignal(title="Signal_c_1.1")
-        signal11.set_data([np.array([0., 1., 2., 3.]), np.array([2., 3., 4., 5.])])
+        signal11.set_data([np.array([0., 1., 2., 3.]),
+                          np.array([2., 3., 4., 5.])])
         plot11.add_signal(signal11)
         self.vtk_canvas.add_plot(plot11, 0)
         self.vtk_canvas.add_plot(None, 1)
 
         plot12 = PlotXY()
         signal121 = ArraySignal(title="Signal1.2.1")
-        signal121.set_data([np.array([0., 1., 2., 3.]), np.array([0., 1., 2., 3.])])
+        signal121.set_data([np.array([0., 1., 2., 3.]),
+                           np.array([0., 1., 2., 3.])])
         plot12.add_signal(signal121)
         signal122 = ArraySignal(title="Signal1.2.2")
-        signal122.set_data([np.array([0., 1., 2., 3.]), np.array([0., 1., 2., 3.])])
+        signal122.set_data([np.array([0., 1., 2., 3.]),
+                           np.array([0., 1., 2., 3.])])
         plot12.add_signal(signal122, stack=2)
         self.vtk_canvas.add_plot(plot12, 0)
 
         plot13 = PlotXY()
         signal13 = ArraySignal(title="Signal1.3")
-        signal13.set_data([np.array([0., 1., 2., 3.]), np.array([0., 1., 2., 3.])])
+        signal13.set_data([np.array([0., 1., 2., 3.]),
+                          np.array([0., 1., 2., 3.])])
         plot13.add_signal(signal13)
         self.vtk_canvas.add_plot(plot13, 0)
 
         plot22 = PlotXY(row_span=2)
         signal22 = ArraySignal(title="Signal2.2")
-        signal22.set_data([np.array([0., 1., 2., 3.]), np.array([0., 1., 2., 3.])])
+        signal22.set_data([np.array([0., 1., 2., 3.]),
+                          np.array([0., 1., 2., 3.])])
         plot22.add_signal(signal22)
         signal22 = ArraySignal(title="Signal2.2")
-        signal22.set_data([np.array([0., 1., 2., 3.]), np.array([1., 2., 3., 4.])])
+        signal22.set_data([np.array([0., 1., 2., 3.]),
+                          np.array([1., 2., 3., 4.])])
         plot22.add_signal(signal22)
         signal22 = ArraySignal(title="Signal2.2")
-        signal22.set_data([np.array([0., 1., 2., 3.]), np.array([2., 3., 4., 5.])])
+        signal22.set_data([np.array([0., 1., 2., 3.]),
+                          np.array([2., 3., 4., 5.])])
         plot22.add_signal(signal22)
         signal22 = ArraySignal(title="Signal2.2")
-        signal22.set_data([np.array([0., 1., 2., 3.]), np.array([3., 4., 5., 6.])])
+        signal22.set_data([np.array([0., 1., 2., 3.]),
+                          np.array([3., 4., 5., 6.])])
         plot22.add_signal(signal22)
         self.vtk_canvas.add_plot(plot22, 1)
 
@@ -74,18 +85,23 @@ class VTKCanvasTesting(QAppTestAdapter):
         size = self.vtk_canvas.matrix.GetSize()
         self.assertEqual(size[0], 2)
         self.assertEqual(size[1], 3)
-        
+
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
     def test_visuals(self):
-        self.vtk_canvas.refresh()
 
         self.canvas.set_canvas(self.vtk_canvas)
+        self.canvas.update()
         self.canvas.show()
-        self.canvas.get_qvtk_render_widget().Initialize()
-        self.canvas.get_qvtk_render_widget().Render()
+        self.canvas.get_render_widget().Initialize()
+        self.canvas.get_render_widget().Render()
 
-        renWin = self.canvas.get_qvtk_render_widget().GetRenderWindow()
-        self.assertTrue(regression_test(__file__, renWin))
+        renWin = self.canvas.get_render_widget().GetRenderWindow()
+        valid_image_name = os.path.basename(__file__).replace(
+            "test", "valid").replace(".py", ".png")
+        valid_image_path = os.path.join(os.path.join(
+            os.path.dirname(__file__), "baseline"), valid_image_name)
+        self.assertTrue(regression_test(valid_image_path, renWin))
+
 
 if __name__ == "__main__":
     unittest.main()
