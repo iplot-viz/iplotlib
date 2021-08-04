@@ -41,7 +41,7 @@ setuptools.setup(
         "matplotlib >= 3.3.3",
         "pandas >= 1.1.4",
         "qtpy >= 1.9.0",
-        "vtk >= 9.3.0"
+        "vtk >= 9.0.3"
     ],
     package_data = {
         "iplotlib.qt": ["icons/*.png"]
