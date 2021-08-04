@@ -12,7 +12,6 @@ get_abs_filename()
 
 # Set up environment for compilation
 source /usr/share/Modules/init/sh
-module use /work/imas/etc/modulefiles
 module use /work/imas/etc/modules/all
 
 source environ.sh $*
