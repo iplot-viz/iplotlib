@@ -57,10 +57,19 @@ class QStandaloneCanvas:
         self.qt_main_widget.show()
         sys.exit(self.qt_app.exec_())
 
+def register(impl: str="vtk"):
+    try:
+        if impl.lower() in ["matplotlib", "mpl", "mplot"]:
+            from iplotlib.impl.matplotlib.qt.qtMatplotlibCanvas import QtMatplotlibCanvas
+            QStandaloneCanvas.register_implementation(QtMatplotlibCanvas, impl.lower())
+        elif impl.lower() == "vtk":
+            from iplotlib.impl.vtk.qt.qtVTKCanvas import QtVTKCanvas
+            QStandaloneCanvas.register_implementation(QtVTKCanvas, "vtk")
+        else:
+            logger.error(f"Invalid implementation: {impl}")
+    except ModuleNotFoundError:
+        logger.error(f"No {impl.lower()} canvas implementation found")
 
-try:
-    from iplotlib.impl.matplotlib.qt.qtMatplotlibCanvas import QtMatplotlibCanvas
-
-    QStandaloneCanvas.register_implementation(QtMatplotlibCanvas, "MATPLOTLIB")
-except ModuleNotFoundError:
-    logger.error("No matplotlib canvas implementation found")
+if __name__ == "__main__":
+    impl = sys.argv[1]
+    QStandaloneCanvas(impl).show()
