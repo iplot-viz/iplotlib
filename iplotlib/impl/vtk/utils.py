@@ -25,6 +25,11 @@ def get_color4d(color: str) -> typing.Tuple[float]:
     Returns:
         typing.Tuple[float]: r, g, b, a (0. ... 1.)
     """
+    if color[0] == "#" and len(color) == 7:
+        color += "FF"
+    if color[0] == "#" and len(color) == 9:
+        # Convert hex string to RGBA
+        return tuple(int(color[i:i + 2], 16) / 255 for i in range(1, 9, 2))
     c4d = vtkColor4d()
     vtkColors.GetColor(color, c4d)
     return (c4d.GetRed(), c4d.GetGreen(), c4d.GetBlue(), c4d.GetAlpha())
@@ -39,6 +44,11 @@ def get_color4ub(color: str) -> typing.Tuple[int]:
     Returns:
         typing.Tuple[int]: r, g, b, a (0 ... 255)
     """
+    if color[0] == "#" and len(color) == 7:
+        color += "FF"
+    if color[0] == "#" and len(color) == 9:
+        # Convert hex string to RGBA
+        return tuple(int(color[i:i + 2], 16) for i in range(1, 9, 2))
     c4ub = vtkColor4ub()
     vtkColors.GetColor(color, c4ub)
     return (c4ub.GetRed(), c4ub.GetGreen(), c4ub.GetBlue(), c4ub.GetAlpha())
@@ -53,6 +63,9 @@ def get_color3d(color: str) -> typing.Tuple[float]:
     Returns:
         typing.Tuple[float]: r, g, b (0. ... 1.)
     """
+    if color[0] == "#" and len(color) == 7:
+        # Convert hex string to RGBA
+        return tuple(int(color[i:i + 2], 16) / 255 for i in range(1, 7, 2))
     c3d = vtkColor3d()
     vtkColors.GetColor(color, c3d)
     return (c3d.GetRed(), c3d.GetGreen(), c3d.GetBlue())
@@ -67,6 +80,9 @@ def get_color3ub(color: str) -> typing.Tuple[int]:
     Returns:
         typing.Tuple[int]: r, g, b (0 ... 255)
     """
+    if color[0] == "#" and len(color) == 7:
+        # Convert hex string to RGBA
+        return tuple(int(color[i:i + 2], 16) for i in range(1, 7, 2))
     c3ub = vtkColor3ub()
     vtkColors.GetColor(color, c3ub)
     return (c3ub.GetRed(), c3ub.GetGreen(), c3ub.GetBlue())
