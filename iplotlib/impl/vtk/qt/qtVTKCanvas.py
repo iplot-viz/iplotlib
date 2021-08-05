@@ -36,10 +36,12 @@ class QtVTKCanvas(QtPlotCanvas):
         Args:
             parent (QWidget, optional): Parent QWidget. Defaults to None.
         """
-        super(QtPlotCanvas, self).__init__(parent=parent, **kwargs)
+        super().__init__(parent, **kwargs)
 
-        self.impl_canvas = CanvasFactory.new("vtk")
         self.render_widget = QVTKRenderWindowInteractor(parent, **kwargs)
+        
+        self.impl_canvas = CanvasFactory.new("vtk")
+        self.set_canvas(kwargs.get('canvas'))
         # Let the view render its scene into our render window
         self.impl_canvas.view.SetRenderWindow(self.render_widget.GetRenderWindow())
 
@@ -76,11 +78,20 @@ class QtVTKCanvas(QtPlotCanvas):
 
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
-        self.impl_canvas.mouse_mode = mode
+        
+        logger.info(f"Mouse mode: {self.impl_canvas.mouse_mode} -> {mode}")
+        self.impl_canvas.remove_crosshair_widget()
+        self.impl_canvas.refresh_mouse_mode(mode)
+        self.impl_canvas.refresh_crosshair_widget()
+        self.render()
 
     def mouse_move_callback(self, obj, ev):
         mousePos = obj.GetEventPosition()
         self.impl_canvas.crosshair.onMove(mousePos)
+
+    def showEvent(self, event: qtpy.QtGui.QShowEvent):
+        super().showEvent(event)
+        self.render()
 
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
@@ -96,7 +107,6 @@ class QtVTKCanvas(QtPlotCanvas):
                 setattr(self.impl_canvas, attr_name, getattr(canvas, attr_name))
 
         self.impl_canvas.refresh()
-        self.render_widget.repaint()
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
@@ -108,3 +118,7 @@ class QtVTKCanvas(QtPlotCanvas):
     def update(self):
         self.impl_canvas.refresh()
         super().update()
+    
+    def render(self):
+        self.render_widget.Initialize()
+        self.render_widget.Render()
