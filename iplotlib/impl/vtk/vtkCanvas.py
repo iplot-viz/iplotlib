@@ -1,3 +1,4 @@
+from iplotlib.impl.vtk.tools.queryMatrix import get_charts
 import numpy as np
 import typing
 from collections import defaultdict
@@ -9,7 +10,7 @@ from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.core.signal import ArraySignal, Signal
 from iplotlib.core.property_manager import PropertyManager
 from iplotlib.impl.vtk import utils as vtkImplUtils
-from iplotlib.impl.vtk.tools import CanvasTitleItem, CrosshairCursorWidget, VTK64BitTimePlotSupport
+from iplotlib.impl.vtk.tools import CanvasTitleItem, CrosshairCursorWidget, VTK64BitTimePlotSupport, find_chart, find_element_index
 
 # needed for runtime vtk-opengl libs
 import vtkmodules.vtkRenderingOpenGL2
@@ -24,7 +25,7 @@ from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.util import numpy_support
 
 from iplotLogging import setupLogger as sl
-logger = sl.get_logger(__name__, "INFO")
+logger = sl.get_logger(__name__, "DEBUG")
 
 AXIS_MAP = [vtkAxis.BOTTOM, vtkAxis.LEFT]
 STEP_MAP = {"none": "none", "mid": "steps-mid", "post": "steps-post",
@@ -41,18 +42,22 @@ class VTKCanvas(Canvas):
     """A concrete implementation of iplotlib.core.canvas.Canvas
     """
 
-    def __post_init__(self):
+    def __post_init__(self, focus_plot=None):
         """Initialize underlying vtk classes.
         """
         super().__post_init__()
+
+        self.focus_plot = focus_plot
+        self._impl_focus_plot = None
+        self._focus_plot_index = vtkVector2i(-1, -1)
 
         self.view = vtkContextView()
         self.scene = self.view.GetScene()
         self.matrix = vtkChartMatrix()
         self.scene.AddItem(self.matrix)
+
         self.custom_tickers = {}
         self.crosshair = CrosshairCursorWidget(self.matrix,
-                                               [],
                                                horizOn=True,
                                                hLineW=1,
                                                vLineW=1)
@@ -63,6 +68,7 @@ class VTKCanvas(Canvas):
         self.matrix.SetBorderTop(0)
 
         self._abstr_plot_chart_lookup = defaultdict(list)  # Plot -> vtkChart
+        self._impl_index_abstr_plot_lookup = dict()  # (c, r) -> Plot
         self._abstr_impl_plot_lookup = dict()  # Signal -> vtkPlot
         self._signal_plot_lookup = dict()  # reverse lookup i.e, Signal -> Plot
 
@@ -136,11 +142,38 @@ class VTKCanvas(Canvas):
 
     def clear(self):
         self._abstr_plot_chart_lookup.clear()
+        self._impl_index_abstr_plot_lookup.clear()
         self._abstr_impl_plot_lookup.clear()
         self._signal_plot_lookup.clear()
         self.matrix.SetSize(vtkVector2i(0, 0))
         self.custom_tickers.clear()
         self.crosshair.clear()
+
+    def find_chart(self, probe: typing.Tuple) -> typing.Union[None, vtkChart]:
+        """Find a chart right under the given probe position.
+            This method is determined to find a chart
+
+        Args:
+            probe (typing.Tuple): Position in VTK screen coordinates.
+        """
+        screenToScene = self.scene.GetTransform()
+        scenePos = [0, 0]
+        screenToScene.TransformPoints(probe, scenePos, 1)
+
+        return find_chart(self.matrix, scenePos)
+
+    def find_element_index(self, probe: typing.Tuple) -> vtkVector2i:
+        """Find a chart/chartmatrix right under the given probe position.
+            This method is not determined to find a chart. It just returns the first element found.
+
+        Args:
+            probe (typing.Tuple): Position in VTK screen coordinates.
+        """
+        screenToScene = self.scene.GetTransform()
+        scenePos = [0, 0]
+        screenToScene.TransformPoints(probe, scenePos, 1)
+
+        return find_element_index(self.matrix, scenePos)
 
     def get_internal_row_id(self, r: int, plot: Plot) -> int:
         """This method accounts for the difference in row numbering convention
@@ -182,19 +215,32 @@ class VTKCanvas(Canvas):
             self.clear()
 
             # 3. Allocate
-            self.matrix.SetSize(vtkVector2i(self.cols, self.rows))
+            if self.focus_plot is not None:
+                self.matrix.SetSize(vtkVector2i(1, 1))
+            else:
+                self.matrix.SetSize(vtkVector2i(self.cols, self.rows))
 
         # 4 Fill canvas with charts
+        stop_drawing = False
         for i, column in enumerate(self.plots):
 
             j = 0
 
             for plot in column:
 
-                self.refresh_plot(plot, i, j)
+                if self.focus_plot is not None:
+                    if self.focus_plot == plot:
+                        self.refresh_plot(plot, 0, 0)
+                        stop_drawing = True
+                        break
+                elif self.focus_plot is None:
+                    self.refresh_plot(plot, i, j)
 
                 # Increment row number carefully. (for next iteration)
                 j += plot.row_span if isinstance(plot, Plot) else 1
+
+            if stop_drawing:
+                break
 
         # 5 Refresh mouse mode
         self.refresh_mouse_mode(self.mouse_mode)
@@ -225,7 +271,7 @@ class VTKCanvas(Canvas):
                     if ax.font_color is not None:
                         appearance.SetColor(
                             *vtkImplUtils.get_color3d(ax.font_color))
-                        logger.info(
+                        logger.debug(
                             f"Ax color: {vtkImplUtils.get_color3d(ax.font_color)}")
                     if ax.font_size is not None:
                         appearance.SetFontSize(ax.font_size)
@@ -234,7 +280,7 @@ class VTKCanvas(Canvas):
         """Updates canvas title text and the appearance
         """
         if self.title is not None:
-            logger.info(f"Setting canvas title: {self.title}")
+            logger.debug(f"Setting canvas title: {self.title}")
             self._py_title_item.title = self.title
 
         if self.font_color:
@@ -247,7 +293,19 @@ class VTKCanvas(Canvas):
         self.crosshair.clear()
 
     def refresh_crosshair_widget(self):
+        self.crosshair.clear()
+        
+        if not self.crosshair_enabled:
+            return
+        if isinstance(self._impl_focus_plot, vtkChart):
+            self.crosshair.charts.append(self._impl_focus_plot)
+        elif isinstance(self._impl_focus_plot, vtkChartMatrix):
+            get_charts(self._impl_focus_plot, self.crosshair.charts)
+        else:
+            get_charts(self.matrix, self.crosshair.charts)
+
         self.crosshair.resize()
+
         for cursor, _ in self.crosshair.cursors:  # type: CrosshairCursor,
             cursor.lc['h'] = self.crosshair_color
             cursor.lc['v'] = self.crosshair_color
@@ -362,8 +420,6 @@ class VTKCanvas(Canvas):
 
         for _, charts in self._abstr_plot_chart_lookup.items():
             for chart in charts:
-                if chart not in self.crosshair.charts and self.crosshair_enabled:
-                    self.crosshair.charts.append(chart)
 
                 # Mouse mode handled for each chart.
                 chart.SetActionToButton(
@@ -414,6 +470,10 @@ class VTKCanvas(Canvas):
 
         # Invert row id for vtk
         row_id = self.get_internal_row_id(row, plot)
+        self._impl_index_abstr_plot_lookup.update({(column, row_id): plot})
+
+        if self.focus_plot == plot:
+            row_id = 0
 
         # Deal with stacked charts
         stack_sz = len(plot.signals.keys())
@@ -441,8 +501,10 @@ class VTKCanvas(Canvas):
             chart = None
             if isinstance(element, vtkChartMatrix):
                 chart = self.add_vtk_chart(element, 0, i)
-            else:
+            elif isinstance(element, vtkChart):
                 chart = element
+            else:
+                logger.critical(f"Unexpected path in refresh_plot {column}, {row}, {row_id}")
 
             self.refresh_custom_ticker(0, plot, chart)
             self._abstr_plot_chart_lookup[id(plot)].append(chart)
@@ -623,3 +685,15 @@ class VTKCanvas(Canvas):
         self._title_region.SetFixedRect(
             vtkRecti(0, chart_height, w, title_height))
         self.matrix.SetRect(vtkRecti(0, 0, w, chart_height))
+
+    def set_focus_plot(self, index: vtkVector2i):
+        if index.GetX() < 0 or index.GetY() < 0:
+            logger.debug("Nothing to focus")
+            return
+
+        if self.focus_plot is None:
+            logger.debug(f"Set focus chart @ internal index : {index}")
+            self.focus_plot = self._impl_index_abstr_plot_lookup.get((index[0], index[1]))
+        else:
+            logger.debug("Set focus chart -> None")
+            self.focus_plot = None

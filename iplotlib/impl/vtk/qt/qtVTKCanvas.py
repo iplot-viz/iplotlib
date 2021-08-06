@@ -54,6 +54,10 @@ class QtVTKCanvas(QtPlotCanvas):
         self.mouse_move_cb_tag = self.render_widget.AddObserver(
             vtkCommand.MouseMoveEvent, self.mouse_move_callback)
 
+        # callback to process mouse double clicks
+        self.mouse_press_cb_tag = self.render_widget.AddObserver(
+            vtkCommand.LeftButtonPressEvent, self.mouse_dclick_callback)
+
     def resizeEvent(self, event: QResizeEvent):
         size = event.size()
         if not size.width():
@@ -83,11 +87,18 @@ class QtVTKCanvas(QtPlotCanvas):
         self.impl_canvas.remove_crosshair_widget()
         self.impl_canvas.refresh_mouse_mode(mode)
         self.impl_canvas.refresh_crosshair_widget()
-        self.render()
 
     def mouse_move_callback(self, obj, ev):
         mousePos = obj.GetEventPosition()
         self.impl_canvas.crosshair.onMove(mousePos)
+
+    def mouse_dclick_callback(self, obj, ev):
+        mousePos = obj.GetEventPosition()
+        if obj.GetRepeatCount() and self.impl_canvas.mouse_mode == Canvas.MOUSE_MODE_SELECT:
+            index = self.impl_canvas.find_element_index(mousePos)
+            self.impl_canvas.set_focus_plot(index)
+            self.impl_canvas.refresh()
+            self.render()
 
     def showEvent(self, event: qtpy.QtGui.QShowEvent):
         super().showEvent(event)
