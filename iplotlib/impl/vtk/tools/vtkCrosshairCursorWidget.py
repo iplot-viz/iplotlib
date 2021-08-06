@@ -1,6 +1,7 @@
 import typing
 
 from iplotlib.impl.vtk import utils as vtkImplUtils
+from iplotlib.impl.vtk.tools.queryMatrix import find_root_plot
 
 from vtkmodules.vtkCommonDataModel import vtkVector2f
 from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart
@@ -53,8 +54,7 @@ class CrosshairCursor(object):
 
 
 class CrosshairCursorWidget:
-    def __init__(self, matrix: vtkChartMatrix, charts: typing.List[vtkChart],
-                 **kwargs):
+    def __init__(self, matrix: vtkChartMatrix, **kwargs):
         self.matrix = matrix
         self.charts = []
         self.rootPlotPos = [0, 0]
@@ -93,31 +93,16 @@ class CrosshairCursorWidget:
             return
 
         screenToScene = scene.GetTransform()
-        scenePos = [0, 0]
-        screenToScene.TransformPoints(mousePos, scenePos, 1)
+        probe = [0, 0]
+        screenToScene.TransformPoints(mousePos, probe, 1)
 
         self.hide()
 
-        def _get_plot_root(matrix: vtkChartMatrix):
-
-            elementIndex = matrix.GetChartIndex(vtkVector2f(scenePos))
-            logger.debug(f"Mouse in element {elementIndex}")
-
-            if elementIndex.GetX() < 0 or elementIndex.GetY() < 0:
-                return
-
-            chart = matrix.GetChart(elementIndex)
-            subMatrix = matrix.GetChartMatrix(elementIndex)
-            if chart is None and subMatrix is not None:
-                return _get_plot_root(subMatrix)
-            elif chart is not None and subMatrix is None:
-                return chart.GetPlot(0)
-
-        plotRoot = _get_plot_root(self.matrix)
+        plotRoot = find_root_plot(self.matrix, probe)
         if plotRoot is None:
             return
 
-        self.rootPlotPos = plotRoot.MapFromScene(vtkVector2f(scenePos))
+        self.rootPlotPos = plotRoot.MapFromScene(vtkVector2f(probe))
         self._update()
 
     def _update(self):
