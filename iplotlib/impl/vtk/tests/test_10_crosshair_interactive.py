@@ -94,7 +94,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         self.canvas.get_render_widget().Initialize()
         self.canvas.get_render_widget().Render()
 
-        QTest.mouseMove(self.canvas.get_render_widget(), QPoint(400, 200))
+        QTest.mouseMove(self.canvas.get_render_widget(), QPoint(400, 150), delay=1)
         self.app.processEvents()
 
         renWin = self.canvas.get_render_widget().GetRenderWindow()
