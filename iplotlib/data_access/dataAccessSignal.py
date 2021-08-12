@@ -130,7 +130,7 @@ class AccessHelper:
         return AccessHelper()
 
     def get_data(self, signal):
-        logger.info("[UDA {}] Get data: {} ts_start={} ts_end={} pulsenb={} nbsamples={}".format(self.query_no, signal.varname, self.str_ts(signal, signal.ts_start), self.str_ts(signal, signal.ts_end),
+        logger.debug("[UDA {}] Get data: {} ts_start={} ts_end={} pulsenb={} nbsamples={}".format(self.query_no, signal.varname, self.str_ts(signal, signal.ts_start), self.str_ts(signal, signal.ts_end),
                                                                                            signal.pulsenb, signal.dec_samples or self.num_samples))
         # logger.info(F"[UDA2: {float(signal.ts_start):.20f}")
         self.query_no += 1
@@ -159,10 +159,13 @@ class AccessHelper:
                 raw = AccessHelper.da.getData(**common_params, **data_params)
 
                 xdata = np_nvl(raw.xdata) if signal.ts_relative else np_nvl(raw.xdata).astype('int')
-                logger.info(F"\tUDA samples: {len(xdata)} params={data_params}")
+
                 if len(xdata) > 0:
-                    logger.info(F"\tX range: d_min={xdata[0]} d_max={xdata[-1]} delta={xdata[-1]-xdata[0]} type={xdata.dtype}")
+                    logger.debug(F"\tUDA samples: {len(xdata)} params={data_params}")
+                    logger.debug(F"\tX range: d_min={xdata[0]} d_max={xdata[-1]} delta={xdata[-1]-xdata[0]} type={xdata.dtype}")
                     # logger.info(xdata)
+                else:
+                    logger.info(F"\tUDA samples: {len(xdata)} params={data_params}")
                 return [xdata, np_nvl(raw.ydata)], [raw.xunit, raw.yunit]
         else:
             # logger.info("RETURNING EMPTY DATA SET", type(np.empty(1)), type(np.empty(1).astype('datetime64[ns]')))

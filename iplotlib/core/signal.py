@@ -57,16 +57,19 @@ class ArraySignal(Signal):
         def gather(arrs, idx):
             return [arrs[i][idx] if isinstance(arrs[i], Collection) and len(arrs[i]) > idx else None for i in range(len(arrs))]
 
-        if isinstance(self.data, Collection) and isinstance(self.data[0], Collection):
-            index = np.searchsorted(self.data[0], sample)
+        try:
+            if isinstance(self.data, Collection) and isinstance(self.data[0], Collection):
+                index = np.searchsorted(self.data[0], sample)
 
-            if index == len(self.data[0]):
-                index = len(self.data[0]) - 1
+                if index == len(self.data[0]):
+                    index = len(self.data[0]) - 1
 
-            # Either return values at index or values at index-1
-            if index > 0 and abs(self.data[0][index - 1] - sample) < abs(self.data[0][index] - sample):
-                index = index - 1
+                # Either return values at index or values at index-1
+                if index > 0 and abs(self.data[0][index - 1] - sample) < abs(self.data[0][index] - sample):
+                    index = index - 1
 
-            return gather(self.data, index) if index > 0 else None
+                return gather(self.data, index) if index > 0 else None
+        except:
+            pass
 
         return None

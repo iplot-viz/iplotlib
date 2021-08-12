@@ -44,7 +44,9 @@ class MatplotlibCanvas:
         self.mpl_task_queue = Queue()
 
         self.mpl_axes = dict()
+        self.mpl_axes_lut = dict()
         self.mpl_shapes = dict()
+
 
         register_matplotlib_converters()
         #TODO: SO:50325907 it would be better to call tight_layout manually than use this
@@ -99,6 +101,7 @@ class MatplotlibCanvas:
             self.canvas = canvas
             self.figure.clear()
             self.mpl_axes = dict()
+            self.mpl_axes_lut = dict()
             self.mpl_shapes = dict()
 
             if canvas.title:
@@ -147,7 +150,7 @@ class MatplotlibCanvas:
                         """If axis is a RangeAxis update its min and max to mpl view limits"""
 
                         if isinstance(range_axis, RangeAxis):
-                            logger.info(F"*Axis update {id(range_axis)} xmin={a.get_xlim()[0]} xmax={a.get_xlim()[1]} delta={a.get_xlim()[1] - a.get_xlim()[0]} ")
+                            logger.debug(F"\tAxis update: mpl_axes={id(mpl_axes)} range_axis={id(range_axis)} axis_index={axis_index}  ")
                             range_axis.begin, range_axis.end = NanosecondHelper.mpl_get_lim(mpl_axes, axis_index)
                             return [range_axis.begin, range_axis.end]
 
@@ -161,7 +164,7 @@ class MatplotlibCanvas:
                                     a_min, a_max = update_single_range_axis(stack_axis, axis_index, a)
                                 else:
                                     if isinstance(stack_axis, RangeAxis):
-                                        a_min, a_max = NanosecondHelper.mpl_get_lim(mpl_axes, axis_index)
+                                        a_min, a_max = NanosecondHelper.mpl_get_lim(self.mpl_axes_lut[id(stack_axis)], axis_index)
                                         stack_axis.begin, stack_axis.end = a_min, a_max
                                     else:
                                         a_min, a_max = None, None
@@ -256,6 +259,8 @@ class MatplotlibCanvas:
         if axis is None:
             axis = plot.axes[axis_idx]
 
+        self.mpl_axes_lut[id(axis)] = mpl_axes
+
         font_color = nvl(axis.font_color, plot.font_color, canvas.font_color, 'black')
         font_size = nvl(axis.font_size, plot.font_size, canvas.font_size)
 
@@ -282,7 +287,7 @@ class MatplotlibCanvas:
                 # mpl_axis.axes.tick_params(axis='x', which='major', labelrotation=5)
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
-            logger.info(F"process_iplotlib_axis: setting {axis_idx} axis range to {axis.begin} and {axis.end}")
+            logger.debug(F"process_iplotlib_axis: setting {axis_idx} axis range to {axis.begin} and {axis.end}")
             NanosecondHelper.mpl_set_lim(mpl_axes, axis_idx, [axis.begin, axis.end])
 
     def get_signal_style(self, signal, plot=None, canvas=None):
@@ -751,9 +756,9 @@ class NanosecondHelper:
         Returns None otherwise"""
 
         if isinstance(vals, Collection) and len(vals) > 0:
-            if (hasattr(vals, 'dtype') and vals.dtype.name == 'int64') \
+            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'int64') \
                     or (type(vals[0]) == int) \
-                    or isinstance(vals[0], numpy.int64):
+                    or isinstance(vals[0], numpy.int64)) and vals[0] > 10**15:
                 return vals[0]
         return None
 
