@@ -42,10 +42,10 @@ class DataAccessSignal(ArraySignal):
         self.data = None
         self.data_xrange = None, None
 
-    def __str__(self):
-        return "{}({}{}{}{}{})".format(self.__class__.__name__, self.varname, ', pulsenb=' + str(self.pulsenb) if self.pulsenb is not None else "",
-                                       ', ts_start=' + str(np.datetime64(self.ts_start, 'ns')) if not (self.ts_start is None or self.ts_relative) else "",
-                                       ', ts_end=' + str(np.datetime64(self.ts_end, 'ns')) if not (self.ts_end is None or self.ts_relative) else "", ', dec_samples=' + str(self.dec_samples))
+    # def __str__(self):
+    #     return "{}({}{}{}{}{})".format(self.__class__.__name__, self.varname, ', pulsenb=' + str(self.pulsenb) if self.pulsenb is not None else "",
+    #                                    ', ts_start=' + str(np.datetime64(self.ts_start, 'ns')) if not (self.ts_start is None or self.ts_relative) else "",
+    #                                    ', ts_end=' + str(np.datetime64(self.ts_end, 'ns')) if not (self.ts_end is None or self.ts_relative) else "", ', dec_samples=' + str(self.dec_samples))
 
     def get_data(self):
         if self._should_refresh_data():
@@ -121,8 +121,15 @@ class AccessHelper:
         return value  # return str(np.datetime64(value, 'ns')) if not (signal.ts_relative or value is None) else value
 
     def str_ts(self, signal, value):
-        if value is not None and value > 10**15:
-            return np.datetime64(value, 'ns')
+        try:
+            if value is not None:
+                if type(value) == np.datetime64:
+                    return value
+                if (type(value) == int or type(value) == float) and value > 10**15:
+                    return np.datetime64(value, 'ns')
+        except:
+            logger.error(f"Unable to convert value {value} to string timestamp")
+
         return value
 
     @staticmethod
@@ -130,8 +137,8 @@ class AccessHelper:
         return AccessHelper()
 
     def get_data(self, signal):
-        logger.debug("[UDA {}] Get data: {} ts_start={} ts_end={} pulsenb={} nbsamples={}".format(self.query_no, signal.varname, self.str_ts(signal, signal.ts_start), self.str_ts(signal, signal.ts_end),
-                                                                                           signal.pulsenb, signal.dec_samples or self.num_samples))
+        logger.debug("[UDA {}] Get data: {} ts_start={} ts_end={} pulsenb={} nbsamples={} relative={}".format(self.query_no, signal.varname, self.str_ts(signal, signal.ts_start), self.str_ts(signal, signal.ts_end),
+                                                                                           signal.pulsenb, signal.dec_samples or self.num_samples, signal.ts_relative))
         # logger.info(F"[UDA2: {float(signal.ts_start):.20f}")
         self.query_no += 1
 

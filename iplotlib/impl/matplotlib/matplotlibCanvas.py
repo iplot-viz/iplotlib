@@ -331,7 +331,7 @@ class MatplotlibCanvas:
                 for columns in self.canvas.plots:
                     for plot in columns:
                         if plot != self.focused_plot:
-                            logger.info(F"\t\tSetting range on plot {id(plot)} focused= {id(self.focused_plot)} begin={np.datetime64(begin, 'ns')}")
+                            logger.info(F"\t\tSetting range on plot {id(plot)} focused= {id(self.focused_plot)} begin={begin}")
                             set_x_axis_range(plot, begin, end)
 
             self.focused_plot = None
