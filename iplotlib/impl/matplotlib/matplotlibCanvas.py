@@ -127,17 +127,33 @@ class MatplotlibCanvas:
 
         def axis_update_callback(axis):
 
+            def get_range_axis_limits_from_mpl_axis(mpl_axis):
+                plot = mpl_axis._plot if hasattr(mpl_axis, '_plot') else None
+                if plot is not None and len(plot.axes or []) > 0:
+                    if isinstance(plot.axes[0], RangeAxis):
+                        return plot.axes[0].original_begin, plot.axes[0].original_end
+                return None, None
+
+            def get_all_shared_axes(base_axis):
+                ret = list()
+                base_begin, base_end = get_range_axis_limits_from_mpl_axis(base_axis)
+                if (base_begin, base_end) != (None, None):
+                    for axis in self.figure.axes:
+                        begin, end = get_range_axis_limits_from_mpl_axis(axis)
+                        if (begin, end) == (base_begin, base_end):
+                            ret.append(axis)
+                return ret
+
             affected_axes = axis.get_shared_x_axes().get_siblings(axis)
 
             if canvas.shared_x_axis:
-                other_axes = list(set(self.figure.axes) - set(affected_axes))
+                other_axes = get_all_shared_axes(axis)
                 for other_axis in other_axes:
-                    cur = axis.get_xlim()
-                    cur2 = other_axis.get_xlim()
-                    if cur[0] != cur2[0] or cur[1] != cur2[1]:
-                        other_axis.set_xlim(cur)
+                    cur_x_limits = NanosecondHelper.mpl_get_lim(axis, 0)
+                    other_x_limits = NanosecondHelper.mpl_get_lim(other_axis, 0)
+                    if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
+                        NanosecondHelper.mpl_set_lim(other_axis, 0, cur_x_limits)
 
-            # print(f"Affecred axes: {affected_axes}")
             for a_idx, a in enumerate(affected_axes):
                 ranges_hash = hash((*a.get_xlim(), *a.get_ylim()))
                 current_hash = self.axes_ranges.get(id(a))
@@ -838,7 +854,7 @@ class NanosecondHelper:
                         mpl_axis._offset = d[0]
 
                 if hasattr(mpl_axis, '_offset'):
-                    logger.info(F"\tAPPLY DATA OFFSET {mpl_axis._offset} to axis {id(mpl_axis)} idx: {i}")
+                    logger.debug(F"\tAPPLY DATA OFFSET {mpl_axis._offset} to axis {id(mpl_axis)} idx: {i}")
                     if isinstance(d, Collection):
                         ret.append([e - mpl_axis._offset for e in d])
                     else:

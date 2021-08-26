@@ -25,6 +25,8 @@ class Axis:
 @dataclass
 class RangeAxis(Axis):
 
+    original_begin: any = None
+    original_end: any = None
     begin: any = None
     end: any = None
 
