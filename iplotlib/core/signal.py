@@ -68,7 +68,7 @@ class ArraySignal(Signal):
                 if index > 0 and abs(self.data[0][index - 1] - sample) < abs(self.data[0][index] - sample):
                     index = index - 1
 
-                return gather(self.data, index) if index > 0 else None
+                return gather(self.data, index)
         except:
             pass
 
