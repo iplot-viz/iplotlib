@@ -146,7 +146,8 @@ class MatplotlibCanvas:
             def get_all_shared_axes(base_axis):
                 ret = list()
                 base_begin, base_end = get_range_axis_limits_from_mpl_axis(base_axis)
-                if (base_begin, base_end) != (None, None):
+
+                if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
                     for axis in self.figure.axes:
                         begin, end = get_range_axis_limits_from_mpl_axis(axis)
                         if (begin, end) == (base_begin, base_end):
