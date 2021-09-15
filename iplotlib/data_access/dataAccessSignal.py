@@ -56,6 +56,12 @@ class DataAccessSignal(ArraySignal):
                 self.data_xrange = self.data[0][0], self.data[0][-1]
 
         return self.data
+    
+    def calculate_data_hash(self):
+        # This hashcode is used to determine if we should perform new UDA request or not
+        return hash_code(self, ["ts_start", "ts_end", "dec_samples","pulsenb"])
+
+
 
     def get_ranges(self):
         return [[self.ts_start, self.ts_end]]
@@ -76,6 +82,8 @@ class DataAccessSignal(ArraySignal):
         # self.ts_start = ranges[0][0].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][0]
         # self.ts_end = ranges[0][1].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][1]
 
+
+	
     def _should_refresh_data(self):
         cur_hash = hash_code(self, ["ts_start", "ts_end", "dec_samples", "pulsenb"])
         if self.data_hash != cur_hash:
