@@ -52,10 +52,11 @@ class DataAccessSignal(ArraySignal, ProcessingSignal):
     def data(self, val):
         self._data_store[0] = ProcessingBufferObject(input_arr=val)
 
-    def get_data(self):
+    def fetch_data(self):
         if self.needs_refresh():
-            CachingAccessHelper.get().get_data(self)
-            
+            CachingAccessHelper.get().fetch_data(self)
+
+    def get_data(self):
         self_hash = hash_code(self, ["data_source", "name"])
         x_data = CachingAccessHelper.get().ctx.evaluate_expr(self.x_expr, self_hash, data_source=self.data_source)
         y_data = CachingAccessHelper.get().ctx.evaluate_expr(self.y_expr, self_hash, data_source=self.data_source)
@@ -145,18 +146,18 @@ class AccessHelper:
     def get():
         return AccessHelper()
 
-    def get_data(self, signal: DataAccessSignal):
+    def fetch_data(self, signal: DataAccessSignal):
         if not isinstance(signal, DataAccessSignal):
             logger.warning(f"{signal} is not an object of {type(DataAccessSignal)}")
             return
         
         # Evaluate self
         if signal.is_expression:
-            CachingAccessHelper.get().ctx.evaluate_signal(signal, lambda h, sig: print(h, sig), get_as_needed=True)
+            self.ctx.evaluate_signal(signal, lambda h, sig: print(h, sig), fetch_on_demand=True)
         else:
-            self.get_data_submit(signal)
+            self.fetch_data_submit(signal)
 
-    def get_data_submit(self, signal: DataAccessSignal):
+    def fetch_data_submit(self, signal: DataAccessSignal):
         logger.debug("[UDA {}] Get data: {} ts_start={} ts_end={} pulse_nb={} nbsamples={} relative={}".format(self.query_no, signal.name, self.str_ts(signal, signal.ts_start), self.str_ts(signal, signal.ts_end),
                                                                                            signal.pulse_nb, signal.dec_samples or self.num_samples, signal.ts_relative))
         self.query_no += 1
