@@ -106,6 +106,5 @@ class Canvas(ABC):
     def from_json(json):
         return JSONExporter().from_json(json)
 
-    @abstractmethod
     def export_image(self, filename: str, **kwargs):
         pass

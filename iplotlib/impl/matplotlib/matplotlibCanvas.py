@@ -53,6 +53,15 @@ class MatplotlibCanvas:
         self.figure = Figure(tight_layout=self.tight_layout)
         self.process_iplotlib_canvas(canvas)
 
+    def export_image(self, filename: str, **kwargs):
+        dpi = kwargs.get("dpi") or 300
+        width = kwargs.get("width") or 18.5
+        height = kwargs.get("height") or 10.5
+
+        self.figure.set_size_inches(width/dpi, height/dpi)
+        self.process_iplotlib_canvas(kwargs.pop("canvas"))
+        self.figure.savefig(filename)
+
     def _run_in_one_thread(func):
         """
         A decorator that causes all matplotlib operations to execute in the main thread (self.mpl_draw_thread) even if these functions were called in other threads
