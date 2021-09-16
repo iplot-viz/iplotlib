@@ -19,7 +19,7 @@ import vtkmodules.vtkRenderingContextOpenGL2
 from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti
 from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine, vtkPlotPoints
 from vtkmodules.vtkPythonContext2D import vtkPythonItem
-from vtkmodules.vtkRenderingCore import vtkTextProperty
+from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkRenderWindow
 from vtkmodules.vtkRenderingContext2D import vtkContextMouseEvent, vtkMarkerUtilities, vtkPen
 from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.util import numpy_support
@@ -101,6 +101,23 @@ class VTKCanvas(Canvas):
         self.matrix.SetFillStrategy(vtkChartMatrix.StretchType.CUSTOM)
         self._title_region.SetDrawAreaResizeBehavior(
             vtkContextArea.DARB_FixedRect)
+
+    def export_image(self, filename: str, **kwargs):
+        renWin = vtkRenderWindow()
+        dpi = kwargs.get("dpi") or 100
+        width_i = kwargs.get("width") or 18.4
+        height_i = kwargs.get("height") or 10.5
+        width = int(dpi * width_i)
+        height = int(dpi * height_i)
+        renWin.SetSize(width, height)
+        self.resize(width, height)
+        renWin.SetDPI(dpi)
+        
+        self.view.SetRenderWindow(renWin)
+        renWin.GetInteractor().Initialize()
+        self.refresh()
+        renWin.GetInteractor().Render()
+        vtkImplUtils.screenshot(self.view.GetRenderWindow(), filename)
 
     @staticmethod
     def add_vtk_chart(matrix: vtkChartMatrix,
