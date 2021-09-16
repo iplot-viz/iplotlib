@@ -9,7 +9,7 @@ from qtpy.QtWidgets import QApplication, QCheckBox, QColorDialog, QComboBox, QDa
     QStackedWidget, QTreeView, QVBoxLayout, QWidget
 
 from iplotlib.impl.matplotlib.matplotlibCanvas import ConversionHelper
-from iplotlib.core.axis import Axis
+from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.signal import ArraySignal
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.axis import LinearAxis
