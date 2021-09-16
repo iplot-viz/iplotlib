@@ -1,3 +1,14 @@
+# Description: Extend Data-Access, Data-Processing to self-aware iplotlib.core.Signal
+# Author: Abadie Lana
+# Changelog:
+#   Sept 2021: -Inherit from ArraySignal and ProcessingSignal [Jaswant Sai Panchumarti]
+#              -Added attributes for x, y, z expression fields. [Jaswant Sai Panchumarti]
+#              -Extract data-access code into fetch_data method. [Jaswant Sai Panchumarti]
+#              -Apply processing right after data access in fetch_data [Jaswant Sai Panchumarti]
+#              -Teach AccessHelper to explore ProcessingSignal objects. [Jaswant Sai Panchumarti]
+#              -Rename AccessHelper.get_data -> AccessHelper._fetch_data (no longer returns data) [Jaswant Sai Panchumarti]
+#              -Translate iplotDataAccess.DataObj into ProcessingSignal in AccessHelper._fetch_data [Jaswant Sai Panchumarti]
+
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 import os
@@ -63,11 +74,11 @@ class DataAccessSignal(ArraySignal, ProcessingSignal):
         z_data = CachingAccessHelper.get().ctx.evaluate_expr(self.z_expr, self_hash, data_source=self.data_source)
 
         if len(x_data) > 1:
-            self.data_xrange = self.time[0], self.time[-1]
+            self.data_xrange = x_data[0], x_data[-1]
 
         logger.debug(f"x_expr: {self.x_expr}, x.size: {len(x_data)}")
-        logger.debug(f"y_expr: {self.y_expr}, x.size: {len(y_data)}")
-        logger.debug(f"z_expr: {self.z_expr}, x.size: {len(z_data)}")
+        logger.debug(f"y_expr: {self.y_expr}, y.size: {len(y_data)}")
+        logger.debug(f"z_expr: {self.z_expr}, z.size: {len(z_data)}")
 
         return [x_data, y_data, z_data]
 
@@ -219,7 +230,7 @@ class AccessHelper:
         
         logger.debug(f"signal.time: {signal.time.size}")
         logger.debug(f"signal.data_primary: {signal.data_primary.size}")
-        logger.debug(f"signal.data_secondary: {signal.data_secondary}")
+        logger.debug(f"signal.data_secondary: {signal.data_secondary.size}")
 
 
 class CachingAccessHelper(AccessHelper):
