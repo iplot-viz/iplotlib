@@ -65,9 +65,9 @@ class DataAccessSignal(ArraySignal, ProcessingSignal):
         if len(x_data) > 1:
             self.data_xrange = self.time[0], self.time[-1]
 
-        print(x_data)
-        print(y_data)
-        print(z_data)
+        logger.debug(f"x_expr: {self.x_expr}, x.size: {len(x_data)}")
+        logger.debug(f"y_expr: {self.y_expr}, x.size: {len(y_data)}")
+        logger.debug(f"z_expr: {self.z_expr}, x.size: {len(z_data)}")
 
         return [x_data, y_data, z_data]
 
@@ -150,10 +150,14 @@ class AccessHelper:
         if not isinstance(signal, DataAccessSignal):
             logger.warning(f"{signal} is not an object of {type(DataAccessSignal)}")
             return
-        
+
         # Evaluate self
         if signal.is_expression:
-            self.ctx.evaluate_signal(signal, lambda h, sig: print(h, sig), fetch_on_demand=True)
+            sig_params = dict()
+            for k in ["ts_start", "ts_end", "pulse_nb", "dec_samples", "envelope"]:
+                sig_params.update({k: getattr(signal, k)})
+
+            self.ctx.evaluate_signal(signal, lambda h, sig: print(h, sig), fetch_on_demand=True, **sig_params)
         else:
             self.fetch_data_submit(signal)
 
@@ -212,6 +216,10 @@ class AccessHelper:
             signal.time_unit = ''
             signal.data_primary_unit = ''
             signal.data_secondary_unit = ''
+        
+        logger.debug(f"signal.time: {signal.time.size}")
+        logger.debug(f"signal.data_primary: {signal.data_primary.size}")
+        logger.debug(f"signal.data_secondary: {signal.data_secondary}")
 
 
 class CachingAccessHelper(AccessHelper):
