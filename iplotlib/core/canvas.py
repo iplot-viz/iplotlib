@@ -1,4 +1,4 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List
 
@@ -105,3 +105,7 @@ class Canvas(ABC):
     @staticmethod
     def from_json(json):
         return JSONExporter().from_json(json)
+
+    @abstractmethod
+    def export_image(self, filename: str, **kwargs):
+        pass
