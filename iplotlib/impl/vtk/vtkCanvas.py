@@ -421,6 +421,8 @@ class VTKCanvas(Canvas):
     def refresh_line_size(self, signal: ArraySignal):
         impl_plot = self._abstr_impl_plot_lookup.get(
             id(signal))  # type: vtkPlot
+        if not isinstance(impl_plot, vtkPlot):
+            return
         # line style, width if supported by hardware.
         pen = impl_plot.GetPen()
         if signal.line_size is not None:
@@ -429,6 +431,8 @@ class VTKCanvas(Canvas):
     def refresh_line_style(self, signal: ArraySignal):
         impl_plot = self._abstr_impl_plot_lookup.get(
             id(signal))  # type: vtkPlot
+        if not isinstance(impl_plot, vtkPlotPoints):
+            return
         # line style, width if supported by hardware.
         pen = impl_plot.GetPen()
         if signal.line_style is None:
@@ -445,6 +449,8 @@ class VTKCanvas(Canvas):
     def refresh_marker_size(self, signal: ArraySignal):
         impl_plot = self._abstr_impl_plot_lookup.get(
             id(signal))  # type: vtkPlot
+        if not isinstance(impl_plot, vtkPlotPoints):
+            return
         # marker style, size
         if signal.marker_size is not None:
             impl_plot.SetMarkerSize(signal.marker_size)
@@ -452,6 +458,8 @@ class VTKCanvas(Canvas):
     def refresh_marker_style(self, signal: ArraySignal):
         impl_plot = self._abstr_impl_plot_lookup.get(
             id(signal))  # type: vtkPlot
+        if not isinstance(impl_plot, vtkPlotPoints):
+            return
         if signal.marker == 'x':
             impl_plot.SetMarkerStyle(vtkMarkerUtilities.CROSS)
         elif signal.marker == '+':
@@ -636,14 +644,6 @@ class VTKCanvas(Canvas):
         if not isinstance(signal, Signal):
             return
 
-        data = signal.get_data()
-
-        if data is None:
-            return
-
-        if len(data) < 2:
-            return
-
         # acquire/update properties
         plot = self._signal_plot_lookup.get(id(signal))  # type: Plot
         self.property_manager.acquire_signal_from_plot(plot, signal)
@@ -652,16 +652,25 @@ class VTKCanvas(Canvas):
         # Create backend objects
         impl_plot = self._abstr_impl_plot_lookup.get(
             id(signal))  # type: vtkPlot
-        if impl_plot is None and chart is not None:
-            # TODO: Use functional bag for envelope plots
-            if isinstance(signal, ArraySignal):
-                impl_plot = self.add_vtk_line_plot(
-                    chart, signal.title, data[0], data[1], hi_precision)
-                self._abstr_impl_plot_lookup.update({id(signal): impl_plot})
+
+        data = signal.get_data()
+        valid_data = len(data) >= 2
+        for dim in range(len(data)):
+            valid_data &= (len(data[dim]) >= 2)
+
+        if valid_data:
+            if impl_plot is None and chart is not None:
+                # TODO: Use functional bag for envelope plots
+                if isinstance(signal, ArraySignal):
+                    impl_plot = self.add_vtk_line_plot(
+                        chart, signal.title, data[0], data[1], hi_precision)
+                    self._abstr_impl_plot_lookup.update({id(signal): impl_plot})
+            else:
+                if isinstance(signal, ArraySignal):
+                    self.refresh_impl_plot_data(
+                        impl_plot, data[0], data[1], signal.title, hi_precision)
         else:
-            if isinstance(signal, ArraySignal):
-                self.refresh_impl_plot_data(
-                    impl_plot, data[0], data[1], signal.title, hi_precision)
+            impl_plot = chart.AddPlot(vtkChart.LINE)  # type: vtkPlotLine
 
         # Translate abstract properties to backend
         self.refresh_signal_title(signal)
@@ -677,17 +686,25 @@ class VTKCanvas(Canvas):
     def refresh_signal_color(self, signal: ArraySignal):
         impl_plot = self._abstr_impl_plot_lookup.get(
             id(signal))  # type: vtkPlot
+        if not isinstance(impl_plot, vtkPlot):
+            return
         if signal.color is not None:
             impl_plot.SetColor(*vtkImplUtils.get_color4ub(signal.color))
 
     def refresh_signal_title(self, signal: Signal):
         impl_plot = self._abstr_impl_plot_lookup.get(
             id(signal))  # type: vtkPlot
-        impl_plot.SetLabel(signal.title)
+        if not isinstance(impl_plot, vtkPlot):
+            return
+        if signal.title is not None:
+            impl_plot.SetLabel(signal.title)
 
     def refresh_step_type(self, signal: ArraySignal):
         impl_plot = self._abstr_impl_plot_lookup.get(
             id(signal))  # type: vtkPlot
+
+        if not isinstance(impl_plot, vtkPlotPoints):
+            return
 
         if signal.step is None:
             return

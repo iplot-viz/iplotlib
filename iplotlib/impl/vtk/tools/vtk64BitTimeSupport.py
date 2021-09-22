@@ -46,7 +46,7 @@ class VTK64BitTimePlotSupport:
         self._precise = False
 
     def isPlotValid(self):
-        return isinstance(self._plot, vtkPlotPoints)
+        return isinstance(self._plot, vtkPlotPoints) and isinstance(self._table, vtkTable)
 
     @staticmethod
     def getColumnId(table, arr: vtkAbstractArray) -> int:
@@ -452,5 +452,9 @@ class VTK64BitTimePlotSupport:
             tick_labels.InsertNextValue(tick_label)
 
         xAxis.SetCustomTickPositions(tickPositionsVtkArr, tick_labels)
-        xAxis.SetTitle(tss[0].strftime(prefixFmt))
+        try:
+            xAxis.SetTitle(tss[0].strftime(prefixFmt))
+        except IndexError:
+            logger.critical(f"There is no data for chart. Setting xAxis title to 'X Axis'")
+            xAxis.SetTitle('X Axis')
         xAxis.Update()
