@@ -32,10 +32,6 @@ STEP_MAP = {"none": "none", "mid": "steps-mid", "post": "steps-post",
             "pre": "steps-pre", "steps-mid": "steps-mid", "steps-post": "steps-post", "steps-pre": "steps-pre"}
 
 
-class InvalidPlotException(Exception):
-    def __init__(self, *args: object) -> None:
-        super().__init__(*args)
-
 
 @dataclass
 class VTKCanvas(Canvas):
@@ -476,8 +472,6 @@ class VTKCanvas(Canvas):
 
         Args:
             plot (Plot): An object derived from abstract iplotlib.core.plot.Plot
-        Raises:
-            InvalidPlotException
         """
 
         if not isinstance(plot, Plot):
