@@ -34,9 +34,9 @@ case $toolchain in
 
   "foss")
     # Other IDV components
-    try module load iplotLogging/0.0.0-GCCcore-10.2.0
-    try module load iplotProcessing/0.0.0-foss-2020b
-    try module load iplotDataAccess/0.0.0-foss-2020b
+    try module load iplotLogging/0.1.0-GCCcore-10.2.0
+    try module load iplotProcessing/0.1.0-foss-2020b
+    try module load iplotDataAccess/0.1.0-foss-2020b
 
     # Graphics backend requirements
     try module load matplotlib/3.3.3-foss-2020b
@@ -51,9 +51,9 @@ case $toolchain in
 
   "intel")
     # Other IDV components
-    try module load iplotLogging/0.0.0-GCCcore-10.2.0
-    try module load iplotProcessing/0.0.0-intel-2020b
-    try module load iplotDataAccess/0.0.0-intel-2020b
+    try module load iplotLogging/0.1.0-GCCcore-10.2.0
+    try module load iplotProcessing/0.1.0-intel-2020b
+    try module load iplotDataAccess/0.1.0-intel-2020b
 
     # Graphics backend requirements
     try module load matplotlib/3.3.3-intel-2020b
