@@ -4,7 +4,7 @@ import typing
 from collections import defaultdict
 from dataclasses import dataclass
 
-from iplotlib.core.axis import Axis, LinearAxis
+from iplotlib.core.axis import Axis, LinearAxis, RangeAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.core.signal import ArraySignal, Signal
@@ -30,7 +30,6 @@ logger = sl.get_logger(__name__, "DEBUG")
 AXIS_MAP = [vtkAxis.BOTTOM, vtkAxis.LEFT]
 STEP_MAP = {"none": "none", "mid": "steps-mid", "post": "steps-post",
             "pre": "steps-pre", "steps-mid": "steps-mid", "steps-post": "steps-post", "steps-pre": "steps-pre"}
-
 
 
 @dataclass
@@ -108,7 +107,7 @@ class VTKCanvas(Canvas):
         renWin.SetSize(width, height)
         self.resize(width, height)
         renWin.SetDPI(dpi)
-        
+
         self.view.SetRenderWindow(renWin)
         renWin.GetInteractor().Initialize()
         self.refresh()
@@ -274,7 +273,7 @@ class VTKCanvas(Canvas):
         for chart in self._abstr_plot_chart_lookup[id(plot)]:
             for ax_id, ax in enumerate(plot.axes):
                 ax_impl_id = AXIS_MAP[ax_id]
-                ax_impl = chart.GetAxis(ax_impl_id)
+                ax_impl = chart.GetAxis(ax_impl_id)  # type: vtkAxis
 
                 if isinstance(ax, Axis):
                     if ax.label is not None:
@@ -288,6 +287,18 @@ class VTKCanvas(Canvas):
                             f"Ax color: {vtkImplUtils.get_color3d(ax.font_color)}")
                     if ax.font_size is not None:
                         appearance.SetFontSize(ax.font_size)
+                if isinstance(ax, RangeAxis) and not (isinstance(ax, LinearAxis) and ax.follow):
+                    if ax.begin is not None:
+                        ax_impl.SetMinimum(ax.begin)
+                    if ax.end is not None:
+                        ax_impl.SetMaximum(ax.end)
+                    ax_impl.AutoScale()
+                if isinstance(ax, LinearAxis):
+                    if ax.window is not None and not ax.follow:
+                        ax_max = ax_impl.GetMaximum()
+                        ax_impl.SetRange(ax_max - ax.window, ax_max)
+                        ax_impl.AutoScale()
+                        
 
     def refresh_canvas_title(self):
         """Updates canvas title text and the appearance
@@ -307,7 +318,7 @@ class VTKCanvas(Canvas):
 
     def refresh_crosshair_widget(self):
         self.crosshair.clear()
-        
+
         if not self.crosshair_enabled:
             return
         if isinstance(self._impl_focus_plot, vtkChart):
@@ -515,7 +526,8 @@ class VTKCanvas(Canvas):
             elif isinstance(element, vtkChart):
                 chart = element
             else:
-                logger.critical(f"Unexpected path in refresh_plot {column}, {row}, {row_id}")
+                logger.critical(
+                    f"Unexpected path in refresh_plot {column}, {row}, {row_id}")
 
             self.refresh_custom_ticker(0, plot, chart)
             self._abstr_plot_chart_lookup[id(plot)].append(chart)
@@ -704,7 +716,8 @@ class VTKCanvas(Canvas):
 
         if self.focus_plot is None:
             logger.debug(f"Set focus chart @ internal index : {index}")
-            self.focus_plot = self._impl_index_abstr_plot_lookup.get((index[0], index[1]))
+            self.focus_plot = self._impl_index_abstr_plot_lookup.get(
+                (index[0], index[1]))
         else:
             logger.debug("Set focus chart -> None")
             self.focus_plot = None
