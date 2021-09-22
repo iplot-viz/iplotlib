@@ -71,5 +71,9 @@ def register(impl: str="vtk"):
         logger.error(f"No {impl.lower()} canvas implementation found")
 
 if __name__ == "__main__":
-    impl = sys.argv[1]
+    try:
+        impl = sys.argv[1]
+        register(impl)
+    except IndexError:
+        register()
     QStandaloneCanvas(impl).show()
