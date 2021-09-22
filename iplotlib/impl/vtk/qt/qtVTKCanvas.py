@@ -13,6 +13,7 @@ vtkmodules.qt.PyQtImpl = qtpy.API_NAME
 
 # vtk requirements
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor, PyQtImpl
+from vtkmodules.vtkCommonDataModel import vtkVector2i
 from vtkmodules.vtkCommonCore import vtkCommand
 
 # iplot utilities
@@ -110,9 +111,11 @@ class QtVTKCanvas(QtPlotCanvas):
         super().set_canvas(canvas)  # does nothing
 
         if not isinstance(canvas, Canvas) and isinstance(self.impl_canvas, VTKCanvas):
-            self.impl_canvas.clear()
             return
 
+        self.impl_canvas.clear()
+        self.impl_canvas.focus_plot=None
+        self.impl_canvas.refresh()
         for attr_name, attr_value in inspect.getmembers(Canvas):
             if not attr_name.startswith("__") and not attr_name.endswith("__") and not inspect.ismethod(attr_value):
                 setattr(self.impl_canvas, attr_name, getattr(canvas, attr_name))
@@ -133,3 +136,6 @@ class QtVTKCanvas(QtPlotCanvas):
     def render(self):
         self.render_widget.Initialize()
         self.render_widget.Render()
+    
+    def unfocus_plot(self):
+        self.impl_canvas.focus_plot=None

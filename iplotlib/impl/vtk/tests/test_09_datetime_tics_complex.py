@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import unittest
+from iplotlib.core.axis import LinearAxis
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import ArraySignal
 from iplotlib.impl import CanvasFactory
@@ -41,6 +42,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         self.vtk_canvas.add_plot(plot12, 0)
 
         # A plot in top-right with 1 signal.
+        plot12.axes[1] = [LinearAxis(), LinearAxis()]
         signal21 = ArraySignal(title="Signal2.1", hi_precision_data=True)
         signal21.set_data([xs, ys])
         plot21 = PlotXY(title="DateTime=True, HiPrecision=True")

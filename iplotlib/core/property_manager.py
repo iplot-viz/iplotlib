@@ -58,8 +58,14 @@ class PropertyManager:
             for signal in signals:
                 self.acquire_signal_from_plot(plot, signal)
         if plot.axes is not None:
-            for ax in plot.axes:
-                self.acquire_axis_from_plot(plot, ax)
+            for axes in plot.axes:
+                if isinstance(axes, list):
+                    for axis in axes:
+                        self.acquire_axis_from_plot(plot, axis)
+                else:
+                    axis = axes
+                    self.acquire_axis_from_plot(plot, axis)
+
          
     def acquire_axis_from_plot(self, plot: Plot, ax: Axis):
         """Update attributes downward.

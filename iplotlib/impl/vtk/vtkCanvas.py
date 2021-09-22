@@ -270,35 +270,60 @@ class VTKCanvas(Canvas):
             ax (Axis): An abstract Axis object
             ax_id (int): The index of the ax object in Plot.axes
         """
-        for chart in self._abstr_plot_chart_lookup[id(plot)]:
-            for ax_id, ax in enumerate(plot.axes):
-                ax_impl_id = AXIS_MAP[ax_id]
-                ax_impl = chart.GetAxis(ax_impl_id)  # type: vtkAxis
+        try:
+            _ = plot.axes[0]
+        except IndexError:
+            logger.exception(f"{plot} is missing an x-axis")
+            return
+        try:
+            y_axes = plot.axes[1]
+        except IndexError:
+            logger.exception(f"{plot} is missing y-axes")
+            return
 
-                if isinstance(ax, Axis):
-                    if ax.label is not None:
-                        ax_impl.SetTitle(ax.label)
+        charts = self._abstr_plot_chart_lookup[id(plot)]
 
-                    appearance = ax_impl.GetTitleProperties()  # type: vtkTextProperty
-                    if ax.font_color is not None:
-                        appearance.SetColor(
-                            *vtkImplUtils.get_color3d(ax.font_color))
-                        logger.debug(
-                            f"Ax color: {vtkImplUtils.get_color3d(ax.font_color)}")
-                    if ax.font_size is not None:
-                        appearance.SetFontSize(ax.font_size)
-                if isinstance(ax, RangeAxis) and not (isinstance(ax, LinearAxis) and ax.follow):
-                    if ax.begin is not None:
-                        ax_impl.SetMinimum(ax.begin)
-                    if ax.end is not None:
-                        ax_impl.SetMaximum(ax.end)
-                    ax_impl.AutoScale()
-                if isinstance(ax, LinearAxis):
-                    if ax.window is not None and not ax.follow:
-                        ax_max = ax_impl.GetMaximum()
-                        ax_impl.SetRange(ax_max - ax.window, ax_max)
-                        ax_impl.AutoScale()
+        try:
+            assert len(y_axes) == len(charts)
+        except AssertionError:
+            logger.exception(f"len(y_axes) != len(charts). {len(y_axes)} != {len(charts)}")
+            return
+        except TypeError:
+            y_axes = [plot.axes[1]]
+
+        for chart, ax in zip(charts, y_axes):
+            ax_impl_id = vtkAxis.LEFT
+            ax_impl = chart.GetAxis(ax_impl_id)  # type: vtkAxis
+            self.refresh_axis(ax, ax_impl)
+
+            ax_impl_id = vtkAxis.BOTTOM
+            ax_impl = chart.GetAxis(ax_impl_id)  # type: vtkAxis
+            self.refresh_axis(ax, ax_impl)
                         
+    def refresh_axis(self, ax: Axis, ax_impl: vtkAxis):
+        if isinstance(ax, Axis):
+            if ax.label is not None:
+                ax_impl.SetTitle(ax.label)
+
+            appearance = ax_impl.GetTitleProperties()  # type: vtkTextProperty
+            if ax.font_color is not None:
+                appearance.SetColor(
+                    *vtkImplUtils.get_color3d(ax.font_color))
+                logger.debug(
+                    f"Ax color: {vtkImplUtils.get_color3d(ax.font_color)}")
+            if ax.font_size is not None:
+                appearance.SetFontSize(ax.font_size)
+        if isinstance(ax, RangeAxis) and not (isinstance(ax, LinearAxis) and ax.follow):
+            if ax.begin is not None:
+                ax_impl.SetMinimum(ax.begin)
+            if ax.end is not None:
+                ax_impl.SetMaximum(ax.end)
+            ax_impl.AutoScale()
+        if isinstance(ax, LinearAxis):
+            if ax.window is not None and not ax.follow:
+                ax_max = ax_impl.GetMaximum()
+                ax_impl.SetRange(ax_max - ax.window, ax_max)
+                ax_impl.AutoScale()
 
     def refresh_canvas_title(self):
         """Updates canvas title text and the appearance
