@@ -204,7 +204,9 @@ class VTKCanvas(Canvas):
         Returns:
             int: a valid vtk row id.
         """
-        return self.rows - 1 - r - (plot.row_span - 1)
+        r_id = self.rows - 1 - r - (plot.row_span - 1)
+        r_id = 0 if r_id < 0 else r_id
+        return r_id
 
     def hi_precision_needed(self, plot: Plot) -> bool:
         retVal = False
