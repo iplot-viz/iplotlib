@@ -5,6 +5,7 @@
 # Note For changes to this file, please add the author to the list of PR reviewers
 
 import setuptools
+from iplotlib._version import __version__
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -15,7 +16,7 @@ setuptools.setup(
         "setuptools-git-versioning"
     ],
     version_config={
-        "starting_version": "0.0.0",
+        "version_callback": __version__,
         "template": "{tag}",
         "dirty_template": "{tag}.{ccount}.{sha}",
     },
