@@ -1,10 +1,7 @@
-import collections
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from collections import Collection
-
+from typing import Collection
 import numpy as np
-
 
 @dataclass
 class SignalStyle(ABC):
