@@ -35,6 +35,7 @@ class DataAccessSignal(ArraySignal, ProcessingSignal):
     x_expr: str = ''
     y_expr: str = ''
     z_expr: str = ''
+    plot_type: str = ''
 
     def __post_init__(self):
         ProcessingSignal.__post_init__(self)
@@ -50,6 +51,7 @@ class DataAccessSignal(ArraySignal, ProcessingSignal):
             self.title = self.name if self.name != 'noname' else ''
 
         if self.pulse_nb is not None:
+            self.ts_relative = True
             self.title += ':' + str(self.pulse_nb)
 
         self.data_hash = None
@@ -68,10 +70,10 @@ class DataAccessSignal(ArraySignal, ProcessingSignal):
             CachingAccessHelper.get().fetch_data(self)
 
     def get_data(self):
-        self_hash = hash_code(self, ["data_source", "name"])
-        x_data = CachingAccessHelper.get().ctx.evaluate_expr(self.x_expr, self_hash, data_source=self.data_source)
-        y_data = CachingAccessHelper.get().ctx.evaluate_expr(self.y_expr, self_hash, data_source=self.data_source)
-        z_data = CachingAccessHelper.get().ctx.evaluate_expr(self.z_expr, self_hash, data_source=self.data_source)
+        self_uid = AccessHelper.ctx.env.construct_uid_from_signal(self)
+        x_data = CachingAccessHelper.get().ctx.evaluate_expr(self.x_expr, self_uid, data_source=self.data_source)
+        y_data = CachingAccessHelper.get().ctx.evaluate_expr(self.y_expr, self_uid, data_source=self.data_source)
+        z_data = CachingAccessHelper.get().ctx.evaluate_expr(self.z_expr, self_uid, data_source=self.data_source)
 
         if len(x_data) > 1:
             self.data_xrange = x_data[0], x_data[-1]
@@ -103,8 +105,13 @@ class DataAccessSignal(ArraySignal, ProcessingSignal):
 
     def needs_refresh(self) -> bool:
         cur_hash = hash_code(self, ["ts_start", "ts_end", "dec_samples", "pulse_nb"])
+
         if self.data_hash != cur_hash:
             self.data_hash = cur_hash
+
+            uid = AccessHelper.ctx.env.construct_uid_from_signal(self)
+            AccessHelper.ctx.env.update({uid: self})
+
             if self.dec_samples == -1 and self._check_if_zoomed_in():
                 return False
             else:
