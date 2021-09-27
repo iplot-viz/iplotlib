@@ -88,6 +88,20 @@ class DataAccessSignal(ArraySignal, ProcessingSignal):
         if len(x_data) > 1:
             self.data_xrange = x_data[0], x_data[-1]
 
+        if np.isscalar(y_data):
+            y_data = np.array([y_data] * len(x_data))
+        elif x_data.ndim == y_data.ndim:
+            if len(y_data) != len(x_data) and len(y_data) == 1:
+                logger.warning(f"Caught x-y shape mismatch! Fixing it. len(y_data) = {len(y_data)} -> {len(x_data)}")
+                y_data = np.linspace(y_data[0], y_data[-1], len(x_data))
+
+        if np.isscalar(z_data):
+            z_data = np.array([z_data] * len(x_data))
+        elif x_data.ndim == z_data.ndim:
+            if len(z_data) != len(x_data) and len(z_data) == 1:
+                logger.warning(f"Caught x-y shape mismatch! Fixing it. len(z_data) = {len(z_data)} -> {len(x_data)}")
+                z_data = np.linspace(z_data[0], z_data[-1], len(x_data))
+
         logger.debug(f"x_expr: {self.x_expr}, x.size: {len(x_data)}")
         logger.debug(f"y_expr: {self.y_expr}, y.size: {len(y_data)}")
         logger.debug(f"z_expr: {self.z_expr}, z.size: {len(z_data)}")
