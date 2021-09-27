@@ -480,6 +480,10 @@ class VTKCanvas(Canvas):
         for _, charts in self._abstr_plot_chart_lookup.items():
             for chart in charts:
 
+                # Turn on zoom with mouse wheel.
+                if isinstance(chart, vtkChartXY):
+                    chart.ZoomWithMouseWheelOn()
+
                 # Mouse mode handled for each chart.
                 chart.SetActionToButton(
                     vtkChart.PAN, vtkContextMouseEvent.NO_BUTTON)
@@ -503,15 +507,15 @@ class VTKCanvas(Canvas):
                 elif self.mouse_mode == Canvas.MOUSE_MODE_ZOOM:
                     chart.SetActionToButton(
                         vtkChart.ZOOM, vtkContextMouseEvent.LEFT_BUTTON)
+                    # Turn off zoom with mouse wheel.
+                    if isinstance(chart, vtkChartXY):
+                        chart.ZoomWithMouseWheelOff()
                 elif self.mouse_mode == Canvas.MOUSE_MODE_CROSSHAIR:
                     pass
                 else:
                     logger.warning(
                         f"Invalide canvas mouse mode: {self.mouse_mode}")
 
-                # Turn off zoom with mouse wheel.
-                if isinstance(chart, vtkChartXY):
-                    chart.ZoomWithMouseWheelOff()
 
     def refresh_plot(self, plot: Plot, column: int, row: int):
         """Refresh a specific plot
@@ -654,9 +658,10 @@ class VTKCanvas(Canvas):
             id(signal))  # type: vtkPlot
 
         data = signal.get_data()
-        valid_data = len(data) >= 2
+        ndims = len(data)
+        valid_data = ndims >= 2
         for dim in range(len(data)):
-            valid_data &= (len(data[dim]) >= 2)
+            valid_data &= (len(data[dim]) >= 2) or (ndims >= 2)
 
         if valid_data:
             if impl_plot is None and chart is not None:
