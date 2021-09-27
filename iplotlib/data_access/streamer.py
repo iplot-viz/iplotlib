@@ -28,14 +28,14 @@ class CanvasStreamer:
                 for (stack_id, signals) in plot.signals.items():
                     all_signals += signals
 
-        self.signals = {s.varname: s for s in all_signals}
+        self.signals = {s.name: s for s in all_signals}
 
         signals_by_ds = dict()
         for s in all_signals:
-            if signals_by_ds.get(s.datasource):
-                signals_by_ds[s.datasource].append(s.varname)
+            if signals_by_ds.get(s.data_source):
+                signals_by_ds[s.data_source].append(s.name)
             else:
-                signals_by_ds[s.datasource] = [s.varname]
+                signals_by_ds[s.data_source] = [s.name]
 
         for ds in signals_by_ds.keys():
             logger.info(F"Starting streamer for data source: {ds}")
