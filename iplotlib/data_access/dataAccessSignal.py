@@ -176,7 +176,10 @@ class AccessHelper:
 
     def uda_ts(self, signal: DataAccessSignal, value):
         # return str(np.datetime64(value, 'ns')) if not (signal.ts_relative or value is None) else value
-        return value
+        if not signal.ts_relative:
+            return int(value)
+        else:
+            return float(value)
 
     def str_ts(self, signal: DataAccessSignal, value):
         try:
