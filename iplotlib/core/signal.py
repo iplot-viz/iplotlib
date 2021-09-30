@@ -56,17 +56,19 @@ class ArraySignal(Signal):
             return [arrs[i][idx] if isinstance(arrs[i], Collection) and len(arrs[i]) > idx else None for i in range(len(arrs))]
 
         try:
-            if isinstance(self.data, Collection) and isinstance(self.data[0], Collection):
-                index = np.searchsorted(self.data[0], sample)
+            data_arrays = self.get_data()
+            x = data_arrays[0]
+            if isinstance(x, Collection):
+                index = np.searchsorted(x, sample)
 
-                if index == len(self.data[0]):
-                    index = len(self.data[0]) - 1
+                if index == len(x):
+                    index = len(x) - 1
 
                 # Either return values at index or values at index-1
-                if index > 0 and abs(self.data[0][index - 1] - sample) < abs(self.data[0][index] - sample):
+                if index > 0 and abs(x[index - 1] - sample) < abs(x[index] - sample):
                     index = index - 1
 
-                return gather(self.data, index)
+                return gather(data_arrays, index)
         except:
             pass
 
