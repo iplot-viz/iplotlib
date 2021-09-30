@@ -1,11 +1,8 @@
-from qtpy import QtCore, QtGui
-from qtpy.QtCore import *
-from qtpy.QtGui import *
-from qtpy.QtWidgets import *
-from iplotlib.qt.qtOverlayCanvasTool import QtOverlayCanvasTool
-
-
-
+from PySide2 import QtCore, QtGui
+from PySide2.QtCore import *
+from PySide2.QtGui import *
+from PySide2.QtWidgets import *
+from iplotlib.qt.gui.iplotOverlayCanvasTool import QtOverlayCanvasTool
 
 class QtCanvasOverlay(QWidget):
     """

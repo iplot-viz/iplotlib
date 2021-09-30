@@ -1,6 +1,15 @@
-from qtpy import QtGui
-from qtpy.QtCore import QMargins, QMetaObject, Qt, Slot
-from qtpy.QtWidgets import QSizePolicy, QStyle, QVBoxLayout
+# Description: A concrete Qt GUI for a matplotlib canvas.
+# Author: Piotr Mazur
+# Changelog:
+#   Sept 2021:  -Fix orphaned matploitlib figure. [Jaswant Sai Panchumarti]
+#               -Fix draw_in_main_thread for when C++ object might have been deleted. [Jaswant Sai Panchumarti]
+#               -Refactor qt classes [Jaswant Sai Panchumarti]
+#               -Port to PySide2 [Jaswant Sai Panchumarti]
+
+
+from PySide2 import QtGui
+from PySide2.QtCore import QMargins, QMetaObject, Qt, Slot
+from PySide2.QtWidgets import QSizePolicy, QStyle, QVBoxLayout
 from matplotlib.backend_bases import _Mode
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -8,12 +17,12 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 import iplotLogging.setupLogger as ls
 from iplotlib.core.canvas import Canvas
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibCanvas
-from iplotlib.qt.qtPlotCanvas import QtPlotCanvas
+from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 logger = ls.get_logger(__name__)
 
 
-class QtMatplotlibCanvas(QtPlotCanvas):
+class QtMatplotlibCanvas(IplotQtCanvas):
     """Qt widget that internally uses MatplotlibCanvas as backend"""
 
     def __init__(self, parent=None, **kwargs):
@@ -26,6 +35,7 @@ class QtMatplotlibCanvas(QtPlotCanvas):
 
         self.matplotlib_canvas = MatplotlibCanvas(tight_layout=self.tight_layout, mpl_flush_method=self.draw_in_main_thread)
         self.figure_canvas = FigureCanvas(self.matplotlib_canvas.figure)
+        self.figure_canvas.setParent(self)
         self.figure_canvas.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.mpl_toolbar = NavigationToolbar(self.figure_canvas, self)
         self.mpl_toolbar.setVisible(False)
@@ -40,7 +50,9 @@ class QtMatplotlibCanvas(QtPlotCanvas):
         self.refresh_timer = None
 
     def draw_in_main_thread(self):
-        QMetaObject.invokeMethod(self, "flush_draw_queue")
+        import shiboken2
+        if shiboken2.isValid(self):
+            QMetaObject.invokeMethod(self, "flush_draw_queue")
 
     @Slot()
     def flush_draw_queue(self):

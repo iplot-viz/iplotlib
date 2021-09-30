@@ -1,9 +1,9 @@
-from qtpy import QtCore
-from qtpy.QtCore import QPoint, QPointF, Qt, QRect, Signal
-from qtpy.QtGui import QPainter, QPen, QColor
+from PySide2 import QtCore
+from PySide2.QtCore import QPoint, QPointF, Qt, QRect, Signal
+from PySide2.QtGui import QPainter, QPen, QColor
 
 
-from iplotlib.qt.qtOverlayCanvasTool import QtOverlayCanvasTool
+from iplotlib.qt.gui.iplotOverlayCanvasTool import QtOverlayCanvasTool
 
 
 class QtOverlayCrosshairTool(QtOverlayCanvasTool):

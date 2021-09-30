@@ -1,7 +1,7 @@
-from qtpy import QtCore
-from qtpy.QtCore import QPointF, Qt, Signal
-from qtpy.QtGui import QPainter
-from iplotlib.qt.qtOverlayCanvasTool import QtOverlayCanvasTool
+from PySide2 import QtCore
+from PySide2.QtCore import QPointF, Qt, Signal
+from PySide2.QtGui import QPainter
+from iplotlib.qt.gui.iplotOverlayCanvasTool import QtOverlayCanvasTool
 
 
 class QtOverlayPanTool(QtOverlayCanvasTool):

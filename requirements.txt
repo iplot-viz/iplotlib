@@ -2,9 +2,5 @@
 iplotProcessing==0.2.0
 matplotlib==3.3.3
 pandas==1.2.0
-qtpy==1.9.0
-# grepped from [MINT/pom.xml](https://git.iter.org/projects/VIS/repos/mint/browse/pom.xml)
-# pyside2==5.14.2
-pyqt5==5.15.2  # To be deprecated in favour of PySide2 where available (LGPL preferred to GPL)
-pyqt5sip.version=12.8.1
+pyside2==5.14.2
 vtk==9.0.20210806.dev0

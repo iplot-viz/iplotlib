@@ -42,8 +42,8 @@ case $toolchain in
     try module load matplotlib/3.3.3-foss-2020b
     try module load VTK/20210803-foss-2020b
 
-    # Graphical User Interface backends
-    try module load QtPy/1.9.0-GCCcore-10.2.0
+    # Graphical User Interface backend
+    try module load PySide2/5.14.2.3-GCCcore-10.2.0
 
     # Testing/Coverage requirements
     try module load coverage/5.5-GCCcore-10.2.0
@@ -59,8 +59,8 @@ case $toolchain in
     try module load matplotlib/3.3.3-intel-2020b
     try module load VTK/20210803-intel-2020b
 
-    # Graphical User Interface backends
-    try module load QtPy/1.9.0-GCCcore-10.2.0
+    # Graphical User Interface backend
+    try module load PySide2/5.14.2.3-GCCcore-10.2.0
 
     # Testing/Coverage requirements
     try module load coverage/5.5-GCCcore-10.2.0

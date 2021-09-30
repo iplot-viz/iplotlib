@@ -1,6 +1,11 @@
+# Description: Sets up an application ready to test with a QtVTKCanvas.
+# Author: Jaswant Sai Panchumarti
+# Changelog:
+#   Sept 2021: -Port to PySide2
+
 import unittest
 
-from qtpy.QtWidgets import QApplication
+from PySide2.QtWidgets import QApplication
 from iplotlib.impl.vtk.qt import QtVTKCanvas
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
 _instance = None

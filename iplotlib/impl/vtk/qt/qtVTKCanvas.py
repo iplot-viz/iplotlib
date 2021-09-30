@@ -1,15 +1,21 @@
-import inspect
-import qtpy
+# Description: A concrete Qt GUI for a VTK canvas.
+# Author: Jaswant Sai Panchumarti
+# Changelog:
+#   Sept 2021:  -Refactor qt classes [Jaswant Sai Panchumarti]
+#               -Port to PySide2 [Jaswant Sai Panchumarti]
 
-from qtpy.QtWidgets import QVBoxLayout, QWidget
-from qtpy.QtGui import QResizeEvent
+
+import inspect
+
+from PySide2.QtWidgets import QVBoxLayout, QWidget
+from PySide2.QtGui import QResizeEvent, QShowEvent
 
 from iplotlib.impl import CanvasFactory, Canvas, VTKCanvas
-from iplotlib.qt.qtPlotCanvas import QtPlotCanvas
+from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 # Maintain consistent qt api across vtk and iplotlib
 import vtkmodules.qt
-vtkmodules.qt.PyQtImpl = qtpy.API_NAME
+vtkmodules.qt.PyQtImpl = 'PySide2'
 
 # vtk requirements
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor, PyQtImpl
@@ -21,12 +27,13 @@ from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__, "DEBUG")
 
 try:
-    assert(PyQtImpl == qtpy.API_NAME)
-except AssertionError:
-    logger.exception("Sanity check failed")
+    assert(PyQtImpl == 'PySide2')
+except AssertionError as e:
+    logger.warning("Invalid python Qt binding: the sanity check failed")
+    logger.exception(e)
 
 
-class QtVTKCanvas(QtPlotCanvas):
+class QtVTKCanvas(IplotQtCanvas):
     """A Qt container widget that emebeds a VTKCanvas.
         See set_canvas, get_canvas
     """
@@ -39,7 +46,7 @@ class QtVTKCanvas(QtPlotCanvas):
         """
         super().__init__(parent, **kwargs)
 
-        self.render_widget = QVTKRenderWindowInteractor(parent, **kwargs)
+        self.render_widget = QVTKRenderWindowInteractor(self, **kwargs)
         
         self.impl_canvas = CanvasFactory.new("vtk")
         self.set_canvas(kwargs.get('canvas'))
@@ -101,7 +108,7 @@ class QtVTKCanvas(QtPlotCanvas):
             self.impl_canvas.refresh()
             self.render()
 
-    def showEvent(self, event: qtpy.QtGui.QShowEvent):
+    def showEvent(self, event: QShowEvent):
         super().showEvent(event)
         self.render()
 
