@@ -127,7 +127,7 @@ class MatplotlibCanvas:
 
                         if self.focused_plot is not None:
                             if self.focused_plot == plot:
-                                logger.info(F"\t**Focusing on plot: {plot}")
+                                logger.debug(f"Focusing on plot: {plot}")
                                 self.process_iplotlib_plot(canvas, plot, gridspec[0, 0])
                         else:
                             self.process_iplotlib_plot(canvas, plot, gridspec[j:j + row_span, i:i + col_span])
@@ -357,7 +357,7 @@ class MatplotlibCanvas:
                 for columns in self.canvas.plots:
                     for plot in columns:
                         if plot != self.focused_plot:
-                            logger.info(F"\t\tSetting range on plot {id(plot)} focused= {id(self.focused_plot)} begin={begin}")
+                            logger.debug(f"Setting range on plot {id(plot)} focused= {id(self.focused_plot)} begin={begin}")
                             set_x_axis_range(plot, begin, end)
 
             self.focused_plot = None
@@ -370,7 +370,7 @@ class MatplotlibCanvas:
             work_item = self.mpl_task_queue.get_nowait()
             work_item()
         except Empty:
-            logger.info("Nothing to do.")
+            logger.debug("Nothing to do.")
 
     def _redraw_in_frame_with_grid(self, a):
         """A copy of Axes.redraw_in_frame that fixes the problem of not drawing the grid since grid is treated as a part of the axes
@@ -414,10 +414,10 @@ class MatplotlibCanvas:
                             if plot.axes[axis_idx].end is None:
                                 new_axis_range = new_axis_range[0], data[axis_idx][-1]
 
-                            logger.info(F"AUTOSIZE axis {axis_idx} new range after data: {new_axis_range}")
+                            logger.debug(f"AUTOSIZE axis {axis_idx} new range after data: {new_axis_range}")
                             NanosecondHelper.mpl_set_lim(axes, 0, new_axis_range)
                     else:
-                        logger.info(F"AUTOSIZE: No data!")
+                        logger.debug(f"AUTOSIZE: No data!")
                         if hasattr(signal, 'get_ranges'):
                             ranges = signal.get_ranges()
                             if ranges is not None and len(ranges) > axis_idx:
@@ -686,7 +686,7 @@ class MultiCursor2(MultiCursor):
 
                         xvalue = NanosecondHelper.mpl_transform_value(ax.get_xaxis(), event.xdata)
                         values = signal.pick(xvalue)
-                        logger.info(F"Found {values} for xvalue: {xvalue}")
+                        logger.debug(F"Found {values} for xvalue: {xvalue}")
                         if values is not None:
                             dx = abs(xvalue - values[0])
                             xmin, xmax = ax.get_xbound()
@@ -873,34 +873,3 @@ class NanosecondHelper:
                     ret.append(d)
         return ret
 
-
-class ConversionHelper:
-
-    @staticmethod
-    def toInt(value):
-        return ConversionHelper.toNumber(value, int)
-
-    @staticmethod
-    def toFloat(value):
-        return ConversionHelper.toNumber(value, float)
-
-    @staticmethod
-    def toNumber(value, type_func):
-        if isinstance(value, type_func):
-            return value
-        if isinstance(value, str):
-            return type_func(value)
-        if type(value).__module__ == 'numpy':
-            return type_func(value.item())
-
-    @staticmethod
-    def asType(value, to_type):
-        if to_type is not None and hasattr(to_type, '__name__'):
-            if to_type == type(value):
-                return value
-            if to_type.__name__ == 'float64' or to_type.__name__ == 'float':
-                return ConversionHelper.toFloat(value)
-            if to_type.__name__ == 'int64' or to_type.__name__ == 'int':
-                return ConversionHelper.toInt(value)
-
-        return value
