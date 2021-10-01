@@ -442,6 +442,7 @@ class MatplotlibCanvas:
                         draw_function = mpl_axes.step
 
                     line = draw_function(data[0], data[1], **params)
+                    signal.color = line[0].get_c()
                     self.mpl_shapes[id(signal)] = [line]
 
                 else:
@@ -473,6 +474,7 @@ class MatplotlibCanvas:
                     line2 = draw_function(data[0], data[2], **params)
                     area = mpl_axes.fill_between(data[0], data[1], data[2], alpha=0.3, color=params.get('color'), step=step)
                     self.mpl_shapes[id(signal)] = [line, line2, area]
+                    signal.color = params.get('color')
                 else:
 
                     existing[0][0].set_xdata(data[0])

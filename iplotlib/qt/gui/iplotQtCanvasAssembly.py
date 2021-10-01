@@ -33,7 +33,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
             self.setCanvasData(i, self.widget(i))
 
     def setCanvasData(self, idx, canvas: IplotQtCanvas):
-        self._model.item(idx, 0).removeRow(0)
+        self._model.item(idx, 0).removeRows(0, self._model.item(idx, 0).rowCount())
         self._model.item(idx, 0).setData(canvas.get_canvas(), Qt.UserRole)
 
     def model(self) -> QStandardItemModel:

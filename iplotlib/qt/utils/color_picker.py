@@ -41,6 +41,20 @@ class ColorPicker(QWidget):
         QApplication.postEvent(
             self, QKeyEvent(QEvent.KeyPress, Qt.Key_Enter, Qt.NoModifier))
     
-    @Property(str, user=True)
-    def currentColor(self) -> str:
+    def currentcolor(self) -> str:
         return self._rgbValue
+
+    def setCurrentColor(self, color):
+        if not isinstance(color, str):
+            return
+        elif not len(color):
+            return
+        if color[0] == "#" and len(color) == 7:
+            # Convert hex string to RGB
+            r, g, b = tuple(int(color[i:i + 2], 16) for i in range(1, 7, 2))
+            self.colorDialog.setCurrentColor(QColor(r, g, b))
+        else:
+            return self.indicateColorChange(self.colorDialog.currentColor())
+
+    currentColor = Property(str, currentcolor, setCurrentColor, user=True)
+
