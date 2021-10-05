@@ -1,17 +1,12 @@
-from abc import ABC
 from dataclasses import dataclass
-
 
 @dataclass
 class Axis:
     """Main abstraction of an axis"""
 
-    """Axis label: Should be shown next to an axis"""
-    label: str = None
-    """Axis font size, applies both for axis label and axis tick labels"""
-    font_size: int = None
-    """Axis font color, applies both for axis label and axis tick labels"""
-    font_color: str = None
+    label: str = None #: a text to be shown next to an axis.
+    font_size: int = None #: font size applies both for axis label and axis tick labels.
+    font_color: str = None #: color applies to an axis label and axis tick labels.
 
     _type: str = None
 
@@ -49,9 +44,6 @@ class RangeAxis(Axis):
 @dataclass
 class LinearAxis(RangeAxis):
 
-    """Boolean that suggests that axis should be formatted as date instead of number"""
-    is_date: bool = False
-    """Implies that instead of using (begin,end) to specify axis range the range is specified by (end-window,end)"""
-    window: float = None
-    """If true plot 'follows' the data which means it is refreshed when new data arrives and range is automatically changed to show new data"""
-    follow: bool = False
+    is_date: bool = False #: suggests that axis should be formatted as date instead of number
+    window: float = None #: Implies that instead of using (begin,end) to specify axis range the range is specified by (end-window,end)
+    follow: bool = False #: If true plot 'follows' the data which means it is refreshed when new data arrives and range is automatically changed to show new data

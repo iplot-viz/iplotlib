@@ -16,54 +16,36 @@ class Canvas(ABC):
     MOUSE_MODE_ZOOM = 'MM_ZOOM'
     MOUSE_MODE_DIST = 'MM_DIST'
 
-    """Number of rows in the grid. If specified the space for this nuber of rows should be reserved when rendering canvas since some 
-    of the plots can be empty"""
-    rows: int = 1
-    """Number of columns in the grid. If specified the space for this number of columns should be reserved when rendering canvas since 
-    some of the plots may be empty"""
-    cols: int = 1
-    """Canvas title - should be presented above the canvas grid centerer horizontally"""
-    title: str = None
+    rows: int = 1 #: Number of rows in the grid. If specified the space for this nuber of rows should be reserved when rendering canvas since some of the plots can be empty
+    cols: int = 1 #: Number of columns in the grid. If specified the space for this number of columns should be reserved when rendering canvas since some of the plots may be empty
+    title: str = None #: Canvas title - should be shown above the canvas grid centered horizontally
 
 
-    font_size: int = None
-    font_color: str = None
+    font_size: int = None #: default font size that will be cascaded across plots and axes of this canvas.
+    font_color: str = None #: default font color that will be cascaded across plots and axes of this canvas.
 
-    """Default line style for drawing line plots. Possible values: 'solid','dashed','dotted' defaults to 'solid'"""
-    line_style: str = None
+    line_style: str = None #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
+    line_size: int = None #: default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent points should be canvas impementation dependent
 
-    """Default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent points should 
-    be canvas impementation dependent"""
-    line_size: int = None
+    marker: str = None #: default marker type to display. If set a marker is drawn at every point of the data sample. Markers and lines can be drawn together and are not mutually exclusive. Supported types: 'x','o', None, default: None (no markers are drawn)
+    marker_size: int = None #: default marker size. Whether it is mapped to pixels or DPI independent points should be canvas impementation dependent
 
-    """Marker type to display. If set a marker is drawn at every point of the data sample. Markers and lines can be drawn
-    together and are not mutually exclusive. Supported types: 'x','o', None, default: None (no markers are drawn)"""
-    marker: str = None
+    step: str = None # default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
 
-    """Marker size when drawn. Whether it is mapped to pixels or DPI independent points should be canvas 
-    impementation dependent"""
-    marker_size: int = None
+    hi_precision_data: bool = False #: a boolean that suggests the data is sensitive to round off errors and requires special handling
+    dec_samples: int = 1000 #: the default no. of samples for a data access fetch call.
 
+    legend: bool = True #: a boolean that suggests the visibility of a plot legend box.
+    grid: bool = False #: a boolean that suggests the visibility of a plot grid
 
-    step: str = None
+    mouse_mode: str = MOUSE_MODE_SELECT #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
 
-    hi_precision_data: bool = False
-    dec_samples: int = 1000
-    """Should the plot legend be shown"""
-    legend: bool = True
+    plots: List[List[Plot]] = None #: A 22-level nested list of plots.
 
-    """Should plot grid be shown"""
-    grid: bool = False
-
-    mouse_mode: str = MOUSE_MODE_SELECT
-
-
-    plots: List[List[Plot]] = None
-
-    crosshair_enabled: bool = False
-    crosshair_color: str = "red"
-    crosshair_line_width: int = 1
-    crosshair_horizontal: bool = True
+    crosshair_enabled: bool = False #: visibility of crosshair.
+    crosshair_color: str = "red" #: color of the crosshair cursor lines.
+    crosshair_line_width: int = 1 # width of the crosshair cursor lines.
+    crosshair_horizontal: bool = True # visibility of the hori
     crosshair_vertical: bool = True
     crosshair_per_plot: bool = False
 
