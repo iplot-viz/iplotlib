@@ -391,14 +391,16 @@ class MatplotlibCanvas:
     def refresh_signal(self, signal):
         """Should repaint what is needed after data for this signal has changed"""
 
-        def group_data_units(axes, index):
+        def group_data_units(axes):
             """Function that returns axis label made from signal units"""
             units = []
             if hasattr(axes, "_signals"):
                 for s in axes._signals:
-                    if hasattr(s, "units") and s.units is not None and len(s.units) >= index:
-                        if s.units[index] is not None and len(s.units[index].strip()):
-                            units.append(s.units[index] or '-')
+                    try:
+                        assert isinstance(s.data_primary_unit, str)
+                        units.append(s.data_primary_unit or '-')
+                    except (AttributeError, AssertionError) as e:
+                        continue
             units = set(units) if len(set(units)) == 1 else units
             return '[{}]'.format(']['.join(units)) if len(units) else None
 
@@ -504,12 +506,11 @@ class MatplotlibCanvas:
                 #TODO: According to SO:50325907 calling legend may be delayed after tight_layout
                 mpl_axes.legend(prop={'size': self.legend_size})
 
-            if hasattr(signal, "units"):
-                yaxis = mpl_axes.get_yaxis()
-                if hasattr(yaxis, "_label") and not yaxis._label:
-                    label = group_data_units(mpl_axes, 1)
-                    if label:
-                        yaxis.set_label_text(label)
+            yaxis = mpl_axes.get_yaxis()
+            if hasattr(yaxis, "_label") and not yaxis._label:
+                label = group_data_units(mpl_axes)
+                if label:
+                    yaxis.set_label_text(label)
         else:
             logger.error(f"Matplotlib AXES not found for signal {signal}. This should not happen. SIGNAL_ID: {id(signal)} AXES: {mpl_axes}")
 
