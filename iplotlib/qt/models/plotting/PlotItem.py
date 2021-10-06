@@ -13,8 +13,9 @@ from iplotlib.qt.models.plotting.SignalItem import SignalItem
 class PlotItem(QStandardItem):
     AXIS_NAMES = ['x', 'y', 'z']
 
-    def __init__(self, text: str):
+    def __init__(self, text: str, auto_name=False):
         super().__init__(text)
+        self.auto_name = auto_name
 
     def setData(self, value: typing.Any, role: int = Qt.UserRole):
         super().setData(value, role=role)
@@ -25,10 +26,10 @@ class PlotItem(QStandardItem):
         # process signals..
         for stack_id, stack in enumerate(value.signals.values()):
             for signal_id, signal in enumerate(stack):
-                signalItem = SignalItem(f'Signal {signal_id} | stack {stack_id}')
+                signalItem = SignalItem(f'Signal {signal_id} | stack {stack_id}', self.auto_name)
                 signalItem.setEditable(False)
                 signalItem.setData(signal, Qt.UserRole)
-                if signal.title:
+                if self.auto_name and signal.title:
                     signalItem.setText(signal.title)
                 self.appendRow(signalItem)
 
@@ -51,8 +52,8 @@ class PlotItem(QStandardItem):
                 axisPlan.update({name: axisObject})
         
         for name, axisObject in axisPlan.items():
-            axisItem = AxisItem(name)
+            axisItem = AxisItem(name, self.auto_name)
             axisItem.setData(axisObject, Qt.UserRole)
-            if axisObject.label:
+            if self.auto_name and axisObject.label:
                 axisItem.setText(axisObject.label)
             self.appendRow(axisItem)
