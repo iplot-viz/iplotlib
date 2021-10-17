@@ -15,15 +15,20 @@ class JSONExporter:
         "iplotlib.Canvas.Canvas": "iplotlib.core.canvas.Canvas",
         "iplotlib.Plot.Plot2D": "iplotlib.core.plot.PlotXY",
         "iplotlib.Axis.LinearAxis": "iplotlib.core.axis.LinearAxis",
-        "iplotlib.Signal.UDAPulse": "iplotlib.data_access.dataAccessSignal.DataAccessSignal"
-
+        "iplotlib.Signal.UDAPulse": "iplotlib.interface.iplotSignalAdapter.IplotSignalAdapter",
     }
+
+    def to_dict(self, obj):
+        return json.loads(self.to_json(obj))
+
+    def from_dict(self, inp_dict):
+        return self.dataclass_from_dict(inp_dict)
 
     def to_json(self, obj):
         return json.dumps(obj, cls=DataclassNumpyJSONEncoder, indent=4)
 
     def from_json(self, string):
-        return self.dataclass_from_dict(json.loads(string))
+        return self.from_dict(json.loads(string))
 
     def dataclass_from_dict(self, d, klass=None):
         """

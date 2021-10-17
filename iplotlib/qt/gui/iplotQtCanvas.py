@@ -38,6 +38,12 @@ class IplotQtCanvas(QWidget):
     def sizeHint(self):
         return QSize(900, 400)
 
+    def export_dict(self):
+        return self.get_canvas().to_dict() if self.get_canvas() else None
+    
+    def import_dict(self, input_dict):
+        self.set_canvas(Canvas.from_dict(input_dict))
+
     def export_json(self):
         return self.get_canvas().to_json() if self.get_canvas() is not None else None
 
