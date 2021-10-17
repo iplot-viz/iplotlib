@@ -2,7 +2,7 @@ import numpy as np
 import os
 import unittest
 from iplotlib.core.plot import PlotXY
-from iplotlib.core.signal import ArraySignal
+from iplotlib.core.signal import SimpleSignal
 from iplotlib.impl import CanvasFactory
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.QAppTestAdapter import QAppTestAdapter
@@ -26,7 +26,7 @@ class VTKCanvasTesting(QAppTestAdapter):
                   "cadmium_yellow", "emerald_green"]
         plot = PlotXY(title="Color")
         for i in range(5):
-            signal = ArraySignal(
+            signal = SimpleSignal(
                 title=f"{colors[i]}",
                 color=colors[i],
                 hi_precision_data=False
@@ -39,7 +39,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         line_styles = ["solid", "dashed", "dotted"]
         plot = PlotXY(title="LineStyle")
         for i in range(3):
-            signal = ArraySignal(
+            signal = SimpleSignal(
                 title=f"{line_styles[i]}",
                 color=colors[i],
                 line_style=line_styles[i],
@@ -53,7 +53,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         line_sizes = [2, 3, 4]
         plot = PlotXY(title="LineSize")
         for i in range(3):
-            signal = ArraySignal(
+            signal = SimpleSignal(
                 title=f"LineSize-{line_sizes[i]}",
                 color=colors[i],
                 line_size=line_sizes[i],
@@ -67,7 +67,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         markers = ['x', 'o', 'square', 'diamond', 'circle']
         plot = PlotXY(title="Marker")
         for i in range(5):
-            signal = ArraySignal(
+            signal = SimpleSignal(
                 title=f"{markers[i]}",
                 color=colors[i],
                 marker=markers[i],
@@ -81,7 +81,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         marker_sizes = [8, 12, 14]
         plot = PlotXY(title="MarkerSize")
         for i in range(3):
-            signal = ArraySignal(
+            signal = SimpleSignal(
                 title=f"{marker_sizes[i]}",
                 color=colors[i],
                 marker=markers[i],
@@ -96,7 +96,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         step_types = [None, "steps-mid", "steps-post", "steps-pre"]
         plot = PlotXY(title="Step")
         for i in range(4):
-            signal = ArraySignal(
+            signal = SimpleSignal(
                 title=f"{step_types[i]}",
                 color=colors[i],
                 marker='x',

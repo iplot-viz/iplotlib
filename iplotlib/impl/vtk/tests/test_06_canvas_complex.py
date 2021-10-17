@@ -2,7 +2,7 @@ import numpy as np
 import os
 import unittest
 from iplotlib.core.plot import PlotXY
-from iplotlib.core.signal import ArraySignal
+from iplotlib.core.signal import SimpleSignal
 from iplotlib.impl import CanvasFactory
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.QAppTestAdapter import QAppTestAdapter
@@ -18,15 +18,15 @@ class VTKCanvasTesting(QAppTestAdapter):
             "vtk", 3, 2, title=os.path.basename(__file__))
 
         plot11 = PlotXY(col_span=2)
-        signal11 = ArraySignal(title="Signal_a_1.1")
+        signal11 = SimpleSignal(title="Signal_a_1.1")
         signal11.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
         plot11.add_signal(signal11)
-        signal11 = ArraySignal(title="Signal_b_1.1")
+        signal11 = SimpleSignal(title="Signal_b_1.1")
         signal11.set_data([np.array([0., 1., 2., 3.]),
                           np.array([1., 2., 3., 4.])])
         plot11.add_signal(signal11)
-        signal11 = ArraySignal(title="Signal_c_1.1")
+        signal11 = SimpleSignal(title="Signal_c_1.1")
         signal11.set_data([np.array([0., 1., 2., 3.]),
                           np.array([2., 3., 4., 5.])])
         plot11.add_signal(signal11)
@@ -34,37 +34,37 @@ class VTKCanvasTesting(QAppTestAdapter):
         self.vtk_canvas.add_plot(None, 1)
 
         plot12 = PlotXY()
-        signal121 = ArraySignal(title="Signal1.2.1")
+        signal121 = SimpleSignal(title="Signal1.2.1")
         signal121.set_data([np.array([0., 1., 2., 3.]),
                            np.array([0., 1., 2., 3.])])
         plot12.add_signal(signal121)
-        signal122 = ArraySignal(title="Signal1.2.2")
+        signal122 = SimpleSignal(title="Signal1.2.2")
         signal122.set_data([np.array([0., 1., 2., 3.]),
                            np.array([0., 1., 2., 3.])])
         plot12.add_signal(signal122, stack=2)
         self.vtk_canvas.add_plot(plot12, 0)
 
         plot13 = PlotXY()
-        signal13 = ArraySignal(title="Signal1.3")
+        signal13 = SimpleSignal(title="Signal1.3")
         signal13.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
         plot13.add_signal(signal13)
         self.vtk_canvas.add_plot(plot13, 0)
 
         plot22 = PlotXY(row_span=2)
-        signal22 = ArraySignal(title="Signal2.2")
+        signal22 = SimpleSignal(title="Signal2.2")
         signal22.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
         plot22.add_signal(signal22)
-        signal22 = ArraySignal(title="Signal2.2")
+        signal22 = SimpleSignal(title="Signal2.2")
         signal22.set_data([np.array([0., 1., 2., 3.]),
                           np.array([1., 2., 3., 4.])])
         plot22.add_signal(signal22)
-        signal22 = ArraySignal(title="Signal2.2")
+        signal22 = SimpleSignal(title="Signal2.2")
         signal22.set_data([np.array([0., 1., 2., 3.]),
                           np.array([2., 3., 4., 5.])])
         plot22.add_signal(signal22)
-        signal22 = ArraySignal(title="Signal2.2")
+        signal22 = SimpleSignal(title="Signal2.2")
         signal22.set_data([np.array([0., 1., 2., 3.]),
                           np.array([3., 4., 5., 6.])])
         plot22.add_signal(signal22)

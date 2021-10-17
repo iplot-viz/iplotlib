@@ -1,4 +1,4 @@
-from iplotlib.core.signal import ArraySignal
+from iplotlib.core.signal import SimpleSignal
 import unittest
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.axis import LinearAxis
@@ -70,7 +70,7 @@ class VTKCanvasTesting(unittest.TestCase):
     def test_signal_inherits_plot_properties(self):
 
         plot = PlotXY()
-        signal = ArraySignal()
+        signal = SimpleSignal()
         plot.add_signal(signal)
 
         self.prop_manager.acquire_signal_from_plot(plot, signal)

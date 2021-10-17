@@ -2,7 +2,7 @@ import numpy as np
 import os
 import unittest
 from iplotlib.core.plot import PlotXY
-from iplotlib.core.signal import ArraySignal
+from iplotlib.core.signal import SimpleSignal
 from iplotlib.impl import CanvasFactory
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.QAppTestAdapter import QAppTestAdapter
@@ -18,7 +18,7 @@ class VTKCanvasTesting(QAppTestAdapter):
             "vtk", 2, 2, title=os.path.basename(__file__))
 
         # A plot in top-left with 1 signal.
-        signal11 = ArraySignal(title="Signal1.1")
+        signal11 = SimpleSignal(title="Signal1.1")
         signal11.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
         plot11 = PlotXY()
@@ -26,7 +26,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         self.vtk_canvas.add_plot(plot11, 0)
 
         # A plot in bottom-left with 1 signal.
-        signal12 = ArraySignal(title="Signal1.2")
+        signal12 = SimpleSignal(title="Signal1.2")
         signal12.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
         plot12 = PlotXY()
@@ -34,7 +34,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         self.vtk_canvas.add_plot(plot12, 0)
 
         # A plot in top-right with 1 signal.
-        signal21 = ArraySignal(title="Signal2.1")
+        signal21 = SimpleSignal(title="Signal2.1")
         signal21.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
         plot21 = PlotXY()
@@ -42,7 +42,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         self.vtk_canvas.add_plot(plot21, 1)
 
         # A plot in bottom-right with 1 signal.
-        signal22 = ArraySignal(title="Signal2.2")
+        signal22 = SimpleSignal(title="Signal2.2")
         signal22.set_data([np.array([0., 1., 2., 3.]),
                           np.array([0., 1., 2., 3.])])
         plot22 = PlotXY()
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     # vtk_canvas = VTKCanvas(2, 2, title=str(__name__))
 
     # # A plot in top-left with 1 signal.
-    # signal11 = ArraySignal(title="Signal1.1")
+    # signal11 = SimpleSignal(title="Signal1.1")
     # signal11.set_data([np.array([0., 1., 2., 3.]),
     #                     np.array([0., 1., 2., 3.])])
     # plot11 = PlotXY()
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     # vtk_canvas.add_plot(plot11, 0)
 
     # # A plot in bottom-left with 1 signal.
-    # signal12 = ArraySignal(title="Signal1.2")
+    # signal12 = SimpleSignal(title="Signal1.2")
     # signal12.set_data([np.array([0., 1., 2., 3.]),
     #                     np.array([0., 1., 2., 3.])])
     # plot12 = PlotXY()
@@ -111,7 +111,7 @@ if __name__ == "__main__":
     # vtk_canvas.add_plot(plot12, 0)
 
     # # A plot in top-right with 1 signal.
-    # signal21 = ArraySignal(title="Signal2.1")
+    # signal21 = SimpleSignal(title="Signal2.1")
     # signal21.set_data([np.array([0., 1., 2., 3.]),
     #                     np.array([0., 1., 2., 3.])])
     # plot21 = PlotXY()
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     # vtk_canvas.add_plot(plot21, 1)
 
     # # A plot in bottom-right with 1 signal.
-    # signal22 = ArraySignal(title="Signal2.2")
+    # signal22 = SimpleSignal(title="Signal2.2")
     # signal22.set_data([np.array([0., 1., 2., 3.]),
     #                     np.array([0., 1., 2., 3.])])
     # plot22 = PlotXY()
