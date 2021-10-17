@@ -8,16 +8,25 @@
 #              -Teach AccessHelper to explore ProcessingSignal objects. [Jaswant Sai Panchumarti]
 #              -Rename AccessHelper.get_data -> AccessHelper._fetch_data (no longer returns data) [Jaswant Sai Panchumarti]
 #              -Translate iplotDataAccess.DataObj into ProcessingSignal in AccessHelper._fetch_data [Jaswant Sai Panchumarti]
+#  Oct 2021:   Changes by Jaswant
+#              - All data requests are done in blocking fashion.
+#              - Added ParserHelper.
+#              - Added on_fetch_done to AccessHelper
+#              - Renamed DataAccessSignal ->IplotSignalAdapter.
+#              - Removed dec_samples. Use fall back value if default -1 parameter fails.
+#              - Added _process_data() to IplotSignalAdapter
+#              - Added compute() to IplotSignalAdapter
+#              - Added StatusInfo to IplotSignalAdapter
+#              - Parse given time as isoformat datetime only if it is a non-empty string
 
-from concurrent.futures import Future, ProcessPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field, fields
-from iplotProcessing.common.errors import InvalidExpression
-
+from functools import partial
 import numpy as np
 import os
 import typing
 
 from iplotlib.core.signal import ArraySignal
+from iplotProcessing.common.errors import InvalidExpression
 from iplotProcessing.core import BufferObject
 from iplotProcessing.core import Signal as ProcessingSignal
 from iplotProcessing.tools.parsers import Parser
@@ -29,7 +38,6 @@ logger = sl.get_logger(__name__, level="INFO")
 
 IplotSignalAdapterT = typing.TypeVar(
     'IplotSignalAdapterT', bound='IplotSignalAdapter')
-
 
 
 class DataAccessError(Exception):
@@ -44,30 +52,38 @@ class Result:
     SUCCESS = 'Success'
 
 
+class Stage:
+    DA = 'Data-Access'
+    INIT = 'Initialization'
+    PROC = 'Processing'
+
+
 @dataclass
 class StatusInfo:
-    da_msg: str = ''
+    msg: str = ''
     num_points: int = 0
-    proc_msg: str = ''
     result: Result = Result.READY
-    sep = ' | '
+    sep = '|'
+    stage: Stage = Stage.INIT
 
     def reset(self):
-        self.da_msg = ''
+        self.msg = ''
         self.num_points = 0
-        self.proc_msg = ''
         self.result = Result.READY
+        self.stage = Stage.INIT
+        self.sep = '|'
 
     def __str__(self) -> str:
-        msg = f"{self.result}"
-        if self.da_msg:
-            msg += self.sep + f"Data access: {self.da_msg}"
-        if self.proc_msg:
-            msg += self.sep + f"Processing: {self.proc_msg}"
-        if self.result not in [Result.READY, Result.BUSY]:
-            msg += self.sep + f"{self.num_points} points"
-
-        return msg
+        if self.result == Result.BUSY:
+            return self.result + self.sep + self.stage
+        elif self.result == Result.INVALID:
+            return self.result + self.sep + self.stage
+        elif self.result == Result.FAIL:
+            return self.stage + self.sep + f'{self.num_points}' + ' points'
+        elif self.result == Result.READY:
+            return self.result
+        elif self.result == Result.SUCCESS:
+            return self.result + self.sep + f'{self.num_points}' + ' points'
 
 
 @dataclass
@@ -102,18 +118,18 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     data_access_enabled: bool = True
     processing_enabled: bool = True
 
-    time_out_value: float = 60
+    time_out_value: float = 60  # Unimplemented.
 
     def __post_init__(self):
         super().__post_init__()
         ProcessingSignal.__init__(self)
 
         # 1. Initialize access parameters
-        if isinstance(self.ts_start, str):
+        if isinstance(self.ts_start, str) and len(self.ts_start) and not self.ts_start.isspace():
             self.ts_start = np.datetime64(
                 self.ts_start, 'ns').astype('int64').item()
 
-        if isinstance(self.ts_end, str):
+        if isinstance(self.ts_end, str) and len(self.ts_end) and not self.ts_end.isspace():
             self.ts_end = np.datetime64(
                 self.ts_end, 'ns').astype('int64').item()
 
@@ -156,17 +172,17 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 if isinstance(value, IplotSignalAdapter):
                     if self.data_access_enabled and len(self.data_source) and self.data_source != value.data_source:
                         self.status_info.reset()
-                        self.status_info.da_msg = f"Data source conflict {self.data_source} != {value.data_source}."
+                        self.status_info.msg = f"Data source conflict {self.data_source} != {value.data_source}."
                         self.status_info.result = Result.INVALID
-                        logger.warning(self.status_info.da_msg)
+                        logger.warning(self.status_info.msg)
                         break
                     self.children.append(value)
                 else:
                     if self.data_access_enabled and (not len(self.data_source) or self.data_source.isspace()):
                         self.status_info.reset()
-                        self.status_info.da_msg = "Data source unspecified."
+                        self.status_info.msg = "Data source unspecified."
                         self.status_info.result = Result.INVALID
-                        logger.warning(self.status_info.da_msg)
+                        logger.warning(self.status_info.msg)
                         break
                     elif self.data_access_enabled:
                         # Construct a new instance with our data source and time range, etc..
@@ -175,9 +191,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                     elif self.processing_enabled:
                         # Cannot create a new instance without alias in this case.
                         self.status_info.reset()
-                        self.status_info.proc_msg = f"Specified name '{key}' is not a pre-defined alias!"
+                        self.status_info.msg = f"Specified name '{key}' is not a pre-defined alias!"
                         self.status_info.result = Result.INVALID
-                        logger.warning(self.status_info.proc_msg)
+                        logger.warning(self.status_info.msg)
                         break
 
         if self.status_info.result == Result.INVALID:
@@ -289,26 +305,28 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 data_arrays.append(ParserHelper.evaluate(self, expr))
             except Exception as e:
                 # Indicate failure with message and bail.
-                self.status_info.proc_msg = f"Expression {key}={expr} | {str(e)}"
+                self.status_info.stage = Stage.PROC
+                self.status_info.msg = f"Expression {key}={expr} | {str(e)}"
                 self.status_info.result = Result.FAIL
                 logger.warning(
-                    f"Processing error: {self.status_info.proc_msg}")
+                    f"Processing error: {self.status_info.msg}")
                 break
         else:
             if len(data_arrays) == 3:  # strict
                 self.set_data(data_arrays)
             else:
-                self.status_info.proc_msg = f"Unsupported size of data arrays. Expected triple. Got {len(data_arrays)}"
+                self.status_info.stage = Stage.PROC
+                self.status_info.msg = f"Unsupported size of data arrays. Expected triple. Got {len(data_arrays)}"
                 self.status_info.result = Result.FAIL
                 logger.warning(
-                    f"Processing error: {self.status_info.proc_msg}")
+                    f"Processing error: {self.status_info.msg}")
 
     def _process_data(self):
         if len(self.children):
             # Cannot process data when _fetch_data failed or did not occur
             if self.status_info.result != Result.SUCCESS and self.data_access_enabled:
                 return
-    
+
             local_env = dict(ParserHelper.env)
 
             for child in self.children:
@@ -324,17 +342,17 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                     p.result.copy_buffers_to(self)
                     self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
                 else:
-                    self.status_info.reset()
-                    self.status_info.proc_msg = f"Result of expression={self.name} is not an instance of {type(self).__name__}"
+                    self.status_info.stage = Stage.PROC
+                    self.status_info.msg = f"Result of expression={self.name} is not an instance of {type(self).__name__}"
                     self.status_info.result = Result.FAIL
                     logger.warning(
-                        f"Processing error: {self.status_info.proc_msg}")
+                        f"Processing error: {self.status_info.msg}")
             except Exception as e:
-                self.status_info.reset()
-                self.status_info.proc_msg = str(e)
+                self.status_info.stage = Stage.PROC
+                self.status_info.msg = str(e)
                 self.status_info.result = Result.FAIL
                 logger.warning(
-                    f"Processing error: {self.status_info.proc_msg}")
+                    f"Processing error: {self.status_info.msg}")
         else:
             # Cannot process data when _fetch_data failed or did not occur
             if self.status_info.result != Result.SUCCESS and self.data_access_enabled:
@@ -342,41 +360,11 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
             self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
 
-    def _on_data_access_finish(self, f: Future):
-        e = f.exception()
-
-        self.status_info.reset()
-
-        if isinstance(e, Exception):
-            # Indicate failure with message.
-            self.status_info.da_msg = str(e)
-            self.status_info.result = Result.FAIL
-            logger.warning(
-                f"Data access request error: {self.status_info.da_msg}")
-            return
-
-        res = f.result()
-        if not isinstance(res, dict):
-            # We don't know what happened. The iplotDataAccess module was unable to communicate the error.
-            self.status_info.da_msg = 'Unknown error while fetching data'
-            self.status_info.result = Result.FAIL
-        else:
-            # if data access succeded, the fetched data is encapsulated in a dict.
-            self.time = res['time']
-            self.time_unit = res['time_unit']
-            self.data_primary = res['data_primary']
-            self.data_primary_unit = res['data_primary_unit']
-            self.data_secondary = res['data_secondary']
-            self.data_secondary_unit = res['data_secondary_unit']
-            self.status_info.reset()
-            self.status_info.num_points = len(self.time)
-            self.status_info.result = Result.SUCCESS
-
-    def _fetch_data(self, results: dict = {}) -> typing.Tuple[Future, IplotSignalAdapterT]:
+    def _fetch_data(self):
         """
-        Make a data access call with AccessHelper and process the data if necessary.
+        Make a data access call with AccessHelper.
         """
-        # avoid request pile up.
+        # avoid request pile up, shouldn't occur internally since all requests are blocking
         if self.status_info.result == Result.BUSY:
             return
 
@@ -385,49 +373,30 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         # Set appropriate status
         self.status_info.reset()
+        self.status_info.stage = Stage.DA
         self.status_info.result = Result.BUSY
 
         if len(self.children):
             # ask child signals to fetch data
             for child in self.children:
-                child._fetch_data(results)
+                child._fetch_data()
+                if child.status_info.result == Result.FAIL:
+                    self.status_info = child.status_info
+                    break
+            else:  # Fell through, all children succeded
+                self.status_info.result = Result.SUCCESS
         else:
             # submit a fetch request for ourself.
-            f = CachingAccessHelper.get().fetch_data(self)
-            f.add_done_callback(self._on_data_access_finish)
-            results.update({f: self})
-
-    def _wait_data(self, results: dict):
-
-        # The children wait for as long as parent's time out value.
-        _, not_done = wait(results.keys(), timeout=self.time_out_value)
-        for f in not_done:
-            sig = results.get(f)
-            sig.status_info.reset()
-            sig.status_info.da_msg = f"time out ({self.time_out_value})"
-            sig.status_info.proc_msg = f"time out ({self.time_out_value})"
-            sig.status_info.result = Result.FAIL
-
-        # if any child has a status==fail, then parent will indicate it.
-        for child in self.children:
-            if child.status_info.result == Result.FAIL:
-                self.status_info.reset()
-                if child.status_info.da_msg:
-                    self.status_info.da_msg = f"child failure: " + child.status_info.da_msg
-                if child.status_info.proc_msg:
-                    self.status_info.proc_msg = f"child failure: " + child.status_info.proc_msg
-                self.status_info.result = Result.FAIL
-                break
-        else:
-            # fell through, none of the children failed
-            if len(self.children):
-                self.status_info.reset()
-                self.status_info.result = Result.SUCCESS
+            CachingAccessHelper.get().fetch_data(self)
 
     def get_data(self):
-        results = {}
-        self._fetch_data(results)
-        self._wait_data(results)
+
+        # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
+        if isinstance(self.name, str) and len(self.name) and not self.name.isspace():
+            self._fetch_data()
+        else:
+            self.status_info.stage = Stage.DA
+            self.status_info.result = Result.SUCCESS
 
         if self.processing_enabled:
             self._process_data()
@@ -477,19 +446,24 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
 class AccessHelper:
     """
-    A simple wrapper providing UDA data cache.
-    For now we should only assume that data ranges are given by timestamps
+    A simple wrapper providing single threaded data access.
+
+    .. note:
+    All Data requests are blocking and occur sequentially i.e, first to enter, first to exit.
+    Concurrent execution is not implemented but the infrastructure is setup to not come in your way,
+    should you wish to introduce concurrency.
+    See fetch_data(), _submit_fetch(), on_fetch_done() and request_data()
+    For ex. the input and output of request_data() are python builtins i.e, a dictionary
+    compatible with pipes/queues/process-pool-executors.
     """
 
-    async_enabled = False
     da = None
     num_samples_override = False
     num_samples = 1000
     query_no = 0
 
     def __init__(self) -> None:
-        num_workers = None if self.async_enabled else 1
-        self.pool = ProcessPoolExecutor(max_workers=num_workers)
+        pass
 
     @staticmethod
     def construct_da_params(signal: IplotSignalAdapter):
@@ -505,15 +479,18 @@ class AccessHelper:
 
     @staticmethod
     def uda_ts(signal: IplotSignalAdapter, value):
-        """Formats values as relative/absolute timestapms for UDA request or pretty print string"""
+        """Formats values as relative/absolute timestapms for UDA request or pretty print string
+            Logic is to return integer if not relative time, else return float.
+            if given value is an empty string or n alphabetic character or NoneType, just return None
+        """
         # return str(np.datetime64(value, 'ns')) if not (signal.ts_relative or value is None) else value
         try:
             if not signal.ts_relative:
                 return int(value)
             else:
                 return float(value)
-        except TypeError:
-            return value
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def str_ts(signal: IplotSignalAdapter, value):
@@ -533,14 +510,62 @@ class AccessHelper:
     def get():
         return AccessHelper()
 
-    def fetch_data(self, signal: IplotSignalAdapter) -> Future:
+    @staticmethod
+    def on_fetch_done(signal, res: dict):
+        signal.status_info.reset()
+        signal.status_info.stage = Stage.DA
+
+        if not isinstance(res, dict):
+            # We don't know what happened. The iplotDataAccess module was unable to communicate the error.
+            signal.status_info.msg = 'Unknown error while fetching data'
+            signal.status_info.result = Result.FAIL
+        else:
+            # if data access succeded, the fetched data is encapsulated in a dict.
+            signal.time = res['time']
+            signal.time_unit = res['time_unit']
+            signal.data_primary = res['data_primary']
+            signal.data_primary_unit = res['data_primary_unit']
+            signal.data_secondary = res['data_secondary']
+            signal.data_secondary_unit = res['data_secondary_unit']
+            signal.status_info.num_points = len(signal.time)
+            signal.status_info.result = Result.SUCCESS
+
+    @staticmethod
+    def _submit_fetch(signal: IplotSignalAdapter):
+        """This would wrap a blocking call to _request_data. For now, it is sequential.
+
+        :param signal: the signal instance
+        :type signal: IplotSignalAdapter
+        """
+        in_params = AccessHelper.construct_da_params(signal)
+        out_params = dict()
+        try:
+            result = AccessHelper._request_data(**in_params)
+            out_params.update(result)
+        except Exception as e:
+            # Indicate failure with message.
+            signal.status_info.msg = str(e)
+            signal.status_info.result = Result.FAIL
+            logger.warning(
+                f"Data access request error: {signal.status_info.msg}")
+            return
+
+        # finalize function after fetch.
+        AccessHelper.on_fetch_done(signal, out_params)
+
+    def fetch_data(self, signal: IplotSignalAdapter):
+        """Run a single data access request at a time.
+
+        :param signal: the signal instance
+        :type signal: IplotSignalAdapter
+        """
         logger.debug("[UDA {}] Get data: {} ts_start={} ts_end={} pulse_nb={} nbsamples={} relative={}".format(AccessHelper.query_no, signal.name, self.str_ts(signal, signal.ts_start), self.str_ts(signal, signal.ts_end),
                                                                                                                signal.pulse_nb, -1, signal.ts_relative))
         AccessHelper.query_no += 1
-        return self.pool.submit(AccessHelper._request_data, **(AccessHelper.construct_da_params(signal)))
+        AccessHelper._submit_fetch(signal)
 
     @staticmethod
-    def _request_data(**da_params):
+    def _request_data(**da_params) -> dict:
         tsS = da_params.get('tsS')
         tsE = da_params.get('tsE')
         pulse = da_params.get('pulse')
@@ -552,7 +577,7 @@ class AccessHelper:
                       time_unit='',
                       data_primary_unit='',
                       data_secondary_unit='')
-        da_params.pop('envelope') # getEnvelope does not need this.
+        da_params.pop('envelope')  # getEnvelope does not need this.
 
         def np_nvl(arr):
             return np.empty(0) if arr is None else np.array(arr)
@@ -629,7 +654,7 @@ class CachingAccessHelper(AccessHelper):
     def get():
         return CachingAccessHelper()
 
-    def fetch_data(self, signal: IplotSignalAdapter) -> Future:
+    def fetch_data(self, signal: IplotSignalAdapter):
         if self.enable_cache:
             cached = self._cache_fetch(signal)
             if cached is not None:
