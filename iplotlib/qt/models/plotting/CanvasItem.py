@@ -30,10 +30,9 @@ class CanvasItem(QStandardItem):
             if not isinstance(column, typing.Collection):
                 continue
 
-            if not all([isinstance(p, Plot) for p in column]):
-                continue
-
             for plot_idx, plot in enumerate(column):
+                if not isinstance(plot, Plot):
+                    continue
                 plotItem = PlotItem(f'Plot {plot_idx}', self.auto_name)
                 plotItem.setEditable(False)
                 plotItem.setData(plot, Qt.UserRole)
