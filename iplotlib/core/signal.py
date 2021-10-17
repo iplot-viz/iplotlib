@@ -55,6 +55,8 @@ class ArraySignal(Signal):
 
         try:
             data_arrays = self.get_data()
+            if (len(data_arrays) >= 2):
+                data_arrays = data_arrays[:2]
             x = data_arrays[0]
             if isinstance(x, Collection):
                 index = np.searchsorted(x, sample)
@@ -90,5 +92,5 @@ class SimpleSignal(ArraySignal):
             self.x_data = data[0]
             self.y_data = data[1]
             self.z_data = data[2]
-        except IndexError:
+        except (IndexError, TypeError) as _:
             return
