@@ -1,12 +1,15 @@
-# Description: A main window with a collection of iplotlib canvases and a helpful toolbar. 
+# Description: A main window with a collection of iplotlib canvases and a helpful toolbar.
 #               This helps developers write custom applications with PySide2
 # Author: Jaswant Sai Panchumarti
 
+from functools import partial
 import typing
 
-from PySide2.QtCore import QMargins, Qt, Signal
-from PySide2.QtWidgets import QMainWindow, QVBoxLayout, QWidget
+from PySide2.QtCore import QMargins, QModelIndex, Qt, Signal
+from PySide2.QtWidgets import QAbstractItemView, QMainWindow, QVBoxLayout, QWidget
+from iplotlib.core.canvas import Canvas
 
+from iplotlib.core.plot import Plot
 from iplotlib.qt.utils.message_box import show_msg
 from iplotlib.qt.gui.iplotCanvasToolbar import IplotQtCanvasToolbar
 from iplotlib.qt.gui.iplotQtCanvasAssembly import IplotQtCanvasAssembly
@@ -29,7 +32,8 @@ class IplotQtMainWindow(QMainWindow):
         self.toolBar.setVisible(show_toolbar)
         self.prefWindow = IplotQtPreferencesWindow(
             self.canvasStack.model(), parent=self, flags=flags)
-        self.prefWindow.apply.connect(self.reDraw)
+        self.prefWindow.canvasSelected.connect(self.canvasStack.setCurrentIndex)
+        self.prefWindow.apply.connect(self.applyPreferences)
 
         self.addToolBar(self.toolBar)
         self.setCentralWidget(self.canvasStack)
@@ -47,7 +51,7 @@ class IplotQtMainWindow(QMainWindow):
         self.toolBar.toolActivated.connect(
             lambda tool_name:
                 [self.canvasStack.widget(i).set_mouse_mode(tool_name) for i in range(self.canvasStack.count())])
-        self.toolBar.redrawAction.triggered.connect(self.reDraw)
+        self.toolBar.redrawAction.triggered.connect(partial(self.reDraw, True))
         self.toolBar.detachAction.triggered.connect(self.detach)
         self.toolBar.configureAction.triggered.connect(
             lambda:
@@ -64,12 +68,32 @@ class IplotQtMainWindow(QMainWindow):
             canvas = self.canvasStack.widget(i)
             canvas.forward()
 
-    def reDraw(self):
-        for i in range(self.canvasStack.count()):
-            canvas = self.canvasStack.widget(i)
-            # TODO: change this confusing API to just call refresh(redraw=True) of IplotQtCanvas
-            canvas.unfocus_plot()
-            canvas.set_canvas(canvas.get_canvas())
+    def applyPreferences(self):
+        self.reDraw(discard_axis_range=False)
+
+    def reDraw(self, discard_axis_range: bool = True):
+        canvas = self.canvasStack.currentWidget()
+        core_canvas = canvas.get_canvas()
+        if not isinstance(core_canvas, Canvas):
+            return
+        for _, col in enumerate(core_canvas.plots):
+            for _, plot in enumerate(col):
+                if not isinstance(plot, Plot):
+                    continue
+                for axes in plot.axes:
+                    if isinstance(axes, typing.Collection):
+                        for axis in axes:
+                            if discard_axis_range:
+                                axis.begin = None
+                                axis.end = None
+                    else:
+                        axis = axes
+                        if discard_axis_range:
+                            axis.begin = None
+                            axis.end = None
+        # TODO: change this confusing API to just call refresh(redraw=True) of IplotQtCanvas
+        canvas.unfocus_plot()
+        canvas.set_canvas(canvas.get_canvas())
 
     def detach(self):
         if self.toolBar.detachAction.text() == 'Detach':
