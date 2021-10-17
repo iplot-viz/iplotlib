@@ -27,6 +27,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
     def __init__(self, parent: typing.Optional[QWidget] = None):
         super().__init__(parent=parent)
         self._model = QStandardItemModel(parent=self)
+        self._parentItem = self._model.invisibleRootItem()
 
     def refreshLinks(self):
         for i in range(self.count()):
@@ -48,7 +49,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
             self.setCurrentIndex(idx)
             canvasItem = CanvasItem(f'Canvas {idx + 1}')
             canvasItem.setEditable(False)
-            self._model.appendRow(canvasItem)
+            self._parentItem.appendRow(canvasItem)
             self.setCanvasData(idx, canvas)
             self.canvasAdded.emit(idx, canvas)
     
@@ -60,7 +61,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
             super().insertWidget(idx, canvas)
             canvasItem = CanvasItem(f'Canvas {idx + 1}')
             canvasItem.setEditable(False)
-            self._model.insertRow(idx, canvasItem)
+            self._parentItem.insertRow(idx, canvasItem)
             self.setCanvasData(idx, canvas)
             self.canvasAdded.emit(idx, canvas)
 
@@ -68,7 +69,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
         idx = self.indexOf(canvas)
         if idx >= 0:
             self.removeWidget(canvas)
-            removed = self._model.takeRow(idx)
+            removed = self._parentItem.takeRow(idx)
             assert len(removed) > 0
             assert removed[0] == canvas
             self.canvasRemoved.emit(idx, canvas)
