@@ -8,7 +8,7 @@
 import typing
 from collections import namedtuple
 
-from PySide2.QtCore import QItemSelectionModel, Qt, Signal
+from PySide2.QtCore import QItemSelectionModel, QModelIndex, Qt, Signal
 from PySide2.QtGui import QShowEvent, QStandardItem, QStandardItemModel
 from PySide2.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter,
                                QStackedWidget, QTreeView, QWidget)
@@ -17,7 +17,7 @@ from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.signal import ArraySignal
 from iplotlib.core.plot import PlotXY
-from iplotlib.data_access.dataAccessSignal import DataAccessSignal
+from iplotlib.interface import IplotSignalAdapter
 
 from iplotlib.qt.gui.forms import IplotPreferencesForm, AxisForm, CanvasForm, PlotForm, SignalForm
 
@@ -28,6 +28,7 @@ logger = sl.get_logger(__name__, 'INFO')
 class IplotQtPreferencesWindow(QMainWindow):
 
     apply = Signal()
+    canvasSelected = Signal(int)
 
     def __init__(self, canvasAssembly: QStandardItemModel = None, parent: typing.Optional[QWidget] = None, flags: Qt.WindowFlags = Qt.WindowFlags()):
 
@@ -43,7 +44,7 @@ class IplotQtPreferencesWindow(QMainWindow):
             PlotXY: PlotForm(self),
             LinearAxis: AxisForm(self),
             ArraySignal: SignalForm(self),
-            DataAccessSignal: SignalForm(self),
+            IplotSignalAdapter: SignalForm(self),
             type(None): QPushButton("Select item", parent=self)
         }
         self.formsStack = QStackedWidget()
@@ -62,6 +63,13 @@ class IplotQtPreferencesWindow(QMainWindow):
         self.setCentralWidget(self.splitter)
         self.resize(800, 400)
 
+    def _getCanvasItemIdx(self, idx: QModelIndex):
+        child_idx = parent_idx = idx
+        while parent_idx != self.treeView.rootIndex():
+            child_idx = parent_idx
+            parent_idx = self.treeView.model().parent(child_idx)
+        return child_idx
+
     def onItemSelected(self, item: QStandardItem):
         if len(item.indexes()) > 0:
             for model_idx in item.indexes():
@@ -72,6 +80,8 @@ class IplotQtPreferencesWindow(QMainWindow):
                     else:
                         t = type(data)
                     index = list(self._forms.keys()).index(t)
+                    canvasItemIdx = self._getCanvasItemIdx(model_idx)
+                    self.canvasSelected.emit(canvasItemIdx.row())
                 except ValueError:
                     logger.warning(f"Canvas assembly violated: An item with an unregistered class {type(data)}")
                     continue
