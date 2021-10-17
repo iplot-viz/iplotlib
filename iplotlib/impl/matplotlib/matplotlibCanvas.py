@@ -115,6 +115,8 @@ class MatplotlibCanvas:
 
             if canvas.title:
                 self.figure.suptitle(canvas.title, size=canvas.font_size, color=canvas.font_color or 'black')
+            if canvas.font_color is None:
+                canvas.font_color = '#000000'            
 
             rows, cols = (1, 1) if self.focused_plot is not None else (canvas.rows, canvas.cols)
             gridspec = self.figure.add_gridspec(rows, cols)
