@@ -57,8 +57,8 @@ class IplotQtCanvasToolbar(QToolBar):
         self.addAction(self.redoAction)
 
         # Saving, etc..
-        self.exportAction = QAction(create_icon('save_as'), '&Export', self)
-        self.importAction = QAction(create_icon('open_file'), '&Import', self)
+        self.exportAction = QAction(create_icon('save_as'), '&Export Workspace', self)
+        self.importAction = QAction(create_icon('open_file'), '&Import Workspace', self)
         self.addAction(self.exportAction)
         self.addAction(self.importAction)
 
