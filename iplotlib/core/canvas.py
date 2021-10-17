@@ -100,12 +100,19 @@ class Canvas(ABC):
         self.crosshair_horizontal = horizontal
         pass
 
+    def to_dict(self) -> dict:
+        return JSONExporter().to_dict(self)
+
+    @staticmethod
+    def from_dict(inp_dict):
+        return JSONExporter().from_dict(inp_dict)
+
     def to_json(self):
         return JSONExporter().to_json(self)
 
     @staticmethod
-    def from_json(json):
-        return JSONExporter().from_json(json)
+    def from_json(inp_file):
+        return JSONExporter().from_json(inp_file)
 
     def export_image(self, filename: str, **kwargs):
         pass

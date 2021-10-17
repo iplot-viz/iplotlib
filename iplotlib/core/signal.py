@@ -12,11 +12,18 @@ class SignalStyle(ABC):
 class Signal(ABC):
     """Signal title. This value is presented on plot legend"""
     title: str = None
+    color: str = None
+    line_style: str = None
+    line_size: int = None
+    marker: str = None
+    marker_size: int = None
+    step: str = None
+    hi_precision_data: bool = None
+    plot_type: str = ''
     _type: str = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
-        self.signals = {}
 
     @abstractmethod
     def get_data(self):
@@ -33,23 +40,14 @@ class Signal(ABC):
 
 @dataclass
 class ArraySignal(Signal):
-    color: str = None
-    line_style: str = None
-    line_size: int = None
-    marker: str = None
-    marker_size: int = None
-    step: str = None
-    hi_precision_data: bool = None
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.data = None
-
+    @abstractmethod
     def get_data(self):
-        return self.data
+        pass
 
+    @abstractmethod
     def set_data(self, data=None):
-        self.data = data
+        pass
 
     def pick(self, sample):
         def gather(arrs, idx):
@@ -73,3 +71,24 @@ class ArraySignal(Signal):
             pass
 
         return None
+
+
+@dataclass
+class SimpleSignal(ArraySignal):
+    x_data: np.ndarray = np.empty((0))
+    y_data: np.ndarray = np.empty((0))
+    z_data: np.ndarray = np.empty((0))
+    x_unit: str = ''
+    y_unit: str = ''
+    z_unit: str = ''
+
+    def get_data(self):
+        return [self.x_data, self.y_data, self.z_data]
+
+    def set_data(self, data=None):
+        try:
+            self.x_data = data[0]
+            self.y_data = data[1]
+            self.z_data = data[2]
+        except IndexError:
+            return

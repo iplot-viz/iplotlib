@@ -1,0 +1,1 @@
+from .qtMatplotlibCanvas import QtMatplotlibCanvas
