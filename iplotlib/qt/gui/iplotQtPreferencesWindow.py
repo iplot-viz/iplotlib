@@ -59,7 +59,8 @@ class IplotQtPreferencesWindow(QMainWindow):
         self.splitter = QSplitter(self)
         self.splitter.addWidget(self.treeView)
         self.splitter.addWidget(self.formsStack)
-        self.splitter.setSizes([30, 70])
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 2)
         self.setCentralWidget(self.splitter)
         self.resize(800, 400)
 
