@@ -725,6 +725,25 @@ class ParserHelper:
         if not p.is_valid:
             raise InvalidExpression(f"expression: {expression} is invalid!")
 
+        # Handle time offsets with units
+        for var_name in p.var_map.keys():
+            match = p.marker_in + var_name + p.marker_out + '.time'
+            if expression.count(match) and p.has_time_units:
+                if signal.time_unit == "nanoseconds":
+                    signal.time_unit = 'ns'
+                replacement = f"{match}.astype('datetime64[{signal.time_unit}]')"
+                expression = expression.replace(match, replacement)
+                logger.debug(f"|==> replaced {match} with {replacement}")
+                logger.debug(f"expression: {expression}")
+        
+        p.clear_expr()
+        p.set_expression(expression)
+        if not p.is_valid:
+            raise InvalidExpression(f"expression: {expression} is invalid!")
+
         p.substitute_var(local_env)
-        p.eval_expr()
-        return p.result
+        p.eval_expr()       
+        if p.has_time_units:
+                return p.result.astype('int64')
+        else:
+            return p.result
