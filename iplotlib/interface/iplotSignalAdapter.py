@@ -20,7 +20,6 @@
 #              - Parse given time as isoformat datetime only if it is a non-empty string
 
 from dataclasses import dataclass, field, fields
-from functools import partial
 import numpy as np
 import os
 import typing
@@ -146,13 +145,25 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info = StatusInfo()
         self.status_info.reset()
         self.status_info.result = Result.BUSY
-        #
-        # 4.1. name can be an expression.
+        self._init_children(self.name)
+
+        if self.status_info.result == Result.INVALID:
+            return
+        else:
+            # Add a reference to our alias.
+            if isinstance(self.alias, str) and len(self.alias) and not self.alias.isspace():
+                ParserHelper.env.update({self.alias: self})
+
+            # Indicate readiness.
+            self.status_info.result = Result.READY
+
+    def _init_children(self, expression: str):
+        # 1. input can be an expression.
         # eg: ${foo}
         # eg: ${foo} + ${bar} + ${baz} * np.max(${cat})
         # eg: np.max(${foo} + ${bar}) * np.ones((${foo}.data.size))
         #
-        # 4.2. name can be a string of plain text r"^[ A-Za-z0-9_@.\/\[\]#&+-]*"
+        # 2. input can be a string of plain text r"^[ A-Za-z0-9_@.\/\[\]#&+-]+"
         # eg: foo
         # eg: foo_bar
         # eg: bar_
@@ -164,47 +175,52 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         # The second case cannot have children, it does not need special consideration.
 
         # The first case would result in len(children) > 0. We find them (if they are pre-defined aliases) or create them.
-        p = Parser().set_expression(self.name)
-        if p.is_valid:
-            for key in p.var_map.keys():
-                value = ParserHelper.env.get(key)
-
-                if isinstance(value, IplotSignalAdapter):
-                    if self.data_access_enabled and len(self.data_source) and self.data_source != value.data_source:
-                        self.status_info.reset()
-                        self.status_info.msg = f"Data source conflict {self.data_source} != {value.data_source}."
-                        self.status_info.result = Result.INVALID
-                        logger.warning(self.status_info.msg)
-                        break
-                    self.children.append(value)
-                else:
-                    if self.data_access_enabled and (not len(self.data_source) or self.data_source.isspace()):
-                        self.status_info.reset()
-                        self.status_info.msg = "Data source unspecified."
-                        self.status_info.result = Result.INVALID
-                        logger.warning(self.status_info.msg)
-                        break
-                    elif self.data_access_enabled:
-                        # Construct a new instance with our data source and time range, etc..
-                        child = self._construct_named_offspring(key)
-                        self.children.append(child)
-                    elif self.processing_enabled:
-                        # Cannot create a new instance without alias in this case.
-                        self.status_info.reset()
-                        self.status_info.msg = f"Specified name '{key}' is not a pre-defined alias!"
-                        self.status_info.result = Result.INVALID
-                        logger.warning(self.status_info.msg)
-                        break
-
-        if self.status_info.result == Result.INVALID:
+        try:
+            p = Parser()\
+                .inject(Parser.get_member_list(ProcessingSignal))\
+                .inject(Parser.get_member_list(BufferObject))\
+                .set_expression(expression)
+        except InvalidExpression as e:
+            self.status_info.reset()
+            self.status_info.msg = f"{e}"
+            self.status_info.result = Result.INVALID
             return
-        else:
-            # Add a reference to our alias.
-            if isinstance(self.alias, str) and len(self.alias) and not self.alias.isspace():
-                ParserHelper.env.update({self.alias: self})
 
-            # Indicate readiness.
-            self.status_info.result = Result.READY
+        if not p.is_valid:
+            return
+
+        keys = set(p.var_map.keys())
+        keys.discard('self')  # We don't bother with self here.
+        for key in keys:
+            value = ParserHelper.env.get(key)
+
+            if isinstance(value, IplotSignalAdapter):
+                # This is an aliased signal.
+                if self.data_access_enabled and len(self.data_source) and self.data_source != value.data_source:
+                    self.status_info.reset()
+                    self.status_info.msg = f"Data source conflict {self.data_source} != {value.data_source}."
+                    self.status_info.result = Result.INVALID
+                    logger.warning(self.status_info.msg)
+                    break
+                self.children.append(value)
+            else:
+                if self.data_access_enabled and (not len(self.data_source) or self.data_source.isspace()):
+                    self.status_info.reset()
+                    self.status_info.msg = "Data source unspecified."
+                    self.status_info.result = Result.INVALID
+                    logger.warning(self.status_info.msg)
+                    break
+                elif self.data_access_enabled:
+                    # Construct a new instance with our data source and time range, etc..
+                    child = self._construct_named_offspring(key)
+                    self.children.append(child)
+                elif self.processing_enabled:
+                    # Cannot create a new instance without alias in this case.
+                    self.status_info.reset()
+                    self.status_info.msg = f"Specified name '{key}' is not a pre-defined alias!"
+                    self.status_info.result = Result.INVALID
+                    logger.warning(self.status_info.msg)
+                    break
 
     def _construct_named_offspring(self, name: str) -> IplotSignalAdapterT:
         cls = type(self)
@@ -429,14 +445,16 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         target_md5sum = hash_code(self, ["ts_start", "ts_end", "pulse_nb"])
         logger.debug(f"old={self.access_md5sum}, new={target_md5sum}")
 
-        if self.access_md5sum != target_md5sum:
+        if self.access_md5sum is None:
             self.access_md5sum = target_md5sum
-            return not self._check_if_zoomed_in()
+            return True
+        elif self.access_md5sum != target_md5sum:
+            self.access_md5sum = target_md5sum
+            return AccessHelper.num_samples_override
         else:
             return False
 
     def _check_if_zoomed_in(self):
-        """If we are not zoomed in there is no need to refresh data"""
         if all(e is not None for e in [self.data_xrange[0], self.data_xrange[1], self.ts_start, self.ts_end]):
             return (self.data_xrange[0] < self.ts_start < self.data_xrange[1]
                     and self.data_xrange[0] < self.ts_end < self.data_xrange[1])
@@ -560,7 +578,7 @@ class AccessHelper:
         :type signal: IplotSignalAdapter
         """
         logger.debug("[UDA {}] Get data: {} ts_start={} ts_end={} pulse_nb={} nbsamples={} relative={}".format(AccessHelper.query_no, signal.name, self.str_ts(signal, signal.ts_start), self.str_ts(signal, signal.ts_end),
-                                                                                                               signal.pulse_nb, -1, signal.ts_relative))
+                                                                                                               signal.pulse_nb, AccessHelper.num_samples if AccessHelper.num_samples_override else -1, signal.ts_relative))
         AccessHelper.query_no += 1
         AccessHelper._submit_fetch(signal)
 
