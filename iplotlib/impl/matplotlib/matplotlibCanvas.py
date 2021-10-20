@@ -7,7 +7,6 @@ from threading import Timer
 from typing import Collection
 
 import numpy
-import numpy as np
 from matplotlib.axis import Tick
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
