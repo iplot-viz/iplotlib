@@ -628,10 +628,13 @@ class AccessHelper:
             else:
                 raw = AccessHelper.da.getData(**da_params)
                 if raw.errcode < 0:
-                    da_params.update({'nbp': AccessHelper.num_samples})
-                    raw = AccessHelper.da.getData(**da_params)
+                    if raw.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval, use decimation or read data by chunks.':
+                        raw = AccessHelper.da.getData(**da_params)
+                    else: # try with fallback no. of points.
+                        da_params.update({'nbp': AccessHelper.num_samples})
+                        raw = AccessHelper.da.getData(**da_params)
                     if raw.errcode < 0:
-                        message = f"ErrCode: {raw.errcode} | getData failed for -1 and dec_samples. {da_params}"
+                        message = f"ErrCode: {raw.errcode} | getData failed. Error: {raw.errdesc}"
                         raise DataAccessError(message)
 
                 xdata = np_nvl(raw.xdata) if tRelative else np_nvl(
