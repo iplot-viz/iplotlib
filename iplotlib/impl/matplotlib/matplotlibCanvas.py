@@ -512,6 +512,18 @@ class MatplotlibCanvas:
                 label = group_data_units(mpl_axes)
                 if label:
                     yaxis.set_label_text(label)
+            xaxis = mpl_axes.get_xaxis()
+            put_label = False
+            if hasattr(mpl_axes, '_plot'):
+                if hasattr(mpl_axes._plot, 'axes'):
+                    xax = mpl_axes._plot.axes[0]
+                    if isinstance(xax, LinearAxis):
+                        put_label |= (not xax.is_date)
+
+            if put_label and hasattr(signal, 'time_unit'):
+                label = f"[{signal.time_unit}]"
+                if label:
+                    xaxis.set_label_text(label)
         else:
             logger.error(f"Matplotlib AXES not found for signal {signal}. This should not happen. SIGNAL_ID: {id(signal)} AXES: {mpl_axes}")
 
