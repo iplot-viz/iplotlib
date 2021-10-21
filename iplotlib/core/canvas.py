@@ -13,6 +13,7 @@ class Canvas(ABC):
     MOUSE_MODE_CROSSHAIR = 'MM_CROSSHAIR'
     MOUSE_MODE_PAN = 'MM_PAN'
     MOUSE_MODE_ZOOM = 'MM_ZOOM'
+    MOUSE_MODE_DIST = 'MM_DIST'
 
     """Number of rows in the grid. If specified the space for this nuber of rows should be reserved when rendering canvas since some 
     of the plots can be empty"""

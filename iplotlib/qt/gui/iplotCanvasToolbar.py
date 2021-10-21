@@ -40,7 +40,8 @@ class IplotQtCanvasToolbar(QToolBar):
         for tool_name in [Canvas.MOUSE_MODE_SELECT,
                           Canvas.MOUSE_MODE_CROSSHAIR,
                           Canvas.MOUSE_MODE_PAN,
-                          Canvas.MOUSE_MODE_ZOOM]:
+                          Canvas.MOUSE_MODE_ZOOM,
+                          Canvas.MOUSE_MODE_DIST]:
             tool_action = QAction(tool_name[3:], parent=self)
             tool_action.setCheckable(True)
             tool_action.setActionGroup(self._actions)
