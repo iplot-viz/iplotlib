@@ -42,3 +42,9 @@ See [requirements.txt](https://git.iter.org/projects/VIS/repos/iplotlib/browse/r
 ```bash
 pytest iplotlib
 ```
+
+# Run examples
+```bash
+iplotlib-qt-canvas -t
+```
+Click on canvas menu to switch between examples.
