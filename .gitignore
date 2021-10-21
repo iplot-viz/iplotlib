@@ -1,14 +1,3 @@
-# Qt mocs
-moc_*.h
-moc_*.cpp
-.qmake.stash
-iplotlib/impl/gnuplot/qt/widget/gnuplotwidget/Makefile
-iplotlib/impl/gnuplot/qt/widget/pyqt5gnuplotwidget/sip*.h
-iplotlib/impl/gnuplot/qt/widget/pyqt5gnuplotwidget/sip*.cpp
-iplotlib/impl/gnuplot/qt/widget/pyqt5gnuplotwidget/build.sbf
-iplotlib/impl/gnuplot/qt/widget/pyqt5gnuplotwidget/Makefile
-iplotlib/impl/gnuplot/qt/widget/pyqt5gnuplotwidget/PyGnuplotWidget.exp
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
