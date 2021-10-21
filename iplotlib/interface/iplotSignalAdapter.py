@@ -630,7 +630,7 @@ class AccessHelper:
                 if raw.errcode < 0:
                     if raw.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval, use decimation or read data by chunks.':
                         raw = AccessHelper.da.getData(**da_params)
-                    else: # try with fallback no. of points.
+                    if raw.errcode < 0: # try with fallback no. of points.
                         da_params.update({'nbp': AccessHelper.num_samples})
                         raw = AccessHelper.da.getData(**da_params)
                     if raw.errcode < 0:
