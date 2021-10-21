@@ -5,9 +5,9 @@
 #              -Port to PySide2 [Jaswant Sai Panchumarti]
 
 import typing
+import time
 
 from PySide2.QtCore import QModelIndex, Qt, Signal
-from PySide2.QtGui import QStandardItemModel
 from PySide2.QtWidgets import (QCheckBox, QComboBox, QDataWidgetMapper, QLabel, QLineEdit,
                                QFormLayout, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
 
@@ -31,6 +31,7 @@ class IplotPreferencesForm(QWidget):
 
         self.applyButton = QPushButton("Apply")
         self.applyButton.pressed.connect(self.applySignal.emit)
+        self._modifiedTime = time.time_ns()
 
         vlayout = QVBoxLayout()
         self.setLayout(vlayout)
@@ -41,6 +42,7 @@ class IplotPreferencesForm(QWidget):
         self.widgetMapper = QDataWidgetMapper(self)
         self.widgetModel = BeanItemModel(self)
         self.widgetMapper.setModel(self.widgetModel)
+        self.widgetModel.dataChanged.connect(self.modified)
 
         if all([isinstance(f, dict) for f in fields]):
             for i, field in enumerate(fields):
@@ -58,6 +60,12 @@ class IplotPreferencesForm(QWidget):
                 label = bean.data(BeanItem.LabelRole)
                 self.form.layout().addRow(label, widget)
         self.widgetMapper.toFirst()
+
+    def MTime(self):
+        return self._modifiedTime
+
+    def modified(self):
+        self._modifiedTime = time.time_ns()
 
     def setSourceIndex(self, idx: QModelIndex):
         pyObject = idx.data(Qt.UserRole)

@@ -5,8 +5,8 @@
 from functools import partial
 import typing
 
-from PySide2.QtCore import QMargins, QModelIndex, Qt, Signal
-from PySide2.QtWidgets import QAbstractItemView, QMainWindow, QVBoxLayout, QWidget
+from PySide2.QtCore import QMargins, Qt, Signal
+from PySide2.QtWidgets import QMainWindow, QWidget
 from iplotlib.core.canvas import Canvas
 
 from iplotlib.core.plot import Plot
@@ -70,6 +70,7 @@ class IplotQtMainWindow(QMainWindow):
 
     def applyPreferences(self):
         self.reDraw(discard_axis_range=False)
+        self.prefWindow.modified()
 
     def reDraw(self, discard_axis_range: bool = True):
         canvas = self.canvasStack.currentWidget()

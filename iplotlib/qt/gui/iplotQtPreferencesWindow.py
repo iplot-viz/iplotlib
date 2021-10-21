@@ -5,8 +5,8 @@
 #              -Port to PySide2 [Jaswant Sai Panchumarti]
 #              -Add setModel function [Jaswant Sai Panchumarti]
 
+import time
 import typing
-from collections import namedtuple
 
 from PySide2.QtCore import QItemSelectionModel, QModelIndex, Qt, Signal
 from PySide2.QtGui import QShowEvent, QStandardItem, QStandardItemModel
@@ -38,6 +38,8 @@ class IplotQtPreferencesWindow(QMainWindow):
         self.treeView.setHeaderHidden(True)
         self.treeView.setModel(canvasAssembly)
         self.treeView.selectionModel().selectionChanged.connect(self.onItemSelected)
+        self._applyTime = time.time_ns()
+        self._modifiedTime = time.time_ns()
 
         self._forms = {
             Canvas: CanvasForm(self),
@@ -59,7 +61,6 @@ class IplotQtPreferencesWindow(QMainWindow):
         self.splitter = QSplitter(self)
         self.splitter.addWidget(self.treeView)
         self.splitter.addWidget(self.formsStack)
-        self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 2)
         self.setCentralWidget(self.splitter)
         self.resize(800, 400)
@@ -70,6 +71,22 @@ class IplotQtPreferencesWindow(QMainWindow):
             child_idx = parent_idx
             parent_idx = self.treeView.model().parent(child_idx)
         return child_idx
+
+    def postApplied(self):
+        self._applyTime = time.time_ns()
+
+    def MTime(self):
+        return self._modifiedTime
+    
+    def modified(self):
+        self._modifiedTime = time.time_ns()
+
+    def getCollectiveMTime(self):
+        val = 0
+        for form in self._forms.values():
+            if isinstance(form, IplotPreferencesForm):
+                val = max(form.MTime(), val)
+        return val
 
     def onItemSelected(self, item: QStandardItem):
         if len(item.indexes()) > 0:
@@ -93,7 +110,8 @@ class IplotQtPreferencesWindow(QMainWindow):
     def closeEvent(self, event):
         if QApplication.focusWidget():
             QApplication.focusWidget().clearFocus()
-        self.apply.emit()
+        if self.MTime() < self.getCollectiveMTime():
+            self.apply.emit()
 
     def setModel(self, model: QStandardItemModel):
         self.treeView.setModel(model)
