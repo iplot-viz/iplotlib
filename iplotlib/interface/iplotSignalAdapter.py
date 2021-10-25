@@ -134,6 +134,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         self.ts_relative = self.pulse_nb is not None
 
+        # keep track if processing is needed.
+        self.needs_processing = False
+
         # 2. Post-initialize ArraySignal's properties and our name.
         self._init_title()
 
@@ -250,17 +253,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             if not self.title.find(str(self.pulse_nb)):
                 self.title += ':' + str(self.pulse_nb)
 
-    def set_data(self, data=None):
-        """Set the internal buffers for `time`, `data_primary` and `data_secondary`
-
-        :param data: A collection of data buffers, defaults to None
-        :type data: List[BufferObject], optional
-        :return: None
-        :rtype: NoneType
-        """
-        if data is None:
-            super().set_data()
-
+    def _set_data_internal(self, data=None):
         # 1. Fill in data buffers
         if isinstance(data, typing.Collection):
             if len(data):
@@ -293,6 +286,20 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         logger.debug(f"x.unit: {self.time_unit}")
         logger.debug(f"y.unit: {self.data_primary_unit}")
         logger.debug(f"z.unit: {self.data_secondary_unit}")
+
+    def set_data(self, data=None):
+        """Set the internal buffers for `time`, `data_primary` and `data_secondary`
+
+        :param data: A collection of data buffers, defaults to None
+        :type data: List[BufferObject], optional
+        :return: None
+        :rtype: NoneType
+        """
+        if data is None:
+            super().set_data()
+        
+        self._set_data_internal(data)
+        self.needs_processing = True
 
     @staticmethod
     def acquire_shape(source: BufferObject, target: BufferObject) -> BufferObject:
@@ -329,7 +336,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 break
         else:
             if len(data_arrays) == 3:  # strict
-                self.set_data(data_arrays)
+                self._set_data_internal(data_arrays)
             else:
                 self.status_info.stage = Stage.PROC
                 self.status_info.msg = f"Unsupported size of data arrays. Expected triple. Got {len(data_arrays)}"
@@ -384,9 +391,6 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         if self.status_info.result == Result.BUSY:
             return
 
-        if not self.needs_refresh():
-            return
-
         # Set appropriate status
         self.status_info.reset()
         self.status_info.stage = Stage.DA
@@ -401,21 +405,29 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                     break
             else:  # Fell through, all children succeded
                 self.status_info.result = Result.SUCCESS
+                self.needs_processing = True
         else:
             # submit a fetch request for ourself.
             CachingAccessHelper.get().fetch_data(self)
 
     def get_data(self):
-
+        # Data-access will turn this boolean on if successful.
+        self.needs_processing = False
         # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
-        if isinstance(self.name, str) and len(self.name) and not self.name.isspace():
+        nonempty_name = isinstance(self.name, str) and len(self.name) and not self.name.isspace()
+        if nonempty_name and self.needs_refresh():
             self._fetch_data()
         else:
             self.status_info.stage = Stage.DA
             self.status_info.result = Result.SUCCESS
+            if not nonempty_name and self.data_access_enabled:
+                self.needs_processing = True # processing in x,y,z columns
 
-        if self.processing_enabled:
+        if self.processing_enabled and self.needs_processing:
             self._process_data()
+        else:
+            self.status_info.stage = Stage.PROC
+            self.status_info.result = Result.SUCCESS
 
         return [self.time, self.data_primary, self.data_secondary]
 
@@ -546,6 +558,7 @@ class AccessHelper:
             signal.data_secondary = res['data_secondary']
             signal.data_secondary_unit = res['data_secondary_unit']
             signal.status_info.num_points = len(signal.time)
+            signal.needs_processing = True
             signal.status_info.result = Result.SUCCESS
 
     @staticmethod
