@@ -132,7 +132,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             self.ts_end = np.datetime64(
                 self.ts_end, 'ns').astype('int64').item()
 
-        self.ts_relative = self.pulse_nb is not None
+        self.ts_relative = isinstance(self.pulse_nb, str) and len(self.pulse_nb) and not self.pulse_nb.isspace()
 
         # keep track if processing is needed.
         self.needs_processing = False
@@ -249,8 +249,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             self.title = self.alias
 
         # 3. Shows the pulse number in the title (appears in legend box).
-        if self.pulse_nb is not None:
-            if not self.title.find(str(self.pulse_nb)):
+        if isinstance(self.pulse_nb, str) and len(self.pulse_nb) and not self.pulse_nb.isspace():
+            if self.title.find(str(self.pulse_nb)) < 0:
                 self.title += ':' + str(self.pulse_nb)
 
     def _set_data_internal(self, data=None):
