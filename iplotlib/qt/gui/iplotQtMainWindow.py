@@ -69,10 +69,10 @@ class IplotQtMainWindow(QMainWindow):
             canvas.forward()
 
     def applyPreferences(self):
-        self.reDraw(discard_axis_range=False)
+        self.reDraw(discard_axis_range=False, discard_focused_plot=False)
         self.prefWindow.modified()
 
-    def reDraw(self, discard_axis_range: bool = True):
+    def reDraw(self, discard_axis_range: bool = True, discard_focused_plot: bool = True):
         canvas = self.canvasStack.currentWidget()
         core_canvas = canvas.get_canvas()
         if not isinstance(core_canvas, Canvas):
@@ -92,8 +92,9 @@ class IplotQtMainWindow(QMainWindow):
                         if discard_axis_range:
                             axis.begin = None
                             axis.end = None
-        # TODO: change this confusing API to just call refresh(redraw=True) of IplotQtCanvas
-        canvas.unfocus_plot()
+        # TODO: change this confusing API to just call refresh(redraw=True, unfocus=..) of IplotQtCanvas
+        if discard_focused_plot:
+            canvas.unfocus_plot()
         canvas.set_canvas(canvas.get_canvas())
 
     def detach(self):
