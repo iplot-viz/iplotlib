@@ -22,9 +22,11 @@
 from dataclasses import dataclass, field, fields
 import numpy as np
 import os
+import re
 import typing
 
 from iplotlib.core.signal import ArraySignal
+from iplotlib.interface.utils import string_classifier as iplotStrUtils
 from iplotProcessing.common.errors import InvalidExpression
 from iplotProcessing.core import BufferObject
 from iplotProcessing.core import Signal as ProcessingSignal
@@ -33,7 +35,7 @@ from iplotProcessing.tools import hash_code
 
 import iplotLogging.setupLogger as sl
 
-logger = sl.get_logger(__name__, level="INFO")
+logger = sl.get_logger(__name__, level="DEBUG")
 
 IplotSignalAdapterT = typing.TypeVar(
     'IplotSignalAdapterT', bound='IplotSignalAdapter')
@@ -123,30 +125,31 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         super().__post_init__()
         ProcessingSignal.__init__(self)
 
-        # 1. Initialize access parameters
-        if isinstance(self.ts_start, str) and len(self.ts_start) and not self.ts_start.isspace():
+        # 1.1 Initialize access parameters
+        if iplotStrUtils.is_non_empty(self.ts_start):
             self.ts_start = np.datetime64(
                 self.ts_start, 'ns').astype('int64').item()
 
-        if isinstance(self.ts_end, str) and len(self.ts_end) and not self.ts_end.isspace():
+        if iplotStrUtils.is_non_empty(self.ts_end):
             self.ts_end = np.datetime64(
                 self.ts_end, 'ns').astype('int64').item()
 
-        self.ts_relative = isinstance(self.pulse_nb, str) and len(self.pulse_nb) and not self.pulse_nb.isspace()
+        self.ts_relative = iplotStrUtils.is_non_empty(self.pulse_nb)
 
-        # keep track if processing is needed.
-        self.needs_processing = False
+        # 1.2. Initialize attributes that will not be dataclass fields.
+        self.x_data = BufferObject()
+        self.y_data = BufferObject()
+        self.z_data = BufferObject()
 
         # 2. Post-initialize ArraySignal's properties and our name.
         self._init_title()
 
         # 3. Help keep track of data access parameters.
         self.access_md5sum = None
-        self.data_xrange = None, None
+        self._data_xrange = None, None
 
         # 4. Parse name and prepare a hierarchy of objects if needed.
         self.status_info = StatusInfo()
-        self.status_info.reset()
         self.status_info.result = Result.BUSY
         self._init_children(self.name)
 
@@ -154,141 +157,21 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             return
         else:
             # Add a reference to our alias.
-            if isinstance(self.alias, str) and len(self.alias) and not self.alias.isspace():
+            if iplotStrUtils.is_non_empty(self.alias):
                 ParserHelper.env.update({self.alias: self})
 
             # Indicate readiness.
             self.status_info.result = Result.READY
 
-    def _init_children(self, expression: str):
-        # 1. input can be an expression.
-        # eg: ${foo}
-        # eg: ${foo} + ${bar} + ${baz} * np.max(${cat})
-        # eg: np.max(${foo} + ${bar}) * np.ones((${foo}.data.size))
-        #
-        # 2. input can be a string of plain text r"^[ A-Za-z0-9_@.\/\[\]#&+-]+"
-        # eg: foo
-        # eg: foo_bar
-        # eg: bar_
-        # eg: foo-bar-baz2-l3-1
-        # eg: foo_bar_baz2_l3_1
-        # eg: foo/bar[0]/baz_1
-        # eg: foo/bar[0]/baz-1
-        #
-        # The second case cannot have children, it does not need special consideration.
-
-        # The first case would result in len(children) > 0. We find them (if they are pre-defined aliases) or create them.
-        try:
-            p = Parser()\
-                .inject(Parser.get_member_list(ProcessingSignal))\
-                .inject(Parser.get_member_list(BufferObject))\
-                .set_expression(expression)
-        except InvalidExpression as e:
-            self.status_info.reset()
-            self.status_info.msg = f"{e}"
-            self.status_info.result = Result.INVALID
-            return
-
-        if not p.is_valid:
-            return
-
-        keys = set(p.var_map.keys())
-        keys.discard('self')  # We don't bother with self here.
-        for key in keys:
-            value = ParserHelper.env.get(key)
-
-            if isinstance(value, IplotSignalAdapter):
-                # This is an aliased signal.
-                if self.data_access_enabled and len(self.data_source) and self.data_source != value.data_source:
-                    self.status_info.reset()
-                    self.status_info.msg = f"Data source conflict {self.data_source} != {value.data_source}."
-                    self.status_info.result = Result.INVALID
-                    logger.warning(self.status_info.msg)
-                    break
-                self.children.append(value)
-            else:
-                if self.data_access_enabled and (not len(self.data_source) or self.data_source.isspace()):
-                    self.status_info.reset()
-                    self.status_info.msg = "Data source unspecified."
-                    self.status_info.result = Result.INVALID
-                    logger.warning(self.status_info.msg)
-                    break
-                elif self.data_access_enabled:
-                    # Construct a new instance with our data source and time range, etc..
-                    child = self._construct_named_offspring(key)
-                    self.children.append(child)
-                elif self.processing_enabled:
-                    # Cannot create a new instance without alias in this case.
-                    self.status_info.reset()
-                    self.status_info.msg = f"Specified name '{key}' is not a pre-defined alias!"
-                    self.status_info.result = Result.INVALID
-                    logger.warning(self.status_info.msg)
-                    break
-
-    def _construct_named_offspring(self, name: str) -> IplotSignalAdapterT:
-        cls = type(self)
-        kwargs = dict()
-
-        for f in fields(self):
-            kwargs.update({f.name: getattr(self, f.name)})
-        kwargs.update({'name': name})
-        kwargs.update({'title': ''})
-        kwargs.update({'children': []})
-        return cls(**kwargs)
-
-    def _init_title(self):
-        # 1. From name
-        if self.title is None:
-            if isinstance(self.name, str) and not self.name.isspace() and len(self.name):
-                self.title = self.name
-            else:
-                self.title = ''
-
-        # 2. Alias overrides name for the title (appears in legend box)
-        if isinstance(self.alias, str) and not self.alias.isspace() and len(self.alias):
-            self.title = self.alias
-
-        # 3. Shows the pulse number in the title (appears in legend box).
-        if isinstance(self.pulse_nb, str) and len(self.pulse_nb) and not self.pulse_nb.isspace():
-            if self.title.find(str(self.pulse_nb)) < 0:
-                self.title += ':' + str(self.pulse_nb)
-
-    def _set_data_internal(self, data=None):
-        # 1. Fill in data buffers
-        if isinstance(data, typing.Collection):
-            if len(data):
-                if all([isinstance(val, np.ndarray) for val in data]):
-                    for i, name in enumerate(['time', 'data_primary', 'data_secondary']):
-                        try:
-                            setattr(self, name, data[i])
-                        except IndexError:
-                            break
-
-        # 2. Update x range
-        if len(self.time) > 1:
-            self.data_xrange = self.time[0], self.time[-1]
-
-        # 3. Fix x-y shape mismatch.
-        self.acquire_shape(self.data_primary, self.time)
-
-        # 4. Fix x-z shape mismatch.
-        self.acquire_shape(self.data_secondary, self.time)
-
-        # 5. Set appropriate status.
-        self.status_info.reset()
-        self.status_info.num_points = len(self.time)
-        self.status_info.result = Result.SUCCESS
-
-        logger.debug(f"x.size: {len(self.time)}")
-        logger.debug(f"y.size: {len(self.data_primary)}")
-        logger.debug(f"z.size: {len(self.data_secondary)}")
-
-        logger.debug(f"x.unit: {self.time_unit}")
-        logger.debug(f"y.unit: {self.data_primary_unit}")
-        logger.debug(f"z.unit: {self.data_secondary_unit}")
+    def get_data(self):
+        # 1. Populate time, data_primary, data_secondary (if needed)
+        self._do_data_access()
+        # 2. Use iplotProcessing to evaluate x_data, y_data, z_data
+        self._do_data_processing()
+        return [self.x_data, self.y_data, self.z_data]
 
     def set_data(self, data=None):
-        """Set the internal buffers for `time`, `data_primary` and `data_secondary`
+        """Set `x_data`, `y_data` and `z_data`.
 
         :param data: A collection of data buffers, defaults to None
         :type data: List[BufferObject], optional
@@ -296,10 +179,16 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         :rtype: NoneType
         """
         if data is None:
-            super().set_data()
+            super().set_data() # as of now this does nothing.
         
-        self._set_data_internal(data)
-        self.needs_processing = True
+        self._finalize_xyz_data(data)
+
+        # Pure processing, in that case, emulate a successfule data acccess
+        if not self.data_access_enabled:
+            self.time = self.x_data
+            self.data_primary = self.y_data
+            self.data_secondary = self.z_data
+            self.set_da_success()
 
     @staticmethod
     def acquire_shape(source: BufferObject, target: BufferObject) -> BufferObject:
@@ -318,118 +207,30 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             if len(source) != len(target) and len(source) == 1:
                 logger.warning(
                     f"Caught x-target shape mismatch! Fixing it. len(source) = {len(source)} -> {len(target)}")
-                source = np.linspace(source[0], source[-1], len(target))
+                return BufferObject(np.linspace(source[0], source[-1], len(target)), unit=source.unit)
+            else:
+                return source
+        else:
+            return source # TODO: Modify ndims
 
-    def compute(self, **kwargs):
-        data_arrays = []
+    def compute(self, **kwargs) -> dict:
+        data_arrays = dict()
         # Evaluate each expression.
         for key, expr in kwargs.items():
             try:
-                data_arrays.append(ParserHelper.evaluate(self, expr))
+                data_arrays.update({key: ParserHelper.evaluate(self, expr)})
             except Exception as e:
                 # Indicate failure with message and bail.
-                self.status_info.stage = Stage.PROC
-                self.status_info.msg = f"Expression {key}={expr} | {str(e)}"
-                self.status_info.result = Result.FAIL
-                logger.warning(
-                    f"Processing error: {self.status_info.msg}")
-                break
+                self.set_proc_fail(f"Expression {key}={expr} | {str(e)}")
+                continue
+        return data_arrays
+
+    @property
+    def data_xrange(self):
+        if len(self.x_data.ravel()) > 1:
+            return self.x_data.ravel()[0], self.x_data.ravel()[-1]
         else:
-            if len(data_arrays) == 3:  # strict
-                self._set_data_internal(data_arrays)
-            else:
-                self.status_info.stage = Stage.PROC
-                self.status_info.msg = f"Unsupported size of data arrays. Expected triple. Got {len(data_arrays)}"
-                self.status_info.result = Result.FAIL
-                logger.warning(
-                    f"Processing error: {self.status_info.msg}")
-
-    def _process_data(self):
-        if len(self.children):
-            # Cannot process data when _fetch_data failed or did not occur
-            if self.status_info.result != Result.SUCCESS and self.data_access_enabled:
-                return
-
-            local_env = dict(ParserHelper.env)
-
-            for child in self.children:
-                if local_env.get(child.name) is None:
-                    local_env.update({child.name: child})
-                child._process_data()
-
-            try:
-                p = Parser().set_expression(self.name)
-                p.substitute_var(local_env)
-                p.eval_expr()
-                if isinstance(p.result, ProcessingSignal):
-                    p.result.copy_buffers_to(self)
-                    self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
-                else:
-                    self.status_info.stage = Stage.PROC
-                    self.status_info.msg = f"Result of expression={self.name} is not an instance of {type(self).__name__}"
-                    self.status_info.result = Result.FAIL
-                    logger.warning(
-                        f"Processing error: {self.status_info.msg}")
-            except Exception as e:
-                self.status_info.stage = Stage.PROC
-                self.status_info.msg = str(e)
-                self.status_info.result = Result.FAIL
-                logger.warning(
-                    f"Processing error: {self.status_info.msg}")
-        else:
-            # Cannot process data when _fetch_data failed or did not occur
-            if self.status_info.result != Result.SUCCESS and self.data_access_enabled:
-                return
-
-            self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
-
-    def _fetch_data(self):
-        """
-        Make a data access call with AccessHelper.
-        """
-        # avoid request pile up, shouldn't occur internally since all requests are blocking
-        if self.status_info.result == Result.BUSY:
-            return
-
-        # Set appropriate status
-        self.status_info.reset()
-        self.status_info.stage = Stage.DA
-        self.status_info.result = Result.BUSY
-
-        if len(self.children):
-            # ask child signals to fetch data
-            for child in self.children:
-                child._fetch_data()
-                if child.status_info.result == Result.FAIL:
-                    self.status_info = child.status_info
-                    break
-            else:  # Fell through, all children succeded
-                self.status_info.result = Result.SUCCESS
-                self.needs_processing = True
-        else:
-            # submit a fetch request for ourself.
-            CachingAccessHelper.get().fetch_data(self)
-
-    def get_data(self):
-        # Data-access will turn this boolean on if successful.
-        self.needs_processing = False
-        # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
-        nonempty_name = isinstance(self.name, str) and len(self.name) and not self.name.isspace()
-        if nonempty_name and self.needs_refresh():
-            self._fetch_data()
-        else:
-            self.status_info.stage = Stage.DA
-            self.status_info.result = Result.SUCCESS
-            if not nonempty_name and self.data_access_enabled:
-                self.needs_processing = True # processing in x,y,z columns
-
-        if self.processing_enabled and self.needs_processing:
-            self._process_data()
-        else:
-            self.status_info.stage = Stage.PROC
-            self.status_info.result = Result.SUCCESS
-
-        return [self.time, self.data_primary, self.data_secondary]
+            return None, None
 
     def get_ranges(self):
         return [[self.ts_start, self.ts_end]]
@@ -450,7 +251,250 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         # self.ts_start = ranges[0][0].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][0]
         # self.ts_end = ranges[0][1].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][1]
 
-    def needs_refresh(self) -> bool:
+    def set_da_success(self):
+        self.status_info.reset()
+        self.status_info.stage = Stage.DA
+        self.status_info.result = Result.SUCCESS
+        self.status_info.num_points = len(self.time)
+
+    def set_da_fail(self, msg: str = ''):
+        self.status_info.reset()
+        self.status_info.stage = Stage.DA
+        self.status_info.result = Result.FAIL
+        self.status_info.msg = msg
+        self.status_info.num_points = 0
+        logger.warning(f"Data Access Error: {msg}")
+
+    def set_proc_success(self):
+        self.status_info.reset()
+        self.status_info.stage = Stage.PROC
+        self.status_info.num_points = len(self.x_data)
+        self.status_info.result = Result.SUCCESS
+
+    def set_proc_fail(self, msg: str = ''):
+        self.status_info.reset()
+        self.status_info.stage = Stage.PROC
+        self.status_info.result = Result.FAIL
+        self.status_info.msg = msg
+        self.status_info.num_points = 0
+        logger.warning(f"Processing Error: {msg}")
+
+    # Private API begins here.
+    def _init_children(self, expression: str):
+        # 1. input can be an expression.
+        # eg: ${foo}
+        # eg: ${foo} + ${bar} + ${baz} * np.max(${cat})
+        # eg: np.max(${foo} + ${bar}) * np.ones((${foo}.data.size))
+        #
+        # 2. input can be a string of plain text r"^[A-Za-z0-9_@.\/\[\]#&+-]+"
+        # eg: foo
+        # eg: foo_bar
+        # eg: bar_
+        # eg: foo-bar-baz2-l3-1
+        # eg: foo_bar_baz2_l3_1
+        # eg: foo/bar[0]/baz_1
+        # eg: foo/bar[0]/baz-1
+        # The second case cannot have children, it does not need special consideration.
+
+        # The first case would result in len(children) > 0. We find them (if they are pre-defined aliases) or create them.
+        try:
+            p = Parser()\
+                .inject(Parser.get_member_list(ProcessingSignal))\
+                .inject(Parser.get_member_list(BufferObject))\
+                .set_expression(expression)
+        except InvalidExpression as e:
+            self.status_info.reset()
+            self.status_info.msg = f"{e}"
+            self.status_info.result = Result.INVALID
+            return
+
+        if not p.is_valid:
+            return
+
+        keys = set(p.var_map.keys())
+        keys.discard('self')  # don't bother with self here.
+        for key in keys:
+            value = ParserHelper.env.get(key)
+
+            if isinstance(value, IplotSignalAdapter):
+                # This is an aliased signal.
+                if self.data_access_enabled and iplotStrUtils.is_non_empty(self.data_source) and self.data_source != value.data_source:
+                    self.status_info.reset()
+                    self.status_info.msg = f"Data source conflict {self.data_source} != {value.data_source}."
+                    self.status_info.result = Result.INVALID
+                    logger.warning(self.status_info.msg)
+                    break
+                self.children.append(value)
+            else:
+                if self.data_access_enabled and iplotStrUtils.is_empty(self.data_source):
+                    self.status_info.reset()
+                    self.status_info.msg = "Data source unspecified."
+                    self.status_info.result = Result.INVALID
+                    logger.warning(self.status_info.msg)
+                    break
+                elif self.data_access_enabled:
+                    # Construct a new instance with our data source and time range, etc..
+                    child = self._construct_named_offspring(key)
+                    self.children.append(child)
+                elif self.processing_enabled:
+                    # Cannot create a new instance if only processing is enabled.
+                    self.status_info.reset()
+                    self.status_info.msg = f"Specified name '{key}' is not a pre-defined alias!"
+                    self.status_info.result = Result.INVALID
+                    logger.warning(self.status_info.msg)
+                    break
+
+    def _construct_named_offspring(self, name: str) -> IplotSignalAdapterT:
+        cls = type(self)
+        kwargs = dict()
+
+        for f in fields(self):
+            kwargs.update({f.name: getattr(self, f.name)})
+        kwargs.update({'name': name})
+        kwargs.update({'title': ''})
+        kwargs.update({'children': []})
+        return cls(**kwargs)
+
+    def _init_title(self):
+        # 1. From name
+        if self.title is None:
+            if iplotStrUtils.is_non_empty(self.name):
+                self.title = self.name
+            else:
+                self.title = ''
+
+        # 2. Alias overrides name for the title (appears in legend box)
+        if iplotStrUtils.is_non_empty(self.alias):
+            self.title = self.alias
+
+        # 3. Shows the pulse number in the title (appears in legend box).
+        if self.pulse_nb is not None:
+            pulse_as_string = str(self.pulse_nb)
+            if iplotStrUtils.is_non_empty(pulse_as_string):
+                if self.title.find(pulse_as_string) < 0:
+                    self.title += ':' + pulse_as_string
+
+    def _report_xyz_data(self, verbose: int = 0):
+        logger.debug(f"x.size: {len(self.x_data)}")
+        logger.debug(f"y.size: {len(self.y_data)}")
+        logger.debug(f"z.size: {len(self.z_data)}")
+
+        logger.debug(f"x.unit: {self.x_data.unit}")
+        logger.debug(f"y.unit: {self.y_data.unit}")
+        logger.debug(f"z.unit: {self.z_data.unit}")
+
+        if verbose > 0:
+            logger.debug(f"x: {self.x_data}")
+            logger.debug(f"y: {self.y_data}")
+            logger.debug(f"z: {self.z_data}")
+
+    def _finalize_xyz_data(self, data=None):
+        # 1. Fill in data buffers
+        if isinstance(data, typing.Collection):
+            if len(data):
+                if all([isinstance(val, np.ndarray) for val in data]):
+                    for i, name in enumerate(['x_data', 'y_data', 'z_data']):
+                        try:
+                            setattr(self, name, data[i].view(BufferObject))
+                        except IndexError:
+                            break
+
+        # 2. Fix x-y shape mismatch.
+        self.y_data = self.acquire_shape(self.y_data, self.x_data)
+
+        # 3. Fix x-z shape mismatch.
+        self.z_data = self.acquire_shape(self.z_data, self.x_data)
+
+        self._report_xyz_data()
+
+    def _process_data(self):
+        # 1. Cannot process data when _fetch_data failed or did not occur
+        if self.data_access_enabled and self.status_info.result != Result.SUCCESS:
+            return
+
+        # 2.Handle child signals.
+        # Note: In this case, `self.name` is an expression, so prior to applying x,y,z we evaluate `self.name`
+        if len(self.children):
+            local_env = dict(ParserHelper.env)
+            
+            # 2.1 Ensure all child signals have their time, data vectors (if DA enabled)
+            for child in self.children:
+                if local_env.get(child.name) is None:
+                    local_env.update({child.name: child})
+                if child.data_access_enabled and child._needs_refresh():
+                    child._fetch_data()
+
+            # 2.2 Evaluate self.name. This is an expression combining multiple other signals.
+            try:
+                p = Parser().set_expression(self.name)
+                p.substitute_var(local_env)
+                p.eval_expr()
+                if isinstance(p.result, ProcessingSignal):
+                    p.result.copy_buffers_to(self)
+                else:
+                    self.set_proc_fail(f"Result of expression={self.name} is not an instance of {type(self).__name__}")
+                    return
+            except Exception as e:
+                self.set_proc_fail(msg=str(e))
+                return
+
+        # 3. Finally, apply x, y, z expressions to populate `x_data`, `y_data` and `z_data` respectively
+        data_arrays = self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
+        self._finalize_xyz_data([data_arrays.get('x'), data_arrays.get('y'), data_arrays.get('z')])
+        self.set_proc_success()
+
+    def _fetch_data(self):
+        """
+        Make a data access call with AccessHelper.
+        """
+        # avoid request pile up, shouldn't occur internally since all requests are blocking
+        if self.status_info.result == Result.BUSY:
+            return
+
+        # Set appropriate status
+        self.status_info.reset()
+
+        if len(self.children):
+            # ask child signals to fetch data
+            for child in self.children:
+                if child._needs_refresh():
+                    child._fetch_data()
+                if child.status_info.result == Result.FAIL:
+                    self.set_da_fail(msg=child.status_info.msg) # get exact reason for failure from child.
+                    break
+            else:  # Fell through, all children succeded
+                self.set_da_success()
+        else:
+            # submit a fetch request for ourself.
+            CachingAccessHelper.get().fetch_data(self)
+
+    def _do_data_access(self):
+        # Skip if we are invalid.
+        if self.status_info.result == Result.INVALID:
+            return
+
+        # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
+        nonempty_name = iplotStrUtils.is_non_empty(self.name)
+        if nonempty_name and self.data_access_enabled:
+            if self._needs_refresh():
+                self._fetch_data()
+            elif self.status_info.stage == Stage.PROC:
+                self.set_da_success()
+        else:
+            # 1. either name is empty, trivial (no data access, so emulate a success DA)
+            # or 
+            # 2.data_access_enabled = False. Assume that user called set_data(...), so, emulate a success DA
+            self.set_da_success()
+
+    def _do_data_processing(self):
+        # Skip if we are invalid.
+        if self.status_info.result == Result.INVALID:
+            return
+
+        if self.processing_enabled:
+            self._process_data()
+
+    def _needs_refresh(self) -> bool:
         if not self.data_access_enabled:
             return
 
@@ -467,9 +511,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             return False
 
     def _check_if_zoomed_in(self):
-        if all(e is not None for e in [self.data_xrange[0], self.data_xrange[1], self.ts_start, self.ts_end]):
-            return (self.data_xrange[0] < self.ts_start < self.data_xrange[1]
-                    and self.data_xrange[0] < self.ts_end < self.data_xrange[1])
+        if all(e is not None for e in [self._data_xrange[0], self._data_xrange[1], self.ts_start, self.ts_end]):
+            return (self._data_xrange[0] < self.ts_start < self._data_xrange[1]
+                    and self._data_xrange[0] < self.ts_end < self._data_xrange[1])
         else:
             return False
 
@@ -541,25 +585,18 @@ class AccessHelper:
         return AccessHelper()
 
     @staticmethod
-    def on_fetch_done(signal, res: dict):
-        signal.status_info.reset()
-        signal.status_info.stage = Stage.DA
-
-        if not isinstance(res, dict):
-            # We don't know what happened. The iplotDataAccess module was unable to communicate the error.
-            signal.status_info.msg = 'Unknown error while fetching data'
-            signal.status_info.result = Result.FAIL
-        else:
-            # if data access succeded, the fetched data is encapsulated in a dict.
+    def on_fetch_done(signal: IplotSignalAdapter, res: dict):
+        if isinstance(res, dict):
             signal.time = res['time']
             signal.time_unit = res['time_unit']
             signal.data_primary = res['data_primary']
             signal.data_primary_unit = res['data_primary_unit']
             signal.data_secondary = res['data_secondary']
             signal.data_secondary_unit = res['data_secondary_unit']
-            signal.status_info.num_points = len(signal.time)
-            signal.needs_processing = True
-            signal.status_info.result = Result.SUCCESS
+            signal.set_da_success()
+        else:
+            # ¯\_(ツ)_/¯ The iplotDataAccess module was unable to communicate the error.
+            signal.set_da_fail(msg="¯\_(ツ)_/¯ Unknown error while fetching data")
 
     @staticmethod
     def _submit_fetch(signal: IplotSignalAdapter):
@@ -575,10 +612,7 @@ class AccessHelper:
             out_params.update(result)
         except Exception as e:
             # Indicate failure with message.
-            signal.status_info.msg = str(e)
-            signal.status_info.result = Result.FAIL
-            logger.warning(
-                f"Data access request error: {signal.status_info.msg}")
+            signal.set_da_fail(msg=str(e))
             return
 
         # finalize function after fetch.

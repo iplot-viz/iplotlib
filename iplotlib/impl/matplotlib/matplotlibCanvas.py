@@ -398,8 +398,8 @@ class MatplotlibCanvas:
             if hasattr(axes, "_signals"):
                 for s in axes._signals:
                     try:
-                        assert isinstance(s.data_primary_unit, str)
-                        units.append(s.data_primary_unit or '-')
+                        assert isinstance(s.y_data.unit, str)
+                        units.append(s.y_data.unit or '-')
                     except (AttributeError, AssertionError) as e:
                         continue
             units = set(units) if len(set(units)) == 1 else units
@@ -520,10 +520,11 @@ class MatplotlibCanvas:
                     if isinstance(xax, LinearAxis):
                         put_label |= (not xax.is_date)
 
-            if put_label and hasattr(signal, 'time_unit'):
-                label = f"[{signal.time_unit}]"
-                if label:
-                    xaxis.set_label_text(label)
+            if put_label and hasattr(signal, 'x_data'):
+                if hasattr(signal.x_data, 'unit'):
+                    label = f"[{signal.x_data.unit}]"
+                    if label:
+                        xaxis.set_label_text(label)
         else:
             logger.error(f"Matplotlib AXES not found for signal {signal}. This should not happen. SIGNAL_ID: {id(signal)} AXES: {mpl_axes}")
 
