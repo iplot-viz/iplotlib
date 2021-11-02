@@ -130,7 +130,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 self.focus_plot(event.inaxes._plot,
                                 event.inaxes._plot_stack_key)
             else:
-                self.mpl_toolbar.home()
+                self.focus_plot(None, None)
         else:
             if self.mouse_mode == Canvas.MOUSE_MODE_DIST and event.button == 1 and event.inaxes is not None:
                 if self._distCalculator.plot1 is not None:
