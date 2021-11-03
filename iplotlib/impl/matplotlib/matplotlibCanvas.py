@@ -522,7 +522,7 @@ class MatplotlibCanvas:
 
             if put_label and hasattr(signal, 'x_data'):
                 if hasattr(signal.x_data, 'unit'):
-                    label = f"[{signal.x_data.unit or '-'}]"
+                    label = f"[{signal.x_data.unit or '?'}]"
                     if label:
                         xaxis.set_label_text(label)
         else:
