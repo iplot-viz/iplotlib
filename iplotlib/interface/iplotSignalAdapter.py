@@ -35,7 +35,7 @@ from iplotProcessing.tools import hash_code
 
 import iplotLogging.setupLogger as sl
 
-logger = sl.get_logger(__name__, level="DEBUG")
+logger = sl.get_logger(__name__, level="INFO")
 
 IplotSignalAdapterT = typing.TypeVar(
     'IplotSignalAdapterT', bound='IplotSignalAdapter')
