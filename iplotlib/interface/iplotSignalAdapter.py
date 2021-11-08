@@ -163,6 +163,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             # Indicate readiness.
             self.status_info.result = Result.READY
 
+    def calculate_data_hash(self):
+        return hash_code(self, ["ts_start", "ts_end", "pulse_nb"])
+
     def get_data(self):
         # 1. Populate time, data_primary, data_secondary (if needed)
         self._do_data_access()
@@ -183,7 +186,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         
         self._finalize_xyz_data(data)
 
-        # Pure processing, in that case, emulate a successfule data acccess
+        # Pure processing, in that case, emulate a successful data access
         if not self.data_access_enabled:
             self.time = self.x_data
             self.data_primary = self.y_data
@@ -278,6 +281,11 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info.msg = msg
         self.status_info.num_points = 0
         logger.warning(f"Processing Error: {msg}")
+
+    def inject_external(self, append : bool = False, **kwargs):
+        AccessHelper.on_fetch_done(self, kwargs, append = append)
+        self.access_md5sum = self.calculate_data_hash()
+        self._do_data_processing()
 
     # Private API begins here.
     def _init_children(self, expression: str):
@@ -498,7 +506,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         if not self.data_access_enabled:
             return
 
-        target_md5sum = hash_code(self, ["ts_start", "ts_end", "pulse_nb"])
+        target_md5sum = self.calculate_data_hash()
         logger.debug(f"old={self.access_md5sum}, new={target_md5sum}")
 
         if self.access_md5sum is None:
@@ -585,18 +593,31 @@ class AccessHelper:
         return AccessHelper()
 
     @staticmethod
-    def on_fetch_done(signal: IplotSignalAdapter, res: dict):
-        if isinstance(res, dict):
-            signal.time = res['time']
-            signal.time_unit = res['time_unit']
-            signal.data_primary = res['data_primary']
-            signal.data_primary_unit = res['data_primary_unit']
-            signal.data_secondary = res['data_secondary']
-            signal.data_secondary_unit = res['data_secondary_unit']
-            signal.set_da_success()
-        else:
-            # ¯\_(ツ)_/¯ The iplotDataAccess module was unable to communicate the error.
+    def on_fetch_done(signal: IplotSignalAdapter, res: dict, append: bool = False):
+
+        if not isinstance(res, dict):
             signal.set_da_fail(msg="¯\_(ツ)_/¯ Unknown error while fetching data")
+            return
+
+        # we can append to existing data if required (in case of real time streaming)
+        if append:
+            signal.time = np.append(signal.time, res['time'])
+            signal.data_primary = np.append(signal.data_primary, res['data_primary'])
+            signal.data_secondary = np.append(signal.data_secondary, res['data_secondary'])
+        else:
+            signal.time = res['time']
+            signal.data_primary = res['data_primary']
+            signal.data_secondary = res['data_secondary']
+
+        # units can be specified separately, if your data access module does not use the BufferObject subclass.
+        if res.get('time_unit'):
+            signal.time_unit = res['time_unit']
+        if res.get('data_primary_unit'):
+            signal.data_primary_unit = res['data_primary_unit']
+        if res.get('data_secondary_unit'):
+            signal.data_secondary_unit = res['data_secondary_unit']
+
+        signal.set_da_success()
 
     @staticmethod
     def _submit_fetch(signal: IplotSignalAdapter):

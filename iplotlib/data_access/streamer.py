@@ -74,12 +74,14 @@ class CanvasStreamer:
 
     def handler(self, callback, varname, dobj):
         signal = self.signals.get(varname)
-        if signal:
-            signal.data_hash = signal.calculate_data_hash()
-            data = signal.get_data()
-            logger.info(F"\tUPDATED {varname} with {len(dobj.xdata)} new samples")
-            xdata = np.append(data[0], dobj.xdata)
-            ydata = np.append(data[1], dobj.ydata)
-            signal.set_data([xdata, ydata])
-            signal.units = [dobj.xunit, dobj.yunit]
+        if hasattr(signal, 'inject_external'):
+            result = dict(
+                time=dobj.xdata,
+                data_primary=dobj.ydata,
+                data_secondary=[],
+                time_unit=dobj.xunit,
+                data_primary_unit=dobj.yunit,
+                data_secondary_unit='')
+            signal.inject_external(append=True, **result)
+            logger.info(f"Updated {varname} with {len(dobj.xdata)} new samples")
             callback(signal)
