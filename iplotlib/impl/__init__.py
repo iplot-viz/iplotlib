@@ -1,5 +1,4 @@
 from iplotlib.core.canvas import Canvas
-from iplotlib.impl.vtk import VTKCanvas
 
 class CanvasFactory:
     @staticmethod
@@ -7,4 +6,5 @@ class CanvasFactory:
         if backend.lower() in ["matplotlib", "mpl", "mplot", "mplib"]:
             return None
         elif backend.lower() in ["vtk"]:
+            from iplotlib.impl.vtk import VTKCanvas
             return VTKCanvas(*args, **kwargs)

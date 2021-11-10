@@ -10,7 +10,8 @@ import inspect
 from PySide2.QtWidgets import QVBoxLayout, QWidget
 from PySide2.QtGui import QResizeEvent, QShowEvent
 
-from iplotlib.impl import CanvasFactory, Canvas, VTKCanvas
+from iplotlib.impl import CanvasFactory, Canvas
+from iplotlib.impl.vtk import VTKCanvas
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 # Maintain consistent qt api across vtk and iplotlib
