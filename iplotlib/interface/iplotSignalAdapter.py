@@ -501,10 +501,14 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         if self.processing_enabled:
             self._process_data()
+        elif self.data_access_enabled:
+            self._finalize_xyz_data([self.time, self.data_primary, self.data_secondary])
+        else: # no da, no proc
+            self._finalize_xyz_data([self.time, self.data_primary, self.data_secondary])
 
     def _needs_refresh(self) -> bool:
         if not self.data_access_enabled:
-            return
+            return False
 
         target_md5sum = self.calculate_data_hash()
         logger.debug(f"old={self.access_md5sum}, new={target_md5sum}")
