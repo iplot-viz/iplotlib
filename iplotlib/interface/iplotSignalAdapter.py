@@ -501,9 +501,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         if self.processing_enabled:
             self._process_data()
-        elif self.data_access_enabled:
-            self._finalize_xyz_data([self.time, self.data_primary, self.data_secondary])
-        else: # no da, no proc
+        else:
             self._finalize_xyz_data([self.time, self.data_primary, self.data_secondary])
 
     def _needs_refresh(self) -> bool:
