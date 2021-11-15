@@ -668,17 +668,17 @@ class VTKCanvas(Canvas):
                 # TODO: Use functional bag for envelope plots
                 if isinstance(signal, ArraySignal):
                     impl_plot = self.add_vtk_line_plot(
-                        chart, signal.title, data[0], data[1], hi_precision)
+                        chart, signal.label, data[0], data[1], hi_precision)
                     self._abstr_impl_plot_lookup.update({id(signal): impl_plot})
             else:
                 if isinstance(signal, ArraySignal):
                     self.refresh_impl_plot_data(
-                        impl_plot, data[0], data[1], signal.title, hi_precision)
+                        impl_plot, data[0], data[1], signal.label, hi_precision)
         else:
             impl_plot = chart.AddPlot(vtkChart.LINE)  # type: vtkPlotLine
 
         # Translate abstract properties to backend
-        self.refresh_signal_title(signal)
+        self.refresh_signal_label(signal)
         self.refresh_signal_color(signal)
 
         if isinstance(signal, ArraySignal):
@@ -696,13 +696,13 @@ class VTKCanvas(Canvas):
         if signal.color is not None:
             impl_plot.SetColor(*vtkImplUtils.get_color4ub(signal.color))
 
-    def refresh_signal_title(self, signal: Signal):
+    def refresh_signal_label(self, signal: Signal):
         impl_plot = self._abstr_impl_plot_lookup.get(
             id(signal))  # type: vtkPlot
         if not isinstance(impl_plot, vtkPlot):
             return
-        if signal.title is not None:
-            impl_plot.SetLabel(signal.title)
+        if signal.label is not None:
+            impl_plot.SetLabel(signal.label)
 
     def refresh_step_type(self, signal: ArraySignal):
         impl_plot = self._abstr_impl_plot_lookup.get(

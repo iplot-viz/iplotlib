@@ -30,6 +30,15 @@ class JSONExporter:
     def from_json(self, string):
         return self.from_dict(json.loads(string))
 
+    def make_compatible(self, d, klass):
+        from iplotlib.core.signal import Signal
+        if issubclass(klass, Signal):
+            try:
+                label = d.pop('title')
+                d.update({'label': label})
+            except KeyError:
+                pass
+
     def dataclass_from_dict(self, d, klass=None):
         """
         Creates a dataclass instance from nested dicts. If dict has a _type key then this value
@@ -51,6 +60,7 @@ class JSONExporter:
         if isinstance(d, Dict):
             if d.get("_type") is not None:
                 klass = create_klass_using_aliases(d.get("_type"))
+                self.make_compatible(d, klass)
             else:
                 return {k: self.dataclass_from_dict(v) for (k, v) in d.items()}
 

@@ -142,7 +142,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.z_data = BufferObject()
 
         # 2. Post-initialize ArraySignal's properties and our name.
-        self._init_title()
+        self._init_label()
 
         # 3. Help keep track of data access parameters.
         self.access_md5sum = None
@@ -359,28 +359,28 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         for f in fields(self):
             kwargs.update({f.name: getattr(self, f.name)})
         kwargs.update({'name': name})
-        kwargs.update({'title': ''})
+        kwargs.update({'label': ''})
         kwargs.update({'children': []})
         return cls(**kwargs)
 
-    def _init_title(self):
+    def _init_label(self):
         # 1. From name
-        if self.title is None:
+        if self.label is None:
             if iplotStrUtils.is_non_empty(self.name):
-                self.title = self.name
+                self.label = self.name
             else:
-                self.title = ''
+                self.label = ''
 
-        # 2. Alias overrides name for the title (appears in legend box)
+        # 2. Alias overrides name for the label (appears in legend box)
         if iplotStrUtils.is_non_empty(self.alias):
-            self.title = self.alias
+            self.label = self.alias
 
-        # 3. Shows the pulse number in the title (appears in legend box).
+        # 3. Shows the pulse number in the label (appears in legend box).
         if self.pulse_nb is not None:
             pulse_as_string = str(self.pulse_nb)
             if iplotStrUtils.is_non_empty(pulse_as_string):
-                if self.title.find(pulse_as_string) < 0:
-                    self.title += ':' + pulse_as_string
+                if self.label.find(pulse_as_string) < 0:
+                    self.label += ':' + pulse_as_string
 
     def _report_xyz_data(self, verbose: int = 0):
         logger.debug(f"x.size: {len(self.x_data)}")
