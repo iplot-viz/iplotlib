@@ -21,7 +21,7 @@ class VTKCanvasTesting(QAppTestAdapter):
             "vtk", 2, 2, title=os.path.basename(__file__))
 
         # A plot in top-left with 1 signal.
-        signal11 = SimpleSignal(title="Signal1.1", hi_precision_data=False)
+        signal11 = SimpleSignal(label="Signal1.1", hi_precision_data=False)
         signal11.set_data([xs, ys])
         plot11 = PlotXY(title="DateTime=True, HiPrecision=False")
         plot11.axes[0].is_date = True
@@ -29,18 +29,18 @@ class VTKCanvasTesting(QAppTestAdapter):
         self.vtk_canvas.add_plot(plot11, 0)
 
         # A plot in bottom-left with 2 stacked signal.
-        signal121 = SimpleSignal(title="Signal1.2.1")
+        signal121 = SimpleSignal(label="Signal1.2.1")
         signal121.set_data([xs, ys])
         plot12 = PlotXY(title="DateTime=True, HiPrecision=False")
         plot12.axes[0].is_date = True
         plot12.add_signal(signal121)
-        signal122 = SimpleSignal(title="Signal1.2.2")
+        signal122 = SimpleSignal(label="Signal1.2.2")
         signal122.set_data([xs, ys + np.sin(xs)])
         plot12.add_signal(signal122, 2)
         self.vtk_canvas.add_plot(plot12, 0)
 
         # A plot in top-right with 1 signal.
-        signal21 = SimpleSignal(title="Signal2.1")
+        signal21 = SimpleSignal(label="Signal2.1")
         signal21.set_data([xs, ys])
         plot21 = PlotXY(title="DateTime=True, HiPrecision=False")
         plot21.axes[0].is_date = True
@@ -48,7 +48,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         self.vtk_canvas.add_plot(plot21, 1)
 
         # A plot in bottom-right with 1 signal.
-        signal22 = SimpleSignal(title="Signal2.2")
+        signal22 = SimpleSignal(label="Signal2.2")
         signal22.set_data([xs, ys])
         plot22 = PlotXY(title="DateTime=False, HiPrecision=False")
         plot22.add_signal(signal22)
