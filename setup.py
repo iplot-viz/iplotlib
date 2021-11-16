@@ -41,7 +41,7 @@ setuptools.setup(
         "matplotlib >= 3.3.3",
         "pandas >= 1.1.4",
         "PySide2 >= 5.14.2",
-        "vtk >= 9.0.3"
+        "vtk >= 9.1.0"
     ],
     entry_points={
         'console_scripts': ['iplotlib-qt-canvas = iplotlib.qt.gui.iplotQtStandaloneCanvas:main']
