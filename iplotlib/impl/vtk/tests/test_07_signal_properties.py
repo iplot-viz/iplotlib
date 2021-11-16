@@ -27,7 +27,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         plot = PlotXY(title="Color")
         for i in range(5):
             signal = SimpleSignal(
-                title=f"{colors[i]}",
+                label=f"{colors[i]}",
                 color=colors[i],
                 hi_precision_data=False
             )
@@ -40,7 +40,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         plot = PlotXY(title="LineStyle")
         for i in range(3):
             signal = SimpleSignal(
-                title=f"{line_styles[i]}",
+                label=f"{line_styles[i]}",
                 color=colors[i],
                 line_style=line_styles[i],
                 hi_precision_data=False
@@ -54,7 +54,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         plot = PlotXY(title="LineSize")
         for i in range(3):
             signal = SimpleSignal(
-                title=f"LineSize-{line_sizes[i]}",
+                label=f"LineSize-{line_sizes[i]}",
                 color=colors[i],
                 line_size=line_sizes[i],
                 hi_precision_data=False
@@ -68,7 +68,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         plot = PlotXY(title="Marker")
         for i in range(5):
             signal = SimpleSignal(
-                title=f"{markers[i]}",
+                label=f"{markers[i]}",
                 color=colors[i],
                 marker=markers[i],
                 hi_precision_data=False
@@ -82,7 +82,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         plot = PlotXY(title="MarkerSize")
         for i in range(3):
             signal = SimpleSignal(
-                title=f"{marker_sizes[i]}",
+                label=f"{marker_sizes[i]}",
                 color=colors[i],
                 marker=markers[i],
                 marker_size=marker_sizes[i],
@@ -97,7 +97,7 @@ class VTKCanvasTesting(QAppTestAdapter):
         plot = PlotXY(title="Step")
         for i in range(4):
             signal = SimpleSignal(
-                title=f"{step_types[i]}",
+                label=f"{step_types[i]}",
                 color=colors[i],
                 marker='x',
                 step=step_types[i],

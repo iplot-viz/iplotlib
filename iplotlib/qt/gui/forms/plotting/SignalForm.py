@@ -17,7 +17,7 @@ class SignalForm(IplotPreferencesForm):
     
     def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         prototype = [
-            {"label": "Label", "property": "title",
+            {"label": "Label", "property": "label",
                 "widget": self.create_lineedit()},
             {"label": "Varname", "property": "varname",
                 "widget":  self.create_lineedit(readonly=True)},

@@ -10,8 +10,8 @@ class SignalStyle(ABC):
 
 @dataclass
 class Signal(ABC):
-    """Signal title. This value is presented on plot legend"""
-    title: str = None
+    """Signal label. This value is presented on plot legend"""
+    label: str = None
     color: str = None
     line_style: str = None
     line_size: int = None

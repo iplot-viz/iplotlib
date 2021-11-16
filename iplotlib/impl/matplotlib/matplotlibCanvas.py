@@ -321,8 +321,8 @@ class MatplotlibCanvas:
 
         linestyle_lut = {"Solid": "solid", "Dashed": "dashed", "Dotted": "dotted", "None": "None"}
         styledata = dict()
-        if signal.title:
-            styledata['label'] = signal.title
+        if signal.label:
+            styledata['label'] = signal.label
         if hasattr(signal, "color"):
             styledata['color'] = signal.color
 
