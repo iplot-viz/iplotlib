@@ -3,4 +3,4 @@ iplotProcessing==0.2.0
 matplotlib==3.3.3
 pandas==1.2.0
 pyside2==5.14.2
-vtk==9.0.20210806.dev0
+vtk==9.1.0
