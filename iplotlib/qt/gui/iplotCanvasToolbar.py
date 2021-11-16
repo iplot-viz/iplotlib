@@ -68,7 +68,7 @@ class IplotQtCanvasToolbar(QToolBar):
         self.addAction(self.redrawAction)
 
         # Configuration..
-        self.configureAction = QAction(create_icon('options'), '&Prefrences')
+        self.configureAction = QAction(create_icon('options', 'svg'), '&Prefrences')
         self.addAction(self.configureAction)
 
         # Detach..
