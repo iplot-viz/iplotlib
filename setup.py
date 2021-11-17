@@ -20,8 +20,8 @@ setuptools.setup(
         "template": "{tag}",
         "dirty_template": "{tag}.{ccount}.{sha}",
     },
-    author="Lana Abadie",
-    author_email="lana.abadie@iter.org",
+    author="Panchumarti Jaswant EXT",
+    author_email="jaswant.panchumarti@iter.org",
     description="ITER plotting library",
     long_description=long_description,
     url="https://git.iter.org/scm/vis/iplotlib.git",
@@ -47,6 +47,6 @@ setuptools.setup(
         'console_scripts': ['iplotlib-qt-canvas = iplotlib.qt.gui.iplotQtStandaloneCanvas:main']
     },
     package_data = {
-        "iplotlib.qt": ["icons/*.png"]
+        "iplotlib.qt": ["icons/*.png", "icons/*.svg"]
     }
 )
