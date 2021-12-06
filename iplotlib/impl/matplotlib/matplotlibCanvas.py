@@ -525,6 +525,8 @@ class MatplotlibCanvas:
                     label = f"[{signal.x_data.unit or '?'}]"
                     if label:
                         xaxis.set_label_text(label)
+            if hasattr(xaxis, "_label") and xaxis._label: # label from preferences takes precedence.
+                xaxis.set_label_text(xaxis._label)
         else:
             logger.error(f"Matplotlib AXES not found for signal {signal}. This should not happen. SIGNAL_ID: {id(signal)} AXES: {mpl_axes}")
 
