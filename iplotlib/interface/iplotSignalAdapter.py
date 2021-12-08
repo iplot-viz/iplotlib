@@ -19,17 +19,20 @@
 #              - Added StatusInfo to IplotSignalAdapter
 #              - Parse given time as isoformat datetime only if it is a non-empty string
 
+from collections import defaultdict
 from dataclasses import dataclass, field, fields
 import numpy as np
 import os
-import re
 import typing
 
 from iplotlib.core.signal import ArraySignal
 from iplotlib.interface.utils import string_classifier as iplotStrUtils
 from iplotProcessing.common.errors import InvalidExpression
+from iplotProcessing.common.grid_mixing import GridAlignmentMode
+from iplotProcessing.common.interpolation import InterpolationKind
 from iplotProcessing.core import BufferObject
 from iplotProcessing.core import Signal as ProcessingSignal
+from iplotProcessing.math.pre_processing.grid_mixing import align
 from iplotProcessing.tools.parsers import Parser
 from iplotProcessing.tools import hash_code
 
@@ -108,7 +111,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
     x_expr: str = '${self}.time'
     y_expr: str = '${self}.data'
-    z_expr: str = '${self}.data_secondary'
+    z_expr: str = '${self}.data_store[2]'
 
     plot_type: str = ''
 
@@ -188,9 +191,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         # Pure processing, in that case, emulate a successful data access
         if not self.data_access_enabled:
-            self.time = self.x_data
-            self.data_primary = self.y_data
-            self.data_secondary = self.z_data
+            self.data_store[0] = self.x_data
+            self.data_store[1] = self.y_data
+            self.data_store[2] = self.z_data
             self.set_da_success()
 
     @staticmethod
@@ -223,8 +226,6 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             try:
                 data_arrays.update({key: ParserHelper.evaluate(self, expr)})
             except Exception as e:
-                # Indicate failure with message and bail.
-                self.set_proc_fail(f"Expression {key}={expr} | {str(e)}")
                 continue
         return data_arrays
 
@@ -258,7 +259,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info.reset()
         self.status_info.stage = Stage.DA
         self.status_info.result = Result.SUCCESS
-        self.status_info.num_points = len(self.time)
+        self.status_info.num_points = len(self.data_store[0])
 
     def set_da_fail(self, msg: str = ''):
         self.status_info.reset()
@@ -426,27 +427,46 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             local_env = dict(ParserHelper.env)
             
             # 2.1 Ensure all child signals have their time, data vectors (if DA enabled)
-            for child in self.children:
-                if local_env.get(child.name) is None:
-                    local_env.update({child.name: child})
+            children_data = defaultdict(list)
+            for c, child in enumerate(self.children):
                 if child.data_access_enabled and child._needs_refresh():
                     child._fetch_data()
+                child._process_data()
+                for ds in child.data_store:
+                    children_data[c].append(ds.copy())
+                if local_env.get(child.name) is None:
+                    local_env.update({child.name: child})
 
-            # 2.2 Evaluate self.name. This is an expression combining multiple other signals.
+            # 2.2 Align all signals onto a common grid.
+            align(self.children) #,mode=self.alignment_mode, kind=self.interpolation_kind)
+
+            # 2.2 Evaluate self.name. It is an expression combining multiple other signals.
             try:
                 p = Parser().set_expression(self.name)
                 p.substitute_var(local_env)
                 p.eval_expr()
                 if isinstance(p.result, ProcessingSignal):
-                    p.result.copy_buffers_to(self)
+                    self.data_store[0] = p.result.data_store[0]
+                    self.data_store[1] = p.result.data_store[1]
+                    self.data_store[2] = p.result.data_store[2]
                 else:
                     self.set_proc_fail(f"Result of expression={self.name} is not an instance of {type(self).__name__}")
                     return
             except Exception as e:
                 self.set_proc_fail(msg=str(e))
-                return
+            finally:
+                # restore backup.
+                for c, child in enumerate(self.children):
+                    child.data_store.clear()
+                    for ds in children_data[c]:
+                        child.data_store.append(ds)
+
+        if self.status_info.result == Result.FAIL:
+            return
 
         # 3. Finally, apply x, y, z expressions to populate `x_data`, `y_data` and `z_data` respectively
+        self.z_expr = self.z_expr.replace("data_secondary", "data") # data_secondary is deprecated.
+
         data_arrays = self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
         self._finalize_xyz_data([data_arrays.get('x'), data_arrays.get('y'), data_arrays.get('z')])
         self.set_proc_success()
@@ -502,7 +522,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         if self.processing_enabled:
             self._process_data()
         else:
-            self._finalize_xyz_data([self.time, self.data_primary, self.data_secondary])
+            self._finalize_xyz_data(self.data_store)
 
     def _needs_refresh(self) -> bool:
         if not self.data_access_enabled:
@@ -601,23 +621,27 @@ class AccessHelper:
             signal.set_da_fail(msg="¯\_(ツ)_/¯ Unknown error while fetching data")
             return
 
+        signal.alias_map.clear()
+        signal.alias_map.update(res['alias_map'])
+
         # we can append to existing data if required (in case of real time streaming)
         if append:
-            signal.time = np.append(signal.time, res['time'])
-            signal.data_primary = np.append(signal.data_primary, res['data_primary'])
-            signal.data_secondary = np.append(signal.data_secondary, res['data_secondary'])
+            signal.data_store[0] = BufferObject(np.append(signal.data_store[0], res['d0']))
+            signal.data_store[1] = BufferObject(np.append(signal.data_store[1], res['d1']))
+            signal.data_store[2] = BufferObject(np.append(signal.data_store[2], res['d2']))
         else:
-            signal.time = res['time']
-            signal.data_primary = res['data_primary']
-            signal.data_secondary = res['data_secondary']
+            signal.data_store.clear()
+            signal.data_store.append(BufferObject(res['d0']))
+            signal.data_store.append(BufferObject(res['d1']))
+            signal.data_store.append(BufferObject(res['d2']))
 
         # units can be specified separately, if your data access module does not use the BufferObject subclass.
-        if res.get('time_unit'):
-            signal.time_unit = res['time_unit']
-        if res.get('data_primary_unit'):
-            signal.data_primary_unit = res['data_primary_unit']
-        if res.get('data_secondary_unit'):
-            signal.data_secondary_unit = res['data_secondary_unit']
+        if res.get('d0_unit'):
+            signal.data_store[0].unit = res['d0_unit']
+        if res.get('d1_unit'):
+            signal.data_store[1].unit = res['d1_unit']
+        if res.get('d2_unit'):
+            signal.data_store[2].unit = res['d2_unit']
 
         signal.set_da_success()
 
@@ -659,12 +683,13 @@ class AccessHelper:
         pulse = da_params.get('pulse')
         envelope = da_params.get('envelope')
         tRelative = da_params.get('tsFormat') == 'relative'
-        result = dict(time=[],
-                      data_primary=[],
-                      data_secondary=[],
-                      time_unit='',
-                      data_primary_unit='',
-                      data_secondary_unit='')
+        result = dict(alias_map={},
+                      d0=[],
+                      d1=[],
+                      d2=[],
+                      d0_unit='',
+                      d1_unit='',
+                      d2_unit='')
         da_params.pop('envelope')  # getEnvelope does not need this.
 
         def np_nvl(arr):
@@ -686,14 +711,19 @@ class AccessHelper:
 
                 xdata = np_nvl(d_min.xdata if d_min else None) if tRelative else np_nvl(
                     d_min.xdata if d_min else None)
-
-                result['time'] = np_nvl(xdata)
-                result['data_primary'] = np_nvl(d_min.ydata if d_min else None)
-                result['data_secondary'] = np_nvl(
+                
+                result['alias_map'] = {
+                        'time': {'idx': 0, 'independent': True},
+                        'dmin': {'idx': 1},
+                        'dmax': {'idx': 2}
+                    }
+                result['d0'] = np_nvl(xdata)
+                result['d1'] = np_nvl(d_min.ydata if d_min else None)
+                result['d2'] = np_nvl(
                     d_max.ydata if d_max else None)
-                result['time_unit'] = d_min.xunit if d_min else ''
-                result['data_primary_unit'] = d_min.yunit if d_min else ''
-                result['data_secondary_unit'] = d_max.yunit if d_min else ''
+                result['d0_unit'] = d_min.xunit if d_min else ''
+                result['d1_unit'] = d_min.yunit if d_min else ''
+                result['d2_unit'] = d_max.yunit if d_min else ''
 
             else:
                 raw = AccessHelper.da.getData(**da_params)
@@ -719,12 +749,16 @@ class AccessHelper:
                     logger.info(
                         F"\tUDA samples: {len(xdata)} params={da_params}")
 
-                result['time'] = xdata
-                result['data_primary'] = np_nvl(raw.ydata)
-                result['data_secondary'] = np.empty(0).astype('double')
-                result['time_unit'] = raw.xunit if raw.xunit else ''
-                result['data_primary_unit'] = raw.yunit if raw.yunit else ''
-                result['data_secondary_unit'] = ''
+                result['alias_map'] = {
+                        'time': {'idx': 0, 'independent': True},
+                        'data': {'idx': 1}
+                    }
+                result['d0'] = xdata
+                result['d1'] = np_nvl(raw.ydata)
+                result['d2'] = np.empty(0).astype('double')
+                result['d0_unit'] = raw.xunit if raw.xunit else ''
+                result['d1_unit'] = raw.yunit if raw.yunit else ''
+                result['d2_unit'] = ''
         else:
             raise DataAccessError(
                 f"tsS={tsS}, tsE={tsE}, pulse_nb={pulse}")
@@ -793,6 +827,7 @@ class ParserHelper:
 
         p = Parser()
         p.inject(Parser.get_member_list(type(signal)))
+        p.inject(signal.alias_map)
         p.inject(Parser.get_member_list(BufferObject))
         p.set_expression(expression)
         if not p.is_valid:
@@ -802,9 +837,9 @@ class ParserHelper:
         for var_name in p.var_map.keys():
             match = p.marker_in + var_name + p.marker_out + '.time'
             if expression.count(match) and p.has_time_units:
-                if signal.time_unit == "nanoseconds":
-                    signal.time_unit = 'ns'
-                replacement = f"{match}.astype('datetime64[{signal.time_unit}]')"
+                if signal.time.unit == "nanoseconds":
+                    signal.time.unit = 'ns'
+                replacement = f"{match}.astype('datetime64[{signal.time.unit}]')"
                 expression = expression.replace(match, replacement)
                 logger.debug(f"|==> replaced {match} with {replacement}")
                 logger.debug(f"expression: {expression}")
