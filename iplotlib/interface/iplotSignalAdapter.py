@@ -18,6 +18,9 @@
 #              - Added compute() to IplotSignalAdapter
 #              - Added StatusInfo to IplotSignalAdapter
 #              - Parse given time as isoformat datetime only if it is a non-empty string
+#  Dec 2021:   Changes by Jaswant
+#              - If the number of child signals is > 1, then align them onto a common grid before evaluating an expression.
+#              - The alignment modifies the data_store. After evaluation, restore the original buffers.
 
 from collections import defaultdict
 from dataclasses import dataclass, field, fields
@@ -432,13 +435,15 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 if child.data_access_enabled and child._needs_refresh():
                     child._fetch_data()
                 child._process_data()
-                for ds in child.data_store:
-                    children_data[c].append(ds.copy())
+                if len(self.children) > 1:
+                    for ds in child.data_store:
+                        children_data[c].append(ds.copy())
                 if local_env.get(child.name) is None:
                     local_env.update({child.name: child})
 
             # 2.2 Align all signals onto a common grid.
-            align(self.children) #,mode=self.alignment_mode, kind=self.interpolation_kind)
+            if len(self.children) > 1:
+                align(self.children) #,mode=self.alignment_mode, kind=self.interpolation_kind)
 
             # 2.2 Evaluate self.name. It is an expression combining multiple other signals.
             try:
@@ -456,10 +461,11 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 self.set_proc_fail(msg=str(e))
             finally:
                 # restore backup.
-                for c, child in enumerate(self.children):
-                    child.data_store.clear()
-                    for ds in children_data[c]:
-                        child.data_store.append(ds)
+                if len(self.children) > 1:
+                    for c, child in enumerate(self.children):
+                        child.data_store.clear()
+                        for ds in children_data[c]:
+                            child.data_store.append(ds)
 
         if self.status_info.result == Result.FAIL:
             return
