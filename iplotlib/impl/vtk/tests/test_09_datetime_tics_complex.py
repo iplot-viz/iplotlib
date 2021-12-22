@@ -6,11 +6,11 @@ from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SimpleSignal
 from iplotlib.impl import CanvasFactory
 from iplotlib.impl.vtk.utils import regression_test
-from iplotlib.impl.vtk.tests.QAppTestAdapter import QAppTestAdapter
+from iplotlib.impl.vtk.tests.QVTKAppTestAdapter import QVTKAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
 
 
-class VTKCanvasTesting(QAppTestAdapter):
+class VTKCanvasTesting(QVTKAppTestAdapter):
 
     def setUp(self) -> None:
         ts = 1_000_000_000

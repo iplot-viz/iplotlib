@@ -1,17 +1,17 @@
-# Description: Sets up an application ready to test with a QtVTKCanvas.
+# Description: Sets up a Qt application ready to test with a QtVTKCanvas.
 # Author: Jaswant Sai Panchumarti
 # Changelog:
 #   Sept 2021: -Port to PySide2
 
 import unittest
 
-from PySide2.QtWidgets import QApplication
 from iplotlib.impl.vtk.qt import QtVTKCanvas
+from iplotlib.qt.testing import QAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
 _instance = None
 _qvtk_canvas = None
 
-class QAppTestAdapter(unittest.TestCase):
+class QVTKAppTestAdapter(QAppTestAdapter):
     """Helper class to provide QApplication instances"""
 
     qapplication = True
@@ -20,21 +20,19 @@ class QAppTestAdapter(unittest.TestCase):
         """Creates the QApplication instance"""
 
         # Simple way of making instance a singleton
-        super(QAppTestAdapter, self).setUp()
         global _instance, _qvtk_canvas
-        if _instance is None and not vtk_is_headless():
-            _instance = QApplication([])
-        if _qvtk_canvas is None and not vtk_is_headless():
+        super().setUp()
+        if _qvtk_canvas is None and not self.headless():
             _qvtk_canvas = QtVTKCanvas()
             _qvtk_canvas.setFixedSize(800, 800)
 
-        self.app = _instance
         self.canvas = _qvtk_canvas
 
+    def headless(self):
+        return vtk_is_headless()
 
     def tearDown(self):
         """Deletes the reference owned by self"""
-        if not vtk_is_headless():
+        if not self.headless():
             del self.canvas 
-            del self.app
-        super(QAppTestAdapter, self).tearDown()
+        super().tearDown()
