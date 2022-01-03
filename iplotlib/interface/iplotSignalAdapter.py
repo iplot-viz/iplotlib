@@ -141,6 +141,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 self.ts_end, 'ns').astype('int64').item()
 
         self.ts_relative = iplotStrUtils.is_non_empty(self.pulse_nb)
+        self._local_env = dict()
 
         # 1.2. Initialize attributes that will not be dataclass fields.
         self.x_data = BufferObject()
@@ -151,7 +152,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self._init_label()
 
         # 3. Help keep track of data access parameters.
-        self.access_md5sum = None
+        self._access_md5sum = None
         self._data_xrange = None, None
 
         # 4. Parse name and prepare a hierarchy of objects if needed.
@@ -288,7 +289,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
     def inject_external(self, append : bool = False, **kwargs):
         AccessHelper.on_fetch_done(self, kwargs, append = append)
-        self.access_md5sum = self.calculate_data_hash()
+        self._access_md5sum = self.calculate_data_hash()
         self._do_data_processing()
 
     # Private API begins here.
@@ -338,15 +339,17 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                     break
                 self.children.append(value)
             else:
+                # This is a new/pre-defined signal.
                 if self.data_access_enabled and iplotStrUtils.is_empty(self.data_source):
                     self.status_info.reset()
                     self.status_info.msg = "Data source unspecified."
                     self.status_info.result = Result.INVALID
                     logger.warning(self.status_info.msg)
                     break
-                elif self.data_access_enabled:
+                elif self.data_access_enabled and key not in self._local_env:
                     # Construct a new instance with our data source and time range, etc..
                     child = self._construct_named_offspring(key)
+                    self._local_env.update({key: child})
                     self.children.append(child)
                 elif self.processing_enabled:
                     # Cannot create a new instance if only processing is enabled.
@@ -427,7 +430,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         # 2.Handle child signals.
         # Note: In this case, `self.name` is an expression, so prior to applying x,y,z we evaluate `self.name`
         if len(self.children):
-            local_env = dict(ParserHelper.env)
+            vm = dict(self._local_env)
+            vm.update(ParserHelper.env) # makes aliases accessible to parser
             
             # 2.1 Ensure all child signals have their time, data vectors (if DA enabled)
             children_data = defaultdict(list)
@@ -438,8 +442,6 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 if len(self.children) > 1:
                     for ds in child.data_store:
                         children_data[c].append(ds.copy())
-                if local_env.get(child.name) is None:
-                    local_env.update({child.name: child})
 
             # 2.2 Align all signals onto a common grid.
             if len(self.children) > 1:
@@ -448,7 +450,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             # 2.2 Evaluate self.name. It is an expression combining multiple other signals.
             try:
                 p = Parser().set_expression(self.name)
-                p.substitute_var(local_env)
+                p.substitute_var(vm)
                 p.eval_expr()
                 if isinstance(p.result, ProcessingSignal):
                     self.data_store[0] = p.result.data_store[0]
@@ -535,14 +537,20 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             return False
 
         target_md5sum = self.calculate_data_hash()
-        logger.debug(f"old={self.access_md5sum}, new={target_md5sum}")
+        logger.debug(f"old={self._access_md5sum}, new={target_md5sum}")
 
-        if self.access_md5sum is None:
-            self.access_md5sum = target_md5sum
+        if self._access_md5sum is None:
+            self._access_md5sum = target_md5sum
             return True
-        elif self.access_md5sum != target_md5sum:
-            self.access_md5sum = target_md5sum
-            return AccessHelper.num_samples_override
+        elif self._access_md5sum != target_md5sum:
+            self._access_md5sum = target_md5sum
+
+            if AccessHelper.num_samples_override:
+                return True
+            elif self._check_if_zoomed_in():
+                return True
+            else:
+                return False
         else:
             return False
 
