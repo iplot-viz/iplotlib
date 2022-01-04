@@ -60,24 +60,24 @@ class IplotQtMainWindow(QMainWindow):
 
     def undo(self):
         for i in range(self.canvasStack.count()):
-            canvas = self.canvasStack.widget(i)
-            canvas.back()
+            w = self.canvasStack.widget(i)
+            w.back()
 
     def redo(self):
         for i in range(self.canvasStack.count()):
-            canvas = self.canvasStack.widget(i)
-            canvas.forward()
+            w = self.canvasStack.widget(i)
+            w.forward()
 
     def applyPreferences(self):
         self.reDraw(discard_axis_range=False, discard_focused_plot=False)
         self.prefWindow.modified()
 
     def reDraw(self, discard_axis_range: bool = True, discard_focused_plot: bool = True):
-        canvas = self.canvasStack.currentWidget()
-        core_canvas = canvas.get_canvas()
-        if not isinstance(core_canvas, Canvas):
+        w = self.canvasStack.currentWidget()
+        canvas = w.get_canvas()
+        if not isinstance(canvas, Canvas):
             return
-        for _, col in enumerate(core_canvas.plots):
+        for _, col in enumerate(canvas.plots):
             for _, plot in enumerate(col):
                 if not isinstance(plot, Plot):
                     continue
@@ -94,8 +94,8 @@ class IplotQtMainWindow(QMainWindow):
                             axis.end = None
         # TODO: change this confusing API to just call refresh(redraw=True, unfocus=..) of IplotQtCanvas
         if discard_focused_plot:
-            canvas.unfocus_plot()
-        canvas.set_canvas(canvas.get_canvas())
+            w.unfocus_plot()
+        w.set_canvas(canvas)
 
     def detach(self):
         if self.toolBar.detachAction.text() == 'Detach':

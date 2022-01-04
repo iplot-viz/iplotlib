@@ -8,8 +8,6 @@
 
 from functools import partial
 import importlib
-from operator import mod
-import os
 import pkgutil
 import sys
 

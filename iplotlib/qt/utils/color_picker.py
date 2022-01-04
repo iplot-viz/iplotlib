@@ -46,9 +46,9 @@ class ColorPicker(QWidget):
 
     def setCurrentColor(self, color):
         if not isinstance(color, str):
-            return
+            color = "#000000"
         elif not len(color):
-            return
+            color = "#000000"
         if color[0] == "#" and len(color) == 7:
             # Convert hex string to RGB
             r, g, b = tuple(int(color[i:i + 2], 16) for i in range(1, 7, 2))

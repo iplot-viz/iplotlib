@@ -5,13 +5,11 @@
 #               -Port to PySide2 [Jaswant Sai Panchumarti]
 
 
-import inspect
-
 from PySide2.QtWidgets import QVBoxLayout, QWidget
 from PySide2.QtGui import QResizeEvent, QShowEvent
 
-from iplotlib.impl import CanvasFactory, Canvas
-from iplotlib.impl.vtk import VTKCanvas
+from iplotlib.core.canvas import Canvas
+from iplotlib.impl.vtk import VTKParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 # Maintain consistent qt api across vtk and iplotlib
@@ -49,10 +47,10 @@ class QtVTKCanvas(IplotQtCanvas):
 
         self.render_widget = QVTKRenderWindowInteractor(self, **kwargs)
         
-        self.impl_canvas = CanvasFactory.new("vtk")
+        self.vtk_parser = VTKParser()
         self.set_canvas(kwargs.get('canvas'))
         # Let the view render its scene into our render window
-        self.impl_canvas.view.SetRenderWindow(self.render_widget.GetRenderWindow())
+        self.vtk_parser.view.SetRenderWindow(self.render_widget.GetRenderWindow())
 
         # laid out vertically.
         v_layout = QVBoxLayout(self)
@@ -76,7 +74,7 @@ class QtVTKCanvas(IplotQtCanvas):
             size.setHeight(5)
 
         new_ev = QResizeEvent(size, event.oldSize())
-        self.impl_canvas.resize(size.width(), size.height())
+        self.vtk_parser.resize(size.width(), size.height())
         logger.info(f"Resize {new_ev.oldSize()} -> {new_ev.size()}")
 
         return super().resizeEvent(new_ev)
@@ -92,21 +90,21 @@ class QtVTKCanvas(IplotQtCanvas):
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
         
-        logger.info(f"Mouse mode: {self.impl_canvas.mouse_mode} -> {mode}")
-        self.impl_canvas.remove_crosshair_widget()
-        self.impl_canvas.refresh_mouse_mode(mode)
-        self.impl_canvas.refresh_crosshair_widget()
+        logger.info(f"Mouse mode: {self.vtk_parser.canvas.mouse_mode} -> {mode}")
+        self.vtk_parser.remove_crosshair_widget()
+        self.vtk_parser.refresh_mouse_mode(mode)
+        self.vtk_parser.refresh_crosshair_widget()
 
     def mouse_move_callback(self, obj, ev):
         mousePos = obj.GetEventPosition()
-        self.impl_canvas.crosshair.onMove(mousePos)
+        self.vtk_parser.crosshair.onMove(mousePos)
 
     def mouse_dclick_callback(self, obj, ev):
         mousePos = obj.GetEventPosition()
-        if obj.GetRepeatCount() and self.impl_canvas.mouse_mode == Canvas.MOUSE_MODE_SELECT:
-            index = self.impl_canvas.find_element_index(mousePos)
-            self.impl_canvas.set_focus_plot(index)
-            self.impl_canvas.refresh()
+        if obj.GetRepeatCount() and self.vtk_parser.mouse_mode == Canvas.MOUSE_MODE_SELECT:
+            index = self.vtk_parser.find_element_index(mousePos)
+            self.vtk_parser.set_focus_plot(index)
+            self.vtk_parser.refresh()
             self.render()
 
     def showEvent(self, event: QShowEvent):
@@ -118,27 +116,18 @@ class QtVTKCanvas(IplotQtCanvas):
 
         super().set_canvas(canvas)  # does nothing
 
-        if not isinstance(canvas, Canvas) and isinstance(self.impl_canvas, VTKCanvas):
-            return
-
-        self.impl_canvas.clear()
-        self.impl_canvas.focus_plot=None
-        self.impl_canvas.refresh()
-        for attr_name, attr_value in inspect.getmembers(Canvas):
-            if not attr_name.startswith("__") and not attr_name.endswith("__") and not inspect.ismethod(attr_value):
-                setattr(self.impl_canvas, attr_name, getattr(canvas, attr_name))
-
-        self.impl_canvas.refresh()
+        self.vtk_parser.focus_plot=None
+        self.vtk_parser.refresh(canvas)
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
-        return self.impl_canvas
+        return self.vtk_parser.canvas
 
     def get_render_widget(self) -> QVTKRenderWindowInteractor:
         return self.render_widget
 
     def update(self):
-        self.impl_canvas.refresh()
+        self.vtk_parser.refresh(self.vtk_parser.canvas)
         super().update()
     
     def render(self):
@@ -146,4 +135,4 @@ class QtVTKCanvas(IplotQtCanvas):
         self.render_widget.Render()
     
     def unfocus_plot(self):
-        self.impl_canvas.focus_plot=None
+        self.vtk_parser.focus_plot=None

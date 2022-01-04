@@ -3,8 +3,6 @@
 # Changelog:
 #   Sept 2021: -Port to PySide2
 
-import unittest
-
 from iplotlib.impl.vtk.qt import QtVTKCanvas
 from iplotlib.qt.testing import QAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless

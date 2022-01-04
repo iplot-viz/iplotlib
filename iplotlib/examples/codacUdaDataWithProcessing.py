@@ -2,7 +2,7 @@ import os
 from iplotlib.core.axis import LinearAxis
 from iplotlib.interface import IplotSignalAdapter
 from iplotlib.core import Canvas, PlotXY
-
+skip = True
 def plot():
     s1 = IplotSignalAdapter(data_source='codacuda',
                             name='UTIL-SYSM-COM-4503-UT:SRV3602-NRBPS',

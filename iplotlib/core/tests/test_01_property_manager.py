@@ -1,3 +1,4 @@
+from functools import partial
 from iplotlib.core.signal import SimpleSignal
 import unittest
 from iplotlib.core.canvas import Canvas
@@ -7,7 +8,7 @@ from iplotlib.core.property_manager import PropertyManager
 
 class VTKCanvasTesting(unittest.TestCase):
     def setUp(self) -> None:
-        self.prop_manager = PropertyManager()
+        self.pm = PropertyManager()
         self.canvas = Canvas(
             font_size = 24,
             font_color = "black",
@@ -42,43 +43,43 @@ class VTKCanvasTesting(unittest.TestCase):
         plot = PlotXY()
 
         self.canvas.add_plot(plot)
-        
-        self.prop_manager.acquire_plot_from_canvas(self.canvas, plot)
-        
-        self.assertEqual(plot.font_size, self.canvas.font_size)
-        self.assertEqual(plot.font_color, self.canvas.font_color)
-        self.assertEqual(plot.legend, self.canvas.legend)
-        self.assertEqual(plot.grid, self.canvas.grid)
-        self.assertEqual(plot.line_style, self.canvas.line_style)
-        self.assertEqual(plot.line_size, self.canvas.line_size)
-        self.assertEqual(plot.marker, self.canvas.marker)
-        self.assertEqual(plot.marker_size, self.canvas.marker_size)
-        self.assertEqual(plot.step, self.canvas.step)
-        self.assertEqual(plot.dec_samples, self.canvas.dec_samples)
+        f = partial(self.pm.get_value, canvas=self.canvas, plot=plot)
+
+        self.assertEqual(f("font_size"), self.canvas.font_size)
+        self.assertEqual(f("font_color"), self.canvas.font_color)
+        self.assertEqual(f("legend"), self.canvas.legend)
+        self.assertEqual(f("grid"), self.canvas.grid)
+        self.assertEqual(f("line_style"), self.canvas.line_style)
+        self.assertEqual(f("line_size"), self.canvas.line_size)
+        self.assertEqual(f("marker"), self.canvas.marker)
+        self.assertEqual(f("marker_size"), self.canvas.marker_size)
+        self.assertEqual(f("step"), self.canvas.step)
+        self.assertEqual(f("dec_samples"), self.canvas.dec_samples)
     
     def test_axis_inherits_canvas_properties(self):
 
         plot = PlotXY()
 
         self.canvas.add_plot(plot)
-        self.prop_manager.acquire_plot_from_canvas(self.canvas, plot)
 
         for ax in plot.axes:
-            self.assertEqual(ax.font_color, self.canvas.font_color)
-            self.assertEqual(ax.font_size, self.canvas.font_size)
-    
+            f = partial(self.pm.get_value, canvas=self.canvas, plot=plot, axis=ax)
+            self.assertEqual(f("font_color"), self.canvas.font_color)
+            self.assertEqual(f("font_size"), self.canvas.font_size)
+
     def test_signal_inherits_plot_properties(self):
 
         plot = PlotXY()
         signal = SimpleSignal()
         plot.add_signal(signal)
 
-        self.prop_manager.acquire_signal_from_plot(plot, signal)
-        self.assertEqual(signal.line_style, plot.line_style)
-        self.assertEqual(signal.line_size, plot.line_size)
-        self.assertEqual(signal.marker, plot.marker)
-        self.assertEqual(signal.marker_size, plot.marker_size)
-        self.assertEqual(signal.step, plot.step)
+        f = partial(self.pm.get_value, canvas=self.canvas, plot=plot, signal=signal)
+
+        self.assertEqual(f("line_style"), self.canvas.line_style)
+        self.assertEqual(f("line_size"), self.canvas.line_size)
+        self.assertEqual(f("marker"), self.canvas.marker)
+        self.assertEqual(f("marker_size"), self.canvas.marker_size)
+        self.assertEqual(f("step"), self.canvas.step)
 
 
 if __name__ == "__main__":

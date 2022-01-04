@@ -1,18 +1,22 @@
 import unittest
+from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import Plot
-from iplotlib.impl.vtk.vtkCanvas import VTKCanvas
+from iplotlib.impl.vtk.vtkCanvas import VTKParser
 
 
-class VTKCanvasTesting(unittest.TestCase):
+class VTKParserTesting(unittest.TestCase):
 
     def setUp(self) -> None:
 
-        self.vtk_canvas = VTKCanvas(6, 5)
+        canvas = Canvas(6, 5)
+        self.vtk_parser = VTKParser()
 
-        for c in range(self.vtk_canvas.cols):
-            for _ in range(self.vtk_canvas.rows):
+        for c in range(canvas.cols):
+            for _ in range(canvas.rows):
                 plot = Plot()
-                self.vtk_canvas.add_plot(plot, c)
+                canvas.add_plot(plot, c)
+
+        self.vtk_parser.refresh(canvas)
 
         return super().setUp()
 
@@ -20,12 +24,12 @@ class VTKCanvasTesting(unittest.TestCase):
         
         valid_internal_row_ids = [5, 4, 3, 2, 1, 0]
 
-        for c, column in enumerate(self.vtk_canvas.plots):
+        for c, column in enumerate(self.vtk_parser.canvas.plots):
             r = 0
             test_internal_row_ids = []
             
             for plot in column:
-                test_internal_row_ids.append(self.vtk_canvas.get_internal_row_id(r, plot))
+                test_internal_row_ids.append(self.vtk_parser.get_internal_row_id(r, plot))
                 r += plot.row_span
 
             self.assertListEqual(test_internal_row_ids, valid_internal_row_ids)

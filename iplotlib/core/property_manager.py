@@ -4,92 +4,48 @@ from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.core.signal import Signal, ArraySignal
 
 class PropertyManager:
-    """This class provides an API to update properties in the iplotlib hierarchy
+    """This class provides an API that returns attributes in the iplotlib hierarchy
         such that the lower level constructs inherit properties from higher level
         constructs. (unless the properties of lower level constructs are explicitly
         specified)
 
         Usage:
-        ...
-        ...
-        ..Somewhere in your code..
-        prop_manager = PropertyManager()
-        prop_manager.update(canvas)
-        ...
+            pm = PropertyManager()
+            pm.get_value(property_name, canvas, plot, axis, signal)
         ...
     """
-    def update(self, canvas: Canvas):
-        """Update attributes downward.
-            Canvas > [Plot > Signals], Axis
-        """
-        for column in canvas.plots:
-            for plot in column:
-                if isinstance(plot, Plot):
-                    self.acquire_plot_from_canvas(canvas, plot)
+    def get_value(self, attr_name: str, canvas: Canvas, plot: Plot=None, axis: Axis=None, signal: Signal=None):
+        if canvas is None:
+            return None
+        elif plot is None and axis is None and signal is None:
+            return self._get_canvas_attr(attr_name, canvas)
+        elif axis is None and signal is None:
+            return self._get_plot_attr(attr_name, canvas, plot)
+        elif signal is None:
+            return self._get_axis_attr(attr_name, canvas, plot, axis)
+        else:
+            return self._get_signal_attr(attr_name, canvas, plot, signal)
 
-    def acquire_plot_from_canvas(self, canvas: Canvas, plot: Plot):
-        """Update attributes downward.
-            Canvas -> Plot -> [Axis, Signals]
-        """
-        if plot.font_color is None:
-            plot.font_color = canvas.font_color
-        if plot.font_size is None:
-            plot.font_size = canvas.font_size
-        if plot.legend is None:
-            plot.legend = canvas.legend
-        if isinstance(plot, PlotXY):
-            if plot.grid is None:
-                plot.grid = canvas.grid
-            if plot.line_size is None:
-                plot.line_size = canvas.line_size
-            if plot.line_style is None:
-                plot.line_style = canvas.line_style
-            if plot.marker is None:
-                plot.marker = canvas.marker
-            if plot.marker_size is None:
-                plot.marker_size = canvas.marker_size
-            if plot.step is None:
-                plot.step = canvas.step
-            if plot.dec_samples is None:
-                plot.dec_samples = canvas.dec_samples
-            if plot.hi_precision_data is None:
-                plot.hi_precision_data = canvas.hi_precision_data
-        for signals in plot.signals.values():
-            for signal in signals:
-                self.acquire_signal_from_plot(plot, signal)
-        if plot.axes is not None:
-            for axes in plot.axes:
-                if isinstance(axes, list):
-                    for axis in axes:
-                        self.acquire_axis_from_plot(plot, axis)
-                else:
-                    axis = axes
-                    self.acquire_axis_from_plot(plot, axis)
+    def _get_canvas_attr(self, attr_name: str, canvas: Canvas):
+        if getattr(canvas, attr_name) is not None:
+            return getattr(canvas, attr_name)
+        else:
+            return None
 
-         
-    def acquire_axis_from_plot(self, plot: Plot, ax: Axis):
-        """Update attributes downward.
-            Plot -> Axis
-        """
-        if ax.font_color is None:
-            ax.font_color = plot.font_color
-        if ax.font_size is None:
-            ax.font_size = plot.font_size
+    def _get_plot_attr(self, attr_name: str, canvas: Canvas, plot: Plot):
+        if getattr(plot, attr_name) is not None:
+            return getattr(plot, attr_name)
+        else:
+            return self._get_canvas_attr(attr_name, canvas)
 
-    def acquire_signal_from_plot(self, plot: Plot, signal: Signal):
-        """Update attributes downward.
-            Plot -> Signal
-        """
-        if isinstance(signal, ArraySignal) and isinstance(plot, PlotXY):
-            if signal.line_size is None:
-                signal.line_size = plot.line_size
-            if signal.line_style is None:
-                signal.line_style = plot.line_style
-            if signal.marker is None:
-                signal.marker = plot.marker
-            if signal.marker_size is None:
-                signal.marker_size = plot.marker_size
-            if signal.step is None:
-                signal.step = plot.step
-            if signal.hi_precision_data is None:
-                signal.hi_precision_data = plot.hi_precision_data
+    def _get_axis_attr(self, attr_name: str, canvas: Canvas, plot: Plot, axis: Axis):
+            if getattr(axis, attr_name) is not None:
+                return getattr(axis, attr_name)
+            else:
+                return self._get_plot_attr(attr_name, canvas, plot)
+
+    def _get_signal_attr(self, attr_name: str, canvas: Canvas, plot: Plot, signal: Signal):
+            if getattr(signal, attr_name) is not None:
+                return getattr(signal, attr_name)
+            else:
+                return self._get_plot_attr(attr_name, canvas, plot)

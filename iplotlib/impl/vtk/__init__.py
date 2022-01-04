@@ -1,1 +1,1 @@
-from iplotlib.impl.vtk.vtkCanvas import VTKCanvas
+from iplotlib.impl.vtk.vtkCanvas import VTKParser

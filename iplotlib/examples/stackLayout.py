@@ -1,11 +1,13 @@
 import os
+from iplotlib.core.axis import LinearAxis
 import numpy as np
 from iplotlib.core import SimpleSignal, Canvas, PlotXY
+import time
 
 def plot():
-    ts = 1_000_000_000
+    ts = time.time_ns()
     te = ts + 8 * 32
-    xs = np.arange(ts, te, 8, dtype=np.uint64)
+    xs = np.arange(ts, te, 8, dtype=np.int64)
     ys = np.sin(np.linspace(-1, 1, len(xs)))
 
     # A 2col x 2row canvas
@@ -23,11 +25,11 @@ def plot():
     signal121 = SimpleSignal(label="Signal1.2.1")
     signal121.set_data([xs, ys])
     plot12 = PlotXY(title="DateTime=True, HiPrecision=True",
-                    hi_precision_data=True)
+                    hi_precision_data=True, axes=[LinearAxis(), [LinearAxis(), LinearAxis()]])
     plot12.axes[0].is_date = True
     plot12.add_signal(signal121)
     signal122 = SimpleSignal(label="Signal1.2.2")
-    signal122.set_data([xs, ys + np.sin(xs)])
+    signal122.set_data([xs, -ys])
     plot12.add_signal(signal122, 2)
     canvas.add_plot(plot12, 0)
 

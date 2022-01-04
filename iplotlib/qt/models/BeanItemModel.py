@@ -13,6 +13,7 @@ from PySide2.QtGui import QStandardItemModel
 from PySide2.QtWidgets import QComboBox
 
 from iplotlib.qt.models.BeanItem import BeanItem, BeanPrototype
+from iplotlib.qt.utils.color_picker import ColorPicker
 from iplotlib.qt.utils.conversions import ConversionHelper
 
 from iplotLogging import setupLogger as sl
@@ -73,6 +74,8 @@ class BeanItemModel(QStandardItemModel):
                 if hasattr(self._pyObject, property_name):
                     type_func = type(getattr(self._pyObject, property_name))
                     value = ConversionHelper.asType(value, type_func)
-                setattr(self._pyObject, property_name, value)
-                self.dataChanged.emit(index, index)
-                return True
+                    setattr(self._pyObject, property_name, value)
+                    self.dataChanged.emit(index, index)
+                    return True
+                else:
+                    return False

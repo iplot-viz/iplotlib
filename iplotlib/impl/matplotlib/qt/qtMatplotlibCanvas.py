@@ -7,9 +7,12 @@
 #               -Port to PySide2 [Jaswant Sai Panchumarti]
 
 
+import pandas as pd
+
 from PySide2.QtCore import QMargins, QMetaObject, Qt, Slot
 from PySide2.QtGui import QKeyEvent
-from PySide2.QtWidgets import QMessageBox, QSizePolicy, QStyle, QVBoxLayout
+from PySide2.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
+
 from matplotlib.backend_bases import _Mode
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -17,7 +20,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 import iplotLogging.setupLogger as ls
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
-from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibCanvas
+from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser, NanosecondHelper
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 logger = ls.get_logger(__name__)
@@ -26,32 +29,33 @@ logger = ls.get_logger(__name__)
 class QtMatplotlibCanvas(IplotQtCanvas):
     """Qt widget that internally uses MatplotlibCanvas as backend"""
 
-    def __init__(self, parent=None, **kwargs):
+    def __init__(self, parent=None, tight_layout=True, **kwargs):
         super().__init__(parent, **kwargs)
 
-        self.figure_canvas = None
         self.mpl_toolbar = None
         self.mouse_mode = None
-        self.tight_layout = kwargs.get('tight_layout')
         self._distCalculator = DistanceCalculator()
+        self._draw_call_counter = 0
 
-        self.matplotlib_canvas = MatplotlibCanvas(
-            tight_layout=self.tight_layout, mpl_flush_method=self.draw_in_main_thread)
-        self.figure_canvas = FigureCanvas(self.matplotlib_canvas.figure)
-        self.figure_canvas.setParent(self)
-        self.figure_canvas.setSizePolicy(QSizePolicy(
+        self.mpl_parser = MatplotlibParser(tight_layout=tight_layout, mpl_flush_method=self.draw_in_main_thread, **kwargs)
+
+        self.render_widget = FigureCanvas(self.mpl_parser.figure)
+        self.render_widget.setParent(self)
+        self.render_widget.setSizePolicy(QSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding))
-        self.mpl_toolbar = NavigationToolbar(self.figure_canvas, self)
+        self.render_widget.mpl_connect('draw_event', self.on_draw_finish)
+        self.mpl_toolbar = NavigationToolbar(self.render_widget, self)
         self.mpl_toolbar.setVisible(False)
 
         self.setLayout(QVBoxLayout())
         self.layout().setAlignment(Qt.AlignTop)
         self.layout().setContentsMargins(QMargins())
-        self.layout().addWidget(self.figure_canvas)
+        self.layout().addWidget(self.render_widget)
+
+        self.mpl_parser.axes_update_timer = self.render_widget.new_timer(interval=self.mpl_parser.refresh_delay)
+        self.mpl_parser.axes_update_timer.add_callback(self.mpl_parser.refresh_data)
 
         self.set_canvas(kwargs.get('canvas'))
-
-        self.refresh_timer = None
 
     def draw_in_main_thread(self):
         import shiboken2
@@ -60,30 +64,26 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     @Slot()
     def flush_draw_queue(self):
-        if self.matplotlib_canvas:
-            self.matplotlib_canvas.process_work_queue()
+        if self.mpl_parser:
+            self.mpl_parser.process_work_queue()
 
-    def set_canvas(self, canvas, focus_plot=None):
-        super().set_canvas(canvas)
-        self.matplotlib_canvas.deactivate_cursor()
+    def set_canvas(self, canvas: Canvas):
+        """Sets new iplotlib canvas and redraw"""
 
+        super().set_canvas(canvas)  # does nothing
+        self.mpl_parser.deactivate_cursor()
         if canvas:
-            self.matplotlib_canvas.process_iplotlib_canvas(canvas)
+            self.mpl_parser.refresh(canvas)
             self.set_mouse_mode(self.mouse_mode or canvas.mouse_mode)
-            QMetaObject.invokeMethod(self, "apply_tight_layout")
+            QMetaObject.invokeMethod(self, "render")
 
-    def get_canvas(self):
-        return self.matplotlib_canvas.canvas if self.matplotlib_canvas else None
+    def get_canvas(self) -> Canvas:
+        """Gets current iplotlib canvas"""
+        return self.mpl_parser.canvas if self.mpl_parser else None
 
     @Slot()
-    def apply_tight_layout(self):
-        self.matplotlib_canvas.figure.tight_layout()
-        self.matplotlib_canvas.figure.canvas.draw()
-
-    def process_canvas_toolbar(self, toolbar):
-        toolbar.addSeparator()
-        toolbar.addAction(self.style().standardIcon(
-            getattr(QStyle, "SP_FileDialogListView")), "Layout", self.apply_tight_layout)
+    def render(self):
+        self.render_widget.draw()
 
     def set_mouse_mode(self, mode: str):
         self.mouse_mode = mode
@@ -91,33 +91,33 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         def reset_tool():
             if self.mpl_toolbar:
                 self.mpl_toolbar.mode = _Mode.NONE
-                self.matplotlib_canvas.deactivate_cursor()
+                self.mpl_parser.deactivate_cursor()
 
         reset_tool()
 
         if self.mpl_toolbar and self.mouse_mode is not None:
             if mode == Canvas.MOUSE_MODE_CROSSHAIR:
                 self.mpl_toolbar.canvas.widgetlock.release(self.mpl_toolbar)
-                self.matplotlib_canvas.activate_cursor()
-                self.matplotlib_canvas.figure.canvas.mpl_connect(
+                self.mpl_parser.activate_cursor()
+                self.mpl_parser.figure.canvas.mpl_connect(
                     'button_press_event', self.click)
 
             elif mode == Canvas.MOUSE_MODE_PAN:
-                self.matplotlib_canvas.deactivate_cursor()
+                self.mpl_parser.deactivate_cursor()
                 self.mpl_toolbar.pan()
-                self.matplotlib_canvas.figure.canvas.mpl_connect(
+                self.mpl_parser.figure.canvas.mpl_connect(
                     'button_press_event', self.click)
             elif mode == Canvas.MOUSE_MODE_ZOOM:
-                self.matplotlib_canvas.deactivate_cursor()
+                self.mpl_parser.deactivate_cursor()
                 self.mpl_toolbar.zoom()
-                self.matplotlib_canvas.figure.canvas.mpl_connect(
+                self.mpl_parser.figure.canvas.mpl_connect(
                     'button_press_event', self.click)
             elif mode == Canvas.MOUSE_MODE_SELECT:
-                self.matplotlib_canvas.figure.canvas.mpl_connect(
+                self.mpl_parser.figure.canvas.mpl_connect(
                     'button_press_event', self.click)
                 pass
             elif mode == Canvas.MOUSE_MODE_DIST:
-                self.matplotlib_canvas.figure.canvas.mpl_connect(
+                self.mpl_parser.figure.canvas.mpl_connect(
                     'button_press_event', self.click)
                 pass
 
@@ -126,18 +126,26 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if event.dblclick:
             if self.mouse_mode == Canvas.MOUSE_MODE_SELECT and event.button == 1 and event.inaxes is not None:
                 logger.debug(
-                    f"Plot clicked: {event.inaxes}. Plot: {event.inaxes._plot} stack_key: {event.inaxes._plot_stack_key}")
-                self.focus_plot(event.inaxes._plot,
-                                event.inaxes._plot_stack_key)
+                    f"Plot clicked: {event.inaxes}. Plot: {event.inaxes._ipl_plot()} stack_key: {event.inaxes._ipl_plot_stack_key}")
+                self.mpl_parser.set_focus_plot(event.inaxes)
             else:
-                self.focus_plot(None, None)
+                self.mpl_parser.set_focus_plot(None)
+
+            self.mpl_parser.refresh(self.mpl_parser.canvas)
+            self.mpl_parser.figure.canvas.draw()
         else:
             if self.mouse_mode == Canvas.MOUSE_MODE_DIST and event.button == 1 and event.inaxes is not None:
                 if self._distCalculator.plot1 is not None:
-                    self._distCalculator.set_dst(event.xdata, event.ydata, event.inaxes._plot, event.inaxes._plot_stack_key)
+                    x_axis = event.inaxes.get_xaxis()
+                    has_offset = hasattr(x_axis, '_offset')
+                    x = NanosecondHelper.mpl_transform_value(event.inaxes.get_xaxis(), event.xdata)
+                    self._distCalculator.set_dst(x, event.ydata, event.inaxes._ipl_plot(), event.inaxes._ipl_plot_stack_key)
                     box = QMessageBox(self)
                     box.setWindowTitle('Distance')
                     dx, dy, dz = self._distCalculator.dist()
+                    if has_offset:
+                        dx = pd.Timestamp(x, unit='ns') - pd.Timestamp(self._distCalculator.p1[0], unit='ns')
+                        dx = pd.Timedelta(dx).isoformat()
                     if any([dx, dy, dz]):
                         box.setText(f"dx = {dx}\ndy = {dy}\ndz = {dz}")
                     else:
@@ -145,7 +153,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     box.exec_()
                     self._distCalculator.reset()
                 else:
-                    self._distCalculator.set_src(event.xdata, event.ydata, event.inaxes._plot, event.inaxes._plot_stack_key)
+                    x = NanosecondHelper.mpl_transform_value(event.inaxes.get_xaxis(), event.xdata)
+                    self._distCalculator.set_src(x, event.ydata, event.inaxes._ipl_plot(), event.inaxes._ipl_plot_stack_key)
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.text() == 'n':
@@ -161,15 +170,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if self.mpl_toolbar:
             self.mpl_toolbar.forward()
 
-    def focus_plot(self, plot, stack_key):
-        """Toggle focus on one plot on/off"""
-        if self.matplotlib_canvas.focused_plot is None:
-
-            self.matplotlib_canvas.focus_plot(plot, stack_key)
-        else:
-            self.matplotlib_canvas.unfocus_plot()
-
-        self.matplotlib_canvas.figure.canvas.draw()
-
     def unfocus_plot(self):
-        self.matplotlib_canvas.unfocus_plot()
+        self.mpl_parser.set_focus_plot(None)
+
+    def on_draw_finish(self, e):
+        self._draw_call_counter += 1
+        logger.info(f"{self.__class__.__name__}({hex(id(self))}) Draw Call {self._draw_call_counter} | {e}")

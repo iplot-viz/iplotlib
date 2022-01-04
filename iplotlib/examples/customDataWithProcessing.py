@@ -3,7 +3,7 @@ import numpy as np
 import os
 from iplotlib.core import Canvas, PlotXY
 from iplotlib.interface import IplotSignalAdapter
-
+skip=True
 def func(x):
     return np.sin(10 * np.arcsin(1.) * x) * np.linspace(np.min(x), np.max(x), x.size)
 

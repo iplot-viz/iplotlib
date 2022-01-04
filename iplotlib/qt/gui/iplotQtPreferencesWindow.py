@@ -15,7 +15,7 @@ from PySide2.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter
 
 from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.signal import ArraySignal
+from iplotlib.core.signal import ArraySignal, SimpleSignal
 from iplotlib.core.plot import PlotXY
 from iplotlib.interface import IplotSignalAdapter
 
@@ -47,6 +47,7 @@ class IplotQtPreferencesWindow(QMainWindow):
             LinearAxis: AxisForm(self),
             ArraySignal: SignalForm(self),
             IplotSignalAdapter: SignalForm(self),
+            SimpleSignal: SignalForm(self),
             type(None): QPushButton("Select item", parent=self)
         }
         self.formsStack = QStackedWidget()

@@ -1,9 +1,9 @@
 import numpy as np
 import os
 import unittest
+from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SimpleSignal
-from iplotlib.impl import CanvasFactory
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.QVTKAppTestAdapter import QVTKAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
@@ -14,8 +14,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
     def setUp(self) -> None:
 
         # A 2col x 2row canvas
-        self.vtk_canvas = CanvasFactory.new(
-            "vtk", 2, 2, title=os.path.basename(__file__))
+        self.core_canvas = Canvas(2, 2, title=os.path.basename(__file__))
 
         # A plot in top-left with 1 signal.
         signal11 = SimpleSignal(label="Signal1.1")
@@ -23,7 +22,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
                           np.array([0., 1., 2., 3.])])
         plot11 = PlotXY()
         plot11.add_signal(signal11)
-        self.vtk_canvas.add_plot(plot11, 0)
+        self.core_canvas.add_plot(plot11, 0)
 
         # A plot in bottom-left with 1 signal.
         signal12 = SimpleSignal(label="Signal1.2")
@@ -31,7 +30,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
                           np.array([0., 1., 2., 3.])])
         plot12 = PlotXY()
         plot12.add_signal(signal12)
-        self.vtk_canvas.add_plot(plot12, 0)
+        self.core_canvas.add_plot(plot12, 0)
 
         # A plot in top-right with 1 signal.
         signal21 = SimpleSignal(label="Signal2.1")
@@ -39,7 +38,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
                           np.array([0., 1., 2., 3.])])
         plot21 = PlotXY()
         plot21.add_signal(signal21)
-        self.vtk_canvas.add_plot(plot21, 1)
+        self.core_canvas.add_plot(plot21, 1)
 
         # A plot in bottom-right with 1 signal.
         signal22 = SimpleSignal(label="Signal2.2")
@@ -47,28 +46,25 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
                           np.array([0., 1., 2., 3.])])
         plot22 = PlotXY()
         plot22.add_signal(signal22)
-        self.vtk_canvas.add_plot(plot22, 1)
+        self.core_canvas.add_plot(plot22, 1)
 
         return super().setUp()
 
     def tearDown(self):
         return super().tearDown()
 
+    @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
     def test_05_canvas_simple_refresh(self):
 
-        self.assertEqual(self.vtk_canvas.cols, 2)
-        self.assertEqual(self.vtk_canvas.rows, 2)
-
-        self.vtk_canvas.refresh()
-
-        size = self.vtk_canvas.matrix.GetSize()
+        self.canvas.set_canvas(self.core_canvas)
+        size = self.canvas.vtk_parser.matrix.GetSize()
         self.assertEqual(size[0], 2)
         self.assertEqual(size[1], 2)
 
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
     def test_05_canvas_simple_visuals(self):
 
-        self.canvas.set_canvas(self.vtk_canvas)
+        self.canvas.set_canvas(self.core_canvas)
         self.canvas.update()
         self.canvas.show()
         self.canvas.get_render_widget().Initialize()
@@ -92,7 +88,7 @@ if __name__ == "__main__":
 
     # # A 2col x 2row canvas
 
-    # vtk_canvas = VTKCanvas(2, 2, title=str(__name__))
+    # canvas = VTKCanvas(2, 2, title=str(__name__))
 
     # # A plot in top-left with 1 signal.
     # signal11 = SimpleSignal(label="Signal1.1")
@@ -100,7 +96,7 @@ if __name__ == "__main__":
     #                     np.array([0., 1., 2., 3.])])
     # plot11 = PlotXY()
     # plot11.add_signal(signal11)
-    # vtk_canvas.add_plot(plot11, 0)
+    # canvas.add_plot(plot11, 0)
 
     # # A plot in bottom-left with 1 signal.
     # signal12 = SimpleSignal(label="Signal1.2")
@@ -108,7 +104,7 @@ if __name__ == "__main__":
     #                     np.array([0., 1., 2., 3.])])
     # plot12 = PlotXY()
     # plot12.add_signal(signal12)
-    # vtk_canvas.add_plot(plot12, 0)
+    # canvas.add_plot(plot12, 0)
 
     # # A plot in top-right with 1 signal.
     # signal21 = SimpleSignal(label="Signal2.1")
@@ -116,7 +112,7 @@ if __name__ == "__main__":
     #                     np.array([0., 1., 2., 3.])])
     # plot21 = PlotXY()
     # plot21.add_signal(signal21)
-    # vtk_canvas.add_plot(plot21, 1)
+    # canvas.add_plot(plot21, 1)
 
     # # A plot in bottom-right with 1 signal.
     # signal22 = SimpleSignal(label="Signal2.2")
@@ -124,12 +120,11 @@ if __name__ == "__main__":
     #                     np.array([0., 1., 2., 3.])])
     # plot22 = PlotXY()
     # plot22.add_signal(signal22)
-    # vtk_canvas.add_plot(plot22, 1)
-    # vtk_canvas.refresh()
-    # canvas = QtVTKCanvas()
-    # canvas.set_canvas(vtk_canvas)
-    # canvas.show()
-    # canvas.get_render_widget().Initialize()
-    # canvas.get_render_widget().Render()
+    # canvas.add_plot(plot22, 1)
+    # vtk_canvas = QtVTKCanvas()
+    # vtk_canvas.set_canvas(canvas)
+    # vtk_canvas.show()
+    # vtk_canvas.get_render_widget().Initialize()
+    # vtk_canvas.get_render_widget().Render()
     # import sys
     # sys.exit(app.exec_())
