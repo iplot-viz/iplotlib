@@ -1,3 +1,5 @@
+import pandas as pd
+
 class DistanceCalculator:
     def __init__(self) -> None:
         self.p1 = []
@@ -6,6 +8,7 @@ class DistanceCalculator:
         self.plot2 = None
         self.stack_key1 = None
         self.stack_key2 = None
+        self._dx_is_datetime = False
 
     def reset(self):
         self.p1.clear()
@@ -14,6 +17,10 @@ class DistanceCalculator:
         self.plot2 = None
         self.stack_key1 = None
         self.stack_key2 = None
+        self._dx_is_datetime = False
+    
+    def set_dx_is_datetime(self, val: bool):
+        self._dx_is_datetime = val
 
     def set_src(self, px, py, plot, stack_key, pz=0.0):
         self.p1 = [px, py, pz]
@@ -30,6 +37,25 @@ class DistanceCalculator:
 
     def dist(self):
         if self.is_valid():
-            return self.p2[0] - self.p1[0], self.p2[1] - self.p1[1],  self.p2[2] - self.p1[2]
+            # See https://jira.iter.org/browse/IDV-260?focusedCommentId=1261136&page=com.atlassian.jira.plugin.system.issuetabpanels%3Acomment-tabpanel#comment-1261136
+            if self._dx_is_datetime:
+                dx = pd.Timestamp(self.p2[0], unit='ns') - pd.Timestamp(self.p1[0], unit='ns')
+                dx_str = f"{dx.components.days}D" if dx.components.days else ""
+                dx_str += f"T{dx.components.hours}H{dx.components.minutes}M{dx.components.seconds}S"
+                if dx.components.nanoseconds:
+                    dx_str += f"+{dx.components.milliseconds}m"
+                    dx_str += f"+{dx.components.microseconds}u"
+                    dx_str += f"+{dx.components.nanoseconds}n"
+                else:
+                    if dx.components.milliseconds:
+                        dx_str += f"+{dx.components.milliseconds}m"
+                    if dx.components.microseconds:
+                        dx_str += f"+{dx.components.microseconds}m"
+                dx = dx_str
+            else:
+                dx = self.p2[0] - self.p1[0]
+            dy = self.p2[1] - self.p1[1]
+            dz = self.p2[2] - self.p1[2]
+            return dx, dy, dz
         else:
             return None, None, None
