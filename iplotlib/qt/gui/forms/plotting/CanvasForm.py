@@ -6,9 +6,11 @@
 
 import typing
 
-from PySide2.QtCore import Qt
+from PySide2.QtCore import QModelIndex, Qt, Slot
 from PySide2.QtWidgets import QWidget
+from iplotlib.core.canvas import Canvas
 
+from iplotlib.qt.models.BeanItemModel import BeanItemModel
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
 from iplotlib.qt.utils.color_picker import ColorPicker
 
@@ -40,3 +42,15 @@ class CanvasForm(IplotPreferencesForm):
                 "widget":  self.default_linepath_widget()},
             {"label": "Focus all plots in stack", "property": "full_mode_all_stack", "widget":  self.create_checkbox()}]
         super().__init__(fields=prototype, label="Canvas", parent=parent, f=f)
+
+    @Slot()
+    def resetPrefs(self):
+        pyObject = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+
+        if isinstance(pyObject, Canvas):
+            pyObject.reset_preferences()
+        else:
+            return
+
+        self.widgetMapper.revert()
+        super().resetPrefs()

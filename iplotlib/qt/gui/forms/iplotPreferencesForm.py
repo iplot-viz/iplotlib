@@ -4,10 +4,11 @@
 #   Sept 2021: -Refactor qt classes [Jaswant Sai Panchumarti]
 #              -Port to PySide2 [Jaswant Sai Panchumarti]
 
+from dataclasses import fields
 import typing
 import time
 
-from PySide2.QtCore import QModelIndex, Qt, Signal
+from PySide2.QtCore import QModelIndex, Qt, Signal, Slot
 from PySide2.QtWidgets import (QCheckBox, QComboBox, QDataWidgetMapper, QLabel, QLineEdit,
                                QFormLayout, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
 
@@ -17,7 +18,8 @@ from iplotlib.qt.utils.color_picker import ColorPicker
 
 class IplotPreferencesForm(QWidget):
 
-    applySignal = Signal()
+    onApply = Signal()
+    onReset = Signal()
 
     def __init__(self, fields: typing.List[dict] = [{}], label: str = "Preferences", parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         super().__init__(parent=parent, f=f)
@@ -30,7 +32,9 @@ class IplotPreferencesForm(QWidget):
         self.form.setLayout(QFormLayout())
 
         self.applyButton = QPushButton("Apply")
-        self.applyButton.pressed.connect(self.applySignal.emit)
+        self.applyButton.pressed.connect(self.onApply.emit)
+        self.resetButton = QPushButton("Reset")
+        self.resetButton.pressed.connect(self.resetPrefs)
         self._modifiedTime = time.time_ns()
 
         vlayout = QVBoxLayout()
@@ -38,6 +42,7 @@ class IplotPreferencesForm(QWidget):
         self.layout().addWidget(self.top_label)
         self.layout().addWidget(self.form)
         self.layout().addWidget(self.applyButton)
+        # self.layout().addWidget(self.resetButton)
 
         self.widgetMapper = QDataWidgetMapper(self)
         self.widgetModel = BeanItemModel(self)
@@ -72,6 +77,10 @@ class IplotPreferencesForm(QWidget):
         self.widgetModel.setData(
             QModelIndex(), pyObject, BeanItemModel.PyObjectRole)
         self.widgetMapper.toFirst()
+
+    @Slot()
+    def resetPrefs(self):
+        self.onReset.emit()
 
     @staticmethod
     def create_spinbox(**params):

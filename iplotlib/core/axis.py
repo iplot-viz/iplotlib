@@ -20,6 +20,10 @@ class Axis:
 
     def ticks(self, num: int):
         return []
+    
+    def reset_preferences(self):
+        self.font_size = Axis.font_size
+        self.font_color = Axis.font_color
 
 
 @dataclass
@@ -29,6 +33,11 @@ class RangeAxis(Axis):
     original_end: any = None
     begin: any = None
     end: any = None
+
+    def reset_preferences(self):
+        self.begin = RangeAxis.begin
+        self.end = RangeAxis.end
+        return super().reset_preferences()
 
 
 @dataclass

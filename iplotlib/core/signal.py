@@ -37,6 +37,14 @@ class Signal(ABC):
     def pick(self, sample):
         pass
 
+    def reset_preferences(self):
+        self.color = Signal.color
+        self.line_style = Signal.line_style
+        self.line_size = Signal.line_size
+        self.marker = Signal.marker
+        self.marker_size = Signal.marker_size
+        self.step = Signal.step
+
 
 @dataclass
 class ArraySignal(Signal):

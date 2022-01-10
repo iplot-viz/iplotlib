@@ -6,10 +6,12 @@
 
 import typing
 
-from PySide2.QtCore import Qt
+from PySide2.QtCore import QModelIndex, Qt, Slot
 from PySide2.QtWidgets import QWidget
 
+from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
+from iplotlib.qt.models.BeanItemModel import BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
 
 
@@ -38,3 +40,15 @@ class PlotForm(IplotPreferencesForm):
                 "widget": self.default_linepath_widget()}
         ]
         super().__init__(fields=prototype, label="A plot", parent=parent, f=f)
+
+    @Slot()
+    def resetPrefs(self):
+        pyObject = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+
+        if isinstance(pyObject, Plot):
+            pyObject.reset_preferences()
+        else:
+            return
+
+        self.widgetMapper.revert()
+        super().resetPrefs()

@@ -6,10 +6,12 @@
 
 import typing
 
-from PySide2.QtCore import Qt
+from PySide2.QtCore import QModelIndex, Qt, Slot
 from PySide2.QtWidgets import QWidget
 
+from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
+from iplotlib.qt.models.BeanItemModel import BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
 
 
@@ -29,3 +31,15 @@ class AxisForm(IplotPreferencesForm):
                 "widget": self.create_lineedit()}
         ]
         super().__init__(fields=prototype, label="An axis", parent=parent, f=f)
+
+    @Slot()
+    def resetPrefs(self):
+        pyObject = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+
+        if isinstance(pyObject, Axis):
+            pyObject.reset_preferences()
+        else:
+            return
+
+        self.widgetMapper.revert()
+        super().resetPrefs()

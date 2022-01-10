@@ -40,20 +40,34 @@ class Plot(ABC):
             self.signals[str(stack)] = []
         self.signals[str(stack)].append(signal)
 
+    def reset_preferences(self):
+        self.legend = Plot.legend
+        self.font_size = Plot.font_size
+        self.font_color = Plot.font_color
+
 
 @dataclass
 class PlotContour(Plot):
     pass
+
+    def reset_preferences(self):
+        super().reset_preferences()
 
 
 @dataclass
 class PlotSurface(Plot):
     pass
 
+    def reset_preferences(self):
+        super().reset_preferences()
+
 
 @dataclass
 class PlotImage(Plot):
     pass
+
+    def reset_preferences(self):
+        super().reset_preferences()
 
 
 @dataclass
@@ -75,3 +89,12 @@ class PlotXY(Plot):
         super().__post_init__()
         if self.axes is None:
             self.axes = [LinearAxis(), LinearAxis()]
+
+    def reset_preferences(self):
+        self.grid = PlotXY.grid
+        self.line_style = PlotXY.line_style
+        self.line_size = PlotXY.line_size
+        self.marker = PlotXY.marker
+        self.marker_size = PlotXY.marker_size
+        self.step = PlotXY.step
+        return super().reset_preferences()

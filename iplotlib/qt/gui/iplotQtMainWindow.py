@@ -2,16 +2,13 @@
 #               This helps developers write custom applications with PySide2
 # Author: Jaswant Sai Panchumarti
 
-from functools import partial
 import typing
 
 from PySide2.QtCore import QMargins, Qt, Signal
 from PySide2.QtWidgets import QMainWindow, QWidget
-from iplotlib.core.canvas import Canvas
 
-from iplotlib.core.plot import Plot
-from iplotlib.qt.utils.message_box import show_msg
 from iplotlib.qt.gui.iplotCanvasToolbar import IplotQtCanvasToolbar
+from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtCanvasAssembly import IplotQtCanvasAssembly
 from iplotlib.qt.gui.iplotQtPreferencesWindow import IplotQtPreferencesWindow
 
@@ -33,7 +30,8 @@ class IplotQtMainWindow(QMainWindow):
         self.prefWindow = IplotQtPreferencesWindow(
             self.canvasStack.model(), parent=self, flags=flags)
         self.prefWindow.canvasSelected.connect(self.canvasStack.setCurrentIndex)
-        self.prefWindow.apply.connect(self.applyPreferences)
+        self.prefWindow.onApply.connect(self.updateCanvasPreferences)
+        self.prefWindow.onReset.connect(self.updateCanvasPreferences)
 
         self.addToolBar(self.toolBar)
         self.setCentralWidget(self.canvasStack)
@@ -51,7 +49,7 @@ class IplotQtMainWindow(QMainWindow):
         self.toolBar.toolActivated.connect(
             lambda tool_name:
                 [self.canvasStack.widget(i).set_mouse_mode(tool_name) for i in range(self.canvasStack.count())])
-        self.toolBar.redrawAction.triggered.connect(partial(self.reDraw, True))
+        self.toolBar.redrawAction.triggered.connect(self.reDraw)
         self.toolBar.detachAction.triggered.connect(self.detach)
         self.toolBar.configureAction.triggered.connect(
             lambda:
@@ -59,43 +57,35 @@ class IplotQtMainWindow(QMainWindow):
                  self.prefWindow.show()])
 
     def undo(self):
-        for i in range(self.canvasStack.count()):
-            w = self.canvasStack.widget(i)
-            w.back()
+        w = self.canvasStack.currentWidget()
+        if not w:
+            return
+        w.back()
 
     def redo(self):
-        for i in range(self.canvasStack.count()):
-            w = self.canvasStack.widget(i)
-            w.forward()
-
-    def applyPreferences(self):
-        self.reDraw(discard_axis_range=False, discard_focused_plot=False)
-        self.prefWindow.modified()
-
-    def reDraw(self, discard_axis_range: bool = True, discard_focused_plot: bool = True):
         w = self.canvasStack.currentWidget()
-        canvas = w.get_canvas()
-        if not isinstance(canvas, Canvas):
+        if not w:
             return
-        for _, col in enumerate(canvas.plots):
-            for _, plot in enumerate(col):
-                if not isinstance(plot, Plot):
-                    continue
-                for axes in plot.axes:
-                    if isinstance(axes, typing.Collection):
-                        for axis in axes:
-                            if discard_axis_range:
-                                axis.begin = None
-                                axis.end = None
-                    else:
-                        axis = axes
-                        if discard_axis_range:
-                            axis.begin = None
-                            axis.end = None
-        # TODO: change this confusing API to just call refresh(redraw=True, unfocus=..) of IplotQtCanvas
-        if discard_focused_plot:
-            w.unfocus_plot()
+        w.forward()
+
+    def updateCanvasPreferences(self):
+        w = self.canvasStack.currentWidget()
+        w.refresh()
+        self.prefWindow.postApplied()
+
+    def reDraw(self):
+        """
+        """
+        w = self.canvasStack.currentWidget()
+        idx = self.canvasStack.currentIndex()
+        canvas = w.get_canvas()
+        # TODO: Should the history of zoom/pan be cleared here?
+        # TODO: Should we reset preferences here?
+        self.prefWindow.manualReset(idx)
+        w.reset()
         w.set_canvas(canvas)
+        self.prefWindow.formsStack.currentWidget().widgetMapper.revert()
+        self.prefWindow.update()
 
     def detach(self):
         if self.toolBar.detachAction.text() == 'Detach':

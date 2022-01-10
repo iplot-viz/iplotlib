@@ -76,3 +76,6 @@ class IplotQtCanvasAssembly(QStackedWidget):
         else:
             show_msg(
                 f"Cannot remove canvas: {id(canvas)}" + "Error: idx: {i} < 0", "ERROR", self)
+
+    def currentWidget(self) -> IplotQtCanvas:
+        return super().currentWidget()

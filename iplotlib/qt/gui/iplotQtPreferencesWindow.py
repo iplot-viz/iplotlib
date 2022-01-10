@@ -8,15 +8,16 @@
 import time
 import typing
 
-from PySide2.QtCore import QItemSelectionModel, QModelIndex, Qt, Signal
+from PySide2.QtCore import QItemSelectionModel, QModelIndex, Qt
+from PySide2.QtCore import Signal as QtSignal
 from PySide2.QtGui import QShowEvent, QStandardItem, QStandardItemModel
 from PySide2.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter,
                                QStackedWidget, QTreeView, QWidget)
 
-from iplotlib.core.axis import LinearAxis
+from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.signal import ArraySignal, SimpleSignal
-from iplotlib.core.plot import PlotXY
+from iplotlib.core.signal import ArraySignal, SimpleSignal, Signal
+from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.interface import IplotSignalAdapter
 
 from iplotlib.qt.gui.forms import IplotPreferencesForm, AxisForm, CanvasForm, PlotForm, SignalForm
@@ -27,8 +28,9 @@ logger = sl.get_logger(__name__, 'INFO')
 
 class IplotQtPreferencesWindow(QMainWindow):
 
-    apply = Signal()
-    canvasSelected = Signal(int)
+    onApply = QtSignal()
+    onReset = QtSignal()
+    canvasSelected = QtSignal(int)
 
     def __init__(self, canvasAssembly: QStandardItemModel = None, parent: typing.Optional[QWidget] = None, flags: Qt.WindowFlags = Qt.WindowFlags()):
 
@@ -39,7 +41,6 @@ class IplotQtPreferencesWindow(QMainWindow):
         self.treeView.setModel(canvasAssembly)
         self.treeView.selectionModel().selectionChanged.connect(self.onItemSelected)
         self._applyTime = time.time_ns()
-        self._modifiedTime = time.time_ns()
 
         self._forms = {
             Canvas: CanvasForm(self),
@@ -54,7 +55,8 @@ class IplotQtPreferencesWindow(QMainWindow):
         for form in self._forms.values():
             self.formsStack.addWidget(form)
             if isinstance(form, IplotPreferencesForm):
-                form.applySignal.connect(self.apply.emit)
+                form.onApply.connect(self.onApply.emit)
+                form.onReset.connect(self.onReset.emit)
 
         index = list(self._forms.keys()).index(Canvas)
         self.formsStack.setCurrentIndex(index)
@@ -75,12 +77,6 @@ class IplotQtPreferencesWindow(QMainWindow):
 
     def postApplied(self):
         self._applyTime = time.time_ns()
-
-    def MTime(self):
-        return self._modifiedTime
-    
-    def modified(self):
-        self._modifiedTime = time.time_ns()
 
     def getCollectiveMTime(self):
         val = 0
@@ -111,8 +107,8 @@ class IplotQtPreferencesWindow(QMainWindow):
     def closeEvent(self, event):
         if QApplication.focusWidget():
             QApplication.focusWidget().clearFocus()
-        if self.MTime() < self.getCollectiveMTime():
-            self.apply.emit()
+        if self._applyTime < self.getCollectiveMTime():
+            self.onApply.emit()
 
     def setModel(self, model: QStandardItemModel):
         self.treeView.setModel(model)
@@ -123,3 +119,33 @@ class IplotQtPreferencesWindow(QMainWindow):
     def showEvent(self, event: QShowEvent):
         self.treeView.selectionModel().select(self.treeView.model().index(0, 0), QItemSelectionModel.ClearAndSelect)
         return super().showEvent(event)
+
+    def manualReset(self, idx: int):
+        canvas = self.treeView.model().item(idx, 0).data(Qt.UserRole)
+        if not isinstance(canvas, Canvas):
+            return
+        
+        canvas.reset_preferences()
+        for _, col in enumerate(canvas.plots):
+            for _, plot in enumerate(col):
+                if isinstance(plot, Plot):
+                    plot.reset_preferences()
+                else:
+                    continue
+                for axes in plot.axes:
+                    if isinstance(axes, typing.Collection):
+                        for axis in axes:
+                            if isinstance(axis, Axis):
+                                axis.reset_preferences()
+                            else:
+                                continue
+                    elif isinstance(axes, Axis):
+                        axes.reset_preferences()
+                    else:
+                        continue
+                for stack in plot.signals.values():
+                    for signal in stack:
+                        if isinstance(signal, Signal):
+                            signal.reset_preferences()
+                        else:
+                            continue

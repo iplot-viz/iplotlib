@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from iplotlib.core.axis import Axis, LinearAxis, RangeAxis
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.history_manager import HistoryManager
 from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.core.signal import ArraySignal, Signal
 from iplotlib.core.property_manager import PropertyManager
@@ -24,7 +25,7 @@ from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.util import numpy_support
 
 from iplotLogging import setupLogger as sl
-logger = sl.get_logger(__name__, "DEBUG")
+logger = sl.get_logger(__name__)
 
 AXIS_MAP = [vtkAxis.BOTTOM, vtkAxis.LEFT]
 STEP_MAP = {"none": "none", "mid": "steps-mid", "post": "steps-post",
@@ -58,6 +59,7 @@ class VTKParser():
                                                horizOn=True,
                                                hLineW=1,
                                                vLineW=1)
+        self._hm = HistoryManager()
         self._pm = PropertyManager()
 
         self.matrix.SetGutterX(50)
@@ -98,6 +100,15 @@ class VTKParser():
         self.matrix.SetFillStrategy(vtkChartMatrix.StretchType.CUSTOM)
         self._title_region.SetDrawAreaResizeBehavior(
             vtkContextArea.DARB_FixedRect)
+
+    def undo(self):
+        self._hm.undo()
+
+    def redo(self):
+        self._hm.redo()
+
+    def drop_history(self):
+        self._hm.drop()
 
     def export_image(self, filename: str, **kwargs):
         renWin = vtkRenderWindow()
@@ -220,12 +231,32 @@ class VTKParser():
                     retVal |= self._pm.get_value('hi_precision_data', self.canvas, plot, signal=signal)
         return retVal
 
-    def refresh(self, canvas: Canvas):
+    def refresh(self, canvas: Canvas, discard_axis_range: bool = True, discard_focused_plot: bool = True):
         """This method analyzes the iplotlib canvas data structure and maps it
-        onto a vtkChartMatrix
+        onto an internal vtkChartMatrix instance
 
-        The redraw flag forces a complete redraw of all plots. This clears existing canvas.
         """
+        # 1. Clear layout.
+        self.clear()
+
+        if discard_focused_plot:
+            self.focus_plot = None
+
+        for _, col in enumerate(canvas.plots):
+            for _, plot in enumerate(col):
+                if not isinstance(plot, Plot):
+                    continue
+                for axes in plot.axes:
+                    if isinstance(axes, typing.Collection):
+                        for axis in axes:
+                            if discard_axis_range:
+                                axis.begin = None
+                                axis.end = None
+                    else:
+                        axis = axes
+                        if discard_axis_range:
+                            axis.begin = None
+                            axis.end = None
 
         # 1. Clear layout.
         self.clear()

@@ -31,6 +31,10 @@ class BeanItemModel(QStandardItemModel):
 
     def data(self, index: QModelIndex, role: int = Qt.UserRole) -> typing.Any:
         logger.debug(f"Index: {index}, role: {role}")
+
+        if role == BeanItemModel.PyObjectRole:
+            return self._pyObject
+
         bean = self.item(index.row(), index.column())
         # converter = bean.data(BeanItem.ConverterRole)
         widget = bean.data(BeanItem.WidgetRole)

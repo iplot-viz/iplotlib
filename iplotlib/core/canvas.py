@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List
+import typing
 
 from iplotlib.core.persistence import JSONExporter
 from iplotlib.core.plot import Plot
@@ -99,7 +100,6 @@ class Canvas(ABC):
         self.crosshair_enabled = True
         self.crosshair_vertical = vertical
         self.crosshair_horizontal = horizontal
-        pass
 
     def to_dict(self) -> dict:
         return JSONExporter().to_dict(self)
@@ -117,3 +117,16 @@ class Canvas(ABC):
 
     def export_image(self, filename: str, **kwargs):
         pass
+
+    def reset_preferences(self):
+        self.font_size = Canvas.font_size
+        self.shared_x_axis = Canvas.shared_x_axis
+        self.grid = Canvas.grid
+        self.legend = Canvas.legend
+        self.font_color = Canvas.font_color
+        self.line_style = Canvas.line_style
+        self.line_size = Canvas.line_size
+        self.marker = Canvas.marker
+        self.marker_size = Canvas.marker_size
+        self.step = Canvas.step
+        self.full_mode_all_stack = Canvas.full_mode_all_stack

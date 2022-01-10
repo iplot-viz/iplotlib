@@ -6,7 +6,6 @@ from PySide2.QtWidgets import QWidget
 from iplotlib.core.canvas import Canvas
 
 
-# TODO: Add possibility of MOUSEMODE/state between canvases (show crosshair/pan/zoom) between two canvases, possibility of handling events independently
 class IplotQtCanvas(QWidget):
     """
     Base class for all Qt related canvas implementaions
@@ -14,18 +13,37 @@ class IplotQtCanvas(QWidget):
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent)
+        self._mmode = None
 
     @abstractmethod
-    def back(self):
-        """history: back"""
+    def undo(self):
+        """history: undo"""
 
     @abstractmethod
-    def forward(self):
-        """history: forward"""
+    def redo(self):
+        """history: redo"""
+
+    @abstractmethod
+    def drop_history(self):
+        """history: clear undo history. after this, can no longer undo"""
+
+    @abstractmethod
+    def refresh(self):
+        """Refresh the canvas from the current iplotlib.core.Canvas instance.
+        """
+        self.set_canvas(self.get_canvas())
+    
+    @abstractmethod
+    def reset(self):
+        """Remove the current iplotlib.core.Canvas instance.
+            Typical implementation would be a call to set_canvas with None argument.
+        """
+        self.set_canvas(None)
 
     @abstractmethod
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
+        self._mmode = mode
 
     @abstractmethod
     def set_canvas(self, canvas: Canvas):

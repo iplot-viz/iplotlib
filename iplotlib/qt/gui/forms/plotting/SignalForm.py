@@ -6,10 +6,12 @@
 
 import typing
 
-from PySide2.QtCore import Qt
+from PySide2.QtCore import QModelIndex, Qt, Slot
 from PySide2.QtWidgets import QWidget
 
+from iplotlib.core.signal import Signal
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
+from iplotlib.qt.models.BeanItemModel import BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
 
 
@@ -32,3 +34,15 @@ class SignalForm(IplotPreferencesForm):
                 "widget": self.default_markersize_widget()},
             {"label": "Line Path", "property": "step", "widget": self.default_linepath_widget()}]
         super().__init__(fields=prototype, label="A signal", parent=parent, f=f)
+
+    @Slot()
+    def resetPrefs(self):
+        pyObject = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+
+        if isinstance(pyObject, Signal):
+            pyObject.reset_preferences()
+        else:
+            return
+        
+        self.widgetMapper.revert()
+        super().resetPrefs()

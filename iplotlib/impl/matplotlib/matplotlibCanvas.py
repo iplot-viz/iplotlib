@@ -1,3 +1,4 @@
+from collections import defaultdict
 import functools
 import threading
 import typing
@@ -23,9 +24,10 @@ from pandas.plotting import register_matplotlib_converters
 import iplotLogging.setupLogger as ls
 from iplotlib.core.axis import Axis, LinearAxis, RangeAxis
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.history_manager import HistoryManager
 from iplotlib.core.plot import Plot
 from iplotlib.core.property_manager import PropertyManager
-from iplotlib.core.signal import ArraySignal, Signal
+from iplotlib.core.signal import Signal
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 
 logger = ls.get_logger(__name__)
@@ -48,14 +50,14 @@ class MatplotlibParser:
         self.refresh_delay = os.getenv("IPLOTLIB_UPDATE_DELAY", 20)
 
         self._cursors = []
+        self._hm = HistoryManager()
         self._pm = PropertyManager()
         self._gs = None # type: GridSpec
 
         # Look up tables. These are cleared in the beginning of refresh.
-        self._axis_lut = dict() # type: typing.Dict[Axis, MPLAxes]
-        self._mpl_axes_lut = weakref.WeakValueDictionary() # type: typing.Dict[Signal, MPLAxes]
+        self._axis_mpl_axes_lut = dict() # type: typing.Dict[Axis, MPLAxes]
+        self._signal_mpl_axes_lut = weakref.WeakValueDictionary() # type: typing.Dict[Signal, MPLAxes]
         self._mpl_shapes_lut = dict() # type: typing.Dict[Signal, typing.Collection[Artist]]
-        self._mpl_axes_legend_call_back_id_lut = dict() # type: typing.Dict[int, int]
 
         self.mpl_flush_method = mpl_flush_method
         self.mpl_draw_thread = threading.current_thread()
@@ -89,6 +91,15 @@ class MatplotlibParser:
 
         return wrapper
 
+    def undo(self):
+        self._hm.undo()
+
+    def redo(self):
+        self._hm.redo()
+
+    def drop_history(self):
+        self._hm.drop()
+
     def export_image(self, filename: str, **kwargs):
         dpi = kwargs.get("dpi") or 300
         width = kwargs.get("width") or 18.5
@@ -109,10 +120,18 @@ class MatplotlibParser:
             plot = None
         style = self.get_signal_style(signal, plot)
         step = style.pop('step', None)
-        
+
         if isinstance(lines, list):
-            lines[0][0].set_xdata(x_data)
-            lines[0][0].set_ydata(y_data)
+            line = lines[0][0] # type: Line2D
+            line.set_xdata(x_data)
+            line.set_ydata(y_data)
+            style.update({'drawstyle': step})
+            for k, v in style.items():
+                setter = getattr(line, f"set_{k}")
+                if v is None and k != "drawstyle":
+                    continue
+                setter(v)
+
             self.figure.canvas.draw()
         else:
             params = dict(**style)
@@ -143,6 +162,14 @@ class MatplotlibParser:
             shapes[1][0].set_ydata(y2_data)
             shapes[2].remove()
             shapes.pop()
+            style.update({'drawstyle': step})
+            for k, v in style.items():
+                setter = getattr(shapes[0][0], f"set_{k}")
+                if v is None and k != "drawstyle":
+                    continue
+                setter(v)
+                setter = getattr(shapes[1][0], f"set_{k}")
+                setter(v)
             area = mpl_axes.fill_between(x_data, y1_data, y2_data,
                 alpha=0.3,
                 color=shapes[1][0].get_color(),
@@ -166,31 +193,34 @@ class MatplotlibParser:
             self._mpl_shapes_lut.update({id(signal): [line_1, line_2, area]})
     
     def clear(self):
-
-        self._mpl_axes_lut.clear()
+        
+        self._axis_mpl_axes_lut.clear()
+        self._signal_mpl_axes_lut.clear()
         self._mpl_shapes_lut.clear()
         self.axes_ranges.clear()
         self.axes_update_set.clear()
-        self._axis_lut.clear()
         self.figure.clear()
+        self._gs = None
 
-    def refresh(self, canvas: Canvas):
+    def process_ipl_canvas(self, canvas: Canvas):
         """This method analyzes the iplotlib canvas data structure and maps it
         onto an internal matplotlib.figure.Figure instance.
 
         """
+        if canvas is None:
+            self.canvas = canvas
+            self.clear()
+            return
+
         # 1. Clear layout.
         self.clear()
 
-        if canvas is None:
-            return
-
         # 2. Allocate
         self.canvas = canvas
-        if self.focus_plot is not None:
-            self._gs = self.figure.add_gridspec(1, 1)
-        else:
+        if self.focus_plot is None:
             self._gs = self.figure.add_gridspec(canvas.rows, canvas.cols)
+        else:
+            self._gs = self.figure.add_gridspec(1, 1)
 
         # 3. Fill the canvas with plots.
         stop_drawing = False
@@ -201,11 +231,11 @@ class MatplotlibParser:
                 if self.focus_plot is not None:
                     if self.focus_plot == plot:
                         logger.debug(f"Focusing on plot: {plot}")
-                        self.refresh_plot(plot, 0, 0)
+                        self.process_ipl_plot(plot, 0, 0)
                         stop_drawing = True
                         break
                 else:
-                    self.refresh_plot(plot, i, j)
+                    self.process_ipl_plot(plot, i, j)
 
             if stop_drawing:
                 break
@@ -216,10 +246,10 @@ class MatplotlibParser:
                 canvas.font_size = None
             self.figure.suptitle(canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
 
-    def refresh_plot(self, plot: Plot, column: int, row: int):
+    def process_ipl_plot(self, plot: Plot, column: int, row: int):
         if not isinstance(plot, Plot):
             raise Exception(f"{plot} is not an instance of {Plot.__module__}.{Plot.__name__}")
-        
+
         grid_item = self._gs[row: row + plot.row_span, column: column + plot.col_span] # type: SubplotSpec
         
         if not self.canvas.full_mode_all_stack and self.focus_plot_stack_key is not None:
@@ -227,10 +257,10 @@ class MatplotlibParser:
         else:
             stack_sz = len(plot.signals.keys())
 
-        # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item,
+        # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
         subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0) # type: GridSpecFromSubplotSpec
         
-        mpl_axes = None
+        mpl_axes_prev = None
         for stack_id, key in enumerate(sorted(plot.signals.keys())):
             is_stack_plot_focused = self.focus_plot_stack_key == key
 
@@ -242,7 +272,8 @@ class MatplotlibParser:
                 else:
                     row_id = stack_id
 
-                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0], sharex=mpl_axes)
+                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0], sharex=mpl_axes_prev)
+                mpl_axes_prev = mpl_axes
                 # Keep references to iplotlib instances for ease of access in callbacks.
                 mpl_axes._ipl_signals = []
                 mpl_axes._ipl_plot = weakref.ref(plot)
@@ -282,15 +313,15 @@ class MatplotlibParser:
                 for ax_id in range(len(plot.axes)):
                     if isinstance(plot.axes[ax_id], typing.Collection):
                         axis = plot.axes[ax_id][stack_id]
-                        self.refresh_axis(axis, ax_id, plot, mpl_axes)
+                        self.process_ipl_axis(axis, ax_id, plot, mpl_axes)
                     else:
                         axis = plot.axes[ax_id]
-                        self.refresh_axis(axis, ax_id, plot, mpl_axes)
+                        self.process_ipl_axis(axis, ax_id, plot, mpl_axes)
 
                 for signal in signals:
                     mpl_axes._ipl_signals.append(weakref.ref(signal))
-                    self._mpl_axes_lut.update({id(signal): mpl_axes})
-                    self.refresh_signal(signal)
+                    self._signal_mpl_axes_lut.update({id(signal): mpl_axes})
+                    self.process_ipl_signal(signal)
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value('legend', self.canvas, plot)
@@ -356,7 +387,7 @@ class MatplotlibParser:
                                     a_min, a_max = update_single_range_axis(stack_axis, axis_index, a)
                                 else:
                                     if isinstance(stack_axis, RangeAxis):
-                                        a_min, a_max = NanosecondHelper.mpl_get_lim(self._axis_lut[id(stack_axis)], axis_index)
+                                        a_min, a_max = NanosecondHelper.mpl_get_lim(self._axis_mpl_axes_lut[id(stack_axis)], axis_index)
                                         stack_axis.begin, stack_axis.end = a_min, a_max
                                     else:
                                         a_min, a_max = None, None
@@ -390,9 +421,9 @@ class MatplotlibParser:
                 axes.callbacks.connect('xlim_changed', _axis_update_callback)
                 axes.callbacks.connect('ylim_changed', _axis_update_callback)
 
-    def refresh_axis(self, ax: Axis, ax_id, plot: Plot, mpl_axes: MPLAxes):
+    def process_ipl_axis(self, ax: Axis, ax_id, plot: Plot, mpl_axes: MPLAxes):
         mpl_axis = NanosecondHelper.mpl_get_axis(mpl_axes, ax_id) # type: MPLAxis
-        self._axis_lut.update({id(ax): mpl_axes})
+        self._axis_mpl_axes_lut.update({id(ax): mpl_axes})
         if isinstance(ax, Axis):
             fc = self._pm.get_value('font_color', self.canvas, ax, plot) or 'black'
             fs = self._pm.get_value('font_size', self.canvas, ax, plot)
@@ -403,8 +434,8 @@ class MatplotlibParser:
 
             label_props = dict(color=fc)
             tick_props = dict(color=fc, labelcolor=fc)
-            if fs is not None and not fs:
-                label_props.update({'size': fs})
+            if fs is not None and fs > 0:
+                label_props.update({'fontsize': fs})
                 tick_props.update({'labelsize': fs})
             if ax.label is not None:
                 mpl_axis.set_label_text(ax.label, **label_props)
@@ -412,7 +443,7 @@ class MatplotlibParser:
             mpl_axis.set_tick_params(**tick_props)
 
         if isinstance(ax, RangeAxis) and ax.begin is not None and ax.end is not None and (ax.begin or ax.end):
-            logger.debug(f"refresh_axis: setting {ax_id} axis range to {ax.begin} and {ax.end}")
+            logger.debug(f"process_ipl_axis: setting {ax_id} axis range to {ax.begin} and {ax.end}")
             NanosecondHelper.mpl_set_lim(mpl_axes, ax_id, [ax.begin, ax.end])
         
         if isinstance(ax, LinearAxis):
@@ -420,7 +451,7 @@ class MatplotlibParser:
                 mpl_axis.set_major_formatter(NanosecondDateFormatter())
 
     @_run_in_one_thread
-    def refresh_signal(self, signal: Signal):
+    def process_ipl_signal(self, signal: Signal):
         """Refresh a specific signal. This will repaint the necessary items after the signal
             data has changed.
 
@@ -431,7 +462,7 @@ class MatplotlibParser:
         if not isinstance(signal, Signal):
             return
 
-        mpl_axes = self._mpl_axes_lut.get(id(signal)) # type: MPLAxes
+        mpl_axes = self._signal_mpl_axes_lut.get(id(signal)) # type: MPLAxes
         if not isinstance(mpl_axes, MPLAxes):
             logger.error(f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
@@ -591,7 +622,7 @@ class MatplotlibParser:
     def refresh_data(self):
         for a in self.axes_update_set.copy():
             for signal_ref in a._ipl_signals:
-                self.refresh_signal(signal_ref())
+                self.process_ipl_signal(signal_ref())
         self.axes_update_set.clear()
 
 

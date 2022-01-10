@@ -65,6 +65,24 @@ class QtVTKCanvas(IplotQtCanvas):
         self.mouse_press_cb_tag = self.render_widget.AddObserver(
             vtkCommand.LeftButtonPressEvent, self.mouse_dclick_callback)
 
+    def back(self):
+        """history: back"""
+        self.vtk_parser.undo()
+
+    def forward(self):
+        """history: forward"""
+        self.vtk_parser.redo()
+
+    def drop_history(self):
+        return self.mpl_parser.drop_history()
+
+    def refresh(self, discard_axis_range: bool = True, discard_focused_plot: bool = True):
+        canvas = self.get_canvas()
+        if not canvas:
+            return
+        self.vtk_parser.refresh(canvas, discard_axis_range, discard_focused_plot)
+        self.set_mouse_mode(self.mouse_mode or canvas.mouse_mode)
+
     def resizeEvent(self, event: QResizeEvent):
         size = event.size()
         if not size.width():
@@ -78,14 +96,6 @@ class QtVTKCanvas(IplotQtCanvas):
         logger.info(f"Resize {new_ev.oldSize()} -> {new_ev.size()}")
 
         return super().resizeEvent(new_ev)
-
-    def back(self):
-        """history: back"""
-        pass
-
-    def forward(self):
-        """history: forward"""
-        pass
 
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
@@ -127,7 +137,7 @@ class QtVTKCanvas(IplotQtCanvas):
         return self.render_widget
 
     def update(self):
-        self.vtk_parser.refresh(self.vtk_parser.canvas)
+        self.refresh()
         super().update()
     
     def render(self):
