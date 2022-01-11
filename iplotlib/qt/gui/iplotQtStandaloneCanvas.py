@@ -8,14 +8,17 @@
 
 from functools import partial
 import importlib
+import os
 import pkgutil
 import sys
 
 from PySide2.QtCore import Qt
 from PySide2.QtWidgets import QAction, QActionGroup, QApplication
+from PySide2.QtGui import QGuiApplication
 
 from iplotlib.core import Canvas
 from iplotlib import examples as iplotExamples
+from iplotlib.interface.iplotSignalAdapter import AccessHelper
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.gui.iplotQtMainWindow import IplotQtMainWindow
 
@@ -36,16 +39,24 @@ class QStandaloneCanvas:
         self.app = None
         self.main_window = None
 
-    def prepare(self):
+    def prepare(self, argv=sys.argv):
         """Prepares IplotQtMainWindow but does not show it not to block the main thread
         Therefore after calling prepare() the developer can access app/qt_canvas/main_window variables"""
 
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
-        self.app = QApplication(sys.argv)
+        self.app = QApplication(argv)
         self.main_window = IplotQtMainWindow(show_toolbar=self.use_toolbar)
         self.selectMenu = self.main_window.menuBar().addMenu('&Canvases')
         self.canvasActionGroup = QActionGroup(self.main_window)
         self.canvasActionGroup.setExclusive(True)
+
+        logger.debug(f"Detected {len(QGuiApplication.screens())} screen (s)")
+        max_width = 0
+        for screen in QGuiApplication.screens():
+            max_width = max(screen.geometry().width(), max_width)
+        logger.debug(f"Detected max screen width: {max_width}")
+        AccessHelper.num_samples = max_width
+        logger.info(f"Fallback dec_samples : {AccessHelper.num_samples}")
 
     def add_canvas(self, canvas: Canvas):
         if not self.main_window:
@@ -91,8 +102,10 @@ def main():
         '-impl', dest='impl', help="Specify a graphics backend.", default='matplotlib')
     parser.add_argument('-t', dest='toolbar', help="Place a toolbar with canvas specific actions on the top.",
                         action='store_true', default=False)
+    parser.add_argument('-use-fallback-samples', dest='use_fallback_samples', action='store_true', default=False)
     args = parser.parse_args()
 
+    AccessHelper.num_samples_override = args.use_fallback_samples
     canvas_app = QStandaloneCanvas(args.impl, use_toolbar=args.toolbar)
     canvas_app.prepare()
 

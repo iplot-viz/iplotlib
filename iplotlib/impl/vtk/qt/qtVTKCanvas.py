@@ -18,12 +18,11 @@ vtkmodules.qt.PyQtImpl = 'PySide2'
 
 # vtk requirements
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor, PyQtImpl
-from vtkmodules.vtkCommonDataModel import vtkVector2i
 from vtkmodules.vtkCommonCore import vtkCommand
 
 # iplot utilities
 from iplotLogging import setupLogger as sl
-logger = sl.get_logger(__name__, "DEBUG")
+logger = sl.get_logger(__name__, 'DEBUG')
 
 try:
     assert(PyQtImpl == 'PySide2')
@@ -45,43 +44,39 @@ class QtVTKCanvas(IplotQtCanvas):
         """
         super().__init__(parent, **kwargs)
 
-        self.render_widget = QVTKRenderWindowInteractor(self, **kwargs)
-        
-        self.vtk_parser = VTKParser()
+        self._vtk_renderer = QVTKRenderWindowInteractor(self, **kwargs)
+        self._vtk_parser = VTKParser()
         self.set_canvas(kwargs.get('canvas'))
         # Let the view render its scene into our render window
-        self.vtk_parser.view.SetRenderWindow(self.render_widget.GetRenderWindow())
+        self._vtk_parser.view.SetRenderWindow(self._vtk_renderer.GetRenderWindow())
 
         # laid out vertically.
         v_layout = QVBoxLayout(self)
-        v_layout.addWidget(self.render_widget)
+        v_layout.addWidget(self._vtk_renderer)
         self.setLayout(v_layout)
 
         # callback to process mouse movements
-        self.mouse_move_cb_tag = self.render_widget.AddObserver(
-            vtkCommand.MouseMoveEvent, self.mouse_move_callback)
+        self.mouse_move_cb_tag = self._vtk_renderer.AddObserver(
+            vtkCommand.MouseMoveEvent, self._vtk_mouse_move_handler)
 
-        # callback to process mouse double clicks
-        self.mouse_press_cb_tag = self.render_widget.AddObserver(
-            vtkCommand.LeftButtonPressEvent, self.mouse_dclick_callback)
+        # callback to process mouse clicks
+        self.mouse_press_cb_tag = self._vtk_renderer.AddObserver(
+            vtkCommand.LeftButtonPressEvent, self._vtk_mouse_click_handler)
 
-    def back(self):
-        """history: back"""
-        self.vtk_parser.undo()
+        # callback to process mouse clicks
+        self.mouse_press_cb_tag = self._vtk_renderer.AddObserver(
+            vtkCommand.RightButtonPressEvent, self._vtk_mouse_click_handler)
 
-    def forward(self):
-        """history: forward"""
-        self.vtk_parser.redo()
+    def undo(self):
+        """history: undo"""
+        self._vtk_parser.undo()
+
+    def redo(self):
+        """history: redo"""
+        self._vtk_parser.redo()
 
     def drop_history(self):
-        return self.mpl_parser.drop_history()
-
-    def refresh(self, discard_axis_range: bool = True, discard_focused_plot: bool = True):
-        canvas = self.get_canvas()
-        if not canvas:
-            return
-        self.vtk_parser.refresh(canvas, discard_axis_range, discard_focused_plot)
-        self.set_mouse_mode(self.mouse_mode or canvas.mouse_mode)
+        return self._vtk_parser.drop_history()
 
     def resizeEvent(self, event: QResizeEvent):
         size = event.size()
@@ -92,33 +87,41 @@ class QtVTKCanvas(IplotQtCanvas):
             size.setHeight(5)
 
         new_ev = QResizeEvent(size, event.oldSize())
-        self.vtk_parser.resize(size.width(), size.height())
-        logger.info(f"Resize {new_ev.oldSize()} -> {new_ev.size()}")
+        self._vtk_parser.resize(size.width(), size.height())
+        logger.debug(f"Resize {new_ev.oldSize()} -> {new_ev.size()}")
 
         return super().resizeEvent(new_ev)
 
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
-        
-        logger.info(f"Mouse mode: {self.vtk_parser.canvas.mouse_mode} -> {mode}")
-        self.vtk_parser.remove_crosshair_widget()
-        self.vtk_parser.refresh_mouse_mode(mode)
-        self.vtk_parser.refresh_crosshair_widget()
+        logger.debug(f"Mouse mode: {self._mmode} -> {mode}")
+        self._mmode = mode
+        self._vtk_parser.remove_crosshair_widget()
+        self._vtk_parser.refresh_mouse_mode(self._mmode)
+        self._vtk_parser.refresh_crosshair_widget()
 
-    def mouse_move_callback(self, obj, ev):
+    def _vtk_mouse_move_handler(self, obj, ev):
+        if ev != "MouseMoveEvent":
+            return
         mousePos = obj.GetEventPosition()
-        self.vtk_parser.crosshair.onMove(mousePos)
+        self._debug_log_event(ev, f"{mousePos}")
+        if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
+            self._vtk_parser.crosshair.onMove(mousePos)
 
-    def mouse_dclick_callback(self, obj, ev):
+    def _vtk_mouse_click_handler(self, obj, ev):
+        if ev not in ["LeftButtonPressEvent", "RightButtonPressEvent"]:
+            return
         mousePos = obj.GetEventPosition()
-        if obj.GetRepeatCount() and self.vtk_parser.mouse_mode == Canvas.MOUSE_MODE_SELECT:
-            index = self.vtk_parser.find_element_index(mousePos)
-            self.vtk_parser.set_focus_plot(index)
-            self.vtk_parser.refresh()
+        self._debug_log_event(ev, f"{mousePos} " + "left" if ev == "LeftButtonPressEvent" else "right")
+        if obj.GetRepeatCount() and self._mmode == Canvas.MOUSE_MODE_SELECT:
+            index = self._vtk_parser.find_element_index(mousePos)
+            self._vtk_parser.set_focus_plot(index)
+            self._vtk_parser.process_ipl_canvas(self.get_canvas())
             self.render()
 
     def showEvent(self, event: QShowEvent):
         super().showEvent(event)
+        self._debug_log_event(event, "")
         self.render()
 
     def set_canvas(self, canvas: Canvas):
@@ -126,23 +129,24 @@ class QtVTKCanvas(IplotQtCanvas):
 
         super().set_canvas(canvas)  # does nothing
 
-        self.vtk_parser.focus_plot=None
-        self.vtk_parser.refresh(canvas)
+        self._vtk_parser.set_focus_plot(None)
+        self._vtk_parser.process_ipl_canvas(canvas)
+        if canvas:
+            self.set_mouse_mode(canvas.mouse_mode or self._mmode)
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
-        return self.vtk_parser.canvas
+        return self._vtk_parser.canvas
 
-    def get_render_widget(self) -> QVTKRenderWindowInteractor:
-        return self.render_widget
+    def get_vtk_renderer(self) -> QVTKRenderWindowInteractor:
+        return self._vtk_renderer
 
-    def update(self):
-        self.refresh()
-        super().update()
-    
     def render(self):
-        self.render_widget.Initialize()
-        self.render_widget.Render()
+        self._vtk_renderer.Initialize()
+        self._vtk_renderer.Render()
     
     def unfocus_plot(self):
-        self.vtk_parser.focus_plot=None
+        self._vtk_parser.focus_plot=None
+
+    def _debug_log_event(self, event: vtkCommand, msg: str):
+        logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")

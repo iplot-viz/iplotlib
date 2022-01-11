@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 class IplotCommand(ABC):
-    def __init__(self, name: str="Command") -> None:
+    def __init__(self, name: str) -> None:
         super().__init__()
         self.name = name
 

@@ -32,5 +32,6 @@ class QVTKAppTestAdapter(QAppTestAdapter):
     def tearDown(self):
         """Deletes the reference owned by self"""
         if not self.headless():
+            self.canvas.hide()
             del self.canvas 
         super().tearDown()

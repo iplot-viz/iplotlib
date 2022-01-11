@@ -88,22 +88,19 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
 
         self.canvas.set_canvas(self.core_canvas)
         self.canvas.set_mouse_mode(Canvas.MOUSE_MODE_PAN)
-        self.canvas.update()
         self.canvas.show()
-        self.canvas.get_render_widget().Initialize()
-        self.canvas.get_render_widget().Render()
-
+        self.canvas.get_vtk_renderer().Initialize()
         # pan simple
-        QTest.mouseMove(self.canvas.get_render_widget(), QPoint(200, 150))
-        QTest.mousePress(self.canvas.get_render_widget(), Qt.MouseButton.LeftButton,
+        QTest.mouseMove(self.canvas.get_vtk_renderer(), QPoint(200, 150))
+        QTest.mousePress(self.canvas.get_vtk_renderer(), Qt.MouseButton.LeftButton,
                          Qt.KeyboardModifier.NoModifier, QPoint(200, 150))
         for i in range(200, 0, -1):
-            QTest.mouseMove(self.canvas.get_render_widget(),
+            QTest.mouseMove(self.canvas.get_vtk_renderer(),
                             QPoint(i, 150 + i * 0.1), delay=1)
-        QTest.mouseRelease(self.canvas.get_render_widget(), Qt.MouseButton.LeftButton,
+        QTest.mouseRelease(self.canvas.get_vtk_renderer(), Qt.MouseButton.LeftButton,
                            Qt.KeyboardModifier.NoModifier, QPoint(0, 150))
 
-        renWin = self.canvas.get_render_widget().GetRenderWindow()
+        renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
         valid_image_name = os.path.basename(__file__).replace(
             "test", "valid").replace(".py", ".1.png")
         valid_image_path = os.path.join(os.path.join(
@@ -111,16 +108,16 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         self.assertTrue(regression_test(valid_image_path, renWin))
 
         # pan inside a stacked plot
-        QTest.mouseMove(self.canvas.get_render_widget(), QPoint(200, 350))
-        QTest.mousePress(self.canvas.get_render_widget(), Qt.MouseButton.LeftButton,
+        QTest.mouseMove(self.canvas.get_vtk_renderer(), QPoint(200, 350))
+        QTest.mousePress(self.canvas.get_vtk_renderer(), Qt.MouseButton.LeftButton,
                          Qt.KeyboardModifier.NoModifier, QPoint(200, 350))
         for i in range(200, 0, -1):
-            QTest.mouseMove(self.canvas.get_render_widget(),
+            QTest.mouseMove(self.canvas.get_vtk_renderer(),
                             QPoint(i, 350 + i * 0.1), delay=1)
-        QTest.mouseRelease(self.canvas.get_render_widget(), Qt.MouseButton.LeftButton,
+        QTest.mouseRelease(self.canvas.get_vtk_renderer(), Qt.MouseButton.LeftButton,
                            Qt.KeyboardModifier.NoModifier, QPoint(0, 350))
 
-        renWin = self.canvas.get_render_widget().GetRenderWindow()
+        renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
         valid_image_name = os.path.basename(__file__).replace(
             "test", "valid").replace(".py", ".2.png")
         valid_image_path = os.path.join(os.path.join(

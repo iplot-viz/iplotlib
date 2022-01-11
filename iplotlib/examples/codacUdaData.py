@@ -7,7 +7,6 @@ from iplotlib.core import Canvas, PlotXY
 from iplotlib.core.axis import LinearAxis
 from iplotlib.interface import AccessHelper, IplotSignalAdapter
 
-skip=True
 dscfg = """[codacuda]
 conninfo=host=io-ls-udafe01.iter.org,port=3090
 varprefix=

@@ -57,7 +57,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
     def test_05_canvas_simple_refresh(self):
 
         self.canvas.set_canvas(self.core_canvas)
-        size = self.canvas.vtk_parser.matrix.GetSize()
+        size = self.canvas._vtk_parser.matrix.GetSize()
         self.assertEqual(size[0], 2)
         self.assertEqual(size[1], 2)
 
@@ -67,10 +67,10 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         self.canvas.set_canvas(self.core_canvas)
         self.canvas.update()
         self.canvas.show()
-        self.canvas.get_render_widget().Initialize()
-        self.canvas.get_render_widget().Render()
+        self.canvas.get_vtk_renderer().Initialize()
+        self.canvas.get_vtk_renderer().Render()
 
-        renWin = self.canvas.get_render_widget().GetRenderWindow()
+        renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
         valid_image_name = os.path.basename(__file__).replace(
             "test", "valid").replace(".py", ".png")
         valid_image_path = os.path.join(os.path.join(
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     # vtk_canvas = QtVTKCanvas()
     # vtk_canvas.set_canvas(canvas)
     # vtk_canvas.show()
-    # vtk_canvas.get_render_widget().Initialize()
-    # vtk_canvas.get_render_widget().Render()
+    # vtk_canvas.get_vtk_renderer().Initialize()
+    # vtk_canvas.get_vtk_renderer().Render()
     # import sys
     # sys.exit(app.exec_())

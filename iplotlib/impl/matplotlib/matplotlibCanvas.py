@@ -1,11 +1,9 @@
-from collections import defaultdict
 import functools
 import threading
 import typing
 from contextlib import ExitStack
 from functools import partial
 from queue import Empty, Queue
-import os
 import weakref
 
 import numpy
@@ -24,6 +22,7 @@ from pandas.plotting import register_matplotlib_converters
 import iplotLogging.setupLogger as ls
 from iplotlib.core.axis import Axis, LinearAxis, RangeAxis
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.commands.axes_range import IplotAxesRangeCmd, XYLimits
 from iplotlib.core.history_manager import HistoryManager
 from iplotlib.core.plot import Plot
 from iplotlib.core.property_manager import PropertyManager
@@ -47,17 +46,19 @@ class MatplotlibParser:
         self.focus_plot = focus_plot
         self.focus_plot_stack_key = focus_plot_stack_key
         self.legend_size = 8
-        self.refresh_delay = os.getenv("IPLOTLIB_UPDATE_DELAY", 20)
 
         self._cursors = []
         self._hm = HistoryManager()
         self._pm = PropertyManager()
         self._gs = None # type: GridSpec
 
-        # Look up tables. These are cleared in the beginning of refresh.
+        # Look up tables and stale indicators. These are cleared in the beginning of refresh.
         self._axis_mpl_axes_lut = dict() # type: typing.Dict[Axis, MPLAxes]
         self._signal_mpl_axes_lut = weakref.WeakValueDictionary() # type: typing.Dict[Signal, MPLAxes]
         self._mpl_shapes_lut = dict() # type: typing.Dict[Signal, typing.Collection[Artist]]
+        self._plot_mpl_axes_lut = weakref.WeakValueDictionary() # type: typing.Dict[Plot, MPLAxes]
+        self._stale_mpl_axes = weakref.WeakSet() # typing.Set[MPLAxes]
+        self._axes_ranges = dict()
 
         self.mpl_flush_method = mpl_flush_method
         self.mpl_draw_thread = threading.current_thread()
@@ -65,9 +66,6 @@ class MatplotlibParser:
 
         register_matplotlib_converters()
         self.figure = Figure()
-        self.axes_update_timer = None
-        self.axes_update_set = set()
-        self.axes_ranges = dict()
 
         if tight_layout:
             self.enable_tight_layout()
@@ -131,8 +129,11 @@ class MatplotlibParser:
                 if v is None and k != "drawstyle":
                     continue
                 setter(v)
-
-            self.figure.canvas.draw()
+            # bg = self.figure.canvas.copy_from_bbox(mpl_axes.bbox)
+            # self.figure.canvas.restore_region(bg)
+            # mpl_axes.draw_artist(line)
+            # self.figure.canvas.blit(mpl_axes.bbox)
+            self.figure.canvas.draw_idle()
         else:
             params = dict(**style)
             draw_fn = mpl_axes.plot
@@ -175,7 +176,9 @@ class MatplotlibParser:
                 color=shapes[1][0].get_color(),
                 step=step)
             shapes.append(area)
-            self.figure.canvas.draw()
+            shapes[0][0].draw()
+            shapes[1][0].draw()
+            shapes[2].draw()
         else:
             params = dict(**style)
             draw_fn = mpl_axes.plot
@@ -192,15 +195,63 @@ class MatplotlibParser:
 
             self._mpl_shapes_lut.update({id(signal): [line_1, line_2, area]})
     
+    def unstale_mpl_axes(self):
+        self._stale_mpl_axes.clear()
+
     def clear(self):
-        
         self._axis_mpl_axes_lut.clear()
+        self._plot_mpl_axes_lut.clear()
         self._signal_mpl_axes_lut.clear()
         self._mpl_shapes_lut.clear()
-        self.axes_ranges.clear()
-        self.axes_update_set.clear()
+        self._axes_ranges.clear()
+        self._stale_mpl_axes.clear()
         self.figure.clear()
         self._gs = None
+
+    @staticmethod
+    def update_range_axis(range_axis: RangeAxis, ax_idx: int, mpl_axes: MPLAxes):
+        """If axis is a RangeAxis update its min and max to mpl view limits"""
+
+        if not isinstance(range_axis, RangeAxis):
+            return
+        logger.debug(f"Axis update: mpl_axes={id(mpl_axes)} range_axis={id(range_axis)} ax_idx={ax_idx}")
+        range_axis.begin, range_axis.end = NanosecondHelper.mpl_get_lim(mpl_axes, ax_idx)
+        return [range_axis.begin, range_axis.end]
+
+    def update_multi_range_axis(self, range_axes: typing.Collection[RangeAxis], ax_idx: int, mpl_axes: MPLAxes):
+        """Updates RangeAxis instances begin and end to mpl_axis limits. Works also on stacked axes"""
+        ax_ranges = []
+        for ax in range_axes:
+            #FIXME: Use mpl_get_axis here
+            if ax_idx == 0:
+                a_min, a_max = self.update_range_axis(ax, ax_idx, mpl_axes)
+            else:
+                if isinstance(ax, RangeAxis):
+                    a_min, a_max = NanosecondHelper.mpl_get_lim(self._axis_mpl_axes_lut[id(ax)], ax_idx)
+                    ax.begin, ax.end = a_min, a_max
+                else:
+                    a_min, a_max = None, None
+            ax_ranges.append([a_min, a_max])
+        return ax_ranges
+
+    @staticmethod
+    def get_range_axis_limits_from_mpl_axes(mpl_axes: MPLAxes):
+        plot = mpl_axes._ipl_plot() if hasattr(mpl_axes, '_ipl_plot') else None
+        if plot is not None and len(plot.axes or []) > 0:
+            if isinstance(plot.axes[0], RangeAxis):
+                return plot.axes[0].original_begin, plot.axes[0].original_end
+        return None, None
+
+    def get_all_shared_axes(self, base_axis):
+        axes = list()
+        base_begin, base_end = self.get_range_axis_limits_from_mpl_axes(base_axis)
+
+        if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
+            for axis in self.figure.axes:
+                begin, end = self.get_range_axis_limits_from_mpl_axes(axis)
+                if (begin, end) == (base_begin, base_end):
+                    axes.append(axis)
+        return axes
 
     def process_ipl_canvas(self, canvas: Canvas):
         """This method analyzes the iplotlib canvas data structure and maps it
@@ -248,7 +299,7 @@ class MatplotlibParser:
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
         if not isinstance(plot, Plot):
-            raise Exception(f"{plot} is not an instance of {Plot.__module__}.{Plot.__name__}")
+            return
 
         grid_item = self._gs[row: row + plot.row_span, column: column + plot.col_span] # type: SubplotSpec
         
@@ -273,13 +324,14 @@ class MatplotlibParser:
                     row_id = stack_id
 
                 mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0], sharex=mpl_axes_prev)
+                if not self._plot_mpl_axes_lut.get(id(plot)):
+                    self._plot_mpl_axes_lut.update({id(plot): mpl_axes})
                 mpl_axes_prev = mpl_axes
                 # Keep references to iplotlib instances for ease of access in callbacks.
                 mpl_axes._ipl_signals = []
                 mpl_axes._ipl_plot = weakref.ref(plot)
                 mpl_axes._ipl_plot_stack_key = key
                 mpl_axes._ipl_canvas = weakref.ref(plot)
-                mpl_axes._ipl_xy_lim_changes = 0
                 mpl_axes.set_xmargin(0)
                 mpl_axes.set_autoscalex_on(True)
                 mpl_axes.set_autoscaley_on(True)
@@ -331,95 +383,53 @@ class MatplotlibParser:
                     if self.figure.get_tight_layout():
                         leg.set_in_layout(False)
 
-        def _axis_update_callback(axis):
-
-            def get_range_axis_limits_from_mpl_axis(mpl_axis):
-                plot = mpl_axis._ipl_plot() if hasattr(mpl_axis, '_ipl_plot') else None
-                if plot is not None and len(plot.axes or []) > 0:
-                    if isinstance(plot.axes[0], RangeAxis):
-                        return plot.axes[0].original_begin, plot.axes[0].original_end
-                return None, None
-
-            def get_all_shared_axes(base_axis):
-                ret = list()
-                base_begin, base_end = get_range_axis_limits_from_mpl_axis(base_axis)
-
-                if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
-                    for axis in self.figure.axes:
-                        begin, end = get_range_axis_limits_from_mpl_axis(axis)
-                        if (begin, end) == (base_begin, base_end):
-                            ret.append(axis)
-                return ret
-
-            affected_axes = axis.get_shared_x_axes().get_siblings(axis)
-
-            if self.canvas.shared_x_axis:
-                other_axes = get_all_shared_axes(axis)
-                for other_axis in other_axes:
-                    cur_x_limits = NanosecondHelper.mpl_get_lim(axis, 0)
-                    other_x_limits = NanosecondHelper.mpl_get_lim(other_axis, 0)
-                    if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
-                        NanosecondHelper.mpl_set_lim(other_axis, 0, cur_x_limits)
-
-            for a_idx, a in enumerate(affected_axes):
-                ranges_hash = hash((*a.get_xlim(), *a.get_ylim()))
-                current_hash = self.axes_ranges.get(id(a))
-
-                if current_hash is None or ranges_hash != current_hash:
-                    a._ipl_xy_lim_changes += 1
-                    self.axes_ranges[id(a)] = ranges_hash
-
-                    def update_single_range_axis(range_axis, axis_index, mpl_axes):
-                        """If axis is a RangeAxis update its min and max to mpl view limits"""
-
-                        if isinstance(range_axis, RangeAxis):
-                            logger.debug(F"\tAxis update: mpl_axes={id(mpl_axes)} range_axis={id(range_axis)} axis_index={axis_index}  ")
-                            range_axis.begin, range_axis.end = NanosecondHelper.mpl_get_lim(mpl_axes, axis_index)
-                            return [range_axis.begin, range_axis.end]
-
-                    def update_range_axis(range_axis, axis_index, mpl_axes):
-                        """Updates RangeAxis instances begin and end to mpl_axis limits. Works also on stacked axes"""
-                        if isinstance(range_axis, typing.Collection):
-                            subranges = []
-                            for stack_axis in range_axis:
-                                #FIXME: Use mpl_get_axis here
-                                if axis_index == 0:
-                                    a_min, a_max = update_single_range_axis(stack_axis, axis_index, a)
-                                else:
-                                    if isinstance(stack_axis, RangeAxis):
-                                        a_min, a_max = NanosecondHelper.mpl_get_lim(self._axis_mpl_axes_lut[id(stack_axis)], axis_index)
-                                        stack_axis.begin, stack_axis.end = a_min, a_max
-                                    else:
-                                        a_min, a_max = None, None
-                                subranges.append([a_min, a_max])
-                            return subranges
-                        else:
-                            return update_single_range_axis(range_axis, axis_index, mpl_axes)
-
-                    ranges = []
-
-                    if hasattr(a, '_ipl_plot') and a._ipl_plot():
-                        for axis_idx, plot_axis in enumerate(a._ipl_plot().axes):
-                            ranges.append(update_range_axis(plot_axis, axis_idx, a))
-
-                    if a._ipl_xy_lim_changes >= 2:
-                        self.axes_update_set.add(a)
-
-                        for signal_ref in a._ipl_signals:
-                            signal = signal_ref()
-                            if hasattr(signal, "set_ranges"):
-                                signal.set_ranges([ranges[0], ranges[1]])
-
-                if self.axes_update_timer:
-                    self.axes_update_timer.stop()
-
-                self.axes_update_timer.start()
-
         # Observe the axis limit change events
         if not self.canvas.streaming:
             for axes in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
-                axes.callbacks.connect('xlim_changed', _axis_update_callback)
-                axes.callbacks.connect('ylim_changed', _axis_update_callback)
+                axes.callbacks.connect('xlim_changed', self._axis_update_callback)
+                axes.callbacks.connect('ylim_changed', self._axis_update_callback)
+
+    def _axis_update_callback(self, axis):
+
+        affected_axes = axis.get_shared_x_axes().get_siblings(axis)
+
+        if self.canvas.shared_x_axis:
+            other_axes = self.get_all_shared_axes(axis)
+            for other_axis in other_axes:
+                cur_x_limits = NanosecondHelper.mpl_get_lim(axis, 0)
+                other_x_limits = NanosecondHelper.mpl_get_lim(other_axis, 0)
+                if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
+                    NanosecondHelper.mpl_set_lim(other_axis, 0, cur_x_limits)
+
+        for a in affected_axes:
+            ranges_hash = hash((*a.get_xlim(), *a.get_ylim()))
+            current_hash = self._axes_ranges.get(id(a))
+
+            if current_hash is not None and (ranges_hash == current_hash):
+                continue
+
+            self._axes_ranges[id(a)] = ranges_hash
+            ranges = []
+
+            if not hasattr(a, '_ipl_plot'):
+                continue
+            if not isinstance(a._ipl_plot(), Plot):
+                continue
+
+            for ax_idx, ax in enumerate(a._ipl_plot().axes):
+                if isinstance(ax, typing.Collection):
+                    ranges.append(self.update_multi_range_axis(ax, ax_idx, a))
+                elif isinstance(ax, RangeAxis):
+                    ranges.append(self.update_range_axis(ax, ax_idx, a))
+            
+            if not hasattr(a, '_ipl_signals'):
+                continue
+
+            for signal_ref in a._ipl_signals:
+                signal = signal_ref()
+                if hasattr(signal, "set_ranges"):
+                    signal.set_ranges([ranges[0], ranges[1]])
+            self._stale_mpl_axes.add(a)
 
     def process_ipl_axis(self, ax: Axis, ax_id, plot: Plot, mpl_axes: MPLAxes):
         mpl_axis = NanosecondHelper.mpl_get_axis(mpl_axes, ax_id) # type: MPLAxis
@@ -620,11 +630,33 @@ class MatplotlibParser:
 
     @_run_in_one_thread
     def refresh_data(self):
-        for a in self.axes_update_set.copy():
+        logger.debug(f"Stale mpl_axes : {self._stale_mpl_axes}")
+        for a in self._stale_mpl_axes.copy():
             for signal_ref in a._ipl_signals:
                 self.process_ipl_signal(signal_ref())
-        self.axes_update_set.clear()
+        self.unstale_mpl_axes()
 
+
+class MplAxesRangeCmd(IplotAxesRangeCmd):
+    def __init__(self, name: str, old_lim: XYLimits, new_lim: XYLimits, plot: Plot, mpl_parser: MatplotlibParser) -> None:
+        super().__init__(name, old_lim, new_lim, plot)
+        self._mpl_parser = mpl_parser
+        self._mpl_axes = None
+
+    def __call__(self):
+        super().__call__()
+        NanosecondHelper.mpl_set_lim(self.mpl_axes, 0, [self.new_lim.xmin, self.new_lim.xmax])
+        NanosecondHelper.mpl_set_lim(self.mpl_axes, 1, [self.new_lim.ymin, self.new_lim.ymax])
+
+    def undo(self):
+        super().undo()
+        NanosecondHelper.mpl_set_lim(self.mpl_axes, 0, [self.old_lim.xmin, self.old_lim.xmax])
+        NanosecondHelper.mpl_set_lim(self.mpl_axes, 1, [self.old_lim.ymin, self.old_lim.ymax])
+
+    @property
+    def mpl_axes(self) -> MPLAxes:
+        self._mpl_axes = self._mpl_parser._plot_mpl_axes_lut.get(id(self.plot))
+        return self._mpl_axes
 
 def get_data_range(data, axis_idx):
     """Returns first and last value from data[axis_idx] or None"""

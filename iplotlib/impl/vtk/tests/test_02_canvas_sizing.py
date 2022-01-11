@@ -13,7 +13,7 @@ class VTKParserTesting(unittest.TestCase):
     def test_02_canvas_sizing_refresh(self):
         
         canvas = Canvas(2, 2)
-        self.vtk_canvas.refresh(canvas)
+        self.vtk_canvas.process_ipl_canvas(canvas)
 
         size = self.vtk_canvas.matrix.GetSize()
 

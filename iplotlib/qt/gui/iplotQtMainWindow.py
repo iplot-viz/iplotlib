@@ -60,13 +60,13 @@ class IplotQtMainWindow(QMainWindow):
         w = self.canvasStack.currentWidget()
         if not w:
             return
-        w.back()
+        w.undo()
 
     def redo(self):
         w = self.canvasStack.currentWidget()
         if not w:
             return
-        w.forward()
+        w.redo()
 
     def updateCanvasPreferences(self):
         w = self.canvasStack.currentWidget()
@@ -79,7 +79,6 @@ class IplotQtMainWindow(QMainWindow):
         w = self.canvasStack.currentWidget()
         idx = self.canvasStack.currentIndex()
         canvas = w.get_canvas()
-        # TODO: Should the history of zoom/pan be cleared here?
         # TODO: Should we reset preferences here?
         self.prefWindow.manualReset(idx)
         w.reset()

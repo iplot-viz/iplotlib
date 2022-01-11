@@ -1,50 +1,47 @@
+from collections import deque
+
 from iplotlib.core.command import IplotCommand
 import iplotLogging.setupLogger as ls
-logger = ls.get_logger(__name__, 'DEBUG')
+
+logger = ls.get_logger(__name__)
 
 class HistoryManager:
     def __init__(self) -> None:
-        self.iplot_commands = []
-        self._location = -1 # index points to the next command in iplot_commands
+        self._undo_stack = deque()
+        self._redo_stack = deque()
 
-    def do_command(self, cmd: IplotCommand):
-        self.iplot_commands.append(cmd)
-        self._location = len(self.iplot_commands) - 1
+    def done(self, cmd: IplotCommand):
+        assert isinstance(cmd, IplotCommand)
+        self._redo_stack.clear()
+        self._undo_stack.append(cmd)
+        logger.debug(f"UndoStack: {self._undo_stack}")
+        logger.debug(f"RedoStack: {self._redo_stack}")
 
     def undo(self) -> None:
         try:
-            cmd = self.iplot_commands[self._location] # type: IplotCommand
-            assert callable(cmd)
-            cmd()
-            self._location -= 1
+            cmd = self._undo_stack.pop() # type: IplotCommand
+            cmd.undo()
+            self._redo_stack.append(cmd)
             logger.debug(f"Undo {cmd.name}")
+            logger.debug(f"UndoStack: {self._undo_stack}")
+            logger.debug(f"RedoStack: {self._redo_stack}")
         except (IndexError, AssertionError) as _:
-            logger.debug(f"Cannot undo. No more commands.")
+            logger.warning(f"Cannot undo. No more commands.")
             return
 
     def redo(self) -> None:
         try:
-            cmd = self.iplot_commands[self._location + 1]
-            assert callable(cmd)
-            self._location += 1
+            cmd = self._redo_stack.pop() # type: IplotCommand
+            cmd()
+            self._undo_stack.append(cmd)
             logger.debug(f"Redo {cmd.name}")
+            logger.debug(f"UndoStack: {self._undo_stack}")
+            logger.debug(f"RedoStack: {self._redo_stack}")
         except (IndexError, AssertionError) as _:
-            logger.debug(f"Cannot redo. No more commands.")
+            logger.warning(f"Cannot redo. No more commands.")
             return
 
     def drop(self) -> None:
-        self.iplot_commands.clear()
-        self._location = -1
-
-# Ex: For the following sequence..
-# 0. Zoom -1, 1 
-# 1. Pan -3, 3
-# 2. Zoom -2, 2
-
-# Hit undo
-# _location is 2. Will undo command with id 2. the zoom will be undone. _location is decremented.
-# Hit redo
-# _location is 1. Will redo command with id _location + 1 = 2. the zoom will be redone. _location is incremented.
-# Hit redo
-# _location is 2. IndexError is raised, so cannot redo.
-
+        self._iplot_commands.clear()
+        logger.debug(f"UndoStack: {self._undo_stack}")
+        logger.debug(f"RedoStack: {self._redo_stack}")

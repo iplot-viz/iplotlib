@@ -88,15 +88,12 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
 
         self.canvas.set_canvas(self.core_canvas)
         self.canvas.set_mouse_mode(Canvas.MOUSE_MODE_CROSSHAIR)
-        self.canvas.update()
         self.canvas.show()
-        self.canvas.get_render_widget().Initialize()
-        self.canvas.get_render_widget().Render()
 
-        QTest.mouseMove(self.canvas.get_render_widget(), QPoint(400, 150), delay=1)
+        QTest.mouseMove(self.canvas.get_vtk_renderer(), QPoint(400, 150), delay=1)
         self.app.processEvents()
 
-        renWin = self.canvas.get_render_widget().GetRenderWindow()
+        renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
         valid_image_name = os.path.basename(__file__).replace(
             "test", "valid").replace(".py", ".png")
         valid_image_path = os.path.join(os.path.join(

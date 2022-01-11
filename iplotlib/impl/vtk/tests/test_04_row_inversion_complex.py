@@ -16,7 +16,7 @@ class VTKParserTesting(unittest.TestCase):
                 plot = Plot(row_span=2)
                 canvas.add_plot(plot, c)
 
-        self.vtk_parser.refresh(canvas)
+        self.vtk_parser.process_ipl_canvas(canvas)
 
         return super().setUp()
 
