@@ -78,6 +78,15 @@ class QtVTKCanvas(IplotQtCanvas):
     def drop_history(self):
         return self._vtk_parser.drop_history()
 
+    def stage_view_lim_cmd(self):
+        return super().stage_view_lim_cmd()
+    
+    def commit_view_lim_cmd(self):
+        return super().commit_view_lim_cmd()
+    
+    def stage_view_lim_cmd(self):
+        return super().stage_view_lim_cmd()
+
     def resizeEvent(self, event: QResizeEvent):
         size = event.size()
         if not size.width():

@@ -9,20 +9,20 @@
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 
-import typing
 
 from PySide2.QtCore import QMargins, QMetaObject, Qt, Slot
 from PySide2.QtGui import QKeyEvent
 from PySide2.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
 
+from matplotlib.axes import Axes as MPLAxes
 from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, MouseEvent
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
-from iplotlib.core.commands.axes_range import XYLimits
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.distance import DistanceCalculator
-from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser, MplAxesRangeCmd, NanosecondHelper
+from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser, NanosecondHelper
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 import iplotLogging.setupLogger as ls
 
@@ -35,15 +35,12 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def __init__(self, parent=None, tight_layout=True, **kwargs):
         super().__init__(parent, **kwargs)
 
-        self._mmode = None
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
-        self._staging_commands = [] # type: typing.List[MplAxesRangeCmd]
-        self._commited_commands = [] # type: typing.List[MplAxesRangeCmd]
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._mpl_parser = MatplotlibParser(tight_layout=tight_layout, mpl_flush_method=self.draw_in_main_thread, **kwargs)
-        self._mpl_renderer = FigureCanvas(self._mpl_parser.figure)
+        self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
+        self._mpl_renderer = FigureCanvas(self._parser.figure)
         self._mpl_renderer.setParent(self)
         self._mpl_renderer.setSizePolicy(self._mpl_size_pol)
         self._mpl_toolbar = NavigationToolbar(self._mpl_renderer, self)
@@ -66,24 +63,24 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
 
-        prev_canvas = self._mpl_parser.canvas
+        prev_canvas = self._parser.canvas
         if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
             self.unfocus_plot()
 
-        super().set_canvas(canvas)  # does nothing for now
-
-        self._mpl_parser.deactivate_cursor()
+        self._parser.deactivate_cursor()
         
         if not canvas:
             return
 
-        self._mpl_parser.process_ipl_canvas(canvas)
+        self._parser.process_ipl_canvas(canvas)
         self.set_mouse_mode(self._mmode or canvas.mouse_mode)
         self.render()
 
+        super().set_canvas(canvas)
+
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
-        return self._mpl_parser.canvas if self._mpl_parser else None
+        return self._parser.canvas if self._parser else None
 
     def set_mouse_mode(self, mode: str):
         logger.debug(f"MMode change {self._mmode} -> {mode}")
@@ -91,7 +88,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         if self._mpl_toolbar:
             self._mpl_toolbar.mode = _Mode.NONE
-            self._mpl_parser.deactivate_cursor()
+            self._parser.deactivate_cursor()
         
         if self._mmode is None:
             return
@@ -101,29 +98,48 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         if mode == Canvas.MOUSE_MODE_CROSSHAIR:
             self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
-            self._mpl_parser.activate_cursor()
+            self._parser.activate_cursor()
         elif mode == Canvas.MOUSE_MODE_PAN:
-            self._mpl_parser.deactivate_cursor()
+            self._parser.deactivate_cursor()
             self._mpl_toolbar.pan()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
-            self._mpl_parser.deactivate_cursor()
+            self._parser.deactivate_cursor()
             self._mpl_toolbar.zoom()
 
     def undo(self):
-        self._mpl_parser.undo()
-        self._mpl_parser.refresh_data()
+        self._parser.undo()
         self.render()
 
     def redo(self):
-        self._mpl_parser.redo()
-        self._mpl_parser.refresh_data()
+        self._parser.redo()
         self.render()
 
     def unfocus_plot(self):
-        self._mpl_parser.set_focus_plot(None)
+        self._parser.set_focus_plot(None)
 
     def drop_history(self):
-        return self._mpl_parser.drop_history()
+        return self._parser.drop_history()
+
+    def stage_view_lim_cmd(self):
+        name = self._mmode[3:]
+        old_limits = self._parser.get_all_plot_limits()
+        cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
+        self._staging_cmds.append(cmd)
+        super().stage_view_lim_cmd()
+    
+    def commit_view_lim_cmd(self):
+        cmd = self._staging_cmds.pop()
+        cmd.new_lim = self._parser.get_all_plot_limits()
+        assert len(cmd.new_lim) == len(cmd.old_lim)
+        if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
+            self._commitd_cmds.append(cmd)
+            logger.debug(f"Commited {cmd}")
+            super().commit_view_lim_cmd()
+        else:
+            logger.debug(f"Rejected {cmd}")
+    
+    def push_view_lim_cmd(self):
+        super().push_view_lim_cmd()
 
     def draw_in_main_thread(self):
         import shiboken2
@@ -132,13 +148,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     @Slot()
     def flush_draw_queue(self):
-        if self._mpl_parser:
-            self._mpl_parser.process_work_queue()
+        if self._parser:
+            self._parser.process_work_queue()
 
     @Slot()
     def render(self):
         self._mpl_renderer.draw()
-        self._mpl_parser.unstale_mpl_axes()
+        self._parser.unstale_impl_plots()
 
     # custom event handlers
     def _mpl_draw_finish(self, event: DrawEvent):
@@ -150,32 +166,50 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._debug_log_event(event, "Mouse pressed")
         if event.dblclick:
             if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT and event.inaxes is not None:
-                logger.debug(
-                    f"Plot clicked: {event.inaxes}. Plot: {event.inaxes._ipl_plot()} stack_key: {event.inaxes._ipl_plot_stack_key}")
-                self._mpl_parser.set_focus_plot(event.inaxes)
+                self._parser.set_focus_plot(event.inaxes)
+                self._refresh_original_ranges = False
                 self.refresh()
-            elif self._mmode == Canvas.MOUSE_MODE_ZOOM:
-                pass
+                self._refresh_original_ranges = True
+            elif self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                mpl_axes = event.inaxes
+                if not isinstance(mpl_axes, MPLAxes):
+                    return
+                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+                if not hasattr(ci, 'plot'):
+                    return
+                plot = ci.plot()
+                if not plot:
+                    return
+
+                # Stage a command to obtain original view limits
+                self.stage_view_lim_cmd()
+                
+                # Reset plot to original view limits
+                original_limits = self._parser.get_plot_limits(plot, which='original')
+                self._parser.set_plot_limits(original_limits)
+
+                # Commit it.
+                while len(self._staging_cmds):
+                    self.commit_view_lim_cmd()
+
+                # Push it.
+                while len(self._commitd_cmds):
+                    self.push_view_lim_cmd()
+
+                self.render()
             else:
-                self._mpl_parser.set_focus_plot(None)
+                self._parser.set_focus_plot(None)
+                self._refresh_original_ranges = False
                 self.refresh()
-            QMetaObject.invokeMethod(self, "render")
+                self._refresh_original_ranges = True
         else:
-            if event.inaxes is None:
-                return
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                # Stage a command to obtain original view limits for event.inaxes
-                old_lim = XYLimits(
-                    *NanosecondHelper.mpl_get_lim(event.inaxes, 0),
-                    *NanosecondHelper.mpl_get_lim(event.inaxes, 1)
-                )
-                new_lim = None
-                name = self._mmode[3:]
-                cmd = MplAxesRangeCmd(name.capitalize(), old_lim, new_lim, event.inaxes._ipl_plot(), self._mpl_parser)
-                self._staging_commands.append(cmd)
-                logger.debug(f"Staged {cmd}")
+                # Stage a command to obtain original view limits
+                self.stage_view_lim_cmd()
                 return
             if event.button != MouseButton.LEFT:
+                return
+            if event.inaxes is None:
                 return
             if self._mmode == Canvas.MOUSE_MODE_DIST:
                 if self._dist_calculator.plot1 is not None:
@@ -202,27 +236,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if event.dblclick:
             pass
         else:
-            if event.inaxes is None:
-                return
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
                 # commit commands from staging.
-                while len(self._staging_commands):
-                    cmd = self._staging_commands.pop()
-                    cmd.new_lim = XYLimits(
-                        *NanosecondHelper.mpl_get_lim(cmd.mpl_axes, 0),
-                        *NanosecondHelper.mpl_get_lim(cmd.mpl_axes, 1)
-                    )
-                    if any([val1 != val2 for val1, val2 in zip(cmd.old_lim, cmd.new_lim)]):
-                        self._commited_commands.append(cmd)
-                        logger.debug(f"Commited {cmd}")
-                    else:
-                        logger.debug(f"Rejected {cmd}")
+                while len(self._staging_cmds):
+                    self.commit_view_lim_cmd()
                 # push uncommited changes onto the command stack.
-                while len(self._commited_commands):
-                    cmd = self._commited_commands.pop()
-                    self._mpl_parser._hm.done(cmd)
-                    logger.debug(f"Pushed {cmd}")
-                    self._mpl_parser.refresh_data()
+                while len(self._commitd_cmds):
+                    self.push_view_lim_cmd()
     
     def keyPressEvent(self, event: QKeyEvent):
         if event.text() == 'n':

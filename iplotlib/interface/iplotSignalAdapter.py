@@ -41,7 +41,7 @@ from iplotProcessing.tools import hash_code
 
 import iplotLogging.setupLogger as sl
 
-logger = sl.get_logger(__name__, level="INFO")
+logger = sl.get_logger(__name__)
 
 IplotSignalAdapterT = typing.TypeVar(
     'IplotSignalAdapterT', bound='IplotSignalAdapter')
@@ -153,7 +153,6 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         # 3. Help keep track of data access parameters.
         self._access_md5sum = None
-        self._data_xrange = None, None
 
         # 4. Parse name and prepare a hierarchy of objects if needed.
         self.status_info = StatusInfo()
@@ -538,7 +537,6 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         target_md5sum = self.calculate_data_hash()
         logger.debug(f"old={self._access_md5sum}, new={target_md5sum}")
-
         if self._access_md5sum is None:
             self._access_md5sum = target_md5sum
             return True
@@ -547,17 +545,21 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
             if AccessHelper.num_samples_override:
                 return True
-            elif self._check_if_zoomed_in():
+            elif self._check_if_zoomed_or_panned():
                 return True
             else:
                 return False
         else:
             return False
 
-    def _check_if_zoomed_in(self):
-        if all(e is not None for e in [self._data_xrange[0], self._data_xrange[1], self.ts_start, self.ts_end]):
-            return (self._data_xrange[0] < self.ts_start < self._data_xrange[1]
-                    and self._data_xrange[0] < self.ts_end < self._data_xrange[1])
+    def _check_if_zoomed_or_panned(self):
+        if not hasattr(self.x_data, '__len__'):
+            return
+        if len(self.x_data) < 2:
+            return
+        xmin, xmax = self.x_data[0], self.x_data[-1]
+        if all(e is not None for e in [xmin, xmax, self.ts_start, self.ts_end]):
+            return (xmin != self.ts_start or xmax != self.ts_end)
         else:
             return False
 
@@ -756,12 +758,12 @@ class AccessHelper:
 
                 if len(xdata) > 0:
                     logger.debug(
-                        F"\tUDA samples: {len(xdata)} params={da_params}")
+                        f"\tUDA samples: {len(xdata)} params={da_params}")
                     logger.debug(
-                        F"\tX range: d_min={xdata[0]} d_max={xdata[-1]} delta={xdata[-1]-xdata[0]} type={xdata.dtype}")
+                        f"\tX range: d_min={xdata[0]} d_max={xdata[-1]} delta={xdata[-1]-xdata[0]} type={xdata.dtype}")
                 else:
                     logger.info(
-                        F"\tUDA samples: {len(xdata)} params={da_params}")
+                        f"\tUDA samples: {len(xdata)} params={da_params}")
 
                 result['alias_map'] = {
                         'time': {'idx': 0, 'independent': True},
@@ -797,10 +799,10 @@ class CachingAccessHelper(AccessHelper):
         if self.enable_cache:
             cached = self._cache_fetch(signal)
             if cached is not None:
-                logger.info(F"HIT: {self._cache_filename(signal)}")
+                logger.info(f"HIT: {self._cache_filename(signal)}")
                 return cached
             else:
-                logger.info(F"MISS: {self._cache_filename(signal)}")
+                logger.info(f"MISS: {self._cache_filename(signal)}")
                 return self._cache_put(signal, super().fetch_data(signal))
         else:
             return super().fetch_data(signal)

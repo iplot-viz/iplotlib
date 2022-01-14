@@ -8,7 +8,6 @@ from PySide2.QtCore import QMargins, Qt, Signal
 from PySide2.QtWidgets import QMainWindow, QWidget
 
 from iplotlib.qt.gui.iplotCanvasToolbar import IplotQtCanvasToolbar
-from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtCanvasAssembly import IplotQtCanvasAssembly
 from iplotlib.qt.gui.iplotQtPreferencesWindow import IplotQtPreferencesWindow
 
@@ -79,7 +78,6 @@ class IplotQtMainWindow(QMainWindow):
         w = self.canvasStack.currentWidget()
         idx = self.canvasStack.currentIndex()
         canvas = w.get_canvas()
-        # TODO: Should we reset preferences here?
         self.prefWindow.manualReset(idx)
         w.reset()
         w.set_canvas(canvas)

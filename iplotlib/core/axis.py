@@ -34,6 +34,12 @@ class RangeAxis(Axis):
     begin: any = None
     end: any = None
 
+    def get_limits(self, which: str = 'current') -> tuple:
+        if which == 'current':
+            return self.begin, self.end
+        else: # which == 'original'
+            return self.original_begin, self.original_end
+
     def reset_preferences(self):
         self.begin = RangeAxis.begin
         self.end = RangeAxis.end
