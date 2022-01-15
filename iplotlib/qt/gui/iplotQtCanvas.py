@@ -53,6 +53,7 @@ class IplotQtCanvas(QWidget):
     @abstractmethod
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
+        logger.debug(f"MMode change {self._mmode} -> {mode}")
         self._mmode = mode
 
     @abstractmethod
@@ -83,29 +84,29 @@ class IplotQtCanvas(QWidget):
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
 
-    @abstractmethod
     def stage_view_lim_cmd(self):
-        """Implementation must stage a view command"""
-        try:
-            cmd = self._staging_cmds.pop()
-            logger.debug(f"Staged {cmd}")
-            self._staging_cmds.append(cmd)
-        except IndexError:
-            return
+        """stage a view command"""
 
-    @abstractmethod
+        name = self._mmode[3:]
+        old_limits = self._parser.get_all_plot_limits()
+        cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
+        self._staging_cmds.append(cmd)
+        logger.debug(f"Staged {cmd}")
+
     def commit_view_lim_cmd(self):
-        """Implementation must commit a view command"""
-        try:
-            cmd = self._commitd_cmds.pop()
-            logger.debug(f"Commited {cmd}")
-            self._commitd_cmds.append(cmd)
-        except IndexError:
-            return
+        """commit a view command"""
 
-    @abstractmethod
+        cmd = self._staging_cmds.pop()
+        cmd.new_lim = self._parser.get_all_plot_limits()
+        assert len(cmd.new_lim) == len(cmd.old_lim)
+        if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
+            self._commitd_cmds.append(cmd)
+            logger.debug(f"Commited {cmd}")
+        else:
+            logger.debug(f"Rejected {cmd}")
+
     def push_view_lim_cmd(self):
-        """Implementation must push a view command onto their history manager"""
+        """push a view command onto their history manager"""
         try:
             cmd = self._commitd_cmds.pop()
             self._parser._hm.done(cmd)

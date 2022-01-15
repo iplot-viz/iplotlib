@@ -6,8 +6,8 @@ import time
 
 def plot():
     ts = time.time_ns()
-    te = ts + 8000_000_000_000_000 * 32
-    xs = np.arange(ts, te, 8000_000_000_000_000, dtype=np.int64)
+    te = ts + 8 * 32
+    xs = np.arange(ts, te, 8, dtype=np.int64)
     ys = np.sin(np.linspace(-1, 1, len(xs)))
 
     # A 2col x 2row canvas

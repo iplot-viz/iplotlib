@@ -1,7 +1,9 @@
 from matplotlib.ticker import ScalarFormatter
 import pandas
 
+from iplotlib.core.impl_base import ImplementationPlotCacheTable
 import iplotLogging.setupLogger as ls
+
 
 logger = ls.get_logger(__name__)
 
@@ -21,18 +23,22 @@ class NanosecondDateFormatter(ScalarFormatter):
     """Formats for each date segment"""
     formats = ["{:4d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:03d}", "{:03d}", "{:03d}"]
 
-    def __init__(self, label_segments=4, postfix_end=True, postfix_start=False):
+    def __init__(self, label_segments=4, postfix_end=True, postfix_start=False, offset_lut: ImplementationPlotCacheTable=None):
         super().__init__()
         self.postfix_end = postfix_end
         self.posfix_start = postfix_start
         self.label_segments = label_segments
         self.offset_str = "N/A"
         self.cut_start = -1
+        self._offset_lut = offset_lut
 
     @property
     def offsetns(self):
-        if hasattr(self.axis, '_offset'):
-            return self.axis._offset
+        if not self._offset_lut:
+            return 0
+        ci = self._offset_lut.get_cache_item(self.axis)
+        if hasattr(ci, 'offset') and ci.offset is not None:
+            return ci.offset
         return 0
 
     def set_locs(self, locs):
@@ -77,7 +83,6 @@ class NanosecondDateFormatter(ScalarFormatter):
         ret = ""
         if end is None:
             end = self.NANOSECOND
-
         for i in range(start, end + 1):
             if i > 0 and i == start and postfix_start:
                 ret += self.postfixes[i - 1]

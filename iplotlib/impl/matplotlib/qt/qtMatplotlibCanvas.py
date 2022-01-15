@@ -22,7 +22,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.distance import DistanceCalculator
-from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser, NanosecondHelper
+from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 import iplotLogging.setupLogger as ls
 
@@ -68,22 +68,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self.unfocus_plot()
 
         self._parser.deactivate_cursor()
-        
-        if not canvas:
-            return
-
         self._parser.process_ipl_canvas(canvas)
-        self.set_mouse_mode(self._mmode or canvas.mouse_mode)
-        self.render()
+        
+        if canvas:
+            self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
+        self.render()
         super().set_canvas(canvas)
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
-        return self._parser.canvas if self._parser else None
+        return self._parser.canvas
 
     def set_mouse_mode(self, mode: str):
-        logger.debug(f"MMode change {self._mmode} -> {mode}")
         super().set_mouse_mode(mode)
 
         if self._mpl_toolbar:
@@ -119,27 +116,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def drop_history(self):
         return self._parser.drop_history()
-
-    def stage_view_lim_cmd(self):
-        name = self._mmode[3:]
-        old_limits = self._parser.get_all_plot_limits()
-        cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
-        self._staging_cmds.append(cmd)
-        super().stage_view_lim_cmd()
-    
-    def commit_view_lim_cmd(self):
-        cmd = self._staging_cmds.pop()
-        cmd.new_lim = self._parser.get_all_plot_limits()
-        assert len(cmd.new_lim) == len(cmd.old_lim)
-        if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
-            self._commitd_cmds.append(cmd)
-            logger.debug(f"Commited {cmd}")
-            super().commit_view_lim_cmd()
-        else:
-            logger.debug(f"Rejected {cmd}")
-    
-    def push_view_lim_cmd(self):
-        super().push_view_lim_cmd()
 
     def draw_in_main_thread(self):
         import shiboken2
@@ -203,19 +179,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 self.refresh()
                 self._refresh_original_ranges = True
         else:
+            if event.inaxes is None:
+                return
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
                 # Stage a command to obtain original view limits
                 self.stage_view_lim_cmd()
                 return
             if event.button != MouseButton.LEFT:
                 return
-            if event.inaxes is None:
-                return
             if self._mmode == Canvas.MOUSE_MODE_DIST:
                 if self._dist_calculator.plot1 is not None:
                     x_axis = event.inaxes.get_xaxis()
                     has_offset = hasattr(x_axis, '_offset')
-                    x = NanosecondHelper.mpl_transform_value(event.inaxes.get_xaxis(), event.xdata)
+                    x = self._parser.transform_value(event.inaxes, 0, event.xdata)
                     self._dist_calculator.set_dst(x, event.ydata, event.inaxes._ipl_plot(), event.inaxes._ipl_plot_stack_key)
                     self._dist_calculator.set_dx_is_datetime(has_offset)
                     box = QMessageBox(self)
@@ -228,7 +204,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     box.exec_()
                     self._dist_calculator.reset()
                 else:
-                    x = NanosecondHelper.mpl_transform_value(event.inaxes.get_xaxis(), event.xdata)
+                    x = self._parser.transform_value(event.inaxes, 0, event.xdata)
                     self._dist_calculator.set_src(x, event.ydata, event.inaxes._ipl_plot(), event.inaxes._ipl_plot_stack_key)
 
     def _mpl_mouse_release_handler(self, event: MouseEvent):

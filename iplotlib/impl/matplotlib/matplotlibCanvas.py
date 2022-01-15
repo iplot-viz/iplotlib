@@ -156,7 +156,7 @@ class MatplotlibParser(BackendParserBase):
 
     def update_range_axis(self, range_axis: RangeAxis, ax_idx: int, mpl_axes: MPLAxes, which: str='current'):
         """If axis is a RangeAxis update its min and max to mpl view limits"""
-        limits = NanosecondHelper.mpl_get_lim(mpl_axes, ax_idx)
+        limits =self.get_impl_axis_limits(mpl_axes, ax_idx)
         if which == 'current':
             range_axis.begin = limits[0]
             range_axis.end = limits[1]
@@ -168,7 +168,7 @@ class MatplotlibParser(BackendParserBase):
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, MPLAxes):
             return False
-        NanosecondHelper.mpl_set_lim(impl_plot, ax_idx, limits)
+        self.set_impl_axis_limits(impl_plot, ax_idx, limits)
         return True
 
     def _get_all_shared_axes(self, base_mpl_axes: MPLAxes):
@@ -281,7 +281,7 @@ class MatplotlibParser(BackendParserBase):
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
                 mpl_axes_prev = mpl_axes
                 # Keep references to iplotlib instances for ease of access in callbacks.
-                self._impl_plot_cache_table.register(mpl_axes, self.canvas, plot, key, signals)
+                self._impl_plot_cache_table.register_plot(mpl_axes, self.canvas, plot, key, signals)
                 mpl_axes.set_xmargin(0)
                 mpl_axes.set_autoscalex_on(True)
                 mpl_axes.set_autoscaley_on(True)
@@ -348,10 +348,10 @@ class MatplotlibParser(BackendParserBase):
         if self.canvas.shared_x_axis:
             other_axes = self._get_all_shared_axes(axis)
             for other_axis in other_axes:
-                cur_x_limits = NanosecondHelper.mpl_get_lim(axis, 0)
-                other_x_limits = NanosecondHelper.mpl_get_lim(other_axis, 0)
+                cur_x_limits =self.get_impl_axis_limits(axis, 0)
+                other_x_limits =self.get_impl_axis_limits(other_axis, 0)
                 if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
-                    NanosecondHelper.mpl_set_lim(other_axis, 0, cur_x_limits)
+                    self.set_impl_axis_limits(other_axis, 0, cur_x_limits)
 
         for a in affected_axes:
             ranges_hash = hash((*a.get_xlim(), *a.get_ylim()))
@@ -389,9 +389,10 @@ class MatplotlibParser(BackendParserBase):
 
     def process_ipl_axis(self, axis: Axis, ax_idx, plot: Plot, impl_plot: MPLAxes):
         super().process_ipl_axis(axis, ax_idx, plot, impl_plot)
-        mpl_axis = NanosecondHelper.mpl_get_axis(
+        mpl_axis = self.get_impl_axis(
             impl_plot, ax_idx)  # type: MPLAxis
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
+        self._impl_plot_cache_table.register_axis(mpl_axis)
         if isinstance(axis, Axis):
             fc = self._pm.get_value(
                 'font_color', self.canvas, axis, plot) or 'black'
@@ -414,11 +415,11 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None and (axis.begin or axis.end):
             logger.debug(
                 f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
-            NanosecondHelper.mpl_set_lim(impl_plot, ax_idx, [axis.begin, axis.end])
+            self.set_impl_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
 
         if isinstance(axis, LinearAxis):
             if axis.is_date:
-                mpl_axis.set_major_formatter(NanosecondDateFormatter())
+                mpl_axis.set_major_formatter(NanosecondDateFormatter(offset_lut=self._impl_plot_cache_table))
 
     @BackendParserBase.run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
@@ -440,7 +441,7 @@ class MatplotlibParser(BackendParserBase):
 
         # All good, make a data access request.
         signal_data = signal.get_data()
-        data = NanosecondHelper.mpl_axes_transform_data(mpl_axes, signal_data)
+        data = self.transform_data(mpl_axes, signal_data)
 
         if hasattr(signal, 'envelope') and signal.envelope:
             if len(data) != 3:
@@ -599,6 +600,40 @@ class MatplotlibParser(BackendParserBase):
                 artist.set_visible(False)
 
             a.draw(a.figure._cachedRenderer)
+
+    def get_impl_x_axis(self, impl_plot: Any):
+        if isinstance(impl_plot, MPLAxes):
+            return impl_plot.get_xaxis()
+        else:
+            return None
+
+    def get_impl_y_axis(self, impl_plot: Any):
+        if isinstance(impl_plot, MPLAxes):
+            return impl_plot.get_yaxis()
+        else:
+            return None
+
+    def get_impl_x_axis_limits(self, impl_plot: Any):
+        if isinstance(impl_plot, MPLAxes):
+            return impl_plot.get_xlim()
+        else:
+            return None
+
+    def get_impl_y_axis_limits(self, impl_plot: Any):
+        if isinstance(impl_plot, MPLAxes):
+            return impl_plot.get_ylim()
+        else:
+            return None
+
+    def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
+        if isinstance(impl_plot, MPLAxes):
+            impl_plot.set_xlim(limits)
+
+    def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
+        if isinstance(impl_plot, MPLAxes):
+            impl_plot.set_ylim(limits)
+        else:
+            return None
 
 
 def get_data_range(data, axis_idx):
@@ -788,7 +823,7 @@ class MultiCursor2(MultiCursor):
                     if signal is not None:
                         ax = annotation.axes
 
-                        xvalue = NanosecondHelper.mpl_transform_value(
+                        xvalue = self._cache_table.transform_value(
                             ax.get_xaxis(), event.xdata)
                         values = signal.pick(xvalue)
                         logger.debug(F"Found {values} for xvalue: {xvalue}")
@@ -796,9 +831,9 @@ class MultiCursor2(MultiCursor):
                             dx = abs(xvalue - values[0])
                             xmin, xmax = ax.get_xbound()
                             if dx < (xmax - xmin) * self.val_tolerance:
-                                pos_x = NanosecondHelper.mpl_transform_value(
+                                pos_x = self._cache_table.transform_value(
                                     ax.get_xaxis(), values[0], True)
-                                pos_y = NanosecondHelper.mpl_transform_value(
+                                pos_y = self._cache_table.transform_value(
                                     ax.get_yaxis(), values[1], True)
                                 annotation.set_position((pos_x, pos_y))
                                 annotation.set_text(ax.format_ydata(values[1]))
@@ -839,128 +874,3 @@ class MultiCursor2(MultiCursor):
             self.canvas.blit()
         else:
             self.canvas.draw_idle()
-
-
-# def nvl(*objs):
-#     """Returns first non-None value"""
-
-#     for o in objs:
-#         if o is not None:
-#             return o
-#     return None
-
-
-# def nvl_prop(prop_name, *objs, default=None):
-#     """Returns first not None property value from list of objects"""
-
-#     for o in objs:
-#         if hasattr(o, prop_name) and getattr(o, prop_name) is not None:
-#             return getattr(o, prop_name)
-#     return default
-
-
-class NanosecondHelper:
-
-    @staticmethod
-    def mpl_create_offset(vals):
-        """Given a collection of values determine if creting offset is necessary and return it
-        Returns None otherwise"""
-        if isinstance(vals, Collection) and len(vals) > 0:
-            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'int64')
-                    or (type(vals[0]) == int)
-                    or isinstance(vals[0], numpy.int64)) and vals[0] > 10**15:
-                return vals[0]
-        if isinstance(vals, Collection) and len(vals) > 0:
-            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'uint64')
-                    or (type(vals[0]) == int)
-                    or isinstance(vals[0], numpy.uint64)) and vals[0] > 10**15:
-                return vals[0]
-        return None
-
-    @staticmethod
-    def mpl_transform_value(mpl_axis, value, inverse=False):
-        """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
-        float when offset is int)"""
-        base = 0
-        if mpl_axis is not None and hasattr(mpl_axis, '_offset'):
-            base = mpl_axis._offset
-            if isinstance(mpl_axis._offset, int) or mpl_axis._offset.dtype.name == 'int64':
-                value = int(value)
-        return value - base if inverse else value + base
-
-    @staticmethod
-    def mpl_axis_get_value(mpl_axis, data_sample):
-        """Offset-aware get axis value"""
-        return NanosecondHelper.mpl_transform_value(mpl_axis, data_sample)
-
-    @staticmethod
-    def mpl_get_axis(mpl_axes, axis_idx):
-        """Convenience method that gets matplotlib axis by index instead of using separate methods get_xaxis/get_yaxis"""
-        if 0 <= axis_idx <= 1:
-            return [mpl_axes.get_xaxis, mpl_axes.get_yaxis][axis_idx]()
-        return None
-
-    @staticmethod
-    def mpl_get_lim(mpl_axes, axis_idx):
-        """Offset-aware version of mpl_axis.get_xlim()/get_ylim()"""
-        begin, end = (None, None)
-        if 0 <= axis_idx <= 1:
-            begin, end = [mpl_axes.get_xlim, mpl_axes.get_ylim][axis_idx]()
-
-        mpl_axis = NanosecondHelper.mpl_get_axis(mpl_axes, axis_idx)
-        if hasattr(mpl_axis, '_offset'):
-            begin = NanosecondHelper.mpl_transform_value(mpl_axis, begin)
-            end = NanosecondHelper.mpl_transform_value(mpl_axis, end)
-
-        return begin, end
-
-    @staticmethod
-    def mpl_set_lim(mpl_axes, axis_idx, limits):
-        mpl_axis = NanosecondHelper.mpl_get_axis(mpl_axes, axis_idx)
-
-        if not hasattr(mpl_axis, '_offset'):
-            new_offset = NanosecondHelper.mpl_create_offset(limits)
-            if new_offset is not None:
-                mpl_axis._offset = new_offset
-
-        if hasattr(mpl_axis, '_offset'):
-            begin = NanosecondHelper.mpl_transform_value(
-                mpl_axis, limits[0], inverse=True)
-            end = NanosecondHelper.mpl_transform_value(
-                mpl_axis, limits[1], inverse=True)
-        else:
-            begin = limits[0]
-            end = limits[1]
-
-        if axis_idx == 0:
-            if begin == end and begin is not None:
-                begin = end-1
-            return mpl_axes.set_xlim([begin, end])
-        elif axis_idx == 1:
-            return mpl_axes.set_ylim([begin, end])
-        else:
-            return None
-
-    @staticmethod
-    def mpl_axes_transform_data(mpl_axes, data):
-        """This function post processes data if it cannot be plot with matplotlib directly.
-        Currently it transforms data if it is a large integer which can cause overflow in matplotlib"""
-        ret = []
-        if isinstance(data, Collection):
-            for i, d in enumerate(data):
-                mpl_axis = NanosecondHelper.mpl_get_axis(mpl_axes, i)
-                if not hasattr(mpl_axis, '_offset'):
-                    new_offset = NanosecondHelper.mpl_create_offset(d)
-                    if new_offset is not None:
-                        mpl_axis._offset = d[0]
-
-                if hasattr(mpl_axis, '_offset'):
-                    logger.debug(
-                        F"\tAPPLY DATA OFFSET {mpl_axis._offset} to axis {id(mpl_axis)} idx: {i}")
-                    if isinstance(d, Collection):
-                        ret.append([e - mpl_axis._offset for e in d])
-                    else:
-                        ret.append(d - mpl_axis._offset)
-                else:
-                    ret.append(d)
-        return ret
