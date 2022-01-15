@@ -1,14 +1,18 @@
 import numpy as np
-import typing
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Any, Callable, Collection, List, Sequence, Set, Tuple, Union
 
-from iplotlib.core.axis import Axis, LinearAxis, RangeAxis
-from iplotlib.core.canvas import Canvas
-from iplotlib.core.history_manager import HistoryManager
-from iplotlib.core.plot import Plot, PlotXY
-from iplotlib.core.signal import ArraySignal, Signal
-from iplotlib.core.property_manager import PropertyManager
+from iplotlib.core import (Axis,
+                           LinearAxis,
+                           RangeAxis,
+                           BackendParserBase,
+                           Canvas,
+                           Plot,
+                           PlotXY,
+                           ArraySignal,
+                           Signal)
+
 from iplotlib.impl.vtk import utils as vtkImplUtils
 from iplotlib.impl.vtk.tools import CanvasTitleItem, CrosshairCursorWidget, VTK64BitTimePlotSupport, queryMatrix
 
@@ -33,43 +37,32 @@ STEP_MAP = {"none": "none", "mid": "steps-mid", "post": "steps-post",
 
 
 @dataclass
-class VTKParser():
+class VTKParser(BackendParserBase):
     """This class parses the core iplotlib classes into a VTK charts pipeline.
     """
-
-    def __init__(self,
-            canvas: Canvas=None,
-            focus_plot=None,
-            focus_plot_stack_key=None):
+    def __init__(self, canvas: Canvas = None, focus_plot=None, focus_plot_stack_key=None, impl_flush_method: Callable = None) -> None:
         """Initialize underlying vtk classes.
         """
-        self.canvas = canvas
-        self.focus_plot = focus_plot
-        self.focus_plot_stack_key = focus_plot_stack_key
+        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key, impl_flush_method=impl_flush_method)
         self._impl_focus_plot = None
         self._focus_plot_index = vtkVector2i(-1, -1)
 
         self.view = vtkContextView()
         self.scene = self.view.GetScene()
-        self.matrix = vtkChartMatrix()
-        self.scene.AddItem(self.matrix)
+        self._layout = vtkChartMatrix()
+        self.scene.AddItem(self._layout)
+        self._matrix = self._layout
 
         self._vtk_custom_tickers = {}
-        self.crosshair = CrosshairCursorWidget(self.matrix,
+        self.crosshair = CrosshairCursorWidget(self._layout,
                                                horizOn=True,
                                                hLineW=1,
                                                vLineW=1)
-        self._hm = HistoryManager()
-        self._pm = PropertyManager()
+        self._layout.SetGutterX(50)
+        self._layout.SetGutterY(50)
+        self._layout.SetBorderTop(0)
 
-        self.matrix.SetGutterX(50)
-        self.matrix.SetGutterY(50)
-        self.matrix.SetBorderTop(0)
-
-        self._vtk_chart_lut = defaultdict(list)  # Plot -> vtkChart
         self._vtk_col_row_plot_lut = dict()  # (c, r) -> Plot
-        self._vtk_plot_lut = dict()  # Signal -> vtkPlot
-        self._signal_plot_lookup = dict()  # reverse lookup i.e, Signal -> Plot
 
         self._title_region = vtkContextArea()
         axisLeft = self._title_region.GetAxis(vtkAxis.LEFT)
@@ -97,20 +90,16 @@ class VTKParser():
         self._title_region.GetDrawAreaItem().AddItem(self._title_item)
 
         # Both elements will stretch to fill their rects.
-        self.matrix.SetFillStrategy(vtkChartMatrix.StretchType.CUSTOM)
+        self._layout.SetFillStrategy(vtkChartMatrix.StretchType.CUSTOM)
         self._title_region.SetDrawAreaResizeBehavior(
             vtkContextArea.DARB_FixedRect)
 
-    def undo(self):
-        self._hm.undo()
-
-    def redo(self):
-        self._hm.redo()
-
-    def drop_history(self):
-        self._hm.drop()
+    @property
+    def matrix(self):
+        return self._matrix
 
     def export_image(self, filename: str, **kwargs):
+        super().export_image(filename, **kwargs)
         renWin = vtkRenderWindow()
         dpi = kwargs.get("dpi") or 100
         width_i = kwargs.get("width") or 18.4
@@ -157,48 +146,46 @@ class VTKParser():
 
         if not hasattr(xdata, "__getitem__") and not hasattr(ydata, "__getitem__"):
             return None
-        else:
-            plot = chart.AddPlot(vtkChart.LINE)  # type: vtkPlotLine
-            self.refresh_impl_plot_data(
-                plot, xdata, ydata, name, hi_prec_nanos)
-            plot.SetLegendVisibility(True)
-            plot.SetLabel(name)
-            return plot
+
+        line = chart.AddPlot(vtkChart.LINE)  # type: vtkPlotLine
+        self.refresh_impl_plot_data(
+            line, xdata, ydata, name, hi_prec_nanos)
+        line.SetLegendVisibility(True)
+        line.SetLabel(name)
+        return line
 
     def clear(self):
-        self._vtk_chart_lut.clear()
         self._vtk_col_row_plot_lut.clear()
-        self._vtk_plot_lut.clear()
-        self._signal_plot_lookup.clear()
-        self.matrix.SetSize(vtkVector2i(0, 0))
+        self._layout.SetSize(vtkVector2i(0, 0))
         self._vtk_custom_tickers.clear()
         self.crosshair.clear()
+        super().clear()
 
-    def find_chart(self, probe: typing.Tuple) -> typing.Union[None, vtkChart]:
+    def find_chart(self, probe: Tuple) -> Union[None, vtkChart]:
         """Find a chart right under the given probe position.
             This method is determined to find a chart
 
         Args:
-            probe (typing.Tuple): Position in VTK screen coordinates.
+            probe (Tuple): Position in VTK screen coordinates.
         """
         screenToScene = self.scene.GetTransform()
         scenePos = [0, 0]
         screenToScene.TransformPoints(probe, scenePos, 1)
 
-        return queryMatrix.find_chart(self.matrix, scenePos)
+        return queryMatrix.find_chart(self._layout, scenePos)
 
-    def find_element_index(self, probe: typing.Tuple) -> vtkVector2i:
+    def find_element_index(self, probe: Tuple) -> vtkVector2i:
         """Find a chart/chartmatrix right under the given probe position.
             This method is not determined to find a chart. It just returns the first element found.
 
         Args:
-            probe (typing.Tuple): Position in VTK screen coordinates.
+            probe (Tuple): Position in VTK screen coordinates.
         """
         screenToScene = self.scene.GetTransform()
         scenePos = [0, 0]
         screenToScene.TransformPoints(probe, scenePos, 1)
 
-        return queryMatrix.find_element_index(self.matrix, scenePos)
+        return queryMatrix.find_element_index(self._layout, scenePos)
 
     def get_internal_row_id(self, r: int, plot: Plot) -> int:
         """This method accounts for the difference in row numbering convention
@@ -228,7 +215,8 @@ class VTKParser():
         for signals in plot.signals.values():
             for signal in signals:
                 if isinstance(signal, ArraySignal):
-                    retVal |= self._pm.get_value('hi_precision_data', self.canvas, plot, signal=signal)
+                    retVal |= self._pm.get_value(
+                        'hi_precision_data', self.canvas, plot, signal=signal)
         return retVal
 
     def process_ipl_canvas(self, canvas: Canvas):
@@ -236,18 +224,21 @@ class VTKParser():
         onto an internal vtkChartMatrix instance
 
         """
+        super().process_ipl_canvas(canvas)
+        if canvas is None:
+            self.canvas = canvas
+            self.clear()
+            return
+    
         # 1. Clear layout.
         self.clear()
         self.canvas = canvas
 
-        if canvas is None:
-            return
-
         # 2. Allocate
-        if self.focus_plot is not None:
-            self.matrix.SetSize(vtkVector2i(1, 1))
+        if self._focus_plot is not None:
+            self._layout.SetSize(vtkVector2i(1, 1))
         else:
-            self.matrix.SetSize(vtkVector2i(canvas.cols, canvas.rows))
+            self._layout.SetSize(vtkVector2i(canvas.cols, canvas.rows))
 
         # 3. Fill canvas with charts
         stop_drawing = False
@@ -257,8 +248,8 @@ class VTKParser():
 
             for plot in column:
 
-                if self.focus_plot is not None:
-                    if self.focus_plot == plot:
+                if self._focus_plot is not None:
+                    if self._focus_plot == plot:
                         logger.debug(f"Focusing on plot: {plot}")
                         self.process_ipl_plot(plot, 0, 0)
                         stop_drawing = True
@@ -281,7 +272,7 @@ class VTKParser():
         Args:
             plot (Plot): An object derived from abstract iplotlib.core.plot.Plot
         """
-
+        super().process_ipl_plot(plot, column, row)
         if not isinstance(plot, Plot):
             return
 
@@ -289,18 +280,21 @@ class VTKParser():
         row_id = self.get_internal_row_id(row, plot)
         self._vtk_col_row_plot_lut.update({(column, row_id): plot})
 
-        if self.focus_plot == plot:
+        if self._focus_plot == plot:
             row_id = 0
 
         # Deal with stacked charts
-        stack_sz = len(plot.signals.keys())
+        if not self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None:
+            stack_sz = 1
+        else:
+            stack_sz = len(plot.signals.keys())
         stacked = stack_sz > 1
 
         # add_chart_* fn
         create_chart_func = VTKParser.add_vtk_chart_matrix if stacked else VTKParser.add_vtk_chart
 
         # arguments to `create_chart_func`
-        args = (self.matrix, column, row_id, plot.col_span, plot.row_span)
+        args = (self._layout, column, row_id, plot.col_span, plot.row_span)
 
         # Add/Get a new chart/chart matrix
         element = create_chart_func(*args)
@@ -311,26 +305,44 @@ class VTKParser():
             element.SetGutterX(0)
             element.SetGutterY(0)
 
-        for i, key in enumerate(sorted(plot.signals.keys())):
+        for stack_id, key in enumerate(sorted(plot.signals.keys())):
+            is_stack_plot_focused = self._focus_plot_stack_key == key
+
+            if not self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None or is_stack_plot_focused:
+                row_id = 0
+            else:
+                row_id = stack_id
             signals = plot.signals.get(key) or []
 
             # Prepare or create chart in root/nested chart matrix if necessary
             chart = None
             if isinstance(element, vtkChartMatrix):
-                chart = self.add_vtk_chart(element, 0, i)
+                chart = self.add_vtk_chart(element, 0, row_id)
             elif isinstance(element, vtkChart):
                 chart = element
             else:
                 logger.critical(
-                    f"Unexpected path in process_ipl_plot {column}, {row}, {row_id}")
+                    f"Unexpected code path in process_ipl_plot {column}, {row}, {row_id}")
 
+            self._plot_impl_plot_lut[id(plot)].append(chart)
+            # Keep references to iplotlib instances for ease of access in callbacks.
+            self._impl_plot_cache_table.register(chart, self.canvas, plot, key, signals)
             self._refresh_custom_ticker(0, plot, chart)
-            self._vtk_chart_lut[id(plot)].append(chart)
+            chart.AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
+
+            # translate Axis properties
+            for ax_idx in range(len(plot.axes)):
+                if isinstance(plot.axes[ax_idx], Collection):
+                    axis = plot.axes[ax_idx][stack_id]
+                    self.process_ipl_axis(axis, ax_idx, plot, chart)
+                else:
+                    axis = plot.axes[ax_idx]
+                    self.process_ipl_axis(axis, ax_idx, plot, chart)
 
             # Plot each signal
             for signal in signals:
-                self._signal_plot_lookup.update({id(signal): plot})
-                self.process_ipl_signal(signal, chart)
+                self._signal_impl_plot_lut.update({id(signal): chart})
+                self.process_ipl_signal(signal)
 
         if isinstance(element, vtkChartMatrix):
             element.LabelOuter(vtkVector2i(0, 0), vtkVector2i(0, stack_sz - 1))
@@ -339,77 +351,110 @@ class VTKParser():
         self._refresh_plot_title(plot)
         self._refresh_legend(plot)
 
-        # translate Axis properties
-        self.process_ipl_axes(plot)
-
         # translate PlotXY properties to chart
         self._refresh_grid(plot)
 
-    def process_ipl_axes(self, plot: Plot):
-        """Refresh a plot's axes
+    def process_ipl_axis(self, axis: Axis, ax_idx: int, plot: Plot, impl_plot: vtkChart):
+        super().process_ipl_axis(axis, ax_idx, plot, impl_plot)
+        vtk_axis = impl_plot.GetAxis(vtkAxis.LEFT if ax_idx == 1 else vtkAxis.BOTTOM)
+        self._axis_impl_plot_lut.update({id(axis): impl_plot})
 
-        Args:
-            plot (Plot): An abstract Plot object
-            chart (vtkChart): The chart whose axes will be refreshed
-            ax (Axis): An abstract Axis object
-            ax_id (int): The index of the ax object in Plot.axes
-        """
-        try:
-            _ = plot.axes[0]
-        except IndexError:
-            logger.exception(f"{plot} is missing an x-axis")
-            return
-        except TypeError:
-            return
-        try:
-            y_axes = plot.axes[1]
-        except IndexError:
-            logger.exception(f"{plot} is missing y-axes")
-            return
+        if isinstance(axis, Axis):
+            if axis.label is not None:
+                vtk_axis.SetTitle(axis.label)
 
-        charts = self._vtk_chart_lut[id(plot)]
-
-        try:
-            assert len(y_axes) == len(charts)
-        except AssertionError:
-            logger.exception(f"len(y_axes) != len(charts). {len(y_axes)} != {len(charts)}")
-            return
-        except TypeError:
-            y_axes = [plot.axes[1]]
-
-        for chart, ax in zip(charts, y_axes):
-            ax_impl_id = vtkAxis.LEFT
-            ax_impl = chart.GetAxis(ax_impl_id)  # type: vtkAxis
-            self.process_ipl_axis(ax, ax_impl, plot)
-
-            ax_impl_id = vtkAxis.BOTTOM
-            ax_impl = chart.GetAxis(ax_impl_id)  # type: vtkAxis
-            self.process_ipl_axis(ax, ax_impl, plot)
-                        
-    def process_ipl_axis(self, ax: Axis, ax_impl: vtkAxis, plot: Plot):
-        if isinstance(ax, Axis):
-            if ax.label is not None:
-                ax_impl.SetTitle(ax.label)
-
-            appearance = ax_impl.GetTitleProperties()  # type: vtkTextProperty
-            fc = self._pm.get_value('font_color', self.canvas, ax, plot)
-            fs = self._pm.get_value('font_size', self.canvas, ax, plot)
+            appearance = vtk_axis.GetTitleProperties()  # type: vtkTextProperty
+            fc = self._pm.get_value('font_color', self.canvas, axis, plot)
+            fs = self._pm.get_value('font_size', self.canvas, axis, plot)
             if fc is not None:
                 appearance.SetColor(*vtkImplUtils.get_color3d(fc))
                 logger.debug(f"Ax color: {vtkImplUtils.get_color3d(fc)}")
             if fs is not None:
                 appearance.SetFontSize(fs)
-        if isinstance(ax, RangeAxis) and not (isinstance(ax, LinearAxis) and ax.follow):
-            if ax.begin is not None:
-                ax_impl.SetMinimum(ax.begin)
-            if ax.end is not None:
-                ax_impl.SetMaximum(ax.end)
-            ax_impl.AutoScale()
-        if isinstance(ax, LinearAxis):
-            if ax.window is not None and not ax.follow:
-                ax_max = ax_impl.GetMaximum()
-                ax_impl.SetRange(ax_max - ax.window, ax_max)
-                ax_impl.AutoScale()
+        if isinstance(axis, RangeAxis) and not (isinstance(axis, LinearAxis) and axis.follow):
+            if axis.begin is not None and axis.end is not None:
+                vtk_axis.SetRange(axis.begin, axis.end)
+            vtk_axis.AutoScale()
+        if isinstance(axis, LinearAxis):
+            if axis.window is not None and not axis.follow:
+                ax_max = vtk_axis.GetMaximum()
+                vtk_axis.SetRange(ax_max - axis.window, ax_max)
+                vtk_axis.AutoScale()
+
+    def _axis_update_callback(self, obj, ev):
+        impl_plot = obj # type: vtkChart
+        has_shared_charts = isinstance(impl_plot.GetParent().GetParent(), vtkChartMatrix)
+        affected_charts = []
+        if self.canvas.shared_x_axis:
+            for charts in self._plot_impl_plot_lut.values():
+                for chart in charts:
+                    if chart not in affected_charts:
+                        affected_charts.append(chart)
+        elif has_shared_charts:
+            parent_matrix = impl_plot.GetParent()
+            size = parent_matrix.GetSize()
+            for c in range(size.GetX()):
+                for r in range(size.GetY()):
+                    chart = parent_matrix.GetChart(vtkVector2i(c, r))
+                    if chart not in affected_charts:
+                        affected_charts.append(chart)
+        
+        for chart in affected_charts:
+            xlims = chart.GetAxis(vtkAxis.BOTTOM).GetMinimum(), chart.GetAxis(vtkAxis.BOTTOM).GetMaximum()
+            ylims = chart.GetAxis(vtkAxis.LEFT).GetMinimum(), chart.GetAxis(vtkAxis.LEFT).GetMaximum()
+            ranges_hash = hash((*xlims, *ylims))
+            current_hash = self._impl_plot_ranges_hash.get(id(chart))
+
+            if current_hash is not None and (ranges_hash == current_hash):
+                continue
+
+            self._impl_plot_ranges_hash[id(chart)] = ranges_hash
+            ranges = []
+
+            ci = self._impl_plot_cache_table.get_cache_item(chart)
+            if not hasattr(ci, 'plot'):
+                continue
+            if not isinstance(ci.plot(), Plot):
+                continue
+
+            for ax_idx, ax in enumerate(ci.plot().axes):
+                if isinstance(ax, Collection):
+                    ranges.append(self.update_multi_range_axis(ax, ax_idx, chart))
+                elif isinstance(ax, RangeAxis):
+                    self.update_range_axis(ax, ax_idx, chart)
+                    ranges.append([ax.begin, ax.end])
+
+            if not hasattr(ci, 'signals'):
+                continue
+            if not ci.signals:
+                continue
+
+            for signal_ref in ci.signals:
+                signal = signal_ref()
+                if hasattr(signal, "set_ranges"):
+                    signal.set_ranges([ranges[0], ranges[1]])
+            self._stale_impl_plots.add(chart)
+        
+
+    def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
+        if not isinstance(impl_plot, vtkChart):
+            return False
+        vtk_axis = impl_plot.GetAxis(vtkAxis.LEFT if ax_idx == 1 else vtkAxis.BOTTOM)
+        vtk_axis.SetRange(limits[0], limits[1])
+        vtk_axis.AutoScale()
+        return True
+
+    def update_range_axis(self, range_axis: RangeAxis, ax_idx: int, impl_plot: Any, which='current'):
+        """If axis is a RangeAxis update its min and max to vtk chart view limits"""
+        vtk_axis = impl_plot.GetAxis(vtkAxis.LEFT if ax_idx == 1 else vtkAxis.BOTTOM)
+        limits = vtk_axis.GetMinimum(), vtk_axis.GetMaximum()
+        if which == 'current':
+            range_axis.begin = limits[0]
+            range_axis.end = limits[1]
+        else: # which == 'original'
+            range_axis.original_begin = range_axis.begin
+            range_axis.original_end = range_axis.end
+        super().update_range_axis(range_axis, ax_idx, impl_plot, which=which)
 
     def _refresh_canvas_title(self, title: str, font_color: str):
         """Updates canvas title text and the appearance
@@ -432,13 +477,14 @@ class VTKParser():
             return
         if not self.canvas.crosshair_enabled:
             return
-        
+
         if isinstance(self._impl_focus_plot, vtkChart):
             self.crosshair.charts.append(self._impl_focus_plot)
         elif isinstance(self._impl_focus_plot, vtkChartMatrix):
-            queryMatrix.get_charts(self._impl_focus_plot, self.crosshair.charts)
+            queryMatrix.get_charts(self._impl_focus_plot,
+                                   self.crosshair.charts)
         else:
-            queryMatrix.get_charts(self.matrix, self.crosshair.charts)
+            queryMatrix.get_charts(self._layout, self.crosshair.charts)
 
         self.crosshair.resize()
 
@@ -487,7 +533,7 @@ class VTKParser():
         Args:
             plot (Plot): An abstract plot object
         """
-        for chart in self._vtk_chart_lut[id(plot)]:
+        for chart in self._plot_impl_plot_lut[id(plot)]:
             if isinstance(plot, PlotXY):
                 grid = self._pm.get_value('grid', self.canvas, plot)
                 if grid is not None:
@@ -500,67 +546,10 @@ class VTKParser():
         Args:
             plot (Plot): An abstract plot object
         """
-        for chart in self._vtk_chart_lut[id(plot)]:
+        for chart in self._plot_impl_plot_lut[id(plot)]:
             legend = self._pm.get_value('legend', self.canvas, plot)
             if legend is not None:
                 chart.SetShowLegend(legend)
-
-    def _refresh_line_size(self, signal: ArraySignal):
-        impl_plot = self._vtk_plot_lut.get(
-            id(signal))  # type: vtkPlot
-        if not isinstance(impl_plot, vtkPlot):
-            return
-        # line style, width if supported by hardware.
-        pen = impl_plot.GetPen()
-        ls = self._pm.get_value('line_size', self.canvas, self._signal_plot_lookup.get(id(signal)), signal=signal)
-        if ls is not None:
-            pen.SetWidth(ls)
-
-    def _refresh_line_style(self, signal: ArraySignal):
-        impl_plot = self._vtk_plot_lut.get(
-            id(signal))  # type: vtkPlot
-        if not isinstance(impl_plot, vtkPlotPoints):
-            return
-        # line style, width if supported by hardware.
-        pen = impl_plot.GetPen()
-        ls = self._pm.get_value('line_style', self.canvas, self._signal_plot_lookup.get(id(signal)), signal=signal)
-        if ls is None:
-            return
-        elif ls.lower() == "none":
-            pen.SetLineType(vtkPen.NO_PEN)
-        elif ls.lower() == "solid":
-            pen.SetLineType(vtkPen.SOLID_LINE)
-        elif ls.lower() == "dashed":
-            pen.SetLineType(vtkPen.DASH_LINE)
-        elif ls.lower() == "dotted":
-            pen.SetLineType(vtkPen.DOT_LINE)
-
-    def _refresh_marker_size(self, signal: ArraySignal):
-        impl_plot = self._vtk_plot_lut.get(
-            id(signal))  # type: vtkPlot
-        if not isinstance(impl_plot, vtkPlotPoints):
-            return
-        # marker style, size
-        ms = self._pm.get_value('marker_size', self.canvas, self._signal_plot_lookup.get(id(signal)), signal=signal)
-        if signal.marker_size is not None:
-            impl_plot.SetMarkerSize(ms)
-
-    def _refresh_marker_style(self, signal: ArraySignal):
-        impl_plot = self._vtk_plot_lut.get(
-            id(signal))  # type: vtkPlot
-        if not isinstance(impl_plot, vtkPlotPoints):
-            return
-        marker = self._pm.get_value('marker', self.canvas, self._signal_plot_lookup.get(id(signal)), signal=signal)
-        if marker == 'x':
-            impl_plot.SetMarkerStyle(vtkMarkerUtilities.CROSS)
-        elif marker == '+':
-            impl_plot.SetMarkerStyle(vtkMarkerUtilities.PLUS)
-        elif marker == "square":
-            impl_plot.SetMarkerStyle(vtkMarkerUtilities.SQUARE)
-        elif marker == 'o' or marker == "circle":
-            impl_plot.SetMarkerStyle(vtkMarkerUtilities.CIRCLE)
-        elif marker == "diamond":
-            impl_plot.SetMarkerStyle(vtkMarkerUtilities.DIAMOND)
 
     def refresh_mouse_mode(self, mmode: str):
         """Refresh mouse mmode across all charts
@@ -570,7 +559,7 @@ class VTKParser():
 
         self.canvas.crosshair_enabled = mmode == Canvas.MOUSE_MODE_CROSSHAIR
 
-        for _, charts in self._vtk_chart_lut.items():
+        for _, charts in self._plot_impl_plot_lut.items():
             for chart in charts:
 
                 # Turn on zoom with mouse wheel.
@@ -610,8 +599,8 @@ class VTKParser():
                         f"Invalide canvas mouse mode: {self.canvas.mouse_mode}")
 
     def refresh_impl_plot_data(self, plot: vtkPlot,
-                               x: typing.Sequence[float],
-                               y: typing.Sequence[float],
+                               x: Sequence[float],
+                               y: Sequence[float],
                                var_name,
                                bitSequencing=False):
         if not isinstance(x, np.ndarray):
@@ -647,7 +636,7 @@ class VTKParser():
         stack_sz = len(plot.signals.keys())
         stacked = stack_sz > 1
 
-        for i, chart in enumerate(self._vtk_chart_lut[id(plot)]):
+        for i, chart in enumerate(self._plot_impl_plot_lut[id(plot)]):
             draw_title = not stacked or (stacked and i == stack_sz - 1)
             if (plot.title is not None) and draw_title:
                 chart.SetTitle(plot.title)
@@ -659,43 +648,45 @@ class VTKParser():
                 if fs is not None:
                     appearance.SetFontSize(fs)
 
-    def process_ipl_signal(self, signal: Signal, chart: vtkChart):
+    def process_ipl_signal(self, signal: Signal):
         """Refresh a specific signal
 
         Args:
             signal (Signal): An object derived from abstract iplotlib.core.signal.Signal
         """
-
+        super().process_ipl_signal(signal)
         if not isinstance(signal, Signal):
             return
 
-        # acquire/update properties
-        plot = self._signal_plot_lookup.get(id(signal))  # type: Plot
-        hi_precision = self.hi_precision_needed(plot)
-
-        # Create backend objects
-        impl_plot = self._vtk_plot_lut.get(
-            id(signal))  # type: vtkPlot
+        chart = self._signal_impl_plot_lut.get(id(signal))  # type: vtkChart
 
         data = signal.get_data()
         ndims = len(data)
-        valid_data = ndims >= 2
-        for dim in range(len(data)):
-            valid_data &= (len(data[dim]) >= 2) or (ndims >= 2)
-
-        if valid_data:
-            if impl_plot is None and chart is not None:
-                # TODO: Use functional bag for envelope plots
-                if isinstance(signal, ArraySignal):
-                    impl_plot = self.add_vtk_line_plot(
-                        chart, signal.label, data[0], data[1], hi_precision)
-                    self._vtk_plot_lut.update({id(signal): impl_plot})
-            else:
-                if isinstance(signal, ArraySignal):
-                    self.refresh_impl_plot_data(
-                        impl_plot, data[0], data[1], signal.label, hi_precision)
+        
+        try:
+            ci = self._impl_plot_cache_table.get_cache_item(chart)
+            plot = ci.plot()
+        except AttributeError:
+            return
+        hi_prec_nanos = self.hi_precision_needed(plot)
+    
+        if hasattr(signal, 'envelope') and signal.envelope:
+            if ndims != 3:
+                logger.error(
+                    f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data arrays (==3). {signal}")
+                return
+            # TODO: Use functional bag for envelope plots
         else:
-            impl_plot = chart.AddPlot(vtkChart.LINE)  # type: vtkPlotLine
+            if ndims < 2:
+                logger.error(
+                    f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data arrays (<2). {signal}")
+                return
+            line = self._signal_impl_shape_lut.get(id(signal))
+            if not isinstance(line, vtkPlot):
+                line = self.add_vtk_line_plot(chart, signal.label, data[0], data[1], hi_prec_nanos)
+                self._signal_impl_shape_lut.update({id(signal): line})
+            else:
+                self.refresh_impl_plot_data(line, data[0], data[1], signal.label, hi_prec_nanos)
 
         # Translate abstract properties to backend
         self._process_ipl_signal_label(signal)
@@ -709,29 +700,33 @@ class VTKParser():
             self._refresh_step_type(signal)
 
     def _process_ipl_signal_color(self, signal: ArraySignal):
-        impl_plot = self._vtk_plot_lut.get(
+        line = self._signal_impl_shape_lut.get(
             id(signal))  # type: vtkPlot
-        if not isinstance(impl_plot, vtkPlot):
+        if not isinstance(line, vtkPlot):
             return
         if signal.color is not None:
-            impl_plot.SetColor(*vtkImplUtils.get_color4ub(signal.color))
+            line.SetColor(*vtkImplUtils.get_color4ub(signal.color))
 
     def _process_ipl_signal_label(self, signal: Signal):
-        impl_plot = self._vtk_plot_lut.get(
+        line = self._signal_impl_shape_lut.get(
             id(signal))  # type: vtkPlot
-        if not isinstance(impl_plot, vtkPlot):
+        if not isinstance(line, vtkPlot):
             return
         if signal.label is not None:
-            impl_plot.SetLabel(signal.label)
+            line.SetLabel(signal.label)
 
     def _refresh_step_type(self, signal: ArraySignal):
-        impl_plot = self._vtk_plot_lut.get(
+        line = self._signal_impl_shape_lut.get(
             id(signal))  # type: vtkPlot
 
-        if not isinstance(impl_plot, vtkPlotPoints):
+        if not isinstance(line, vtkPlotPoints):
             return
+        chart = self._signal_impl_plot_lut.get(
+            id(signal))
+        plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
 
-        step = self._pm.get_value('step', self.canvas, self._signal_plot_lookup.get(id(signal)), signal=signal)
+        step = self._pm.get_value(
+            'step', self.canvas, plot, signal=signal)
         if step is None:
             return
 
@@ -741,7 +736,7 @@ class VTKParser():
                 f"Steps type: {step} for {id(signal)} is not recognized!")
             return
 
-        table = impl_plot.GetInput()
+        table = line.GetInput()
         c0 = table.GetColumn(0)
         c1 = table.GetColumn(1)
         xs = numpy_support.vtk_to_numpy(c0)
@@ -769,7 +764,77 @@ class VTKParser():
             newys.append(ys[-1])
 
         self.refresh_impl_plot_data(
-            impl_plot, newxs, newys, var_name, bitSequencing)
+            line, newxs, newys, var_name, bitSequencing)
+
+    def _refresh_line_size(self, signal: ArraySignal):
+        line = self._signal_impl_shape_lut.get(
+            id(signal))  # type: vtkPlot
+        if not isinstance(line, vtkPlot):
+            return
+        chart = self._signal_impl_plot_lut.get(
+            id(signal))
+        plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
+        # line style, width if supported by hardware.
+        pen = line.GetPen()
+        ls = self._pm.get_value('line_size', self.canvas, plot, signal=signal)
+        if ls is not None:
+            pen.SetWidth(ls)
+
+    def _refresh_line_style(self, signal: ArraySignal):
+        line = self._signal_impl_shape_lut.get(
+            id(signal))  # type: vtkPlot
+        if not isinstance(line, vtkPlotPoints):
+            return
+        chart = self._signal_impl_plot_lut.get(
+            id(signal))
+        plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
+        # line style, width if supported by hardware.
+        pen = line.GetPen()
+        ls = self._pm.get_value('line_style', self.canvas, plot, signal=signal)
+        if ls is None:
+            return
+        elif ls.lower() == "none":
+            pen.SetLineType(vtkPen.NO_PEN)
+        elif ls.lower() == "solid":
+            pen.SetLineType(vtkPen.SOLID_LINE)
+        elif ls.lower() == "dashed":
+            pen.SetLineType(vtkPen.DASH_LINE)
+        elif ls.lower() == "dotted":
+            pen.SetLineType(vtkPen.DOT_LINE)
+
+    def _refresh_marker_size(self, signal: ArraySignal):
+        line = self._signal_impl_shape_lut.get(
+            id(signal))  # type: vtkPlot
+        if not isinstance(line, vtkPlotPoints):
+            return
+        chart = self._signal_impl_plot_lut.get(
+            id(signal))
+        plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
+        # marker style, size
+        ms = self._pm.get_value('marker_size', self.canvas, plot, signal=signal)
+        if signal.marker_size is not None:
+            line.SetMarkerSize(ms)
+
+    def _refresh_marker_style(self, signal: ArraySignal):
+        line = self._signal_impl_shape_lut.get(
+            id(signal))  # type: vtkPlot
+        if not isinstance(line, vtkPlotPoints):
+            return
+        chart = self._signal_impl_plot_lut.get(
+            id(signal))
+        plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
+        marker = self._pm.get_value(
+            'marker', self.canvas, plot, signal=signal)
+        if marker == 'x':
+            line.SetMarkerStyle(vtkMarkerUtilities.CROSS)
+        elif marker == '+':
+            line.SetMarkerStyle(vtkMarkerUtilities.PLUS)
+        elif marker == "square":
+            line.SetMarkerStyle(vtkMarkerUtilities.SQUARE)
+        elif marker == 'o' or marker == "circle":
+            line.SetMarkerStyle(vtkMarkerUtilities.CIRCLE)
+        elif marker == "diamond":
+            line.SetMarkerStyle(vtkMarkerUtilities.DIAMOND)
 
     def resize(self, w: int, h: int):
         title_height = int(self.title_scale * h)
@@ -777,7 +842,7 @@ class VTKParser():
 
         c_rect = vtkRecti(0, 0, w, chart_height)
         t_rect = vtkRecti(0, chart_height, w, title_height)
-        self.matrix.SetRect(c_rect)
+        self._layout.SetRect(c_rect)
         self._title_region.SetFixedRect(t_rect)
 
     def set_focus_plot(self, index: vtkVector2i):
@@ -786,10 +851,10 @@ class VTKParser():
 
         if index.GetX() < 0 or index.GetY() < 0:
             logger.debug("Set focus chart -> None")
-            self.focus_plot = None
+            self._focus_plot = None
             return
 
-        if self.focus_plot is None:
+        if self._focus_plot is None:
             logger.debug(f"Set focus chart @ internal index : {index}")
-            self.focus_plot = self._vtk_col_row_plot_lut.get(
+            self._focus_plot = self._vtk_col_row_plot_lut.get(
                 (index[0], index[1]))

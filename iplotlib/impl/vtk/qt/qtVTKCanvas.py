@@ -45,10 +45,11 @@ class QtVTKCanvas(IplotQtCanvas):
         super().__init__(parent, **kwargs)
 
         self._vtk_renderer = QVTKRenderWindowInteractor(self, **kwargs)
-        self._vtk_parser = VTKParser()
+        self._draw_call_counter = 0
+        self._parser = VTKParser()
         self.set_canvas(kwargs.get('canvas'))
         # Let the view render its scene into our render window
-        self._vtk_parser.view.SetRenderWindow(self._vtk_renderer.GetRenderWindow())
+        self._parser.view.SetRenderWindow(self._vtk_renderer.GetRenderWindow())
 
         # laid out vertically.
         v_layout = QVBoxLayout(self)
@@ -61,22 +62,13 @@ class QtVTKCanvas(IplotQtCanvas):
 
         # callback to process mouse clicks
         self.mouse_press_cb_tag = self._vtk_renderer.AddObserver(
-            vtkCommand.LeftButtonPressEvent, self._vtk_mouse_click_handler)
+            vtkCommand.LeftButtonPressEvent, self._vtk_mouse_press_handler)
 
         # callback to process mouse clicks
-        self.mouse_press_cb_tag = self._vtk_renderer.AddObserver(
-            vtkCommand.RightButtonPressEvent, self._vtk_mouse_click_handler)
-
-    def undo(self):
-        """history: undo"""
-        self._vtk_parser.undo()
-
-    def redo(self):
-        """history: redo"""
-        self._vtk_parser.redo()
-
-    def drop_history(self):
-        return self._vtk_parser.drop_history()
+        self.mouse_release_cb_tag = self._vtk_renderer.AddObserver(
+            vtkCommand.LeftButtonReleaseEvent, self._vtk_mouse_release_handler)
+        
+        # self._vtk_renderer.AddObserver(vtkCommand.RenderEvent, self._vtk_draw_finish)
 
     def stage_view_lim_cmd(self):
         return super().stage_view_lim_cmd()
@@ -96,7 +88,7 @@ class QtVTKCanvas(IplotQtCanvas):
             size.setHeight(5)
 
         new_ev = QResizeEvent(size, event.oldSize())
-        self._vtk_parser.resize(size.width(), size.height())
+        self._parser.resize(size.width(), size.height())
         logger.debug(f"Resize {new_ev.oldSize()} -> {new_ev.size()}")
 
         return super().resizeEvent(new_ev)
@@ -105,28 +97,42 @@ class QtVTKCanvas(IplotQtCanvas):
         """Sets mouse mode of this canvas"""
         logger.debug(f"Mouse mode: {self._mmode} -> {mode}")
         self._mmode = mode
-        self._vtk_parser.remove_crosshair_widget()
-        self._vtk_parser.refresh_mouse_mode(self._mmode)
-        self._vtk_parser.refresh_crosshair_widget()
+        self._parser.remove_crosshair_widget()
+        self._parser.refresh_mouse_mode(self._mmode)
+        self._parser.refresh_crosshair_widget()
+
+    def _vtk_draw_finish(self, obj, ev):
+        self._draw_call_counter += 1
+        self._debug_log_event(ev, f"Draw call {self._draw_call_counter}")
 
     def _vtk_mouse_move_handler(self, obj, ev):
         if ev != "MouseMoveEvent":
             return
         mousePos = obj.GetEventPosition()
-        self._debug_log_event(ev, f"{mousePos}")
+        # self._debug_log_event(ev, f"{mousePos}")
         if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
-            self._vtk_parser.crosshair.onMove(mousePos)
+            self._parser.crosshair.onMove(mousePos)
 
-    def _vtk_mouse_click_handler(self, obj, ev):
-        if ev not in ["LeftButtonPressEvent", "RightButtonPressEvent"]:
+    def _vtk_mouse_press_handler(self, obj, ev):
+        if ev not in ["LeftButtonPressEvent"]:
             return
         mousePos = obj.GetEventPosition()
-        self._debug_log_event(ev, f"{mousePos} " + "left" if ev == "LeftButtonPressEvent" else "right")
+        self._debug_log_event(ev, f"{mousePos}")
         if obj.GetRepeatCount() and self._mmode == Canvas.MOUSE_MODE_SELECT:
-            index = self._vtk_parser.find_element_index(mousePos)
-            self._vtk_parser.set_focus_plot(index)
-            self._vtk_parser.process_ipl_canvas(self.get_canvas())
+            index = self._parser.find_element_index(mousePos)
+            self._parser.set_focus_plot(index)
+            self._parser.process_ipl_canvas(self.get_canvas())
             self.render()
+        elif self._mmode in [Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM]:
+            print("press")
+
+    def _vtk_mouse_release_handler(self, obj, ev):
+        if ev not in ["LeftButtonReleaseEvent"]:
+            return
+        mousePos = obj.GetEventPosition()
+        self._debug_log_event(ev, f"{mousePos}")
+        if self._mmode in [Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM]:
+            print("release")
 
     def showEvent(self, event: QShowEvent):
         super().showEvent(event)
@@ -136,16 +142,14 @@ class QtVTKCanvas(IplotQtCanvas):
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
 
-        super().set_canvas(canvas)  # does nothing
-
-        self._vtk_parser.set_focus_plot(None)
-        self._vtk_parser.process_ipl_canvas(canvas)
+        self._parser.process_ipl_canvas(canvas)
         if canvas:
             self.set_mouse_mode(canvas.mouse_mode or self._mmode)
+        super().set_canvas(canvas)
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
-        return self._vtk_parser.canvas
+        return self._parser.canvas
 
     def get_vtk_renderer(self) -> QVTKRenderWindowInteractor:
         return self._vtk_renderer
@@ -153,9 +157,10 @@ class QtVTKCanvas(IplotQtCanvas):
     def render(self):
         self._vtk_renderer.Initialize()
         self._vtk_renderer.Render()
+        self._vtk_draw_finish(self._vtk_renderer, 'ManualRenderEvent')
     
     def unfocus_plot(self):
-        self._vtk_parser.focus_plot=None
+        self._parser.focus_plot=None
 
     def _debug_log_event(self, event: vtkCommand, msg: str):
         logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")

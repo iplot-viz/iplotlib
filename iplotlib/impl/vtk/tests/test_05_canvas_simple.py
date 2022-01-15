@@ -57,7 +57,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
     def test_05_canvas_simple_refresh(self):
 
         self.canvas.set_canvas(self.core_canvas)
-        size = self.canvas._vtk_parser.matrix.GetSize()
+        size = self.canvas._parser.matrix.GetSize()
         self.assertEqual(size[0], 2)
         self.assertEqual(size[1], 2)
 

@@ -278,8 +278,7 @@ class MatplotlibParser(BackendParserBase):
 
                 mpl_axes = self.figure.add_subplot(
                     subgrid_item[row_id, 0], sharex=mpl_axes_prev)
-                if not self._plot_impl_plot_lut.get(id(plot)):
-                    self._plot_impl_plot_lut.update({id(plot): mpl_axes})
+                self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
                 mpl_axes_prev = mpl_axes
                 # Keep references to iplotlib instances for ease of access in callbacks.
                 self._impl_plot_cache_table.register(mpl_axes, self.canvas, plot, key, signals)
@@ -381,7 +380,7 @@ class MatplotlibParser(BackendParserBase):
                 continue
             if not ci.signals:
                 continue
-
+ 
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_ranges"):
@@ -443,7 +442,7 @@ class MatplotlibParser(BackendParserBase):
         signal_data = signal.get_data()
         data = NanosecondHelper.mpl_axes_transform_data(mpl_axes, signal_data)
 
-        if hasattr(signal, "envelope") and signal.envelope:
+        if hasattr(signal, 'envelope') and signal.envelope:
             if len(data) != 3:
                 logger.error(
                     f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data arrays (==3). {signal}")

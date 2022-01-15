@@ -61,6 +61,8 @@ class IplotQtCanvas(QWidget):
 
         # Do some post processing stuff here.
         # 1. Update the original begin, end for each axis.
+        if not canvas:
+            return
         if self._refresh_original_ranges:
             for col in canvas.plots:
                 for plot in col:

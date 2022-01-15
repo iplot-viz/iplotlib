@@ -123,7 +123,6 @@ class BackendParserBase(ABC):
         self._signal_impl_plot_lut.clear()
         self._signal_impl_shape_lut.clear()
         self._impl_plot_cache_table.clear()
-        self._layout = None
 
     @abstractmethod
     def process_ipl_canvas(self, canvas: Canvas):
