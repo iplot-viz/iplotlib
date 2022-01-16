@@ -21,31 +21,24 @@ from iplotlib.core.property_manager import PropertyManager
 logger = sl.get_logger(__name__)
 
 @dataclass
-class ImplementationAxisCacheItem:
-    offset: Any=None
-
-@dataclass
 class ImplementationPlotCacheItem:
     canvas: weakref.ReferenceType=None
     plot: weakref.ReferenceType=None
     stack_key: str = ''
     signals: List[weakref.ReferenceType] = field(default_factory=list)
+    offsets: Dict[int, int] = field(default_factory=lambda:defaultdict(lambda:None))
 
 class ImplementationPlotCacheTable:
     def __init__(self) -> None:
         self._table = dict() # type: Dict[Any, ImplementationPlotCacheItem]
     
-    def register_plot(self, impl_plot: Any, canvas: Canvas=None, plot: Plot=None, stack_key: str='', signals: List[Signal]=[]):
+    def register(self, impl_plot: Any, canvas: Canvas=None, plot: Plot=None, stack_key: str='', signals: List[Signal]=[]):
         cache_item = ImplementationPlotCacheItem(
             canvas=weakref.ref(canvas),
             plot=weakref.ref(plot),
             stack_key=stack_key,
             signals=[weakref.ref(sig) for sig in signals])
         self._table.update({id(impl_plot): cache_item})
-
-    def register_axis(self, impl_axis: Any, offset: Any=None):
-        cache_item = ImplementationAxisCacheItem(offset=offset)
-        self._table.update({id(impl_axis): cache_item})
 
     def drop(self, impl_obj: Any):
         self._table.pop(id(impl_obj))
@@ -56,16 +49,14 @@ class ImplementationPlotCacheTable:
     def clear(self):
         self._table.clear()
 
-    def transform_value(self, impl_axis: Any, value: Any, inverse=False):
+    def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
         base = 0
-        if not impl_axis:
-            return value - base if inverse else value + base
-        ci = self._table.get(id(impl_axis))
-        if hasattr(ci, 'offset') and ci.offset is not None:
-            base = ci.offset
-            if isinstance(ci.offset, int) or ci.offset.dtype.name == 'int64':
+        ci = self._table.get(id(impl_plot))
+        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is not None:
+            base = ci.offsets[ax_idx]
+            if isinstance(base, int) or base.dtype.name == 'int64':
                 value = int(value)
         return value - base if inverse else value + base
 
@@ -178,12 +169,17 @@ class BackendParserBase(ABC):
         :type signal: Signal
         """
 
-    @abstractmethod
     def update_range_axis(self, range_axis: RangeAxis, ax_idx: int, impl_plot: Any, which='current'):
-        """If axis is a RangeAxis update its min and max to mpl view limits"""
-
+        """If axis is a RangeAxis update its min and max to implementation chart's view limits"""
         if not isinstance(range_axis, RangeAxis):
             return
+        limits = self.get_impl_axis_limits(impl_plot, ax_idx)
+        if which == 'current':
+            range_axis.begin = limits[0]
+            range_axis.end = limits[1]
+        else: # which == 'original'
+            range_axis.original_begin = range_axis.begin
+            range_axis.original_end = range_axis.end
         logger.debug(f"Axis update: impl_plot={id(impl_plot)} range_axis={id(range_axis)} ax_idx={ax_idx} {range_axis}")
 
     def update_multi_range_axis(self, range_axes: Collection[RangeAxis], ax_idx: int, impl_plot: Any):
@@ -320,14 +316,7 @@ class BackendParserBase(ABC):
         begin, end = (None, None)
         if 0 <= ax_idx <= 1:
             begin, end = [self.get_impl_x_axis_limits, self.get_impl_y_axis_limits][ax_idx](impl_plot)
-
-        impl_axis = self.get_impl_axis(impl_plot, ax_idx)
-        ci = self._impl_plot_cache_table.get_cache_item(impl_axis)
-        if hasattr(ci, 'offset'):
-            begin = self.transform_value(impl_plot, ax_idx, begin)
-            end = self.transform_value(impl_plot, ax_idx, end)
-
-        return begin, end
+        return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
 
     @abstractmethod
     def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
@@ -338,14 +327,13 @@ class BackendParserBase(ABC):
         """Implementations should set the y range"""
 
     def set_impl_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
-        impl_axis = self.get_impl_axis(impl_plot, ax_idx)
-        ci = self._impl_plot_cache_table.get_cache_item(impl_axis)
-        if hasattr(ci, 'offset') and ci.offset is None:
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is None:
             new_offset = self.create_offset(limits)
             if new_offset is not None:
-                ci.offset = new_offset
+                ci.offsets[ax_idx] = new_offset
 
-        if hasattr(ci, 'offset') and ci.offset is not None:
+        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is not None:
             begin = self.transform_value(
                 impl_plot, ax_idx, limits[0], inverse=True)
             end = self.transform_value(
@@ -364,7 +352,9 @@ class BackendParserBase(ABC):
             return None
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
-        return self._impl_plot_cache_table.transform_value(self.get_impl_axis(impl_plot, ax_idx), value, inverse=inverse)
+        """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
+        float when offset is int)"""
+        return self._impl_plot_cache_table.transform_value(impl_plot, ax_idx, value, inverse=inverse)
 
     def transform_data(self, impl_plot: Any, data):
         """This function post processes data if it cannot be plot with matplotlib directly.
@@ -372,20 +362,19 @@ class BackendParserBase(ABC):
         ret = []
         if isinstance(data, Collection):
             for i, d in enumerate(data):
-                impl_axis = self.get_impl_axis(impl_plot, i)
-                ci = self._impl_plot_cache_table.get_cache_item(impl_axis)
-                if hasattr(ci, 'offset') and ci.offset is None:
+                ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+                if hasattr(ci, 'offsets') and ci.offsets[i] is None:
                     new_offset = self.create_offset(d)
                     if new_offset is not None:
-                        ci.offset = d[0]
+                        ci.offsets[i] = d[0]
 
-                if hasattr(ci, 'offset') and ci.offset is not None:
-                    logger.debug(
-                        f"\tApplying data offset {ci.offset} to to axis {id(impl_axis)} idx: {i}")
+                if hasattr(ci, 'offsets') and ci.offsets[i] is not None:
+                    logger.info(
+                        f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
                     if isinstance(d, Collection):
-                        ret.append([e - ci.offset for e in d])
+                        ret.append([e - ci.offsets[i] for e in d])
                     else:
-                        ret.append(d - ci.offset)
+                        ret.append(d - ci.offsets[i])
                 else:
                     ret.append(d)
         return ret

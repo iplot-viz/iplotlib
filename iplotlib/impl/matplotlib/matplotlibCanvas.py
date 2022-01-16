@@ -154,17 +154,6 @@ class MatplotlibParser(BackendParserBase):
         super().clear()
         self.figure.clear()
 
-    def update_range_axis(self, range_axis: RangeAxis, ax_idx: int, mpl_axes: MPLAxes, which: str='current'):
-        """If axis is a RangeAxis update its min and max to mpl view limits"""
-        limits =self.get_impl_axis_limits(mpl_axes, ax_idx)
-        if which == 'current':
-            range_axis.begin = limits[0]
-            range_axis.end = limits[1]
-        else: # which == 'original'
-            range_axis.original_begin = range_axis.begin
-            range_axis.original_end = range_axis.end
-        super().update_range_axis(range_axis, ax_idx, mpl_axes)
-
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, MPLAxes):
             return False
@@ -281,7 +270,7 @@ class MatplotlibParser(BackendParserBase):
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
                 mpl_axes_prev = mpl_axes
                 # Keep references to iplotlib instances for ease of access in callbacks.
-                self._impl_plot_cache_table.register_plot(mpl_axes, self.canvas, plot, key, signals)
+                self._impl_plot_cache_table.register(mpl_axes, self.canvas, plot, key, signals)
                 mpl_axes.set_xmargin(0)
                 mpl_axes.set_autoscalex_on(True)
                 mpl_axes.set_autoscaley_on(True)
@@ -392,7 +381,7 @@ class MatplotlibParser(BackendParserBase):
         mpl_axis = self.get_impl_axis(
             impl_plot, ax_idx)  # type: MPLAxis
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
-        self._impl_plot_cache_table.register_axis(mpl_axis)
+
         if isinstance(axis, Axis):
             fc = self._pm.get_value(
                 'font_color', self.canvas, axis, plot) or 'black'
@@ -419,7 +408,8 @@ class MatplotlibParser(BackendParserBase):
 
         if isinstance(axis, LinearAxis):
             if axis.is_date:
-                mpl_axis.set_major_formatter(NanosecondDateFormatter(offset_lut=self._impl_plot_cache_table))
+                ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+                mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets))
 
     @BackendParserBase.run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
@@ -737,8 +727,8 @@ class MultiCursor2(MultiCursor):
         if self.value_label:
             for ax in axes:
                 ci = self._cache_table.get_cache_item(ax)
-                if hasattr(ci, "signals") and ci.signals():
-                    for signal in ci.signals():
+                if hasattr(ci, "signals") and ci.signals is not None:
+                    for signal in ci.signals:
                         xmin, xmax = ax.get_xbound()
                         ymin, ymax = ax.get_ybound()
                         value_annotation = Annotation("", xy=(xmin + (xmax - xmin) / 2, ymin + (ymax - ymin) / 2), xycoords="data",  # xytext=(-200, 0),
@@ -824,7 +814,7 @@ class MultiCursor2(MultiCursor):
                         ax = annotation.axes
 
                         xvalue = self._cache_table.transform_value(
-                            ax.get_xaxis(), event.xdata)
+                            ax, 0, event.xdata)
                         values = signal.pick(xvalue)
                         logger.debug(F"Found {values} for xvalue: {xvalue}")
                         if values is not None:
@@ -832,9 +822,9 @@ class MultiCursor2(MultiCursor):
                             xmin, xmax = ax.get_xbound()
                             if dx < (xmax - xmin) * self.val_tolerance:
                                 pos_x = self._cache_table.transform_value(
-                                    ax.get_xaxis(), values[0], True)
+                                    ax, 0, values[0], True)
                                 pos_y = self._cache_table.transform_value(
-                                    ax.get_yaxis(), values[1], True)
+                                    ax, 1, values[1], True)
                                 annotation.set_position((pos_x, pos_y))
                                 annotation.set_text(ax.format_ydata(values[1]))
                             else:

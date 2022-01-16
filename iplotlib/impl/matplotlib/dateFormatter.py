@@ -23,7 +23,7 @@ class NanosecondDateFormatter(ScalarFormatter):
     """Formats for each date segment"""
     formats = ["{:4d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:03d}", "{:03d}", "{:03d}"]
 
-    def __init__(self, label_segments=4, postfix_end=True, postfix_start=False, offset_lut: ImplementationPlotCacheTable=None):
+    def __init__(self, ax_idx: int, label_segments=4, postfix_end=True, postfix_start=False, offset_lut: list=None):
         super().__init__()
         self.postfix_end = postfix_end
         self.posfix_start = postfix_start
@@ -31,14 +31,14 @@ class NanosecondDateFormatter(ScalarFormatter):
         self.offset_str = "N/A"
         self.cut_start = -1
         self._offset_lut = offset_lut
+        self._ax_idx = ax_idx
 
     @property
     def offsetns(self):
         if not self._offset_lut:
             return 0
-        ci = self._offset_lut.get_cache_item(self.axis)
-        if hasattr(ci, 'offset') and ci.offset is not None:
-            return ci.offset
+        if len(self._offset_lut) > self._ax_idx and self._offset_lut[self._ax_idx] is not None:
+            return self._offset_lut[self._ax_idx]
         return 0
 
     def set_locs(self, locs):
