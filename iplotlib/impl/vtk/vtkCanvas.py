@@ -269,7 +269,7 @@ class VTKParser(BackendParserBase):
                 break
 
         # 4. Update the title at the top of canvas.
-        self._refresh_canvas_title(canvas.title, canvas.font_color)
+        self._refresh_canvas_title(canvas.title, canvas.font_color or '#000000')
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
         """Refresh a specific plot
