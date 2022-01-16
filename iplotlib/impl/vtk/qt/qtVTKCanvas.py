@@ -5,10 +5,11 @@
 #               -Port to PySide2 [Jaswant Sai Panchumarti]
 
 
-from PySide2.QtWidgets import QVBoxLayout, QWidget
+from PySide2.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QWidget
 from PySide2.QtGui import QResizeEvent, QShowEvent
 
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.vtk import VTKParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
@@ -19,6 +20,7 @@ vtkmodules.qt.PyQtImpl = 'PySide2'
 # vtk requirements
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor, PyQtImpl
 from vtkmodules.vtkCommonCore import vtkCommand
+from vtkmodules.vtkChartsCore import vtkChart, vtkAxis
 
 # iplot utilities
 from iplotLogging import setupLogger as sl
@@ -44,40 +46,76 @@ class QtVTKCanvas(IplotQtCanvas):
         """
         super().__init__(parent, **kwargs)
 
-        self._vtk_renderer = QVTKRenderWindowInteractor(self, **kwargs)
+        self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
+        
+        self._vtk_size_pol = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._vtk_renderer = QVTKRenderWindowInteractor(self, **kwargs)
+        self._vtk_renderer._Timer.stop()
         self._parser = VTKParser()
-        self.set_canvas(kwargs.get('canvas'))
+        self._vtk_renderer.setSizePolicy(self._vtk_size_pol)
+        self._vlayout = QVBoxLayout(self)
+        self._vlayout.addWidget(self._vtk_renderer)
+
         # Let the view render its scene into our render window
-        self._parser.view.SetRenderWindow(self._vtk_renderer.GetRenderWindow())
+        rwin = self._vtk_renderer.GetRenderWindow()
+        self._parser.view.SetRenderWindow(rwin)
 
-        # laid out vertically.
-        v_layout = QVBoxLayout(self)
-        v_layout.addWidget(self._vtk_renderer)
-        self.setLayout(v_layout)
-
-        # callback to process mouse movements
+        # GUI event handlers 
+        self.draw_end_cb_tag = rwin.AddObserver(vtkCommand.EndEvent, self._vtk_draw_finish)
         self.mouse_move_cb_tag = self._vtk_renderer.AddObserver(
             vtkCommand.MouseMoveEvent, self._vtk_mouse_move_handler)
-
-        # callback to process mouse clicks
         self.mouse_press_cb_tag = self._vtk_renderer.AddObserver(
             vtkCommand.LeftButtonPressEvent, self._vtk_mouse_press_handler)
-
-        # callback to process mouse clicks
         self.mouse_release_cb_tag = self._vtk_renderer.AddObserver(
             vtkCommand.LeftButtonReleaseEvent, self._vtk_mouse_release_handler)
-        
-        # self._vtk_renderer.AddObserver(vtkCommand.RenderEvent, self._vtk_draw_finish)
 
-    def stage_view_lim_cmd(self):
-        return super().stage_view_lim_cmd()
-    
-    def commit_view_lim_cmd(self):
-        return super().commit_view_lim_cmd()
-    
-    def stage_view_lim_cmd(self):
-        return super().stage_view_lim_cmd()
+        self.setLayout(self._vlayout)
+        self.set_canvas(kwargs.get('canvas'))
+
+    def set_canvas(self, canvas: Canvas):
+        """Sets new iplotlib canvas and redraw"""
+        prev_canvas = self._parser.canvas
+        if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
+            self.unfocus_plot()
+
+        self._parser.remove_crosshair_widget()
+        self._parser.process_ipl_canvas(canvas)
+        
+        if canvas:
+            self.set_mouse_mode(self._mmode or canvas.mouse_mode)
+
+        self.render()
+        super().set_canvas(canvas)
+
+    def get_canvas(self) -> Canvas:
+        """Gets current iplotlib canvas"""
+        return self._parser.canvas
+
+    def set_mouse_mode(self, mode: str):
+        """Sets mouse mode of this canvas"""
+        super().set_mouse_mode(mode)
+        self._parser.remove_crosshair_widget()
+        self._parser.refresh_mouse_mode(self._mmode)
+        self._parser.refresh_crosshair_widget()
+
+    def undo(self):
+        self._parser.undo()
+        self.render()
+
+    def redo(self):
+        self._parser.redo()
+        self.render()
+
+    def unfocus_plot(self):
+        self._parser.set_focus_plot(None)
+
+    def drop_history(self):
+        return self._parser.drop_history()
+
+    def render(self):
+        self._vtk_renderer.Initialize()
+        self._vtk_renderer.Render()
 
     def resizeEvent(self, event: QResizeEvent):
         size = event.size()
@@ -89,27 +127,18 @@ class QtVTKCanvas(IplotQtCanvas):
 
         new_ev = QResizeEvent(size, event.oldSize())
         self._parser.resize(size.width(), size.height())
-        logger.debug(f"Resize {new_ev.oldSize()} -> {new_ev.size()}")
-
+        self._debug_log_event(new_ev, "")
         return super().resizeEvent(new_ev)
-
-    def set_mouse_mode(self, mode: str):
-        """Sets mouse mode of this canvas"""
-        logger.debug(f"Mouse mode: {self._mmode} -> {mode}")
-        self._mmode = mode
-        self._parser.remove_crosshair_widget()
-        self._parser.refresh_mouse_mode(self._mmode)
-        self._parser.refresh_crosshair_widget()
 
     def _vtk_draw_finish(self, obj, ev):
         self._draw_call_counter += 1
-        self._debug_log_event(ev, f"Draw call {self._draw_call_counter}")
+        # self._debug_log_event(ev, f"Draw call {self._draw_call_counter}")
 
     def _vtk_mouse_move_handler(self, obj, ev):
         if ev != "MouseMoveEvent":
             return
         mousePos = obj.GetEventPosition()
-        # self._debug_log_event(ev, f"{mousePos}")
+        # self._debug_log_event(ev, f"{mousePos}") # silenced for easy debugging
         if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
             self._parser.crosshair.onMove(mousePos)
 
@@ -118,49 +147,97 @@ class QtVTKCanvas(IplotQtCanvas):
             return
         mousePos = obj.GetEventPosition()
         self._debug_log_event(ev, f"{mousePos}")
-        if obj.GetRepeatCount() and self._mmode == Canvas.MOUSE_MODE_SELECT:
-            index = self._parser.find_element_index(mousePos)
-            self._parser.set_focus_plot(index)
-            self._parser.process_ipl_canvas(self.get_canvas())
-            self.render()
-        elif self._mmode in [Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM]:
-            print("press")
+        chart = self._parser.find_chart(mousePos)
+        if obj.GetRepeatCount():
+            if self._mmode == Canvas.MOUSE_MODE_SELECT:
+                self._parser.set_focus_plot(chart)
+                self._refresh_original_ranges = False
+                self.refresh()
+                self._refresh_original_ranges = True
+            elif self._mmode in [Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM]:
+                if not isinstance(chart, vtkChart):
+                    return
+                ci = self._parser._impl_plot_cache_table.get_cache_item(chart)
+                if not hasattr(ci, 'plot'):
+                    return
+                plot = ci.plot()
+                if not plot:
+                    return
+
+                # Stage a command to obtain original view limits
+                self.stage_view_lim_cmd()
+                
+                # Reset plot to original view limits
+                original_limits = self._parser.get_plot_limits(plot, which='original')
+                self._parser.set_plot_limits(original_limits)
+
+                # Commit it.
+                while len(self._staging_cmds):
+                    self.commit_view_lim_cmd()
+
+                # Push it.
+                while len(self._commitd_cmds):
+                    self.push_view_lim_cmd()
+
+                self.render()
+            else:
+                self._parser.set_focus_plot(None)
+                self._refresh_original_ranges = False
+                self.refresh()
+                self._refresh_original_ranges = True
+        else:
+            if chart is None:
+                return
+            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                # Stage a command to obtain original view limits
+                self.stage_view_lim_cmd()
+                return
+            if self._mmode == Canvas.MOUSE_MODE_DIST:
+                if self._dist_calculator.plot1 is not None:
+                    x_axis = chart.GetAxis(vtkAxis.BOTTOM)
+                    has_offset = hasattr(x_axis, '_offset')
+                    # x = NanosecondHelper.mpl_transform_value(event.inaxes.get_xaxis(), event.xdata)
+                    # self._dist_calculator.set_dst(x, event.ydata, event.inaxes._ipl_plot(), event.inaxes._ipl_plot_stack_key)
+                    self._dist_calculator.set_dx_is_datetime(has_offset)
+                    box = QMessageBox(self)
+                    box.setWindowTitle('Distance')
+                    dx, dy, dz = self._dist_calculator.dist()
+                    if any([dx, dy, dz]):
+                        box.setText(f"dx = {dx}\ndy = {dy}\ndz = {dz}")
+                    else:
+                        box.setText("Invalid selection")
+                    box.exec_()
+                    self._dist_calculator.reset()
+                else:
+                    # x = NanosecondHelper.mpl_transform_value(event.inaxes.get_xaxis(), event.xdata)
+                    # self._dist_calculator.set_src(x, event.ydata, event.inaxes._ipl_plot(), event.inaxes._ipl_plot_stack_key)
+                    pass
+
 
     def _vtk_mouse_release_handler(self, obj, ev):
         if ev not in ["LeftButtonReleaseEvent"]:
             return
         mousePos = obj.GetEventPosition()
+        chart = self._parser.find_chart(mousePos)
         self._debug_log_event(ev, f"{mousePos}")
-        if self._mmode in [Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM]:
-            print("release")
+        if obj.GetRepeatCount():
+            pass
+        else:
+            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                # commit commands from staging.
+                while len(self._staging_cmds):
+                    self.commit_view_lim_cmd()
+                # push uncommited changes onto the command stack.
+                while len(self._commitd_cmds):
+                    self.push_view_lim_cmd()
 
     def showEvent(self, event: QShowEvent):
         super().showEvent(event)
         self._debug_log_event(event, "")
         self.render()
 
-    def set_canvas(self, canvas: Canvas):
-        """Sets new iplotlib canvas and redraw"""
-
-        self._parser.process_ipl_canvas(canvas)
-        if canvas:
-            self.set_mouse_mode(canvas.mouse_mode or self._mmode)
-        super().set_canvas(canvas)
-
-    def get_canvas(self) -> Canvas:
-        """Gets current iplotlib canvas"""
-        return self._parser.canvas
-
     def get_vtk_renderer(self) -> QVTKRenderWindowInteractor:
         return self._vtk_renderer
-
-    def render(self):
-        self._vtk_renderer.Initialize()
-        self._vtk_renderer.Render()
-        self._vtk_draw_finish(self._vtk_renderer, 'ManualRenderEvent')
     
-    def unfocus_plot(self):
-        self._parser.focus_plot=None
-
     def _debug_log_event(self, event: vtkCommand, msg: str):
         logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")

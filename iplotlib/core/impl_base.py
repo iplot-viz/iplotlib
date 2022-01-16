@@ -173,7 +173,7 @@ class BackendParserBase(ABC):
         """If axis is a RangeAxis update its min and max to implementation chart's view limits"""
         if not isinstance(range_axis, RangeAxis):
             return
-        limits = self.get_impl_axis_limits(impl_plot, ax_idx)
+        limits = self.get_oaw_axis_limits(impl_plot, ax_idx)
         if which == 'current':
             range_axis.begin = limits[0]
             range_axis.end = limits[1]
@@ -311,12 +311,9 @@ class BackendParserBase(ABC):
     def get_impl_y_axis_limits(self, impl_plot: Any):
         """Implementations should return the y range"""
 
-    def get_impl_axis_limits(self, impl_plot: Any, ax_idx: int):
-        """Offset-aware version of implementation's get_x_limit, get_y_limit"""
-        begin, end = (None, None)
-        if 0 <= ax_idx <= 1:
-            begin, end = [self.get_impl_x_axis_limits, self.get_impl_y_axis_limits][ax_idx](impl_plot)
-        return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
+    @abstractmethod
+    def get_oaw_axis_limits(self, impl_plot: Any, ax_idx: int):
+        """Offset-aware version of implementation's get_x_limits, get_y_limits"""
 
     @abstractmethod
     def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
@@ -326,55 +323,16 @@ class BackendParserBase(ABC):
     def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
         """Implementations should set the y range"""
 
-    def set_impl_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
-        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is None:
-            new_offset = self.create_offset(limits)
-            if new_offset is not None:
-                ci.offsets[ax_idx] = new_offset
+    @abstractmethod
+    def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
+        """Offset-aware version of implementation's set_x_limits, set_y_limits"""
 
-        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is not None:
-            begin = self.transform_value(
-                impl_plot, ax_idx, limits[0], inverse=True)
-            end = self.transform_value(
-                impl_plot, ax_idx, limits[1], inverse=True)
-        else:
-            begin = limits[0]
-            end = limits[1]
-
-        if ax_idx == 0:
-            if begin == end and begin is not None:
-                begin = end-1
-            return self.set_impl_x_axis_limits(impl_plot, (begin, end))
-        elif ax_idx == 1:
-            return self.set_impl_y_axis_limits(impl_plot, (begin, end))
-        else:
-            return None
-
+    @abstractmethod
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
-        return self._impl_plot_cache_table.transform_value(impl_plot, ax_idx, value, inverse=inverse)
 
+    @abstractmethod
     def transform_data(self, impl_plot: Any, data):
         """This function post processes data if it cannot be plot with matplotlib directly.
         Currently it transforms data if it is a large integer which can cause overflow in matplotlib"""
-        ret = []
-        if isinstance(data, Collection):
-            for i, d in enumerate(data):
-                ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-                if hasattr(ci, 'offsets') and ci.offsets[i] is None:
-                    new_offset = self.create_offset(d)
-                    if new_offset is not None:
-                        ci.offsets[i] = d[0]
-
-                if hasattr(ci, 'offsets') and ci.offsets[i] is not None:
-                    logger.info(
-                        f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
-                    if isinstance(d, Collection):
-                        ret.append([e - ci.offsets[i] for e in d])
-                    else:
-                        ret.append(d - ci.offsets[i])
-                else:
-                    ret.append(d)
-        return ret

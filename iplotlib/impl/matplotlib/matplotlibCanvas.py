@@ -1,7 +1,7 @@
 from contextlib import ExitStack
 from typing import Any, Callable, Collection, List
 
-import numpy
+import numpy as np
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick
 from matplotlib.axis import Axis as MPLAxis
@@ -157,7 +157,7 @@ class MatplotlibParser(BackendParserBase):
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, MPLAxes):
             return False
-        self.set_impl_axis_limits(impl_plot, ax_idx, limits)
+        self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
         return True
 
     def _get_all_shared_axes(self, base_mpl_axes: MPLAxes):
@@ -337,10 +337,10 @@ class MatplotlibParser(BackendParserBase):
         if self.canvas.shared_x_axis:
             other_axes = self._get_all_shared_axes(axis)
             for other_axis in other_axes:
-                cur_x_limits =self.get_impl_axis_limits(axis, 0)
-                other_x_limits =self.get_impl_axis_limits(other_axis, 0)
+                cur_x_limits =self.get_oaw_axis_limits(axis, 0)
+                other_x_limits =self.get_oaw_axis_limits(other_axis, 0)
                 if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
-                    self.set_impl_axis_limits(other_axis, 0, cur_x_limits)
+                    self.set_oaw_axis_limits(other_axis, 0, cur_x_limits)
 
         for a in affected_axes:
             ranges_hash = hash((*a.get_xlim(), *a.get_ylim()))
@@ -404,7 +404,7 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None and (axis.begin or axis.end):
             logger.debug(
                 f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
-            self.set_impl_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
+            self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
 
         if isinstance(axis, LinearAxis):
             if axis.is_date:
@@ -434,7 +434,7 @@ class MatplotlibParser(BackendParserBase):
         data = self.transform_data(mpl_axes, signal_data)
         if not len(data[0]) or not len(data[1]):
             if hasattr(signal, 'ts_start') and hasattr(signal, 'ts_end'):
-                self.set_impl_axis_limits(mpl_axes, 0, [signal.ts_start, signal.ts_end])
+                self.set_oaw_axis_limits(mpl_axes, 0, [signal.ts_start, signal.ts_end])
 
         if hasattr(signal, 'envelope') and signal.envelope:
             if len(data) != 3:
@@ -594,6 +594,22 @@ class MatplotlibParser(BackendParserBase):
 
             a.draw(a.figure._cachedRenderer)
 
+    @staticmethod
+    def create_offset(vals):
+        """Given a collection of values determine if creting offset is necessary and return it
+        Returns None otherwise"""
+        if isinstance(vals, Collection) and len(vals) > 0:
+            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'int64')
+                    or (type(vals[0]) == int)
+                    or isinstance(vals[0], np.int64)) and vals[0] > 10**15:
+                return vals[0]
+        if isinstance(vals, Collection) and len(vals) > 0:
+            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'uint64')
+                    or (type(vals[0]) == int)
+                    or isinstance(vals[0], np.uint64)) and vals[0] > 10**15:
+                return vals[0]
+        return None
+
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):
             return impl_plot.get_xaxis()
@@ -618,6 +634,13 @@ class MatplotlibParser(BackendParserBase):
         else:
             return None
 
+    def get_oaw_axis_limits(self, impl_plot: Any, ax_idx: int):
+        """Offset-aware version of implementation's get_x_limit, get_y_limit"""
+        begin, end = (None, None)
+        if 0 <= ax_idx <= 1:
+            begin, end = [self.get_impl_x_axis_limits, self.get_impl_y_axis_limits][ax_idx](impl_plot)
+        return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
+
     def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
         if isinstance(impl_plot, MPLAxes):
             impl_plot.set_xlim(limits)
@@ -627,6 +650,59 @@ class MatplotlibParser(BackendParserBase):
             impl_plot.set_ylim(limits)
         else:
             return None
+
+    def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is None:
+            new_offset = self.create_offset(limits)
+            if new_offset is not None:
+                ci.offsets[ax_idx] = new_offset
+
+        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is not None:
+            begin = self.transform_value(
+                impl_plot, ax_idx, limits[0], inverse=True)
+            end = self.transform_value(
+                impl_plot, ax_idx, limits[1], inverse=True)
+        else:
+            begin = limits[0]
+            end = limits[1]
+
+        if ax_idx == 0:
+            if begin == end and begin is not None:
+                begin = end-1
+            return self.set_impl_x_axis_limits(impl_plot, (begin, end))
+        elif ax_idx == 1:
+            return self.set_impl_y_axis_limits(impl_plot, (begin, end))
+        else:
+            return None
+
+    def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
+        """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
+        float when offset is int)"""
+        return self._impl_plot_cache_table.transform_value(impl_plot, ax_idx, value, inverse=inverse)
+
+    def transform_data(self, impl_plot: Any, data):
+        """This function post processes data if it cannot be plot with matplotlib directly.
+        Currently it transforms data if it is a large integer which can cause overflow in matplotlib"""
+        ret = []
+        if isinstance(data, Collection):
+            for i, d in enumerate(data):
+                ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+                if hasattr(ci, 'offsets') and ci.offsets[i] is None:
+                    new_offset = self.create_offset(d)
+                    if new_offset is not None:
+                        ci.offsets[i] = d[0]
+
+                if hasattr(ci, 'offsets') and ci.offsets[i] is not None:
+                    logger.debug(
+                        f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
+                    if isinstance(d, Collection):
+                        ret.append([e - ci.offsets[i] for e in d])
+                    else:
+                        ret.append(d - ci.offsets[i])
+                else:
+                    ret.append(d)
+        return ret
 
 
 def get_data_range(data, axis_idx):

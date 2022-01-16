@@ -373,12 +373,12 @@ class VTKParser(BackendParserBase):
                 appearance.SetFontSize(fs)
         if isinstance(axis, RangeAxis) and not (isinstance(axis, LinearAxis) and axis.follow):
             if axis.begin is not None and axis.end is not None:
-                vtk_axis.SetRange(axis.begin, axis.end)
+                self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
             vtk_axis.AutoScale()
         if isinstance(axis, LinearAxis):
             if axis.window is not None and not axis.follow:
-                ax_max = vtk_axis.GetMaximum()
-                vtk_axis.SetRange(ax_max - axis.window, ax_max)
+                ax_max = self.get_oaw_axis_limits(impl_plot, ax_idx)[1]
+                self.set_oaw_axis_limits(impl_plot, ax_idx, [ax_max - axis.window, ax_max])
                 vtk_axis.AutoScale()
 
     def _axis_update_callback(self, obj, ev):
@@ -439,22 +439,8 @@ class VTKParser(BackendParserBase):
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, vtkChart):
             return False
-        vtk_axis = impl_plot.GetAxis(vtkAxis.LEFT if ax_idx == 1 else vtkAxis.BOTTOM)
-        vtk_axis.SetRange(limits[0], limits[1])
-        vtk_axis.AutoScale()
+        self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
         return True
-
-    def update_range_axis(self, range_axis: RangeAxis, ax_idx: int, impl_plot: Any, which='current'):
-        """If axis is a RangeAxis update its min and max to vtk chart view limits"""
-        vtk_axis = impl_plot.GetAxis(vtkAxis.LEFT if ax_idx == 1 else vtkAxis.BOTTOM)
-        limits = vtk_axis.GetMinimum(), vtk_axis.GetMaximum()
-        if which == 'current':
-            range_axis.begin = limits[0]
-            range_axis.end = limits[1]
-        else: # which == 'original'
-            range_axis.original_begin = range_axis.begin
-            range_axis.original_end = range_axis.end
-        super().update_range_axis(range_axis, ax_idx, impl_plot, which=which)
 
     def _refresh_canvas_title(self, title: str, font_color: str):
         """Updates canvas title text and the appearance
@@ -845,16 +831,74 @@ class VTKParser(BackendParserBase):
         self._layout.SetRect(c_rect)
         self._title_region.SetFixedRect(t_rect)
 
-    def set_focus_plot(self, index: vtkVector2i):
-        if not isinstance(index, vtkVector2i):
-            return
-
-        if index.GetX() < 0 or index.GetY() < 0:
+    def set_focus_plot(self, impl_plot: Any):
+        if not isinstance(impl_plot, vtkChart):
             logger.debug("Set focus chart -> None")
             self._focus_plot = None
+            self._focus_plot_stack_key = None
             return
 
         if self._focus_plot is None:
-            logger.debug(f"Set focus chart @ internal index : {index}")
-            self._focus_plot = self._vtk_col_row_plot_lut.get(
-                (index[0], index[1]))
+            logger.debug(f"Set focus chart {impl_plot}")
+            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            if not hasattr(ci, 'plot'):
+                return
+            if not ci.plot():
+                return
+            self._focus_plot = ci.plot()
+            self._focus_plot_stack_key = ci.stack_key
+
+    def get_impl_x_axis(self, impl_plot: Any):
+        if isinstance(impl_plot, vtkChart):
+            return impl_plot.GetAxis(vtkAxis.BOTTOM)
+        else:
+            return None
+
+    def get_impl_y_axis(self, impl_plot: Any):
+        if isinstance(impl_plot, vtkChart):
+            return impl_plot.GetAxis(vtkAxis.LEFT)
+        else:
+            return None
+
+    def get_impl_x_axis_limits(self, impl_plot: Any):
+        if isinstance(impl_plot, vtkChart):
+            ax = impl_plot.GetAxis(vtkAxis.BOTTOM)
+            return (ax.GetMinimum(), ax.GetMaximum())
+        else:
+            return None
+
+    def get_impl_y_axis_limits(self, impl_plot: Any):
+        if isinstance(impl_plot, vtkChart):
+            ax = impl_plot.GetAxis(vtkAxis.LEFT)
+            return (ax.GetMinimum(), ax.GetMaximum())
+        else:
+            return None
+
+    def get_oaw_axis_limits(self, impl_plot: Any, ax_idx: int):
+        """Offset-aware version of implementation's get_x_limits, get_y_limits"""
+        return (None, None)
+
+    def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
+        if isinstance(impl_plot, vtkChart):
+            impl_plot.GetAxis(vtkAxis.BOTTOM).SetRange(limits[0], limits[1])
+
+    def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
+        if isinstance(impl_plot, vtkChart):
+            impl_plot.GetAxis(vtkAxis.LEFT).SetRange(limits[0], limits[1])
+        else:
+            return None
+
+    def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
+        """Offset-aware version of implementation's set_x_limits, set_y_limits"""
+        pass
+
+    def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
+        """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
+        float when offset is int)"""
+        pass
+
+    def transform_data(self, impl_plot: Any, data):
+        """This function post processes 64-bitdata if it cannot be plotted with VTK directly.
+        NOTE: This function is unused in the VTK implementation.
+        """
+        pass
