@@ -432,6 +432,9 @@ class MatplotlibParser(BackendParserBase):
         # All good, make a data access request.
         signal_data = signal.get_data()
         data = self.transform_data(mpl_axes, signal_data)
+        if not len(data[0]) or not len(data[1]):
+            if hasattr(signal, 'ts_start') and hasattr(signal, 'ts_end'):
+                self.set_impl_axis_limits(mpl_axes, 0, [signal.ts_start, signal.ts_end])
 
         if hasattr(signal, 'envelope') and signal.envelope:
             if len(data) != 3:
