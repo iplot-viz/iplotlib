@@ -18,6 +18,8 @@ class VTK64BitTimePlotSupport:
         self._precise = precise
         self._table = None  # type: vtkTable
         self._plot = None  # type: vtkPlot
+        self._activeBitSeqId = None
+        self._ofstTime = None
 
     def enable(self):
         """
@@ -322,22 +324,7 @@ class VTK64BitTimePlotSupport:
                     selectedColIds.append(colId)
         return selectedColIds
 
-    def generateTics(self, obj, ev):
-        """Tick labels mark periods of time in plot data.
-        These labels display only the varying periods.
-        The constant prefix is stored in axis title.
-        """
-        if not self._enabled:
-            return
-
-        chart = obj.GetParent()  # type: vtkChart
-
-        # Initially, compute simple numeric tick positions
-        xAxis = chart.GetAxis(vtkAxis.BOTTOM)  # type: vtkAxis
-        xAxis.SetCustomTickPositions(None, None)
-        xAxis.SetNumberOfTicks(6)
-        xAxis.SetTickLabelAlgorithm(vtkAxis.TICK_SIMPLE)
-
+    def computeOffsetValue(self, chart: vtkChart):
         columnIds = []
         bBitSeqEnabled = self.isBitSequencingEnabled(chart)
 
@@ -355,6 +342,24 @@ class VTK64BitTimePlotSupport:
                     columnIds.append(actColId)
                     self.resetXaxisRange(
                         chart, i)  # needed to fit axis to current column data
+
+            # Check for uniqueness. All plots must have same active column.
+            try:
+                activeColId = min(columnIds)
+            except ValueError:
+                return
+            self._activeBitSeqId = activeColId - 2
+            if min(columnIds) != max(columnIds):
+                columnIds[:] = [activeColId] * len(columnIds)
+
+            # Enforce uniform active column. Get offset time
+            self._ofstTime = (1 << 63) - 1
+            for i in range(numPlots):
+                self.updateActiveColumnId(chart, i, columnIds[i])
+                ofstITime = self.getOffsetTimeValue(chart, i, columnIds[i])
+                if ofstITime >= 0:
+                    self._ofstTime = min(ofstITime, self._ofstTime)
+            logger.debug(f"Offset time: {pd.to_datetime(self._ofstTime)}")
         elif not self._precise:
             if bBitSeqEnabled:
                 # Disable bit sequencing
@@ -362,22 +367,51 @@ class VTK64BitTimePlotSupport:
                     self.disableBitSequencing(chart, i)
                     self.resetXaxisRange(
                         chart, i)  # needed to fit axis to current column data
+            self._ofstTime = 0
+            self._activeBitSeqId = -1
 
-        if self._precise:
-            # Check for uniqueness. All plots must have same active column.
-            activeColId = min(columnIds)
-            activeBitSeqId = activeColId - 2
-            if min(columnIds) != max(columnIds):
-                columnIds[:] = [activeColId] * len(columnIds)
+    def transformValue(self, value: typing.Any, inverse=False):
+        """Build the full 64 bit integer value corresponding to input value in 
+        the context of given chart
+        The inverse operation would subtract the offset and return the 16-bit integer"""
+        if not inverse:
+            if self._precise and self._enabled and self._ofstTime is not None:
+                bitSequences = np.array([self._ofstTime], np.uint64).view(np.uint16)
+                bitSequencesList = bitSequences.tolist()
+                bitSequencesList[self._activeBitSeqId] = int(bitSequencesList[self._activeBitSeqId] + value)
+                logger.debug(f"Pre-normalize: {bitSequencesList}")
+                VTK64BitTimePlotSupport.normalizeToDtype(bitSequencesList,
+                                                            dtype=np.uint16)
+                logger.debug(f"Post-normalize: {bitSequencesList}")
+                return VTK64BitTimePlotSupport.getTimeStampFrom16Bits(bitSequencesList)
+            else:
+                return np.int64(value)
+        elif self._precise and self._enabled:
+            bitSequences = np.array([value], np.uint64).view(np.uint16).tolist()
+            try:
+                return bitSequences[self._activeBitSeqId]
+            except (TypeError, IndexError) as _:
+                return 0
+        else:
+            return int(value)
 
-            # Enforce uniform active column. Get offset time
-            ofstTime = (1 << 63) - 1
-            for i in range(numPlots):
-                self.updateActiveColumnId(chart, i, columnIds[i])
-                ofstITime = self.getOffsetTimeValue(chart, i, columnIds[i])
-                if ofstITime >= 0:
-                    ofstTime = min(ofstITime, ofstTime)
-            logger.debug(f"Offset time: {pd.to_datetime(ofstTime)}")
+    def generateTics(self, obj, ev):
+        """Tick labels mark periods of time in plot data.
+        These labels display only the varying periods.
+        The constant prefix is stored in axis title.
+        """
+        if not self._enabled:
+            return
+
+        chart = obj.GetParent()  # type: vtkChart
+
+        # Initially, compute simple numeric tick positions
+        xAxis = chart.GetAxis(vtkAxis.BOTTOM)  # type: vtkAxis
+        xAxis.SetCustomTickPositions(None, None)
+        xAxis.SetNumberOfTicks(6)
+        xAxis.SetTickLabelAlgorithm(vtkAxis.TICK_SIMPLE)
+
+        self.computeOffsetValue(chart)
 
         xAxis.Update()
         tickPositionsVtkArr = xAxis.GetTickPositions()
@@ -386,21 +420,9 @@ class VTK64BitTimePlotSupport:
 
         logger.debug(f"TimeStamp | Tick Position | time")
         for pos in tickPositionsNpArr:
-            if self._precise:
-                bitSequences = np.array([ofstTime], np.uint64).view(np.uint16)
-                bitSequencesList = bitSequences.tolist()
-                bitSequencesList[activeBitSeqId] = int(
-                    bitSequencesList[activeBitSeqId] + pos)
-                logger.debug(f"Pre-normalize: {bitSequencesList}")
-                VTK64BitTimePlotSupport.normalizeToDtype(bitSequencesList,
-                                                         dtype=np.uint16)
-                logger.debug(f"Post-normalize: {bitSequencesList}")
-                t = VTK64BitTimePlotSupport.getTimeStampFrom16Bits(
-                    bitSequencesList)
-            else:
-                t = np.int64(pos)
-                if t < 0:
-                    t = 0
+            t = self.transformValue(pos)
+            if t < 0:
+                t = 0
             tss.append(pd.to_datetime(t))
             logger.debug(f"{tss[-1]} | {np.int64(pos)} | {t}")
 

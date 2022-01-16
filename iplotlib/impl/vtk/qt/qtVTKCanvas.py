@@ -24,7 +24,7 @@ from vtkmodules.vtkChartsCore import vtkChart, vtkAxis
 
 # iplot utilities
 from iplotLogging import setupLogger as sl
-logger = sl.get_logger(__name__, 'DEBUG')
+logger = sl.get_logger(__name__)
 
 try:
     assert(PyQtImpl == 'PySide2')
@@ -86,6 +86,7 @@ class QtVTKCanvas(IplotQtCanvas):
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
         self.render()
+        # self._parser.post_render()
         super().set_canvas(canvas)
 
     def get_canvas(self) -> Canvas:
