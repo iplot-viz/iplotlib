@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import os
 import numpy as np
 from iplotlib.core import SimpleSignal, Canvas, PlotXY

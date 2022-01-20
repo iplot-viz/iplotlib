@@ -18,8 +18,6 @@ from iplotlib.core import (Axis,
                            LinearAxis,
                            RangeAxis,
                            Canvas,
-                           IplPlotViewLimits,
-                           IplotAxesRangeCmd,
                            BackendParserBase,
                            Plot,
                            Signal)
@@ -46,6 +44,7 @@ class MatplotlibParser(BackendParserBase):
 
         register_matplotlib_converters()
         self.figure = Figure()
+        self._impl_plot_ranges_hash = dict()
 
         if tight_layout:
             self.enable_tight_layout()
@@ -80,12 +79,16 @@ class MatplotlibParser(BackendParserBase):
             line = lines[0][0]  # type: Line2D
             line.set_xdata(x_data)
             line.set_ydata(y_data)
-            style.update({'drawstyle': step})
+            style.update({'drawstyle': step or 'default'})
             for k, v in style.items():
                 setter = getattr(line, f"set_{k}")
                 if v is None and k != "drawstyle":
                     continue
                 setter(v)
+            if self.canvas.streaming:
+                mpl_axes.set_ylim(min(y_data) - 0.01, max(y_data) + 0.01)
+                ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
+                mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
             self.figure.canvas.draw_idle()
         else:
             params = dict(**style)
@@ -118,7 +121,7 @@ class MatplotlibParser(BackendParserBase):
             shapes[1][0].set_ydata(y2_data)
             shapes[2].remove()
             shapes.pop()
-            style.update({'drawstyle': step})
+            style.update({'drawstyle': step or 'default'})
             for k, v in style.items():
                 setter = getattr(shapes[0][0], f"set_{k}")
                 if v is None and k != "drawstyle":
@@ -268,7 +271,6 @@ class MatplotlibParser(BackendParserBase):
                 mpl_axes = self.figure.add_subplot(
                     subgrid_item[row_id, 0], sharex=mpl_axes_prev)
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
-                mpl_axes_prev = mpl_axes
                 # Keep references to iplotlib instances for ease of access in callbacks.
                 self._impl_plot_cache_table.register(mpl_axes, self.canvas, plot, key, signals)
                 mpl_axes.set_xmargin(0)
@@ -330,14 +332,14 @@ class MatplotlibParser(BackendParserBase):
                 axes.callbacks.connect(
                     'ylim_changed', self._axis_update_callback)
 
-    def _axis_update_callback(self, axis):
+    def _axis_update_callback(self, mpl_axes):
 
-        affected_axes = axis.get_shared_x_axes().get_siblings(axis)
+        affected_axes = mpl_axes.get_shared_x_axes().get_siblings(mpl_axes)
 
         if self.canvas.shared_x_axis:
-            other_axes = self._get_all_shared_axes(axis)
+            other_axes = self._get_all_shared_axes(mpl_axes)
             for other_axis in other_axes:
-                cur_x_limits =self.get_oaw_axis_limits(axis, 0)
+                cur_x_limits =self.get_oaw_axis_limits(mpl_axes, 0)
                 other_x_limits =self.get_oaw_axis_limits(other_axis, 0)
                 if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
                     self.set_oaw_axis_limits(other_axis, 0, cur_x_limits)
@@ -372,9 +374,10 @@ class MatplotlibParser(BackendParserBase):
  
             for signal_ref in ci.signals:
                 signal = signal_ref()
-                if hasattr(signal, "set_ranges"):
-                    signal.set_ranges([ranges[0], ranges[1]])
-            self._stale_impl_plots.add(a)
+                if hasattr(signal, "set_xranges"):
+                    signal.set_xranges([ranges[0][0], ranges[0][1]])
+            if ci not in self._stale_citems:
+                self._stale_citems.append(ci)
 
     def process_ipl_axis(self, axis: Axis, ax_idx, plot: Plot, impl_plot: MPLAxes):
         super().process_ipl_axis(axis, ax_idx, plot, impl_plot)

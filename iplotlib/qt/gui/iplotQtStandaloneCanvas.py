@@ -14,7 +14,7 @@ import sys
 
 from PySide2.QtCore import Qt
 from PySide2.QtWidgets import QAction, QActionGroup, QApplication
-from PySide2.QtGui import QGuiApplication
+from PySide2.QtGui import QGuiApplication, QKeySequence
 
 from iplotlib.core import Canvas
 from iplotlib import examples as iplotExamples
@@ -46,7 +46,14 @@ class QStandaloneCanvas:
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
         self.app = QApplication(argv)
         self.main_window = IplotQtMainWindow(show_toolbar=self.use_toolbar)
+        self.fileMenu = self.main_window.menuBar().addMenu('&File')
         self.selectMenu = self.main_window.menuBar().addMenu('&Canvases')
+
+        exit_action = QAction("Exit", self.main_window.menuBar())
+        exit_action.setShortcuts(QKeySequence.Quit)
+        exit_action.triggered.connect(QApplication.quit)
+
+        self.fileMenu.addAction(exit_action)
         self.canvasActionGroup = QActionGroup(self.main_window)
         self.canvasActionGroup.setExclusive(True)
 
@@ -84,27 +91,21 @@ class QStandaloneCanvas:
             self.prepare()
         
         # select the first canvas
-        try:
-            firstAct = self.canvasActionGroup.actions()[0]
-            firstAct.trigger()
-        except IndexError:
-            logger.warning('The main thread is now blocked. You can no longer add canvases.')
-
+        firstAct = self.canvasActionGroup.actions()[0]
+        firstAct.trigger()
         self.main_window.show()
-        sys.exit(self.app.exec_())
+    
+    def exec_(self) -> int:
+        if self.app is None:
+            self.prepare()
+        self.show()
+        logger.warning('The main thread is now blocked. You can no longer add canvases.')
+        return self.app.exec_()
 
+args = None
 
-def main():
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '-impl', dest='impl', help="Specify a graphics backend.", default='matplotlib')
-    parser.add_argument('-t', dest='toolbar', help="Place a toolbar with canvas specific actions on the top.",
-                        action='store_true', default=False)
-    parser.add_argument('-use-fallback-samples', dest='use_fallback_samples', action='store_true', default=False)
-    args = parser.parse_args()
-
+def proxy_main():
+    global args
     AccessHelper.num_samples_override = args.use_fallback_samples
     canvas_app = QStandaloneCanvas(args.impl, use_toolbar=args.toolbar)
     canvas_app.prepare()
@@ -116,3 +117,29 @@ def main():
         if hasattr(module, 'plot'):
             canvas_app.add_canvas(module.plot())
     canvas_app.show()
+    return canvas_app.exec_()
+
+def main():
+    global args
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '-impl', dest='impl', help="Specify a graphics backend.", default='matplotlib')
+    parser.add_argument('-t', dest='toolbar', help="Place a toolbar with canvas specific actions on the top.",
+                        action='store_true', default=False)
+    parser.add_argument('-use-fallback-samples', dest='use_fallback_samples', action='store_true', default=False)
+    parser.add_argument('-profile', dest='use_profiler', action='store_true', default=False)
+    args = parser.parse_args()
+
+    if args.use_profiler:
+        import cProfile, pstats
+        cProfile.runctx("proxy_main()", globals(), locals(), "{}.profile".format(__file__))
+        s = pstats.Stats("{}.profile".format(__file__))
+        s.strip_dirs()
+        s.sort_stats("time").print_stats(10)
+    else:
+        sys.exit(proxy_main())
+
+if __name__ == '__main__':
+    main()

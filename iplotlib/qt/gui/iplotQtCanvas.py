@@ -1,11 +1,13 @@
 from abc import abstractmethod
+from contextlib import contextmanager
 from typing import Collection, List
 
-from PySide2.QtCore import QSize
-from PySide2.QtWidgets import QWidget
+from PySide2.QtCore import QMetaObject, QSize, Qt, Signal, Slot
+from PySide2.QtWidgets import QApplication, QWidget
 from iplotlib.core.axis import RangeAxis
 
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.command import IplotCommand
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.impl_base import BackendParserBase
 import iplotLogging.setupLogger as sl
@@ -16,6 +18,7 @@ class IplotQtCanvas(QWidget):
     """
     Base class for all Qt related canvas implementaions
     """
+    cmdDone = Signal(IplotCommand)
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent)
@@ -37,6 +40,28 @@ class IplotQtCanvas(QWidget):
     def drop_history(self):
         """history: clear undo history. after this, can no longer undo"""
 
+    def can_undo(self) -> bool:
+        return self._parser._hm.can_undo()
+
+    def can_redo(self) -> bool:
+        return self._parser._hm.can_redo()
+
+    def get_next_undo_cmd_name(self) -> str:
+        return self._parser._hm.get_next_undo_cmd_name()
+
+    def get_next_redo_cmd_name(self) -> str:
+        return self._parser._hm.get_next_redo_cmd_name()
+
+    def draw_in_main_thread(self):
+        import shiboken2
+        if shiboken2.isValid(self):
+            QMetaObject.invokeMethod(self, "flush_draw_queue")
+
+    @Slot()
+    def flush_draw_queue(self):
+        if self._parser:
+            self._parser.process_work_queue()
+
     @abstractmethod
     def refresh(self):
         """Refresh the canvas from the current iplotlib.core.Canvas instance.
@@ -55,6 +80,18 @@ class IplotQtCanvas(QWidget):
         """Sets mouse mode of this canvas"""
         logger.debug(f"MMode change {self._mmode} -> {mode}")
         self._mmode = mode
+        if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
+            self.setCursor(Qt.CrossCursor)
+        elif self._mmode == Canvas.MOUSE_MODE_DIST:
+            self.setCursor(Qt.PointingHandCursor)
+        elif self._mmode == Canvas.MOUSE_MODE_PAN:
+            self.setCursor(Qt.OpenHandCursor)
+        elif self._mmode == Canvas.MOUSE_MODE_SELECT:
+            self.setCursor(Qt.CrossCursor)
+        elif self._mmode == Canvas.MOUSE_MODE_ZOOM:
+            self.setCursor(Qt.CrossCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
 
     @abstractmethod
     def set_canvas(self, canvas: Canvas):
@@ -84,6 +121,16 @@ class IplotQtCanvas(QWidget):
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
 
+    @contextmanager
+    def view_retainer(self):
+        try:
+            current_lims = self._parser.get_all_plot_limits()
+            cmd = IplotAxesRangeCmd('_TmpPrefUpd_', current_lims, parser=self._parser)
+            self._parser._hm.done(cmd)
+            yield None
+        finally:
+            self._parser._hm.undo()
+
     def stage_view_lim_cmd(self):
         """stage a view command"""
 
@@ -111,7 +158,11 @@ class IplotQtCanvas(QWidget):
             cmd = self._commitd_cmds.pop()
             self._parser._hm.done(cmd)
             logger.debug(f"Pushed {cmd}")
+            self.cmdDone.emit(cmd)
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            QApplication.processEvents()
             self._parser.refresh_data()
+            QApplication.restoreOverrideCursor()
         except IndexError:
             return
 

@@ -300,6 +300,11 @@ class VTK64BitTimePlotSupport:
             if self.isPlotValid():
                 self.updateActiveColumnId(chart, plotId, 0)
 
+    def resetChartXAxisRange(self, chart: vtkChart):
+        numPlots = chart.GetNumberOfPlots()
+        for i in range(numPlots):
+            self.resetXaxisRange(chart, i)
+
     def resetXaxisRange(self, chart: vtkChart, plotId: int):
         actColId = self.getActiveColumnId(chart, plotId)
         with self.getPlotFromChart(plotId, chart):
@@ -340,8 +345,8 @@ class VTK64BitTimePlotSupport:
                     # and dynamically select columns
                     actColId = self.selectColumn(chart, i)
                     columnIds.append(actColId)
-                    self.resetXaxisRange(
-                        chart, i)  # needed to fit axis to current column data
+                    # self.resetXaxisRange(
+                    #     chart, i)  # needed to fit axis to current column data
 
             # Check for uniqueness. All plots must have same active column.
             try:
@@ -365,8 +370,8 @@ class VTK64BitTimePlotSupport:
                 # Disable bit sequencing
                 for i in range(numPlots):
                     self.disableBitSequencing(chart, i)
-                    self.resetXaxisRange(
-                        chart, i)  # needed to fit axis to current column data
+                    # self.resetXaxisRange(
+                    #     chart, i)  # needed to fit axis to current column data
             self._ofstTime = 0
             self._activeBitSeqId = -1
 
@@ -384,16 +389,36 @@ class VTK64BitTimePlotSupport:
                                                             dtype=np.uint16)
                 logger.debug(f"Post-normalize: {bitSequencesList}")
                 return VTK64BitTimePlotSupport.getTimeStampFrom16Bits(bitSequencesList)
+            elif self._precise or self._enabled:
+                try:
+                    return np.int64(value)
+                except OverflowError:
+                    return int(value)
+            elif value > (1 << 32):
+                try:
+                    return np.int64(value)
+                except OverflowError:
+                    return int(value)
             else:
-                return np.int64(value)
+                return value
         elif self._precise and self._enabled:
             bitSequences = np.array([value], np.uint64).view(np.uint16).tolist()
             try:
                 return bitSequences[self._activeBitSeqId]
             except (TypeError, IndexError) as _:
-                return 0
+                return bitSequences[0]
+        elif self._enabled:
+            try:
+                return np.int64(value)
+            except OverflowError:
+                return int(value)
+        elif value > (1 << 32):
+            try:
+                return np.int64(value)
+            except OverflowError:
+                return int(value)
         else:
-            return int(value)
+            return value
 
     def generateTics(self, obj, ev):
         """Tick labels mark periods of time in plot data.

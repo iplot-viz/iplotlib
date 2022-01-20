@@ -20,7 +20,7 @@ from iplotlib.core.property_manager import PropertyManager
 
 logger = sl.get_logger(__name__)
 
-@dataclass
+@dataclass(frozen=True, eq=True)
 class ImplementationPlotCacheItem:
     canvas: weakref.ReferenceType=None
     plot: weakref.ReferenceType=None
@@ -30,30 +30,28 @@ class ImplementationPlotCacheItem:
 
 class ImplementationPlotCacheTable:
     def __init__(self) -> None:
-        self._table = dict() # type: Dict[Any, ImplementationPlotCacheItem]
+        pass
     
-    def register(self, impl_plot: Any, canvas: Canvas=None, plot: Plot=None, stack_key: str='', signals: List[Signal]=[]):
+    def register(self, impl_obj: Any, canvas: Canvas=None, plot: Plot=None, stack_key: str='', signals: List[Signal]=[]):
         cache_item = ImplementationPlotCacheItem(
             canvas=weakref.ref(canvas),
             plot=weakref.ref(plot),
             stack_key=stack_key,
             signals=[weakref.ref(sig) for sig in signals])
-        self._table.update({id(impl_plot): cache_item})
+        impl_obj._ipl_cache_item = cache_item
 
     def drop(self, impl_obj: Any):
-        self._table.pop(id(impl_obj))
+        if hasattr(impl_obj, '_ipl_cache_item'):
+            del impl_obj._ipl_cache_item
 
     def get_cache_item(self, impl_obj: Any) -> ImplementationPlotCacheItem:
-        return self._table.get(id(impl_obj))
+        return impl_obj._ipl_cache_item if hasattr(impl_obj, '_ipl_cache_item') else None
     
-    def clear(self):
-        self._table.clear()
-
-    def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
+    def transform_value(self, impl_obj: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
         base = 0
-        ci = self._table.get(id(impl_plot))
+        ci = self.get_cache_item(impl_obj)
         if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is not None:
             base = ci.offsets[ax_idx]
             if isinstance(base, int) or base.dtype.name == 'int64':
@@ -80,8 +78,8 @@ class BackendParserBase(ABC):
         self._plot_impl_plot_lut = defaultdict(list) # type: Dict[Plot, List[Any]] # key is id(Plot)
         self._signal_impl_plot_lut = weakref.WeakValueDictionary() # type: Dict[Signal, Any] # key is id(Signal)
         self._signal_impl_shape_lut = dict() # type: Dict[Signal, Any] # key is id(Signal)
-        self._stale_impl_plots = weakref.WeakSet() # type: Set[Any]
-        self._impl_plot_ranges_hash = dict() # type: Dict[Any, int] # key is id(impl_plot)
+        self._stale_citems = list() # type: List[ImplementationPlotCacheItem]
+        self._impl_plot_ranges_hash = defaultdict(lambda: defaultdict(dict)) # type: Dict[Any, int] # key is id(impl_plot)
 
     def run_in_one_thread(func):
         """
@@ -110,15 +108,14 @@ class BackendParserBase(ABC):
 
     @run_in_one_thread
     def refresh_data(self):
-        logger.debug(f"Stale mpl_axes : {self._stale_impl_plots}")
-        for impl_plot in self._stale_impl_plots.copy():
-            cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
-            if cache_item is None:
+        logger.debug(f"Stale cItems : {self._stale_citems}")
+        for ci in self._stale_citems:
+            if ci is None:
                 continue
-            signals = cache_item.signals
+            signals = ci.signals
             for signal_ref in signals:
                 self.process_ipl_signal(signal_ref())
-        self.unstale_impl_plots()
+        self.unstale_cache_items()
 
     @abstractmethod
     def export_image(self, filename: str, **kwargs):
@@ -134,7 +131,6 @@ class BackendParserBase(ABC):
         self._plot_impl_plot_lut.clear()
         self._signal_impl_plot_lut.clear()
         self._signal_impl_shape_lut.clear()
-        self._impl_plot_cache_table.clear()
 
     @abstractmethod
     def process_ipl_canvas(self, canvas: Canvas):
@@ -216,8 +212,8 @@ class BackendParserBase(ABC):
     def drop_history(self):
         self._hm.drop()
     
-    def unstale_impl_plots(self):
-        self._stale_impl_plots.clear()
+    def unstale_cache_items(self):
+        self._stale_citems.clear()
 
     def get_all_plot_limits(self, which='current') -> List[IplPlotViewLimits]:
         all_limits = []

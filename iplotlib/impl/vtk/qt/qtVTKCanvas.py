@@ -7,6 +7,7 @@
 
 from PySide2.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QWidget
 from PySide2.QtGui import QResizeEvent, QShowEvent
+from PySide2.QtCore import Qt
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
@@ -32,6 +33,20 @@ except AssertionError as e:
     logger.warning("Invalid python Qt binding: the sanity check failed")
     logger.exception(e)
 
+class IplotQVTKRwi(QVTKRenderWindowInteractor):
+    """This subclass is a small hack to disable the timer that constantly makes a Render call every 10 ms.
+       Hack: The QTimer created in parent class probably runs in the same thread and causes an unexplained
+       lag when UDA data access is enabled. Override the TimerEvent and do nothing.
+
+
+    :param QVTKRenderWindowInteractor: [description]
+    :type QVTKRenderWindowInteractor: [type]
+    """
+    def __init__(self, parent=None, **kw):
+        super().__init__(parent=parent, **kw)
+    
+    def TimerEvent(self):
+        return
 
 class QtVTKCanvas(IplotQtCanvas):
     """A Qt container widget that emebeds a VTKCanvas.
@@ -50,9 +65,9 @@ class QtVTKCanvas(IplotQtCanvas):
         self._draw_call_counter = 0
         
         self._vtk_size_pol = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._vtk_renderer = QVTKRenderWindowInteractor(self, **kwargs)
+        self._vtk_renderer = IplotQVTKRwi(self, **kwargs)
         self._vtk_renderer._Timer.stop()
-        self._parser = VTKParser()
+        self._parser = VTKParser(impl_flush_method=self.draw_in_main_thread)
         self._vtk_renderer.setSizePolicy(self._vtk_size_pol)
         self._vlayout = QVBoxLayout(self)
         self._vlayout.addWidget(self._vtk_renderer)
@@ -86,7 +101,6 @@ class QtVTKCanvas(IplotQtCanvas):
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
         self.render()
-        # self._parser.post_render()
         super().set_canvas(canvas)
 
     def get_canvas(self) -> Canvas:
@@ -95,6 +109,8 @@ class QtVTKCanvas(IplotQtCanvas):
 
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
+        if mode == self._mmode:
+            return
         super().set_mouse_mode(mode)
         self._parser.remove_crosshair_widget()
         self._parser.refresh_mouse_mode(self._mmode)
@@ -117,6 +133,7 @@ class QtVTKCanvas(IplotQtCanvas):
     def render(self):
         self._vtk_renderer.Initialize()
         self._vtk_renderer.Render()
+        self._parser.unstale_cache_items()
 
     def resizeEvent(self, event: QResizeEvent):
         size = event.size()
@@ -142,6 +159,7 @@ class QtVTKCanvas(IplotQtCanvas):
         # self._debug_log_event(ev, f"{mousePos}") # silenced for easy debugging
         if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
             self._parser.crosshair.onMove(mousePos)
+        self._vtk_renderer.Render()
 
     def _vtk_mouse_press_handler(self, obj, ev):
         if ev not in ["LeftButtonPressEvent"]:
@@ -219,7 +237,6 @@ class QtVTKCanvas(IplotQtCanvas):
         if ev not in ["LeftButtonReleaseEvent"]:
             return
         mousePos = obj.GetEventPosition()
-        chart = self._parser.find_chart(mousePos)
         self._debug_log_event(ev, f"{mousePos}")
         if obj.GetRepeatCount():
             pass
@@ -231,6 +248,7 @@ class QtVTKCanvas(IplotQtCanvas):
                 # push uncommited changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
+            self.render()
 
     def showEvent(self, event: QShowEvent):
         super().showEvent(event)

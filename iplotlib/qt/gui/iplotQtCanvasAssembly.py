@@ -8,6 +8,7 @@ import typing
 from PySide2.QtCore import Qt, Signal
 from PySide2.QtGui import QStandardItemModel
 from PySide2.QtWidgets import QStackedWidget, QWidget
+from iplotlib.core.command import IplotCommand
 
 from iplotlib.qt.utils.message_box import show_msg
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
@@ -19,8 +20,6 @@ logger = sl.get_logger(__name__)
 
 
 class IplotQtCanvasAssembly(QStackedWidget):
-    toolActivated = Signal(str)
-    detachClicked = Signal(str)
     canvasAdded = Signal(int, IplotQtCanvas)
     canvasRemoved = Signal(int, IplotQtCanvas)
 

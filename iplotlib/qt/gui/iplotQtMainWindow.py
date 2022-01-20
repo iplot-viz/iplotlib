@@ -2,12 +2,16 @@
 #               This helps developers write custom applications with PySide2
 # Author: Jaswant Sai Panchumarti
 
+from functools import partial
 import typing
 
 from PySide2.QtCore import QMargins, Qt, Signal
-from PySide2.QtWidgets import QMainWindow, QWidget
+from PySide2.QtWidgets import QApplication, QMainWindow, QWidget
+from PySide2.QtGui import QCloseEvent, QShowEvent
+from iplotlib.core.command import IplotCommand
 
 from iplotlib.qt.gui.iplotCanvasToolbar import IplotQtCanvasToolbar
+from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtCanvasAssembly import IplotQtCanvasAssembly
 from iplotlib.qt.gui.iplotQtPreferencesWindow import IplotQtPreferencesWindow
 
@@ -48,6 +52,8 @@ class IplotQtMainWindow(QMainWindow):
         self.toolBar.toolActivated.connect(
             lambda tool_name:
                 [self.canvasStack.widget(i).set_mouse_mode(tool_name) for i in range(self.canvasStack.count())])
+        self.canvasStack.canvasAdded.connect(self.onCanvasAdd)
+        self.canvasStack.currentChanged.connect(lambda idx: self.check_history(self.canvasStack.widget(idx)))
         self.toolBar.redrawAction.triggered.connect(self.reDraw)
         self.toolBar.detachAction.triggered.connect(self.detach)
         self.toolBar.configureAction.triggered.connect(
@@ -59,17 +65,43 @@ class IplotQtMainWindow(QMainWindow):
         w = self.canvasStack.currentWidget()
         if not w:
             return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         w.undo()
+        QApplication.restoreOverrideCursor()
+        self.check_history(w)
 
     def redo(self):
         w = self.canvasStack.currentWidget()
         if not w:
             return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         w.redo()
+        QApplication.restoreOverrideCursor()
+        self.check_history(w)
+
+    def check_history(self, w: IplotQtCanvas):
+        if w.can_undo():
+            self.toolBar.undoAction.setEnabled(True)
+            self.toolBar.undoAction.setText(f"Undo {w.get_next_undo_cmd_name()}")
+        else:
+            self.toolBar.undoAction.setDisabled(True)
+        if w.can_redo():
+            self.toolBar.redoAction.setEnabled(True)
+            self.toolBar.redoAction.setText(f"Redo {w.get_next_redo_cmd_name()}")
+        else:
+            self.toolBar.redoAction.setDisabled(True)
+
+    def onCanvasAdd(self, idx: int, w: IplotQtCanvas):
+        w.cmdDone.connect(partial(self.onCmdDone, w))
+
+    def onCmdDone(self, w: IplotQtCanvas, cmd: IplotCommand):
+        self.check_history(w)
+        self.toolBar.undoAction.setText(f"Undo {cmd.name}")
 
     def updateCanvasPreferences(self):
         w = self.canvasStack.currentWidget()
-        w.refresh()
+        with w.view_retainer():
+            w.refresh()
         self.prefWindow.postApplied()
 
     def reDraw(self):
@@ -100,3 +132,14 @@ class IplotQtMainWindow(QMainWindow):
             self.setCentralWidget(self.canvasStack)
             self.addToolBar(tbArea, self.toolBar)
             self._floatingWindow.hide()
+
+    def showEvent(self, event: QShowEvent):
+        super().showEvent(event)
+        for i in range(self.canvasStack.count()):
+            self.check_history(self.canvasStack.widget(i))
+        super().showEvent(event)
+
+    def closeEvent(self, event: QCloseEvent):
+        if self.prefWindow.isVisible():
+            self.prefWindow.close()
+        super().closeEvent(event)

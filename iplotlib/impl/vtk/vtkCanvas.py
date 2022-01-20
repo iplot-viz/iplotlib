@@ -1,3 +1,5 @@
+from collections import defaultdict
+from contextlib import contextmanager
 import numpy as np
 from dataclasses import dataclass
 from typing import Any, Callable, Collection, Sequence, Tuple, Union
@@ -49,10 +51,12 @@ class VTKParser(BackendParserBase):
         self.view = vtkContextView()
         self.scene = self.view.GetScene()
         self._layout = vtkChartMatrix()
+        self._shared_x_axis = False
+        self._build_finished = False
         self.scene.AddItem(self._layout)
         self._matrix = self._layout
 
-        self._vtk_custom_tickers = {}
+        self._vtk_custom_tickers = defaultdict(dict)
         self.crosshair = CrosshairCursorWidget(self._layout,
                                                horizOn=True,
                                                hLineW=1,
@@ -92,6 +96,14 @@ class VTKParser(BackendParserBase):
         self._layout.SetFillStrategy(vtkChartMatrix.StretchType.CUSTOM)
         self._title_region.SetDrawAreaResizeBehavior(
             vtkContextArea.DARB_FixedRect)
+
+    @contextmanager
+    def lock_axis_callbacks(self):
+        try:
+            self._build_finished = False
+            yield None
+        finally:
+            self._build_finished = True
 
     @property
     def matrix(self):
@@ -154,12 +166,10 @@ class VTKParser(BackendParserBase):
         return line
 
     def clear(self):
-        for charts in self._plot_impl_plot_lut.values():
-            for chart in charts:
-                for i in range(2):
-                    vtk_axis = self.get_impl_axis(chart, i)
-                    vtk_axis.RemoveObserver(vtkChart.UpdateRange)
-                chart.RemoveObserver(vtkChart.UpdateRange)
+        if self._shared_x_axis:
+            self.canvas.shared_x_axis = False
+            self._refresh_shared_x_axis()
+            self.canvas.shared_x_axis = True
         self._vtk_col_row_plot_lut.clear()
         self._layout.SetSize(vtkVector2i(0, 0))
         self._vtk_custom_tickers.clear()
@@ -246,30 +256,32 @@ class VTKParser(BackendParserBase):
             self._layout.SetSize(vtkVector2i(canvas.cols, canvas.rows))
 
         # 3. Fill canvas with charts
-        stop_drawing = False
-        for i, column in enumerate(canvas.plots):
+        with self.lock_axis_callbacks():
+            stop_drawing = False
+            for i, column in enumerate(canvas.plots):
 
-            j = 0
+                j = 0
 
-            for plot in column:
+                for plot in column:
 
-                if self._focus_plot is not None:
-                    if self._focus_plot == plot:
-                        logger.debug(f"Focusing on plot: {plot}")
-                        self.process_ipl_plot(plot, 0, 0)
-                        stop_drawing = True
-                        break
-                else:
-                    self.process_ipl_plot(plot, i, j)
+                    if self._focus_plot is not None:
+                        if self._focus_plot == plot:
+                            logger.debug(f"Focusing on plot: {plot}")
+                            self.process_ipl_plot(plot, 0, 0)
+                            stop_drawing = True
+                            break
+                    else:
+                        self.process_ipl_plot(plot, i, j)
 
-                # Increment row number carefully. (for next iteration)
-                j += plot.row_span if isinstance(plot, Plot) else 1
+                    # Increment row number carefully. (for next iteration)
+                    j += plot.row_span if isinstance(plot, Plot) else 1
 
-            if stop_drawing:
-                break
+                if stop_drawing:
+                    break
 
         # 4. Update the title at the top of canvas.
         self._refresh_canvas_title(canvas.title, canvas.font_color or '#000000')
+        self._refresh_shared_x_axis()
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
         """Refresh a specific plot
@@ -332,7 +344,8 @@ class VTKParser(BackendParserBase):
             self._plot_impl_plot_lut[id(plot)].append(chart)
             # Keep references to iplotlib instances for ease of access in callbacks.
             self._impl_plot_cache_table.register(chart, self.canvas, plot, key, signals)
-            self._refresh_custom_ticker(0, plot, chart)
+
+            self._refresh_custom_ticker(0, chart)
 
             # translate Axis properties
             for ax_idx in range(len(plot.axes)):
@@ -362,7 +375,6 @@ class VTKParser(BackendParserBase):
         super().process_ipl_axis(axis, ax_idx, plot, impl_plot)
         vtk_axis = impl_plot.GetAxis(vtkAxis.LEFT if ax_idx == 1 else vtkAxis.BOTTOM)
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
-        vtk_axis.AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
 
         if isinstance(axis, Axis):
             if axis.label is not None:
@@ -379,74 +391,92 @@ class VTKParser(BackendParserBase):
         if isinstance(axis, RangeAxis) and not (isinstance(axis, LinearAxis) and axis.follow):
             if axis.begin is not None and axis.end is not None:
                 self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
-            vtk_axis.AutoScale()
         if isinstance(axis, LinearAxis):
             if axis.window is not None and not axis.follow:
                 ax_max = self.get_oaw_axis_limits(impl_plot, ax_idx)[1]
                 self.set_oaw_axis_limits(impl_plot, ax_idx, [ax_max - axis.window, ax_max])
-                vtk_axis.AutoScale()
+        vtk_axis.AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
 
-    def post_render(self):
-        for charts in self._plot_impl_plot_lut.values():
-            for chart in charts:
-                self.get_impl_x_axis(chart).AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
-                self.get_impl_y_axis(chart).AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
-
-    def _axis_update_callback(self, obj, ev):
-        impl_plot = obj.GetParent() # type: vtkChart
-        has_shared_charts = isinstance(impl_plot.GetParent().GetParent(), vtkChartMatrix)
-        affected_charts = [impl_plot]
-        if self.canvas.shared_x_axis:
-            for charts in self._plot_impl_plot_lut.values():
-                for chart in charts:
-                    if chart not in affected_charts:
-                        affected_charts.append(chart)
-        elif has_shared_charts:
-            parent_matrix = impl_plot.GetParent()
-            size = parent_matrix.GetSize()
+    def _refresh_shared_x_axis(self):
+        size = self.matrix.GetSize()
+        if self.canvas.shared_x_axis and not self._shared_x_axis:
+            self._shared_x_axis = True
             for c in range(size.GetX()):
                 for r in range(size.GetY()):
-                    chart_ = parent_matrix.GetChart(vtkVector2i(c, r))
-                    if chart_ not in affected_charts:
-                        affected_charts.append(chart_)
+                    self.matrix.LinkAll(vtkVector2i(c, r))
+        elif not self.canvas.shared_x_axis and self._shared_x_axis:
+            self._shared_x_axis = False
+            for c in range(size.GetX()):
+                for r in range(size.GetY()):
+                    self.matrix.UnlinkAll(vtkVector2i(c, r))
 
-        for chart in affected_charts:
-            xlims = self.get_oaw_axis_limits(chart, 0)
-            ylims = self.get_oaw_axis_limits(chart, 1)
-            ranges_hash = hash((*xlims, *ylims))
-            current_hash = self._impl_plot_ranges_hash.get(id(chart))
+    def _axis_update_callback(self, obj, ev):
+        chart = obj.GetParent() # type: vtkChart
+        if not isinstance(chart, vtkChart):
+            return
 
-            if current_hash is not None and (ranges_hash == current_hash):
-                continue
+        if self._build_finished:
+            self._refresh_shared_x_axis()
 
-            self._impl_plot_ranges_hash[id(chart)] = ranges_hash
-            ranges = []
+        ci = self._impl_plot_cache_table.get_cache_item(chart)
 
-            ci = self._impl_plot_cache_table.get_cache_item(chart)
-            if not hasattr(ci, 'plot'):
-                continue
-            if not isinstance(ci.plot(), Plot):
-                continue
+        try:
+            plot = ci.plot() # type: Plot
+        except (AttributeError, TypeError):
+            return
 
-            for ax_idx, ax in enumerate(ci.plot().axes):
-                if isinstance(ax, Collection):
-                    ranges.append(self.update_multi_range_axis(ax, ax_idx, chart))
-                elif isinstance(ax, RangeAxis):
-                    self.update_range_axis(ax, ax_idx, chart)
-                    ranges.append([ax.begin, ax.end])
-
-            if not hasattr(ci, 'signals'):
-                continue
-            if not ci.signals:
-                continue
-            
-            for signal_ref in ci.signals:
-                signal = signal_ref()
-                if hasattr(signal, "set_ranges"):
-                    signal.set_ranges([ranges[0], ranges[1]])
-            if not self.hi_precision_needed(ci.plot()):
-                self._stale_impl_plots.add(chart)
+        plt_id = id(plot)
+        ax_idx = 0
+        for ax_idx in range(2):
+            if self.get_impl_axis(chart, ax_idx) == obj:
+                break
         
+        axes = plot.axes[ax_idx]
+        axis = None
+        try:
+            assert(len(plot.signals.keys()) == len(axes))
+            for stack_id, stack_key in enumerate(plot.signals.keys()):
+                if stack_key == ci.stack_key:
+                    axis = axes[stack_id]
+        except (AssertionError, TypeError):
+            axis = axes
+        
+        ranges_hash = hash(self.get_oaw_axis_limits(chart, ax_idx))
+        current_hash = self._impl_plot_ranges_hash[plt_id][ax_idx].get(ci.stack_key)
+        if current_hash is not None and (ranges_hash == current_hash):
+            return
+
+        self._impl_plot_ranges_hash[plt_id][ax_idx].update({ci.stack_key: ranges_hash})
+        self.update_range_axis(axis, ax_idx, chart)
+        
+        if ax_idx != 0:
+            return
+
+        # Signal requires x-range only.
+        for signal_ref in ci.signals:
+            signal = signal_ref()
+            try:
+                signal.set_xranges([axis.begin, axis.end])
+            except AttributeError:
+                continue
+
+        if ci not in self._stale_citems:
+            self._stale_citems.append(ci)
+
+        if self._shared_x_axis and ax_idx == 0:
+            size = self.matrix.GetSize()
+            for c in range(size.GetX()):
+                for r in range(size.GetY()):
+                    element = self.matrix.GetChartMatrix(vtkVector2i(c, r))
+                    try:
+                        e_size = element.GetSize()
+                        for e_c in range(e_size.GetX()):
+                            for e_r in range(e_size.GetY()):
+                                sub_chart = element.GetChart(vtkVector2i(e_c, e_r))
+                                if sub_chart != chart:
+                                    self.set_oaw_axis_limits(sub_chart, 0, [axis.begin, axis.end])
+                    except AttributeError:
+                        continue
 
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, vtkChart):
@@ -494,23 +524,27 @@ class VTKParser(BackendParserBase):
             cursor.lv['h'] = self.canvas.crosshair_horizontal
             cursor.lv['v'] = self.canvas.crosshair_vertical
 
-    def _refresh_custom_ticker(self, ax_id: int, plot: Plot, chart: vtkChartXY):
+    def _refresh_custom_ticker(self, ax_id: int, chart: vtkChartXY):
         ax_impl_id = AXIS_MAP[ax_id]
         vtk_axis = chart.GetAxis(ax_impl_id)
+        ci = self._impl_plot_cache_table.get_cache_item(chart)
+        if not hasattr(ci, 'plot'):
+            return
+        if not isinstance(ci.plot(), Plot):
+            return
+        plot = ci.plot()
         ax = plot.axes[ax_id]
+        stack_key = ci.stack_key
 
         if isinstance(ax, LinearAxis):
             # date time ticking
             if ax_impl_id == vtkAxis.BOTTOM:
                 # translate LinearAxis properties
-                if not self._vtk_custom_tickers.get(id(chart)):
-                    self._vtk_custom_tickers.update(
-                        {id(chart): VTK64BitTimePlotSupport()})
-                    vtk_axis.AddObserver(
-                        vtkChart.UpdateRange, self._vtk_custom_tickers[id(chart)].generateTics)
+                self._vtk_custom_tickers[id(plot)].update({stack_key: VTK64BitTimePlotSupport()})
+                ticker = self._vtk_custom_tickers.get(id(plot)).get(stack_key) # type: VTK64BitTimePlotSupport
+                vtk_axis.AddObserver(
+                    vtkChart.UpdateRange, self._vtk_custom_tickers[id(plot)].get(stack_key).generateTics)
 
-                # type: VTK64BitTimePlotSupport
-                ticker = self._vtk_custom_tickers.get(id(chart))
                 if ax.is_date:
                     ticker.enable()
                 else:
@@ -518,7 +552,10 @@ class VTKParser(BackendParserBase):
 
         # handle high precision data for nanosecond timestamps
         # type: VTK64BitTimePlotSupport
-        ticker = self._vtk_custom_tickers.get(id(chart))
+        try:
+            ticker = self._vtk_custom_tickers.get(id(plot)).get(stack_key)
+        except AttributeError:
+            return
         if ticker is not None:
             if self.hi_precision_needed(plot):
                 ticker.precisionOn()
@@ -625,7 +662,11 @@ class VTKParser(BackendParserBase):
                 vtkArr = numpy_support.numpy_to_vtk(bitSeq)
                 vtkArr.SetName(f"Bit-Sequence: {i}")
                 table.AddColumn(vtkArr)
+
         plot.SetInputData(table, 0, 1)
+        if bitSequencing:
+            xaxis = plot.GetXAxis()
+            xaxis.InvokeEvent(vtkChart.UpdateRange)
 
     def _refresh_plot_title(self, plot: Plot):
         """Update plot title text and its appearance
@@ -646,6 +687,7 @@ class VTKParser(BackendParserBase):
                 if fs is not None:
                     appearance.SetFontSize(fs)
 
+    @BackendParserBase.run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
         """Refresh a specific signal
 
@@ -660,7 +702,11 @@ class VTKParser(BackendParserBase):
 
         data = signal.get_data()
         ndims = len(data)
-        
+
+        if not len(data[0]) or not len(data[1]):
+            if hasattr(signal, 'ts_start') and hasattr(signal, 'ts_end'):
+                self.set_oaw_axis_limits(chart, 0, [signal.ts_start, signal.ts_end])
+                chart.GetAxis(vtkAxis.BOTTOM).InvokeEvent(vtkChart.UpdateRange)
         try:
             ci = self._impl_plot_cache_table.get_cache_item(chart)
             plot = ci.plot()
@@ -683,8 +729,15 @@ class VTKParser(BackendParserBase):
             if not isinstance(line, vtkPlot):
                 line = self.add_vtk_line_plot(chart, signal.label, data[0], data[1], hi_prec_nanos)
                 self._signal_impl_shape_lut.update({id(signal): line})
+                try:
+                    ticker = self._vtk_custom_tickers.get(id(plot)).get(ci.stack_key)
+                    if ticker._enabled:
+                        ticker.resetChartXAxisRange(chart)
+                except AttributeError:
+                    pass
             else:
                 self.refresh_impl_plot_data(line, data[0], data[1], signal.label, hi_prec_nanos)
+                self.view.Render()
 
         # Translate abstract properties to backend
         self._process_ipl_signal_label(signal)
@@ -853,38 +906,38 @@ class VTKParser(BackendParserBase):
         if self._focus_plot is None:
             logger.debug(f"Set focus chart {impl_plot}")
             ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-            if not hasattr(ci, 'plot'):
-                return
-            if not ci.plot():
-                return
-            self._focus_plot = ci.plot()
-            self._focus_plot_stack_key = ci.stack_key
+            try:
+                self._focus_plot = ci.plot()
+                self._focus_plot_stack_key = ci.stack_key
+            except AttributeError:
+                self._focus_plot = None
+                self._focus_plot_stack_key = None
 
     def get_impl_x_axis(self, impl_plot: Any):
-        if isinstance(impl_plot, vtkChart):
+        try:
             return impl_plot.GetAxis(vtkAxis.BOTTOM)
-        else:
+        except AttributeError:
             return None
 
     def get_impl_y_axis(self, impl_plot: Any):
-        if isinstance(impl_plot, vtkChart):
+        try:
             return impl_plot.GetAxis(vtkAxis.LEFT)
-        else:
+        except AttributeError:
             return None
 
     def get_impl_x_axis_limits(self, impl_plot: Any):
-        if isinstance(impl_plot, vtkChart):
+        try:
             ax = impl_plot.GetAxis(vtkAxis.BOTTOM)
             return (ax.GetMinimum(), ax.GetMaximum())
-        else:
-            return None
+        except AttributeError:
+            return None, None
 
     def get_impl_y_axis_limits(self, impl_plot: Any):
-        if isinstance(impl_plot, vtkChart):
+        try:
             ax = impl_plot.GetAxis(vtkAxis.LEFT)
             return (ax.GetMinimum(), ax.GetMaximum())
-        else:
-            return None
+        except AttributeError:
+            return None, None
 
     def get_oaw_axis_limits(self, impl_plot: Any, ax_idx: int):
         """Offset-aware version of implementation's get_x_limits, get_y_limits"""
@@ -899,14 +952,16 @@ class VTKParser(BackendParserBase):
         return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
 
     def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
-        if isinstance(impl_plot, vtkChart):
+        try:
             impl_plot.GetAxis(vtkAxis.BOTTOM).SetRange(limits[0], limits[1])
+        except AttributeError:
+            return
 
     def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
-        if isinstance(impl_plot, vtkChart):
+        try:
             impl_plot.GetAxis(vtkAxis.LEFT).SetRange(limits[0], limits[1])
-        else:
-            return None
+        except AttributeError:
+            return
 
     def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
         """Offset-aware version of implementation's set_x_limits, set_y_limits"""
@@ -933,10 +988,14 @@ class VTKParser(BackendParserBase):
         float when offset is int)"""
         if ax_idx == 1:
             return value
-        ticker = self._vtk_custom_tickers.get(id(impl_plot))
-        if not isinstance(ticker, VTK64BitTimePlotSupport):
+
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+
+        try:
+            ticker = self._vtk_custom_tickers.get(id(ci.plot())).get(ci.stack_key)
+            return ticker.transformValue(value, inverse=inverse)
+        except AttributeError:
             return value
-        return ticker.transformValue(value, inverse=inverse)
 
     def transform_data(self, impl_plot: Any, data):
         """This function post processes 64-bitdata if it cannot be plotted with VTK directly.

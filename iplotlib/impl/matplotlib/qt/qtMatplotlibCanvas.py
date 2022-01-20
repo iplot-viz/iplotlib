@@ -117,20 +117,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def drop_history(self):
         return self._parser.drop_history()
 
-    def draw_in_main_thread(self):
-        import shiboken2
-        if shiboken2.isValid(self):
-            QMetaObject.invokeMethod(self, "flush_draw_queue")
-
-    @Slot()
-    def flush_draw_queue(self):
-        if self._parser:
-            self._parser.process_work_queue()
-
     @Slot()
     def render(self):
         self._mpl_renderer.draw()
-        self._parser.unstale_impl_plots()
+        self._parser.unstale_cache_items()
 
     # custom event handlers
     def _mpl_draw_finish(self, event: DrawEvent):

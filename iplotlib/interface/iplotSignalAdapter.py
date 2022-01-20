@@ -242,7 +242,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     def get_ranges(self):
         return [[self.ts_start, self.ts_end]]
 
-    def set_ranges(self, ranges):
+    def set_xranges(self, ranges):
         def np_convert(value):
             if isinstance(value, np.generic):
                 if isinstance(value, np.float64):
@@ -252,11 +252,14 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             else:
                 return value
 
-        self.ts_start = np_convert(ranges[0][0])
-        self.ts_end = np_convert(ranges[0][1])
+        self.ts_start = np_convert(ranges[0])
+        self.ts_end = np_convert(ranges[1])
+        for child in self.children:
+            child.ts_start = self.ts_start
+            child.ts_end = self.ts_end
 
-        # self.ts_start = ranges[0][0].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][0]
-        # self.ts_end = ranges[0][1].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][1]
+        # self.ts_start = ranges[0].astype(target_type).item() if isinstance(ranges[0], np.generic) else ranges[0]
+        # self.ts_end = ranges[1].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][1]
 
     def set_da_success(self):
         self.status_info.reset()
@@ -545,21 +548,21 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
             if AccessHelper.num_samples_override:
                 return True
-            elif self._check_if_zoomed_or_panned():
-                return True
-            else:
+            elif self._contained_bounds():
                 return False
+            else:
+                return True
         else:
             return False
 
-    def _check_if_zoomed_or_panned(self):
+    def _contained_bounds(self):
         if not hasattr(self.x_data, '__len__'):
             return
         if len(self.x_data) < 2:
             return
         xmin, xmax = self.x_data[0], self.x_data[-1]
         if all(e is not None for e in [xmin, xmax, self.ts_start, self.ts_end]):
-            return (xmin != self.ts_start or xmax != self.ts_end)
+            return (xmin < self.ts_start < xmax) and (xmin < self.ts_end < xmax)
         else:
             return False
 
