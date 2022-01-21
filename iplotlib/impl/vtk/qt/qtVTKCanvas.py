@@ -12,6 +12,7 @@ from PySide2.QtCore import Qt
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.vtk import VTKParser
+from iplotlib.impl.vtk.tools.queryMatrix import find_root_plot
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 # Maintain consistent qt api across vtk and iplotlib
@@ -19,6 +20,7 @@ import vtkmodules.qt
 vtkmodules.qt.PyQtImpl = 'PySide2'
 
 # vtk requirements
+from vtkmodules.vtkCommonDataModel import vtkVector2f
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor, PyQtImpl
 from vtkmodules.vtkCommonCore import vtkCommand
 from vtkmodules.vtkChartsCore import vtkChart, vtkAxis
@@ -211,13 +213,38 @@ class QtVTKCanvas(IplotQtCanvas):
                 # Stage a command to obtain original view limits
                 self.stage_view_lim_cmd()
                 return
+            ci = self._parser._impl_plot_cache_table.get_cache_item(chart)
+            if not hasattr(ci, 'plot'):
+                return
+            plot = ci.plot()
+            if not plot:
+                self._dist_calculator.reset()
+                return
+
+            screenToScene = self._parser.scene.GetTransform()
+            probe = [0, 0]
+            screenToScene.TransformPoints(mousePos, probe, 1)
+
+            plotRoot = find_root_plot(self._parser.matrix, probe)
+            if plotRoot is None:
+                return
+
+            pos = plotRoot.MapFromScene(vtkVector2f(probe))
             if self._mmode == Canvas.MOUSE_MODE_DIST:
+                try:
+                    is_date = plot.axes[0].is_date
+                except (AttributeError, IndexError):
+                    is_date = False
+                impl_axis = self._parser.get_impl_axis(chart, 0) # type: vtkAxis
+                shift, scale = impl_axis.GetShift(), impl_axis.GetScalingFactor()
+                if is_date:
+                    x = (int(pos[0] / scale) - int(shift))
+                elif not is_date:
+                    x = (pos[0] / scale) - shift
+                x = self._parser.transform_value(chart, 0, x)
                 if self._dist_calculator.plot1 is not None:
-                    x_axis = chart.GetAxis(vtkAxis.BOTTOM)
-                    has_offset = hasattr(x_axis, '_offset')
-                    # x = NanosecondHelper.mpl_transform_value(event.inaxes.get_xaxis(), event.xdata)
-                    # self._dist_calculator.set_dst(x, event.ydata, event.inaxes._ipl_plot(), event.inaxes._ipl_plot_stack_key)
-                    self._dist_calculator.set_dx_is_datetime(has_offset)
+                    self._dist_calculator.set_dst(x, pos[1], plot, ci.stack_key)
+                    self._dist_calculator.set_dx_is_datetime(is_date)
                     box = QMessageBox(self)
                     box.setWindowTitle('Distance')
                     dx, dy, dz = self._dist_calculator.dist()
@@ -228,9 +255,7 @@ class QtVTKCanvas(IplotQtCanvas):
                     box.exec_()
                     self._dist_calculator.reset()
                 else:
-                    # x = NanosecondHelper.mpl_transform_value(event.inaxes.get_xaxis(), event.xdata)
-                    # self._dist_calculator.set_src(x, event.ydata, event.inaxes._ipl_plot(), event.inaxes._ipl_plot_stack_key)
-                    pass
+                    self._dist_calculator.set_src(x, pos[1], plot, ci.stack_key)
 
 
     def _vtk_mouse_release_handler(self, obj, ev):
