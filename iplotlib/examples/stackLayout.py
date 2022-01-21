@@ -44,8 +44,9 @@ def plot():
     # A plot in bottom-right with 1 signal.
     signal22 = SimpleSignal(label="Signal2.2")
     signal22.set_data([xs, ys])
-    plot22 = PlotXY(title="DateTime=False, HiPrecision=True",
+    plot22 = PlotXY(title="DateTime=True, HiPrecision=True",
                     hi_precision_data=True)
+    plot22.axes[0].is_date = True
     plot22.add_signal(signal22)
     canvas.add_plot(plot22, 1)
 

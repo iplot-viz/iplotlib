@@ -3,7 +3,7 @@ import numpy as np
 import os
 from iplotlib.core import Canvas, PlotXY
 from iplotlib.interface import IplotSignalAdapter
-skip=True
+
 def func(x):
     return np.sin(10 * np.arcsin(1.) * x) * np.linspace(np.min(x), np.max(x), x.size)
 
@@ -28,7 +28,7 @@ def plot():
     s5 = IplotSignalAdapter(name='np.sin(${s1a} + ${s2a} + ${s3a})', data_access_enabled=False, plot_type=PlotXY)
 
     # A little advanced usage of the signal object in the x, y, .. fields
-    s6 = IplotSignalAdapter(name='s6', 
+    s6 = IplotSignalAdapter(name='s6: x=x-10, y=np.sin(y * np.linspace(0, 1, np.size(y))', 
                 x_expr='${self}.time - 10', 
                 y_expr='np.sin(${self}.data * np.linspace(0, 1, np.size(${self}.data)))', 
                 data_access_enabled=False,
@@ -39,8 +39,8 @@ def plot():
     c = Canvas(rows=2, cols=2, title=os.path.basename(__file__).replace('.py', ''))
     p1 = PlotXY()
     p1.add_signal(s1)
-    p1.add_signal(s2, 2)
-    p1.add_signal(s3, 3)
+    p1.add_signal(s2)
+    p1.add_signal(s3)
     c.add_plot(p1)
     
     p3 = PlotXY()
@@ -49,7 +49,7 @@ def plot():
 
     p2 = PlotXY(row_span=2)
     p2.add_signal(s4)
-    p2.add_signal(s5, 2)
+    p2.add_signal(s5)
     c.add_plot(p2, col=1)
 
     return c
