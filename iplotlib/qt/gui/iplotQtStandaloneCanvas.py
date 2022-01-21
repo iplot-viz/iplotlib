@@ -93,6 +93,7 @@ class QStandaloneCanvas:
         # select the first canvas
         firstAct = self.canvasActionGroup.actions()[0]
         firstAct.trigger()
+        self.main_window.resize(1920, 1080)
         self.main_window.show()
     
     def exec_(self) -> int:
