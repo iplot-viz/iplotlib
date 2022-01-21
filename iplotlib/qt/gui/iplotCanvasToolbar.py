@@ -1,3 +1,7 @@
+"""
+This module is deprecated and unused.
+"""
+
 # Description: Support for canvas tools (zoom, pan, select, crosshair) and import/export, history management
 #               and other important tools/actions.
 # Author: Piotr Mazur

@@ -1,3 +1,7 @@
+"""
+This module has a base class defined for all Qt canvas implementations.
+"""
+
 from abc import abstractmethod
 from contextlib import contextmanager
 from typing import Collection, List

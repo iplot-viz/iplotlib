@@ -1,5 +1,8 @@
-# Description: A main window with a collection of iplotlib canvases and a helpful toolbar.
-#               This helps developers write custom applications with PySide2
+"""
+A main window with a collection of iplotlib canvases and a helpful toolbar.
+This module helps developers write custom applications with PySide2
+"""
+
 # Author: Jaswant Sai Panchumarti
 
 from functools import partial

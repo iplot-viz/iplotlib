@@ -1,6 +1,7 @@
-# Description: An assembly of canvas widgets arranged into a QStandardItemModel. 
-#              The model is accessible with self.model(). A convenient exposure to TreeView/ListView/TableView.
-#              Make sure you call refreshLinks after modifying the canvases.
+"""
+An assembly of canvas widgets arranged into a QStandardItemModel. 
+"""
+
 # Author: Jaswant Sai Panchumarti
 
 import typing
@@ -20,6 +21,10 @@ logger = sl.get_logger(__name__)
 
 
 class IplotQtCanvasAssembly(QStackedWidget):
+    """
+    The model is accessible with self.model(). Convenient for TreeView/ListView/TableView.
+    Make sure you call refreshLinks after modifying the canvases.
+    """
     canvasAdded = Signal(int, IplotQtCanvas)
     canvasRemoved = Signal(int, IplotQtCanvas)
 

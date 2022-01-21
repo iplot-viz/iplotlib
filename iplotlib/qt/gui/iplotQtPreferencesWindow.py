@@ -1,4 +1,7 @@
-# Description: A window to configure the visual preferences for iplotlib.
+"""
+A window to configure the visual preferences for iplotlib.
+"""
+
 # Author: Piotr Mazur
 # Changelog:
 #   Sept 2021: -Refactor qt classes [Jaswant Sai Panchumarti]

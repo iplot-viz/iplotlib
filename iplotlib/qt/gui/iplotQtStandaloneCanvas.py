@@ -1,4 +1,7 @@
-# Description: A standalone iplotlib Qt Canvas. It is useful to test preferences-window, toolbar among other things.
+"""
+A standalone iplotlib Qt Canvas. It is useful to test preferences-window, toolbar among other things.
+"""
+
 # Author: Piotr Mazur
 # Changelog:
 #   Sept 2021: -Refactor qt classes [Jaswant Sai Panchumarti]
@@ -28,9 +31,11 @@ logger = ls.get_logger(__name__)
 
 
 class QStandaloneCanvas:
-    """A standalone canvas that is itself a Qt application that can be shown using the run method,
-    separate class is needed for this since instantiating anything that extends QObject is not
-    possible without instantiating a QApplication first"""
+    """
+    A standalone canvas that is itself a Qt application that can be shown using the exec_ method,
+    separate class is needed for this since instantiating anything that extends `QObject` is not
+    possible without instantiating a `QApplication` first
+    """
 
     def __init__(self, impl_name=None, use_toolbar=True):
         super().__init__()
@@ -40,8 +45,13 @@ class QStandaloneCanvas:
         self.main_window = None
 
     def prepare(self, argv=sys.argv):
-        """Prepares IplotQtMainWindow but does not show it not to block the main thread
-        Therefore after calling prepare() the developer can access app/qt_canvas/main_window variables"""
+        """
+        Prepares :data:~`iplotlib.qt.gui.iplotQtMainWindow.IplotQtMainWindow` but does not show it 
+        to avoid blocking the main thread.
+        
+        Therefore after calling prepare() the developer can access app/main_window variables
+        and add canvases.
+        """
 
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
         self.app = QApplication(argv)
@@ -66,6 +76,9 @@ class QStandaloneCanvas:
         logger.info(f"Fallback dec_samples : {AccessHelper.num_samples}")
 
     def add_canvas(self, canvas: Canvas):
+        """
+        Add the given abstract iplotlib canvas to the main window.
+        """
         if not self.main_window:
             logger.warning(
                 "Not yet. Please prepare the Qt5 application. Call 'prepare'")
@@ -86,7 +99,11 @@ class QStandaloneCanvas:
 
 
     def show(self):
-        """Shows the qt canvas on the screen. Calls prepare() if it was not called before"""
+        """
+        Shows the qt window on the screen.
+        If the event loop is not running, the window will be unresponsive.
+        Calls prepare() if it was not called before
+        """
         if self.app is None:
             self.prepare()
         
@@ -97,6 +114,9 @@ class QStandaloneCanvas:
         self.main_window.show()
     
     def exec_(self) -> int:
+        """
+        Show the main window and run the event loop.
+        """
         if self.app is None:
             self.prepare()
         self.show()
@@ -106,6 +126,9 @@ class QStandaloneCanvas:
 args = None
 
 def proxy_main():
+    """
+    The real main function.
+    """
     global args
     AccessHelper.num_samples_override = args.use_fallback_samples
     canvas_app = QStandaloneCanvas(args.impl, use_toolbar=args.toolbar)
@@ -121,6 +144,9 @@ def proxy_main():
     return canvas_app.exec_()
 
 def main():
+    """
+    Calls proxy main inside a profiling context if profiler is enabled.
+    """
     global args
     import argparse
 

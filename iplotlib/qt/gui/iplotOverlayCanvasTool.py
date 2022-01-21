@@ -1,3 +1,6 @@
+"""
+This module is deprecated and unused.
+"""
 from abc import ABC, abstractmethod
 
 from PySide2.QtCore import QObject

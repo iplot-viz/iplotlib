@@ -1,3 +1,6 @@
+"""
+This module is deprecated and unused.
+"""
 from PySide2 import QtCore, QtGui
 from PySide2.QtCore import *
 from PySide2.QtGui import *

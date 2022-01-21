@@ -1,3 +1,9 @@
+"""
+A factory class that returns an appropriate backend subclass of IplotQtCanvas.
+"""
+
+# Author: Jaswant Sai Panchumarti
+
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 import iplotLogging.setupLogger as ls
