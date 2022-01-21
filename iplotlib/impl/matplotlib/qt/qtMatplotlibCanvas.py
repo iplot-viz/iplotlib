@@ -177,13 +177,22 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 return
             if event.button != MouseButton.LEFT:
                 return
+            ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+            if not hasattr(ci, 'plot'):
+                return
+            plot = ci.plot()
+            if not plot:
+                self._dist_calculator.reset()
+                return
             if self._mmode == Canvas.MOUSE_MODE_DIST:
                 if self._dist_calculator.plot1 is not None:
-                    x_axis = event.inaxes.get_xaxis()
-                    has_offset = hasattr(x_axis, '_offset')
+                    try:
+                        is_date = plot.axes[0].is_date
+                    except (AttributeError, IndexError):
+                        is_date = False
                     x = self._parser.transform_value(event.inaxes, 0, event.xdata)
-                    self._dist_calculator.set_dst(x, event.ydata, event.inaxes._ipl_plot(), event.inaxes._ipl_plot_stack_key)
-                    self._dist_calculator.set_dx_is_datetime(has_offset)
+                    self._dist_calculator.set_dst(x, event.ydata, plot, ci.stack_key)
+                    self._dist_calculator.set_dx_is_datetime(is_date)
                     box = QMessageBox(self)
                     box.setWindowTitle('Distance')
                     dx, dy, dz = self._dist_calculator.dist()
@@ -195,7 +204,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self._dist_calculator.reset()
                 else:
                     x = self._parser.transform_value(event.inaxes, 0, event.xdata)
-                    self._dist_calculator.set_src(x, event.ydata, event.inaxes._ipl_plot(), event.inaxes._ipl_plot_stack_key)
+                    self._dist_calculator.set_src(x, event.ydata, plot, ci.stack_key)
 
     def _mpl_mouse_release_handler(self, event: MouseEvent):
         self._debug_log_event(event, "Mouse released")
