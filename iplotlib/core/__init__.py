@@ -8,5 +8,23 @@ from iplotlib.core.plot import Plot, PlotContour, PlotImage, PlotSurface, PlotXY
 from iplotlib.core.signal import Signal, ArraySignal, SimpleSignal
 from iplotlib.core.property_manager import PropertyManager
 
-__all__ = [Axis, RangeAxis, LinearAxis, Canvas, IplAxisLimits, IplotAxesRangeCmd, IplotCommand, IplPlotViewLimits, HistoryManager, BackendParserBase, ImplementationPlotCacheItem, Plot,
-           PlotContour, PlotImage, PlotSurface, PlotXY, Signal, ArraySignal, SimpleSignal, PropertyManager]
+__all__ = ['Axis',
+           'RangeAxis',
+           'LinearAxis',
+           'Canvas',
+           'IplAxisLimits',
+           'IplotAxesRangeCmd',
+           'IplotCommand',
+           'IplPlotViewLimits',
+           'HistoryManager',
+           'BackendParserBase',
+           'ImplementationPlotCacheItem',
+           'Plot',
+           'PlotContour',
+           'PlotImage',
+           'PlotSurface',
+           'PlotXY',
+           'Signal',
+           'ArraySignal',
+           'SimpleSignal',
+           'PropertyManager']

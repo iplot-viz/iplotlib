@@ -1,6 +1,6 @@
-from .AxisForm import AxisForm
-from .CanvasForm import CanvasForm
-from .PlotForm import PlotForm
-from .SignalForm import SignalForm
+from .axisForm import AxisForm
+from .canvasForm import CanvasForm
+from .plotForm import PlotForm
+from .signalForm import SignalForm
 
-__all__ = [AxisForm, CanvasForm, PlotForm, SignalForm]
+__all__ = ['AxisForm', 'CanvasForm', 'PlotForm', 'SignalForm']

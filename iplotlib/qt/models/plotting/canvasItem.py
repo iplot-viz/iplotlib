@@ -7,7 +7,7 @@ from PySide2.QtCore import Qt
 from PySide2.QtGui import QStandardItem
 
 from iplotlib.core import Canvas, Plot
-from iplotlib.qt.models.plotting.PlotItem import PlotItem
+from iplotlib.qt.models.plotting.plotItem import PlotItem
 
 class CanvasItem(QStandardItem):
     def __init__(self, text: str, auto_name=False):

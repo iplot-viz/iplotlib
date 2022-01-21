@@ -1,6 +1,6 @@
-from .AxisItem import AxisItem
-from .CanvasItem import CanvasItem
-from .PlotItem import PlotItem
-from .SignalItem import SignalItem
+from .axisItem import AxisItem
+from .canvasItem import CanvasItem
+from .plotItem import PlotItem
+from .signalItem import SignalItem
 
-__all__ = [AxisItem, CanvasItem, PlotItem, SignalItem]
+__all__ = ['AxisItem', 'CanvasItem', 'PlotItem', 'SignalItem']

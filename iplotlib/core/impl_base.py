@@ -1,3 +1,16 @@
+"""
+The BackendParserBase class parses the :data:`~iplotlib.core.canvas.Canvas` object
+and translates its properties to implementation specific objects.
+
+It uses a caching mechanism to store references to abstract iplotlib objects 
+in the implementation plot object for later retrieval in event callbacks.
+
+See :data:`~iplotlib.core.impl_base.ImplementationPlotCacheItem` and :data:`~iplotlib.core.impl_base.ImplementationPlotCacheTable`
+
+"""
+
+# Author: Jaswant Sai Panchumarti
+
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -5,7 +18,7 @@ from functools import partial, wraps
 import numpy as np
 from queue import Empty, Queue
 import threading
-from typing import Any, Callable, Collection, Dict, List, Set
+from typing import Any, Callable, Collection, Dict, List
 import weakref
 
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
@@ -22,6 +35,9 @@ logger = sl.get_logger(__name__)
 
 @dataclass(frozen=True, eq=True)
 class ImplementationPlotCacheItem:
+    """
+    This cache item holds weak references to objects that can be fetched later on in event callbacks.
+    """
     canvas: weakref.ReferenceType=None
     plot: weakref.ReferenceType=None
     stack_key: str = ''
@@ -29,10 +45,16 @@ class ImplementationPlotCacheItem:
     offsets: Dict[int, int] = field(default_factory=lambda:defaultdict(lambda:None))
 
 class ImplementationPlotCacheTable:
+    """
+    A manager of objects of type :data:`iplotlib.core.impl_base.ImplementationPlotCacheItem`
+    """
     def __init__(self) -> None:
         pass
     
     def register(self, impl_obj: Any, canvas: Canvas=None, plot: Plot=None, stack_key: str='', signals: List[Signal]=[]):
+        """
+        Register the other arguments to the implementation plot(`impl_obj`)
+        """
         cache_item = ImplementationPlotCacheItem(
             canvas=weakref.ref(canvas),
             plot=weakref.ref(plot),
@@ -41,15 +63,23 @@ class ImplementationPlotCacheTable:
         impl_obj._ipl_cache_item = cache_item
 
     def drop(self, impl_obj: Any):
+        """
+        Delete the cache item associated with `impl_obj`
+        """
         if hasattr(impl_obj, '_ipl_cache_item'):
             del impl_obj._ipl_cache_item
 
     def get_cache_item(self, impl_obj: Any) -> ImplementationPlotCacheItem:
+        """
+        Get the cache item associated with `impl_obj`
+        """
         return impl_obj._ipl_cache_item if hasattr(impl_obj, '_ipl_cache_item') else None
     
     def transform_value(self, impl_obj: Any, ax_idx: int, value: Any, inverse=False):
-        """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
-        float when offset is int)"""
+        """
+        Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
+        float when offset is int)
+        """
         base = 0
         ci = self.get_cache_item(impl_obj)
         if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is not None:
@@ -59,10 +89,15 @@ class ImplementationPlotCacheTable:
         return value - base if inverse else value + base
 
 class BackendParserBase(ABC):
+    """
+    An abstract graphics parser for iplotlib. 
+    Graphics implementations should subclass this base class.
+
+    This class does many convenient things that do not require direct access
+    to instances of the graphic implementation classes.
+    """
     def __init__(self, canvas: Canvas=None, focus_plot=None, focus_plot_stack_key=None, impl_flush_method: Callable=None) -> None:
-        """An abstract graphics parser for iplotlib.
-            Graphics implementations should subclass this base class.
-        """
+
         super().__init__()
         self.canvas = canvas
         self._hm = HistoryManager()
@@ -86,7 +121,7 @@ class BackendParserBase(ABC):
         A decorator that causes all matplotlib operations to execute in the main thread (self._impl_draw_thread) even if these functions were called in other threads
         - if self._impl_flush_method is None then decorated method is executed immediately
         - if self._impl_flush_method is not None then decorated method will be executed immediately as long as current thread is the same as self._impl_draw_thread,
-          in other case it will be queued for later execution and self._impl_flush_method should process this queue in the draw thread
+        in other case it will be queued for later execution and self._impl_flush_method should process this queue in the draw thread
         """
         @wraps(func)
         def wrapper(self, *args, **kwargs):
@@ -108,6 +143,9 @@ class BackendParserBase(ABC):
 
     @run_in_one_thread
     def refresh_data(self):
+        """
+        All stale plots are updated here.
+        """
         logger.debug(f"Stale cItems : {self._stale_citems}")
         for ci in self._stale_citems:
             if ci is None:
@@ -123,9 +161,10 @@ class BackendParserBase(ABC):
 
     @abstractmethod
     def clear(self):
-        """Clear the lookup tables. 
-            Implementations can and should clean up any other helper LUTs they might create.
-            It is also a good idea to clear your layout in the implementation.
+        """
+        Clear the lookup tables. 
+        Implementations can and should clean up any other helper LUTs they might create.
+        It is also a good idea to clear your layout in the implementation.
         """
         self._axis_impl_plot_lut.clear()
         self._plot_impl_plot_lut.clear()
@@ -134,7 +173,8 @@ class BackendParserBase(ABC):
 
     @abstractmethod
     def process_ipl_canvas(self, canvas: Canvas):
-        """Prepare the implementation canvas.
+        """
+        Prepare the implementation canvas.
 
         :param canvas: A Canvas instance
         :type canvas: Canvas
@@ -142,7 +182,8 @@ class BackendParserBase(ABC):
 
     @abstractmethod
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
-        """Prepare the implementation plot.
+        """
+        Prepare the implementation plot.
 
         :param plot: A Plot instance
         :type plot: Plot
@@ -150,7 +191,8 @@ class BackendParserBase(ABC):
     
     @abstractmethod
     def process_ipl_axis(self, axis: Axis, ax_idx: int, plot: Plot, impl_plot: Any):
-        """Prepare the implementation axis.
+        """
+        Prepare the implementation axis.
 
         :param plot: An Axis instance
         :type axis: Axis
@@ -159,15 +201,20 @@ class BackendParserBase(ABC):
     @abstractmethod
     @run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
-        """Prepare the implementation shape for the plot of a signal.
+        """
+        Prepare the implementation shape for the plot of a signal.
 
         :param signal: A Signal instance
         :type signal: Signal
         """
 
     def update_axis_labels_with_units(self, impl_plot: Any, signal: Signal):
+        """
+        Get the unit information from the signal object and set the axis labels with those units.
+        """
         def group_data_units(impl_plot: Any):
-            """Function that returns axis label made from signal units"""
+            """
+            Function that returns axis label made from signal units"""
             units = []
             ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
             if hasattr(ci, 'signals') and ci.signals:
@@ -206,7 +253,9 @@ class BackendParserBase(ABC):
             self.set_impl_x_axis_label_text(impl_plot, label)
 
     def update_range_axis(self, range_axis: RangeAxis, ax_idx: int, impl_plot: Any, which='current'):
-        """If axis is a RangeAxis update its min and max to implementation chart's view limits"""
+        """
+        If axis is a RangeAxis update its min and max to implementation chart's view limits
+        """
         if not isinstance(range_axis, RangeAxis):
             return
         limits = self.get_oaw_axis_limits(impl_plot, ax_idx)
@@ -219,7 +268,9 @@ class BackendParserBase(ABC):
         logger.debug(f"Axis update: impl_plot={id(impl_plot)} range_axis={id(range_axis)} ax_idx={ax_idx} {range_axis}")
 
     def update_multi_range_axis(self, range_axes: Collection[RangeAxis], ax_idx: int, impl_plot: Any):
-        """Updates RangeAxis instances begin and end to mpl_axis limits. Works also on stacked axes"""
+        """
+        Updates RangeAxis instances begin and end to mpl_axis limits. Works also on stacked axes
+        """
         ax_ranges = []
         for ax in range_axes:
             if ax_idx == 0:
@@ -235,7 +286,8 @@ class BackendParserBase(ABC):
 
     @abstractmethod
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
-        """Implementation must set the view limits on `ax_idx` axis to the tuple `limits`
+        """
+        Implementation must set the view limits on `ax_idx` axis to the tuple `limits`
         Returns True if the limits were successfully set, False otherwise
         """
 
@@ -244,18 +296,37 @@ class BackendParserBase(ABC):
         """Sets the focus plot."""
 
     def undo(self):
+        """
+        Simply redirect the call to history manager
+        """
         self._hm.undo()
     
     def redo(self):
+        """
+        Simply redirect the call to history manager
+        """
         self._hm.redo()
     
     def drop_history(self):
+        """
+        Simply redirect the call to history manager
+        """
         self._hm.drop()
     
     def unstale_cache_items(self):
+        """
+        Remove all stacle cache items.
+        This is called after all the stale plots are updated in refresh_data.
+        Call it manually should you want to discard the stale plots.
+        """
         self._stale_citems.clear()
 
     def get_all_plot_limits(self, which='current') -> List[IplPlotViewLimits]:
+        """
+        Return limits of all plots. The `which` argument can be `original` or `current`
+        Use this function to construct an :data:`~iplotlib.core.commands.axes_range.IplotAxesRangeCmd` instance
+        that you could push onto the history manager.
+        """
         all_limits = []
         if not isinstance(self.canvas, Canvas):
             return all_limits
@@ -268,6 +339,9 @@ class BackendParserBase(ABC):
         return all_limits
 
     def get_plot_limits(self, plot: Plot, which='current') -> IplPlotViewLimits:
+        """
+        Return limits for the given plot. The `which` argument can be `original` or `current`
+        """
         if not isinstance(self.canvas, Canvas) or not isinstance(plot, Plot):
             return None
         plot_lims = IplPlotViewLimits(plot_ref=weakref.ref(plot))
@@ -284,6 +358,11 @@ class BackendParserBase(ABC):
         return plot_lims
 
     def set_plot_limits(self, limits: IplPlotViewLimits):
+        """
+        Set limits for the plots.
+        :data:`~iplotlib.core.commands.axes_range.IplotAxesRangeCmd` calls this on each plot
+        when undoing/redoing an action.
+        """
         i = 0
         plot = limits.plot_ref()
         ax_limits = limits.axes_ranges
@@ -307,8 +386,10 @@ class BackendParserBase(ABC):
 
     @staticmethod
     def create_offset(vals):
-        """Given a collection of values determine if creting offset is necessary and return it
-        Returns None otherwise"""
+        """
+        Given a collection of values determine if creting offset is necessary and return it
+        Returns None otherwise
+        """
         if isinstance(vals, Collection) and len(vals) > 0:
             if ((hasattr(vals, 'dtype') and vals.dtype.name == 'int64')
                     or (type(vals[0]) == int)
@@ -322,61 +403,92 @@ class BackendParserBase(ABC):
         return None
 
     def get_value(self, impl_plot: Any, ax_idx: int, data_sample):
-        """Offset-aware get axis value"""
+        """
+        Offset-aware get axis value
+        """
         return self.transform_value(impl_plot, ax_idx, data_sample)
 
     @abstractmethod
     def get_impl_x_axis(self, impl_plot: Any):
-        """Implementations should return the x axis"""
+        """
+        Implementations should return the x axis
+        """
 
     @abstractmethod
     def get_impl_y_axis(self, impl_plot: Any):
-        """Implementations should return the y axis"""
+        """
+        Implementations should return the y axis
+        """
 
     def get_impl_axis(self, impl_plot: Plot, axis_idx):
-        """Convenience method that gets matplotlib axis by index instead of using separate methods get_xaxis/get_yaxis"""
+        """
+        Convenience method that gets implementation axis by index 
+        instead of using separate methods `get_impl_x_axis`/`get_impl_y_axis`
+        """
         if 0 <= axis_idx <= 1:
             return [self.get_impl_x_axis, self.get_impl_y_axis][axis_idx](impl_plot)
         return None
 
     @abstractmethod
     def get_impl_x_axis_limits(self, impl_plot: Any):
-        """Implementations should return the x range"""
+        """
+        Implementations should return the x range
+        """
 
     @abstractmethod
     def get_impl_y_axis_limits(self, impl_plot: Any):
-        """Implementations should return the y range"""
+        """
+        Implementations should return the y range
+        """
 
     @abstractmethod
     def get_oaw_axis_limits(self, impl_plot: Any, ax_idx: int):
-        """Offset-aware version of implementation's get_x_limits, get_y_limits"""
+        """
+        Offset-aware version of implementation's `get_impl_x_axis_limits`, `get_impl_y_axis_limits`
+        The `oaw` in the function name stands for OffsetAWare.
+        """
 
     @abstractmethod
     def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
-        """Implementations should set the x range"""
+        """
+        Implementations should set the x range
+        """
 
     @abstractmethod
     def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
-        """Implementations should set the y range"""
+        """
+        Implementations should set the y range
+        """
 
     @abstractmethod
     def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
-        """Offset-aware version of implementation's set_x_limits, set_y_limits"""
+        """
+        Offset-aware version of implementation's `set_impl_x_axis_limits`, `set_impl_y_axis_limits`
+        The `oaw` in the function name stands for OffsetAWare.
+        """
 
     @abstractmethod
     def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
-        """Implementations should set the x axis label text"""
+        """
+        Implementations should set the x axis label text
+        """
 
     @abstractmethod
     def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
-        """Implementations should set the y axis label text"""
+        """
+        Implementations should set the y axis label text
+        """
 
     @abstractmethod
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
-        """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
-        float when offset is int)"""
+        """
+        Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
+        float when offset is int)
+        """
 
     @abstractmethod
     def transform_data(self, impl_plot: Any, data):
-        """This function post processes data if it cannot be plot with matplotlib directly.
-        Currently it transforms data if it is a large integer which can cause overflow in matplotlib"""
+        """
+        This function post processes data if it cannot be plot with matplotlib directly.
+        Currently it transforms data if it is a large integer which can cause overflow in matplotlib
+        """

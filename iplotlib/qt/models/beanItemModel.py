@@ -12,8 +12,7 @@ from PySide2.QtCore import QModelIndex, QObject, Qt
 from PySide2.QtGui import QStandardItemModel
 from PySide2.QtWidgets import QComboBox
 
-from iplotlib.qt.models.BeanItem import BeanItem, BeanPrototype
-from iplotlib.qt.utils.color_picker import ColorPicker
+from iplotlib.qt.models.beanItem import BeanItem, BeanPrototype
 from iplotlib.qt.utils.conversions import ConversionHelper
 
 from iplotLogging import setupLogger as sl

@@ -7,8 +7,8 @@ from PySide2.QtCore import Qt
 from PySide2.QtGui import QStandardItem
 
 from iplotlib.core import Axis, Plot
-from iplotlib.qt.models.plotting.AxisItem import AxisItem
-from iplotlib.qt.models.plotting.SignalItem import SignalItem
+from iplotlib.qt.models.plotting.axisItem import AxisItem
+from iplotlib.qt.models.plotting.signalItem import SignalItem
 
 class PlotItem(QStandardItem):
     AXIS_NAMES = ['x', 'y', 'z']

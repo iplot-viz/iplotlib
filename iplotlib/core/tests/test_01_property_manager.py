@@ -2,11 +2,10 @@ from functools import partial
 from iplotlib.core.signal import SimpleSignal
 import unittest
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.axis import LinearAxis
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.property_manager import PropertyManager
 
-class VTKCanvasTesting(unittest.TestCase):
+class TestPropertyManager(unittest.TestCase):
     def setUp(self) -> None:
         self.pm = PropertyManager()
         self.canvas = Canvas(

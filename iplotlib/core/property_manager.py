@@ -4,15 +4,7 @@ from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.core.signal import Signal, ArraySignal
 
 class PropertyManager:
-    """This class provides an API that returns attributes in the iplotlib hierarchy
-        such that the lower level constructs inherit properties from higher level
-        constructs. (unless the properties of lower level constructs are explicitly
-        specified)
-
-        Usage:
-            pm = PropertyManager()
-            pm.get_value(property_name, canvas, plot, axis, signal)
-        ...
+    """ This class provides an API that returns attributes in the iplotlib hierarchy.
     """
     def get_value(self, attr_name: str, canvas: Canvas, plot: Plot=None, axis: Axis=None, signal: Signal=None):
         if canvas is None:

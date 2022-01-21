@@ -2,3 +2,4 @@ sphinx
 sphinx-rtd-theme
 sphinx-toggleprompt
 sphinx-copybutton
+sphinx-autodoc-typehints

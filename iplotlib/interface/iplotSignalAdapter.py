@@ -569,15 +569,13 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
 class AccessHelper:
     """
-    A simple wrapper providing single threaded data access.
-
-    .. note:
-    All Data requests are blocking and occur sequentially i.e, first to enter, first to exit.
-    Concurrent execution is not implemented but the infrastructure is setup to not come in your way,
-    should you wish to introduce concurrency.
-    See fetch_data(), _submit_fetch(), on_fetch_done() and request_data()
-    For ex. the input and output of request_data() are python builtins i.e, a dictionary
-    compatible with pipes/queues/process-pool-executors.
+        A simple wrapper providing single threaded data access.
+        All Data requests are blocking and occur sequentially i.e, first to enter, first to exit.
+        Concurrent execution is not implemented but the infrastructure is setup to not come in your way,
+        should you wish to introduce concurrency.
+        See fetch_data(), _submit_fetch(), on_fetch_done() and request_data()
+        For ex. the input and output of request_data() are python builtins i.e, a dictionary
+        compatible with pipes/queues/process-pool-executors.
     """
 
     da = None
@@ -786,6 +784,8 @@ class AccessHelper:
 
 
 class CachingAccessHelper(AccessHelper):
+    """A cached layer over access helper
+    """
     KEY_PROP_NAMES = ["var_name", "ts_start", "ts_end", "pulse_nb",
                       "dec_samples", "data_source", "envelope", "ts_relative"]
     CACHE_PREFIX = "/tmp/cache_"

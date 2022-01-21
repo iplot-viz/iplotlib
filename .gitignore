@@ -61,3 +61,5 @@ cython_debug/
 
 # Documentation
 docs/build
+docs/source/_autosummary
+docs/source/generated

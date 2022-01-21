@@ -12,13 +12,13 @@ applications to visualize datasets and signals in ITER databases, IMAS IDS(s) an
 Check out the :doc:`getting-started` section for further information, including how to
 :ref:`install <installation>` **iplotlib**.
 
-Contents
---------
-
 .. toctree::
-   getting-started
-   usage
-   reference/modules.rst
+   :hidden:
+
+   Home page <self>
+   Getting Started <getting-started>
+   Usage <usage>
+   API reference <_autosummary/iplotlib>
 
 
 Support

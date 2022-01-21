@@ -1,2 +1,2 @@
-from .QAppTestAdapter import QAppTestAdapter
-__all__ = [QAppTestAdapter]
+from .qAppTestAdapter import QAppTestAdapter
+__all__ = ['QAppTestAdapter']

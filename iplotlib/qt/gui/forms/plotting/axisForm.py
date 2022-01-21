@@ -11,7 +11,7 @@ from PySide2.QtWidgets import QWidget
 
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
-from iplotlib.qt.models.BeanItemModel import BeanItemModel
+from iplotlib.qt.models.beanItemModel import BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
 
 

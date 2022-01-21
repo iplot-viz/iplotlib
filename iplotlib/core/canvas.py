@@ -1,7 +1,10 @@
-from abc import ABC, abstractmethod
+"""
+This module defines the `Canvas` object.
+"""
+
+from abc import ABC
 from dataclasses import dataclass
 from typing import List
-import typing
 
 from iplotlib.core.persistence import JSONExporter
 from iplotlib.core.plot import Plot
@@ -9,6 +12,9 @@ from iplotlib.core.plot import Plot
 
 @dataclass
 class Canvas(ABC):
+    """
+    This class exposes visual properties of a canvas.
+    """
 
     MOUSE_MODE_SELECT = "MM_SELECT"
     MOUSE_MODE_CROSSHAIR = 'MM_CROSSHAIR'
@@ -67,6 +73,9 @@ class Canvas(ABC):
             self.plots = [[] for _ in range(self.cols)]
 
     def add_plot(self, plot, col=0):
+        """
+        Add a plot to this canvas.
+        """
         if col >= len(self.plots):
             raise Exception("Cannot add plot to column {}: Canvas has only {} column(s)".format(col, len(self.plots)))
         if len(self.plots[col]) >= self.rows:
@@ -74,9 +83,15 @@ class Canvas(ABC):
         self.plots[col].append(plot)
 
     def set_mouse_mode(self, mode):
+        """
+        Set the current mouse mode.
+        """
         self.mouse_mode = mode
 
     def enable_crosshair(self, color="red", linewidth=1, horizontal=False, vertical=True):
+        """
+        Enable the crosshair cursor.
+        """
         self.crosshair_color = color
         self.crosshair_line_width = linewidth
         self.crosshair_enabled = True
@@ -98,9 +113,15 @@ class Canvas(ABC):
         return JSONExporter().from_json(inp_file)
 
     def export_image(self, filename: str, **kwargs):
+        """
+        Export the canvas to an image file.
+        """
         pass
 
     def reset_preferences(self):
+        """
+        Reset the preferences to default values.
+        """
         self.font_size = Canvas.font_size
         self.shared_x_axis = Canvas.shared_x_axis
         self.grid = Canvas.grid

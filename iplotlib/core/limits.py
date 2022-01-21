@@ -4,7 +4,7 @@ from weakref import ref
 
 @dataclass
 class IplAxisLimits:
-    begin: Any = None,
+    begin: Any = None
     end: Any = None
     axes_ref: ref = None
 
