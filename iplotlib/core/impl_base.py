@@ -8,7 +8,7 @@ import threading
 from typing import Any, Callable, Collection, Dict, List, Set
 import weakref
 
-from iplotlib.core.axis import Axis, RangeAxis
+from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits
 from iplotlib.core.plot import Plot
@@ -164,6 +164,46 @@ class BackendParserBase(ABC):
         :param signal: A Signal instance
         :type signal: Signal
         """
+
+    def update_axis_labels_with_units(self, impl_plot: Any, signal: Signal):
+        def group_data_units(impl_plot: Any):
+            """Function that returns axis label made from signal units"""
+            units = []
+            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            if hasattr(ci, 'signals') and ci.signals:
+                for signal_ref in ci.signals:
+                    s = signal_ref()
+                    try:
+                        assert isinstance(s.y_data.unit, str)
+                        if len(s.y_data) and len(s.y_data.unit):
+                            units.append(s.y_data.unit)
+                    except (AttributeError, AssertionError):
+                        continue
+            units = set(units) if len(set(units)) == 1 else units
+            return '[{}]'.format(']['.join(units)) if len(units) else None
+
+        yaxis = self.get_impl_y_axis(impl_plot)
+        if hasattr(yaxis, "_label") and not yaxis._label:
+            label = group_data_units(impl_plot)
+            if label:
+                self.set_impl_y_axis_label_text(impl_plot, label)
+        xaxis = self.get_impl_x_axis(impl_plot)
+        put_label = False
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if hasattr(ci, 'plot') and ci.plot():
+            if hasattr(ci.plot(), 'axes'):
+                xax = ci.plot().axes[0]
+                if isinstance(xax, LinearAxis):
+                    put_label |= (not xax.is_date)
+
+        if put_label and hasattr(signal, 'x_data'):
+            if hasattr(signal.x_data, 'unit'):
+                label = f"[{signal.x_data.unit or '?'}]"
+                if label:
+                    self.set_impl_x_axis_label_text(impl_plot, label)
+        # label from preferences takes precedence.
+        if hasattr(xaxis, "_label") and xaxis._label:
+            self.set_impl_x_axis_label_text(impl_plot, label)
 
     def update_range_axis(self, range_axis: RangeAxis, ax_idx: int, impl_plot: Any, which='current'):
         """If axis is a RangeAxis update its min and max to implementation chart's view limits"""
@@ -322,6 +362,14 @@ class BackendParserBase(ABC):
     @abstractmethod
     def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
         """Offset-aware version of implementation's set_x_limits, set_y_limits"""
+
+    @abstractmethod
+    def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
+        """Implementations should set the x axis label text"""
+
+    @abstractmethod
+    def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
+        """Implementations should set the y axis label text"""
 
     @abstractmethod
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):

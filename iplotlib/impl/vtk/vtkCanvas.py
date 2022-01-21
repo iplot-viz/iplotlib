@@ -377,6 +377,7 @@ class VTKParser(BackendParserBase):
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
 
         if isinstance(axis, Axis):
+            vtk_axis._label = axis.label
             if axis.label is not None:
                 vtk_axis.SetTitle(axis.label)
 
@@ -629,9 +630,11 @@ class VTKParser(BackendParserBase):
                         chart.ZoomWithMouseWheelOff()
                 elif mmode == Canvas.MOUSE_MODE_CROSSHAIR:
                     pass
+                elif mmode == Canvas.MOUSE_MODE_DIST:
+                    pass
                 else:
                     logger.warning(
-                        f"Invalide canvas mouse mode: {self.canvas.mouse_mode}")
+                        f"Invalid canvas mouse mode: {mmode}")
 
     def refresh_impl_plot_data(self, plot: vtkPlot,
                                x: Sequence[float],
@@ -749,6 +752,8 @@ class VTKParser(BackendParserBase):
             self._refresh_marker_size(signal)
             self._refresh_marker_style(signal)
             self._refresh_step_type(signal)
+
+        self.update_axis_labels_with_units(chart, signal)
 
     def _process_ipl_signal_color(self, signal: ArraySignal):
         line = self._signal_impl_shape_lut.get(
@@ -982,6 +987,14 @@ class VTKParser(BackendParserBase):
             return self.set_impl_y_axis_limits(impl_plot, (begin, end))
         else:
             return None
+
+    def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
+        """Implementations should set the x axis label text"""
+        self.get_impl_x_axis(impl_plot).SetTitle(text)
+
+    def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
+        """Implementations should set the y axis label text"""
+        self.get_impl_y_axis(impl_plot).SetTitle(text)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to

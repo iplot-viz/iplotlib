@@ -453,44 +453,7 @@ class MatplotlibParser(BackendParserBase):
                 return
             self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1])
 
-        def group_data_units(axes):
-            """Function that returns axis label made from signal units"""
-            units = []
-            ci = self._impl_plot_cache_table.get_cache_item(axes)
-            if hasattr(ci, 'signals') and ci.signals:
-                for signal_ref in ci.signals:
-                    s = signal_ref()
-                    try:
-                        assert isinstance(s.y_data.unit, str)
-                        if len(s.y_data) and len(s.y_data.unit):
-                            units.append(s.y_data.unit)
-                    except (AttributeError, AssertionError) as e:
-                        continue
-            units = set(units) if len(set(units)) == 1 else units
-            return '[{}]'.format(']['.join(units)) if len(units) else None
-
-        yaxis = mpl_axes.get_yaxis()
-        if hasattr(yaxis, "_label") and not yaxis._label:
-            label = group_data_units(mpl_axes)
-            if label:
-                yaxis.set_label_text(label)
-        xaxis = mpl_axes.get_xaxis()
-        put_label = False
-        ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
-        if hasattr(ci, 'plot') and ci.plot():
-            if hasattr(ci.plot(), 'axes'):
-                xax = ci.plot().axes[0]
-                if isinstance(xax, LinearAxis):
-                    put_label |= (not xax.is_date)
-
-        if put_label and hasattr(signal, 'x_data'):
-            if hasattr(signal.x_data, 'unit'):
-                label = f"[{signal.x_data.unit or '?'}]"
-                if label:
-                    xaxis.set_label_text(label)
-        # label from preferences takes precedence.
-        if hasattr(xaxis, "_label") and xaxis._label:
-            xaxis.set_label_text(xaxis._label)
+        self.update_axis_labels_with_units(mpl_axes, signal)
 
     def enable_tight_layout(self):
         self.figure.set_tight_layout(True)
@@ -678,6 +641,14 @@ class MatplotlibParser(BackendParserBase):
             return self.set_impl_y_axis_limits(impl_plot, (begin, end))
         else:
             return None
+
+    def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
+        """Implementations should set the x axis label text"""
+        self.get_impl_x_axis(impl_plot).set_label_text(text)
+
+    def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
+        """Implementations should set the y axis label text"""
+        self.get_impl_y_axis(impl_plot).set_label_text(text)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
