@@ -1,0 +1,3 @@
+"""
+The matplotlib backend.
+"""

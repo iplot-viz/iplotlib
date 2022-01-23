@@ -24,8 +24,8 @@ logger = ls.get_logger(__name__)
 
 class HistoryManager:
     """
-    The history manager maintains two `deque`(s).
-    A `deque` is used instead of a list to offer more features
+    The history manager maintains two deques.
+    A deque is used instead of a list to offer more features
     like event bubbling in the future, if necessary.
     """
     def __init__(self) -> None:

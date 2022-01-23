@@ -1,3 +1,7 @@
+"""
+The core abstract and base functionality for iplotlib.
+"""
+
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd, IplotCommand

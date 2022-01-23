@@ -1,3 +1,7 @@
+"""
+Demonstrate usage of iplotlib by plotting simple user-defined data.
+"""
+
 import os
 import numpy as np
 from iplotlib.core import SimpleSignal, Canvas, PlotXY

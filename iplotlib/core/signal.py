@@ -1,3 +1,13 @@
+"""
+This module contains definitions of various kinds of Signal (s)
+one might want to use when plotting data.
+
+:data:`~iplotlib.core.signal.SimpleSignal` is a commonly used concrete class for 
+plotting XY or XYZ data.
+:data:`~iplotlib.core.signal.ArraySignal` is a commonly used concrete class 
+for when you wish to take over the data customization.
+"""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Collection
@@ -10,8 +20,10 @@ class SignalStyle(ABC):
 
 @dataclass
 class Signal(ABC):
-    """Signal label. This value is presented on plot legend"""
-    label: str = None
+    """
+    Main abstraction for a Signal.
+    """
+    label: str = None #: Signal label. This value is presented on plot legend
     color: str = None
     line_style: str = None
     line_size: int = None
@@ -26,7 +38,7 @@ class Signal(ABC):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
 
     @abstractmethod
-    def get_data(self):
+    def get_data(self) -> tuple:
         pass
 
     @abstractmethod
@@ -48,9 +60,12 @@ class Signal(ABC):
 
 @dataclass
 class ArraySignal(Signal):
-
+    """
+    A concrete subclass to permit implementors to write their own get/set data functions.
+    This class implements a generic `pick` function to select data from a sample value.
+    """
     @abstractmethod
-    def get_data(self):
+    def get_data(self) -> tuple:
         pass
 
     @abstractmethod
@@ -85,6 +100,10 @@ class ArraySignal(Signal):
 
 @dataclass
 class SimpleSignal(ArraySignal):
+    """
+    A concrete subclass that freezes the data to three numpy arrays (x, y, z).
+    You can use this when you have no requirement for custom data-handling.
+    """
     x_data: np.ndarray = np.empty((0))
     y_data: np.ndarray = np.empty((0))
     z_data: np.ndarray = np.empty((0))
@@ -92,7 +111,7 @@ class SimpleSignal(ArraySignal):
     y_unit: str = ''
     z_unit: str = ''
 
-    def get_data(self):
+    def get_data(self) -> tuple:
         return [self.x_data, self.y_data, self.z_data]
 
     def set_data(self, data=None):

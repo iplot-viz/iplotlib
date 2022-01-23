@@ -1,12 +1,20 @@
+"""
+The property manager returns the appropriate value for an attribute in the hierarchy of core iplotlib classes.
+"""
+
 from iplotlib.core.axis import Axis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.core.signal import Signal, ArraySignal
 
 class PropertyManager:
-    """ This class provides an API that returns attributes in the iplotlib hierarchy.
+    """ 
+    This class provides an API that returns attributes in the iplotlib hierarchy.
     """
     def get_value(self, attr_name: str, canvas: Canvas, plot: Plot=None, axis: Axis=None, signal: Signal=None):
+        """ 
+        Get the value of the attribute from the given core iplotlib objects respecting the hierarchy constraint.
+        """
         if canvas is None:
             return None
         elif plot is None and axis is None and signal is None:

@@ -1,3 +1,7 @@
+"""
+Demonstrate usage of iplotlib by plotting simple user-defined data combined with data processing.
+"""
+
 from iplotlib.interface.iplotSignalAdapter import ParserHelper
 import numpy as np
 import os

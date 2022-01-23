@@ -1,6 +1,6 @@
 """
-This module defines an abstraction of a command.
-A command is a user interactive action.
+The command abstraction. 
+In iplotlib, a command encodes a user interactive action.
 """
 
 # Author: Jaswant Sai Panchumarti

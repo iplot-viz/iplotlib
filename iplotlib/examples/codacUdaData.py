@@ -1,3 +1,7 @@
+"""
+Demonstrate usage of iplotlib by plotting data obtained from a CODAC-UDA server.
+"""
+
 import os
 import tempfile
 

@@ -1,3 +1,10 @@
+"""
+This module contains definitions of various kinds of Plot (s)
+one might want to use when plotting data.
+
+:data:`~iplotlib.core.plot.PlotXY` is a commonly used concrete class for plotting XY data.
+"""
+
 from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, List
@@ -8,27 +15,23 @@ from iplotlib.core.signal import Signal
 
 @dataclass
 class Plot(ABC):
+    """
+    Main abstraction of a Plot
+    """
 
-    """How many rows of the canvas grid this plot takes. Default: 1"""
-    row_span: int = 1
+    row_span: int = 1 #: no. of rows of canvas grid that this plot will span
+    col_span: int = 1 #: no. of columns of canvas grid that this plot will span
 
+    title: str = None #: a plot title text, will be shown above the plot
 
-    """How many columns of the canvas grid this plot takes. Default: 1"""
-    col_span: int = 1
-
-    """Plot title, should be shown above the plot"""
-    title: str = None
-
-    axes: List[Axis] = None
-    signals: Dict[str, Signal] = None
+    axes: List[Axis] = None #: the plot axes.
+    signals: Dict[str, Signal] = None #: the signals drawn in this plot
     _type: str = None
 
 
-    font_size: int = None
-    font_color: str = None
-
-    """Should the plot legend be included when drawing plot"""
-    legend: bool = None
+    font_size: int = None #: the font size of the plot title text
+    font_color: str = None #: the font color of the plot title text
+    legend: bool = None #: indicate if the plot legend must be shown
 
     def __post_init__(self):
         self._type = self.__class__.__module__+'.'+self.__class__.__qualname__
@@ -72,18 +75,18 @@ class PlotImage(Plot):
 
 @dataclass
 class PlotXY(Plot):
-
-    grid: bool = None
-
-    line_style: str = None
-    line_size: int = None
-    marker: str = None
-    marker_size: int = None
-    step: str = None
-    """Boolean that suggests the data is sensitive to round off errors and requires special handling"""
-    hi_precision_data: bool = None
-
-    dec_samples: int = None
+    """
+    Ä concrete Plot class specialized for 2D plottling.
+    """
+    
+    grid: bool = None #: indiacte if the grid must be drawn
+    line_style: str = None #: set the line style of all signals.
+    line_size: int = None #: set the line size of all signals.
+    marker: str = None #: set the marker shape of all signals.
+    marker_size: int = None #: set the marker size of all signals.
+    step: str = None #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
+    hi_precision_data: bool = None #: indicate whether the data is sensitive to round off errors and requires special handling
+    dec_samples: int = None #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
 
     def __post_init__(self):
         super().__post_init__()

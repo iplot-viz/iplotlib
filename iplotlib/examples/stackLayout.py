@@ -1,3 +1,7 @@
+"""
+Demonstrate layout capabilities with stacking.
+"""
+
 import os
 from iplotlib.core.axis import LinearAxis
 import numpy as np

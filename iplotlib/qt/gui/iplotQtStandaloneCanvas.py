@@ -32,9 +32,10 @@ logger = ls.get_logger(__name__)
 
 class QStandaloneCanvas:
     """
-    A standalone canvas that is itself a Qt application that can be shown using the exec_ method,
-    separate class is needed for this since instantiating anything that extends `QObject` is not
-    possible without instantiating a `QApplication` first
+    A standalone canvas that is itself a Qt application that can be shown using the 
+    :data:`~iplotlib.qt.iplotQtStandaloneCanvas.QStandaloneCanvas.run()` method.
+    A Separate class is justified because instantiating `QObject` derived objects is not
+    possible without instantiating a `QApplication`.
     """
 
     def __init__(self, impl_name=None, use_toolbar=True):
@@ -113,7 +114,7 @@ class QStandaloneCanvas:
         self.main_window.resize(1920, 1080)
         self.main_window.show()
     
-    def exec_(self) -> int:
+    def run(self) -> int:
         """
         Show the main window and run the event loop.
         """
@@ -141,7 +142,7 @@ def proxy_main():
         if hasattr(module, 'plot'):
             canvas_app.add_canvas(module.plot())
     canvas_app.show()
-    return canvas_app.exec_()
+    return canvas_app.run()
 
 def main():
     """

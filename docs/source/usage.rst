@@ -84,7 +84,7 @@ with a Qt user interface. For simplicity, it will use the :data:`~iplotlib.qt.gu
 
 .. code-block:: python
 
-    >>> app.exec_()
+    >>> app.run()
 
 Here is the full script.
 
@@ -103,7 +103,7 @@ Here is the full script.
     >>> app = QStandaloneCanvas('matplotlib', use_toolbar=True)
     >>> app.prepare()
     >>> app.add_canvas(c)
-    >>> app.exec_()
+    >>> app.run()
 
 .. note:: After you've pasted the script, hit Return key to execute.
 .. note:: You can add more canvases to the `app` from the interpreter after closing the window.

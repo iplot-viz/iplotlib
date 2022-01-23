@@ -1,3 +1,7 @@
+"""
+Serialization inventory for iplotlib core classes.
+"""
+
 import dataclasses
 import json
 from json import JSONEncoder
@@ -7,7 +11,8 @@ import numpy as np
 
 
 class JSONExporter:
-    """This class exports/imports nested @dataclasses structure from and to JSON format.
+    """
+    This class exports/imports nested @dataclasses structure from and to JSON format.
     In order to preserve correct types for collection items the type name is additionally saved in '_type' property
     """
 

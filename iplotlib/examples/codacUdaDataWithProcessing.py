@@ -1,3 +1,7 @@
+"""
+Demonstrate usage of iplotlib by plotting data obtained from a CODAC-UDA server and processing it with iplotProcessing.
+"""
+
 import os
 from iplotlib.core.axis import LinearAxis
 from iplotlib.interface import IplotSignalAdapter
