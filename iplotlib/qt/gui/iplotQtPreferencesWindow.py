@@ -30,6 +30,10 @@ from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__, 'INFO')
 
 class IplotQtPreferencesWindow(QMainWindow):
+    """
+    A window with a tree view of the iplotlib hierarchy on the left
+    and the GUI forms on the right.
+    """
 
     onApply = QtSignal()
     onReset = QtSignal()

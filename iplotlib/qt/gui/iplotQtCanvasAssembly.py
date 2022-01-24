@@ -34,10 +34,16 @@ class IplotQtCanvasAssembly(QStackedWidget):
         self._parentItem = self._model.invisibleRootItem()
 
     def refreshLinks(self):
+        """
+        Refresh the links b/w the python canvas data object and the model.
+        """
         for i in range(self.count()):
             self.setCanvasData(i, self.widget(i))
 
     def setCanvasData(self, idx, canvas: IplotQtCanvas):
+        """
+        Set the canvas data object for the 'idx' row in the model.
+        """
         self._model.item(idx, 0).removeRows(0, self._model.item(idx, 0).rowCount())
         self._model.item(idx, 0).setData(canvas.get_canvas(), Qt.UserRole)
 

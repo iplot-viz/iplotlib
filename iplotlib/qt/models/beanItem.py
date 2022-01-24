@@ -1,4 +1,7 @@
-# Description: Link a python object to a widget.
+"""
+Link a python object to a widget.
+"""
+
 # Author: Jaswant Sai Panchumarti
 
 import typing
@@ -10,10 +13,13 @@ BeanPrototype = {'label' : None, 'property': None, 'widget': None, 'converter': 
 
 
 class BeanItem(QStandardItem):
-    ConverterRole = Qt.UserRole + 40
-    LabelRole = Qt.UserRole + 10
-    PropertyRole = Qt.UserRole + 20
-    WidgetRole = Qt.UserRole + 30
+    """
+    This class encapsulates various roles of a BeanItem.
+    """
+    ConverterRole = Qt.UserRole + 40 #: The converter function.
+    LabelRole = Qt.UserRole + 10 #: The label string used in a GUI form
+    PropertyRole = Qt.UserRole + 20 #: The python property name.
+    WidgetRole = Qt.UserRole + 30 #: The Qt widget that exposes the python object's property.
 
     def __init__(self, text: str, prototype: dict = BeanPrototype):
         super().__init__(text)

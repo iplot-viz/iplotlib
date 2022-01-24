@@ -1,4 +1,7 @@
-# Description: A helpful icon loader.
+"""
+A helpful icon loader.
+"""
+
 # Author: Jaswant Sai Panchumarti
 
 import pkgutil

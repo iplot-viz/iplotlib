@@ -1,6 +1,5 @@
 """
 A main window with a collection of iplotlib canvases and a helpful toolbar.
-This module helps developers write custom applications with PySide2
 """
 
 # Author: Jaswant Sai Panchumarti
@@ -24,6 +23,11 @@ logger = sl.get_logger(__name__)
 
 
 class IplotQtMainWindow(QMainWindow):
+    """
+    A main window containing a toolbar and an assembly of iplotlib canvasses.
+    This class helps developers write custom applications with PySide2
+    """
+    
     toolActivated = Signal(str)
     detachClicked = Signal(str)
 
@@ -83,6 +87,9 @@ class IplotQtMainWindow(QMainWindow):
         self.check_history(w)
 
     def check_history(self, w: IplotQtCanvas):
+        """
+        Check the current state of history and set the style and text of undo, redo buttons.
+        """
         if w.can_undo():
             self.toolBar.undoAction.setEnabled(True)
             self.toolBar.undoAction.setText(f"Undo {w.get_next_undo_cmd_name()}")
@@ -95,9 +102,17 @@ class IplotQtMainWindow(QMainWindow):
             self.toolBar.redoAction.setDisabled(True)
 
     def onCanvasAdd(self, idx: int, w: IplotQtCanvas):
+        """
+        Connect the `onCmdDone` signal of the canvas widget to our `onCmdDone` signal.
+        """
         w.cmdDone.connect(partial(self.onCmdDone, w))
 
     def onCmdDone(self, w: IplotQtCanvas, cmd: IplotCommand):
+        """
+        Whenever a command is done by a canvas widget, it emits that signal.
+        We handle it by checking the history and setting the appropriate style, text of
+        the undo/redo buttons.
+        """
         self.check_history(w)
         self.toolBar.undoAction.setText(f"Undo {cmd.name}")
 
@@ -109,6 +124,8 @@ class IplotQtMainWindow(QMainWindow):
 
     def reDraw(self):
         """
+        Manually reset the preferences and draw the canvas object.
+        The preferences forms shall reflect the current state of the canvas object.
         """
         w = self.canvasStack.currentWidget()
         idx = self.canvasStack.currentIndex()
@@ -120,6 +137,9 @@ class IplotQtMainWindow(QMainWindow):
         self.prefWindow.update()
 
     def detach(self):
+        """
+        Detach/Re-attach the canvas widget from the main window.
+        """
         if self.toolBar.detachAction.text() == 'Detach':
             # we detach now.
             tbArea = self.toolBarArea(self.toolBar)
@@ -137,12 +157,20 @@ class IplotQtMainWindow(QMainWindow):
             self._floatingWindow.hide()
 
     def showEvent(self, event: QShowEvent):
+        """
+        Updates the style, text on the undo/redo buttons
+        """
         super().showEvent(event)
         for i in range(self.canvasStack.count()):
             self.check_history(self.canvasStack.widget(i))
         super().showEvent(event)
 
     def closeEvent(self, event: QCloseEvent):
+        """
+        Special handling of the close event is done to close the preferences window if it is visible.
+        This seems necessary, else qt might close the main window prior to closing this window and that would
+        cause some inconsistency when exitting the app.
+        """
         if self.prefWindow.isVisible():
             self.prefWindow.close()
         super().closeEvent(event)

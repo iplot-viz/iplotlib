@@ -1,4 +1,7 @@
-# Description: Map a python object's attributes to an index (index used by a data widget mapper)
+"""
+Map a python object's attributes to an index (index used by a data widget mapper)
+"""
+
 # Author: Piotr Mazur
 # Changelog:
 #   Sept 2021: -Refactor qt classes [Jaswant Sai Panchumarti]
@@ -20,8 +23,10 @@ from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__, 'INFO')
 
 class BeanItemModel(QStandardItemModel):
-    """An implementation of QStandardItemModel that binds indexes to object properties"""
-    PyObjectRole = Qt.UserRole + 50
+    """
+    An implementation of QStandardItemModel that binds indexes to object properties
+    """
+    PyObjectRole = Qt.UserRole + 50 #: This role is used to bind this model to a python object.
 
     def __init__(self, parent: typing.Optional[QObject] = ...):
         super().__init__(parent=parent)

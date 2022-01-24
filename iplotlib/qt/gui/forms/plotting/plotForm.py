@@ -1,4 +1,7 @@
-# Description: Map properties of a Plot object to a form.
+"""
+Map properties of a Plot object to a form.
+"""
+
 # Author: Piotr Mazur
 # Changelog:
 #   Sept 2021: -Refactor qt classes [Jaswant Sai Panchumarti]
@@ -16,6 +19,9 @@ from iplotlib.qt.utils.color_picker import ColorPicker
 
 
 class PlotForm(IplotPreferencesForm):
+    """
+    Map the properties of a Plot object to the widgets in a GUI form.
+    """
 
     def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         prototype = [

@@ -1,3 +1,7 @@
+"""
+The concrete implementations of QStandardItem for each core iplotlib class.
+"""
+
 from .axisItem import AxisItem
 from .canvasItem import CanvasItem
 from .plotItem import PlotItem

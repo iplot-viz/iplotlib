@@ -1,4 +1,7 @@
-# Description: Stubs for an axis.
+"""
+Stubs for an axis.
+"""
+
 # Author: Jaswant Sai Panchumarti
 
 import typing

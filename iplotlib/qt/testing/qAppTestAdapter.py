@@ -1,4 +1,7 @@
-# Description: Sets up a Qt application ready for testing.
+"""
+Sets up a Qt application ready for testing.
+"""
+
 # Author: Jaswant Sai Panchumarti
 
 import unittest
@@ -23,10 +26,13 @@ class QAppTestAdapter(unittest.TestCase):
         self.app = _instance
 
     def headless(self):
+        """
+        Return True if we are running without a display. Default is True.
+        """
         return True
 
     def tearDown(self):
-        """Deletes the reference owned by self"""
+        """Deletes the QApplication reference owned by self"""
         if not self.headless():
             del self.app
         super().tearDown()

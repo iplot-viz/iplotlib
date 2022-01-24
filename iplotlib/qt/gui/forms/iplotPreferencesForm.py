@@ -1,4 +1,7 @@
-# Description: An abstract widget that maps a python entity's properties to widgets in the form.
+"""
+An abstract widget that maps a python entity's properties to widgets in the form.
+"""
+
 # Author: Piotr Mazur
 # Changelog:
 #   Sept 2021: -Refactor qt classes [Jaswant Sai Panchumarti]
@@ -17,7 +20,9 @@ from iplotlib.qt.utils.color_picker import ColorPicker
 
 
 class IplotPreferencesForm(QWidget):
-
+    """
+    Map a python object's attributes onto data widgets in a GUI form.
+    """
     onApply = Signal()
     onReset = Signal()
 
@@ -67,12 +72,24 @@ class IplotPreferencesForm(QWidget):
         self.widgetMapper.toFirst()
 
     def MTime(self):
+        """
+        Return the last modified time stamp.
+        """
         return self._modifiedTime
 
     def modified(self):
+        """
+        Force modify the preferences state.
+        """
         self._modifiedTime = time.time_ns()
 
     def setSourceIndex(self, idx: QModelIndex):
+        """
+        Set the python object that will be sourced by the data widgets. 
+        The python object should be an instance of the core iplotlib Canvas class for tthe sourcing mechanism to function.
+        The `QModelIndex` should've encapsulated a python object for the `Qt.UserRole`. 
+        This encapsulation is done in :data:`~iplotlib.qt.gui.iplotQtCanvasAssembly.IplotQtCanvasAssembly.setCanvasData`
+        """
         pyObject = idx.data(Qt.UserRole)
         self.widgetModel.setData(
             QModelIndex(), pyObject, BeanItemModel.PyObjectRole)
@@ -80,6 +97,9 @@ class IplotPreferencesForm(QWidget):
 
     @Slot()
     def resetPrefs(self):
+        """
+        Derived instances will implement the reset functionality.
+        """
         self.onReset.emit()
 
     @staticmethod

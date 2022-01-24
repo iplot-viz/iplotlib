@@ -1,4 +1,7 @@
-# Description: A color dialog box.
+"""
+A color dialog box.
+"""
+
 # Author: Piotr Mazur
 # Changelog:
 #   Sept 2021: -Refactor qt classes [Jaswant Sai Panchumarti]
@@ -10,7 +13,9 @@ from PySide2.QtGui import QColor, QKeyEvent
 from PySide2.QtWidgets import QApplication, QColorDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
 class ColorPicker(QWidget):
-
+    """
+    A color dialog box.
+    """
     def __init__(self):
         super().__init__()
         self.setLayout(QHBoxLayout())

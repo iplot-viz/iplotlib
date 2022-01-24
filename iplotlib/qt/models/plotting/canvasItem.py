@@ -1,4 +1,7 @@
-# Description: Container of Plots in the Model/View architecture
+"""
+Container of Plots in the Model/View architecture
+"""
+
 # Author: Jaswant Sai Panchumarti
 
 import typing

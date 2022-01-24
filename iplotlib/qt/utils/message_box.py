@@ -1,4 +1,7 @@
-# Description: Show a message box with text.
+"""
+Show a message box with text and block the event loop.
+"""
+
 # Author: Jaswant Sai Panchumarti
 
 from PySide2.QtWidgets import QMessageBox

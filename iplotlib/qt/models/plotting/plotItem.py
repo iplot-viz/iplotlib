@@ -1,4 +1,7 @@
-# Description: Container of axes, signals in the Model/View architecture
+"""
+Container of axes, signals in the Model/View architecture
+"""
+
 # Author: Jaswant Sai Panchumarti
 
 import typing

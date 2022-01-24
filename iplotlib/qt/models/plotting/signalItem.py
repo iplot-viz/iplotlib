@@ -1,4 +1,7 @@
-# Description: Stubs for signal.
+"""
+Stubs for signal.
+"""
+
 # Author: Jaswant Sai Panchumarti
 
 import typing
