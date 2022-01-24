@@ -58,7 +58,7 @@ class MatplotlibParser(BackendParserBase):
         height = kwargs.get("height") or 10.5
 
         self.figure.set_size_inches(width/dpi, height/dpi)
-        self.refresh()
+        self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
     def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data):

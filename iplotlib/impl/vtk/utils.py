@@ -107,6 +107,9 @@ def write_image(fname: str, image: vtkImageData):
         writer = vtkJPEGWriter()
     elif fname.endswith("ps"):
         writer = vtkPostScriptWriter()
+    else:
+        logger.error(f"Unsupported file name {fname}")
+        return
 
     writer.SetInputData(image)
     writer.SetFileName(fname)
