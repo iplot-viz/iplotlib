@@ -23,7 +23,7 @@ Check out the :doc:`getting-started` section for further information, including 
 
 Support
 -------
-Feature suggestions, new ideas, and Pull Requests are really welcome.
+Feature suggestions, new ideas, and pull requests are welcome.
 We cooperate through the `project`_ page on git.iter.org
 If you want to support **iplotlib** by reporting bugs,
 you can create a ticket in the `jira`_ system.
@@ -31,7 +31,7 @@ you can create a ticket in the `jira`_ system.
 
 
 .. _project: https://git.iter.org/projects/VIS/repos/iplotlib/browse
-.. _jira: https://jira.iter.org/browse/IDV-245?jql=project%20%3D%20IDV%20AND%20component%20%3D%20iplotlib
+.. _jira: https://jira.iter.org/issues/?jql=project+%3D+IDV+AND+component+%3D+iplotlib
 
 Indices and tables
 ==================
