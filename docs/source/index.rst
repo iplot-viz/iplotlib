@@ -7,7 +7,7 @@ Welcome to iplotlib's documentation!
 ===========================================
 
 **iplotlib** is the ITER Plotting Library. It enables the development of interactive plotting
-applications to visualize datasets and signals in ITER databases, IMAS IDS(s) and CODAC UDA data.
+applications to visualize data.
 
 Check out the :doc:`getting-started` section for further information, including how to
 :ref:`install <installation>` **iplotlib**.
