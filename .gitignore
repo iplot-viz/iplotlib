@@ -63,3 +63,8 @@ cython_debug/
 docs/build
 docs/source/_autosummary
 docs/source/generated
+
+# ignore development binaries
+development/*
+!development/*.sh
+!development/*.patch

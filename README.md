@@ -15,6 +15,40 @@ See [requirements.txt](https://git.iter.org/projects/VIS/repos/iplotlib/browse/r
     ```bash
     git clone ssh://git@git.iter.org/vis/iplotlib.git
     ```
+
+Note: If you plan on developing the IDV components, clone other repositories like so:
+```bash
+# Your dev root should look like this.
+iplotlib/
+    |-iplotlib
+    |-setup.py
+    |-...
+iplotdataaccess
+    |-iplotDataAccess
+    |-setup.py
+    |-...
+iplotprocessing
+    |-iplotProcessing
+    |-setup.py
+    |-...
+iplotlogging
+    |-iplotLogging
+    |-setup.py
+    |-...
+mint
+    |-mint
+    |-setup.py
+    |-...
+$ cd iplotlib
+$ source development/setup-sdcc-dev.sh
+# To build documentation, execute this script
+$ ./development/setup-iplotlib-docs.sh
+# If you wish to exit, run
+$ idv_env_deactivate
+```
+
+The remaining steps below are not required if your are developing iplotlib.
+
 2. Prepare your environment.
     ``` bash
     cd iplotlib
