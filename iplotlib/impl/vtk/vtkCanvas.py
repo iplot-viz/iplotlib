@@ -123,7 +123,8 @@ class VTKParser(BackendParserBase):
 
         self.view.SetRenderWindow(renWin)
         renWin.GetInteractor().Initialize()
-        self.refresh(self.canvas)
+        if kwargs.get('canvas'):
+            self.process_ipl_canvas(kwargs.get('canvas'))
         renWin.GetInteractor().Render()
         vtkImplUtils.screenshot(self.view.GetRenderWindow(), filename)
 
