@@ -44,7 +44,7 @@ try module load coverage/5.5-GCCcore-10.2.0
 
 case $config in
     "prod")
-      try module load iplotLogging/0.1.0-GCCcore-10.2.0
+      try module load iplotLogging/0.2.1-GCCcore-10.2.0
       ;;
     "dev" )
       try module load cachetools/4.2.1-GCCcore-10.2.0
@@ -62,8 +62,8 @@ case $toolchain in
           try module load UDA-CCS/6.3-foss-2020b
           ;;
         "prod")
-          try module load iplotProcessing/0.1.0-foss-2020b
-          try module load iplotDataAccess/0.1.0-foss-2020b
+          try module load iplotProcessing/0.4.0-foss-2020b
+          try module load iplotDataAccess/0.4.0-foss-2020b
           ;;
         * ) 
           echo "Unknown configuration $config"
@@ -82,8 +82,8 @@ case $toolchain in
           try module load UDA-CCS/6.3-intel-2020b
           ;;
         "prod")
-          try module load iplotProcessing/0.1.0-intel-2020b
-          try module load iplotDataAccess/0.1.0-intel-2020b
+          try module load iplotProcessing/0.4.0-intel-2020b
+          try module load iplotDataAccess/0.4.0-intel-2020b
           ;;
         * ) 
           echo "Unknown configuration $config"
