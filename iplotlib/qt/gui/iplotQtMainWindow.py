@@ -7,9 +7,9 @@ A main window with a collection of iplotlib canvases and a helpful toolbar.
 from functools import partial
 import typing
 
-from PySide2.QtCore import QMargins, Qt, Signal
-from PySide2.QtWidgets import QApplication, QMainWindow, QWidget
-from PySide2.QtGui import QCloseEvent, QShowEvent
+from PySide6.QtCore import QMargins, Qt, Signal
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
+from PySide6.QtGui import QCloseEvent, QShowEvent
 from iplotlib.core.command import IplotCommand
 
 from iplotlib.qt.gui.iplotCanvasToolbar import IplotQtCanvasToolbar

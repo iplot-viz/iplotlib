@@ -6,8 +6,8 @@ Stubs for signal.
 
 import typing
 
-from PySide2.QtCore import Qt
-from PySide2.QtGui import QStandardItem
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QStandardItem
 
 class SignalItem(QStandardItem):
     def __init__(self, text: str, auto_name=False):

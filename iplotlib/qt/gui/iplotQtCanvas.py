@@ -6,8 +6,8 @@ from abc import abstractmethod
 from contextlib import contextmanager
 from typing import Collection, List
 
-from PySide2.QtCore import QMetaObject, QSize, Qt, Signal, Slot
-from PySide2.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
+from PySide6.QtWidgets import QApplication, QWidget
 from iplotlib.core.axis import RangeAxis
 
 from iplotlib.core.canvas import Canvas

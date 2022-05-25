@@ -6,8 +6,8 @@ Stubs for an axis.
 
 import typing
 
-from PySide2.QtCore import Qt
-from PySide2.QtGui import QStandardItem
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QStandardItem
 
 
 class AxisItem(QStandardItem):

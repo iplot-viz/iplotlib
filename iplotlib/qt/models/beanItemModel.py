@@ -11,9 +11,9 @@ Map a python object's attributes to an index (index used by a data widget mapper
 
 import typing
 
-from PySide2.QtCore import QModelIndex, QObject, Qt
-from PySide2.QtGui import QStandardItemModel
-from PySide2.QtWidgets import QComboBox
+from PySide6.QtCore import QModelIndex, QObject, Qt
+from PySide6.QtGui import QStandardItemModel
+from PySide6.QtWidgets import QComboBox
 
 from iplotlib.qt.models.beanItem import BeanItem, BeanPrototype
 from iplotlib.qt.utils.conversions import ConversionHelper

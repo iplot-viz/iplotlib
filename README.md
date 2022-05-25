@@ -3,7 +3,7 @@ A high-level abstract plotting library. In development
 
 | Graphics|GUI|
 |----------|:-------------:|
-| matplotlib|PyQt5, PySide2|
+| matplotlib|PyQt5, PySide2, PySide6|
 | gnuplot|PyQt5|
 | vtk|PyQt5, PySide2|
 

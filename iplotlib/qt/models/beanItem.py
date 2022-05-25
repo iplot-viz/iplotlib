@@ -6,8 +6,8 @@ Link a python object to a widget.
 
 import typing
 
-from PySide2.QtCore import Qt
-from PySide2.QtGui import QStandardItem
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QStandardItem
 
 BeanPrototype = {'label' : None, 'property': None, 'widget': None, 'converter': None}
 

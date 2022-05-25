@@ -1,10 +1,10 @@
 """
 This module is deprecated and unused.
 """
-from PySide2 import QtCore, QtGui
-from PySide2.QtCore import *
-from PySide2.QtGui import *
-from PySide2.QtWidgets import *
+from PySide6 import QtCore, QtGui
+from PySide6.QtCore import *
+from PySide6.QtGui import *
+from PySide6.QtWidgets import *
 from iplotlib.qt.gui.iplotOverlayCanvasTool import QtOverlayCanvasTool
 
 class QtCanvasOverlay(QWidget):

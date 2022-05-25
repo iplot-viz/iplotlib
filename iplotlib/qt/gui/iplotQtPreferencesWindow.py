@@ -11,10 +11,10 @@ A window to configure the visual preferences for iplotlib.
 import time
 import typing
 
-from PySide2.QtCore import QItemSelectionModel, QModelIndex, Qt
-from PySide2.QtCore import Signal as QtSignal
-from PySide2.QtGui import QShowEvent, QStandardItem, QStandardItemModel
-from PySide2.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter,
+from PySide6.QtCore import QItemSelectionModel, QModelIndex, Qt
+from PySide6.QtCore import Signal as QtSignal
+from PySide6.QtGui import QShowEvent, QStandardItem, QStandardItemModel
+from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter,
                                QStackedWidget, QTreeView, QWidget)
 
 from iplotlib.core.axis import Axis, LinearAxis

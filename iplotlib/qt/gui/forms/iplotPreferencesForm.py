@@ -11,8 +11,8 @@ from dataclasses import fields
 import typing
 import time
 
-from PySide2.QtCore import QModelIndex, Qt, Signal, Slot
-from PySide2.QtWidgets import (QCheckBox, QComboBox, QDataWidgetMapper, QLabel, QLineEdit,
+from PySide6.QtCore import QModelIndex, Qt, Signal, Slot
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDataWidgetMapper, QLabel, QLineEdit,
                                QFormLayout, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
 
 from iplotlib.qt.models import BeanItem, BeanItemModel

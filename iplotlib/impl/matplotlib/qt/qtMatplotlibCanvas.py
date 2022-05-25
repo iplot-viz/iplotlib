@@ -10,9 +10,9 @@
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 
 
-from PySide2.QtCore import QMargins, QMetaObject, Qt, Slot
-from PySide2.QtGui import QKeyEvent
-from PySide2.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
+from PySide6.QtCore import QMargins, QMetaObject, Qt, Slot
+from PySide6.QtGui import QKeyEvent
+from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
 
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, MouseEvent

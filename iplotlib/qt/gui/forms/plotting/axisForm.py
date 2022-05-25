@@ -9,8 +9,8 @@ Map properties of an Axis object to a form.
 
 import typing
 
-from PySide2.QtCore import QModelIndex, Qt, Slot
-from PySide2.QtWidgets import QWidget
+from PySide6.QtCore import QModelIndex, Qt, Slot
+from PySide6.QtWidgets import QWidget
 
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm

@@ -3,8 +3,8 @@ This module is deprecated and unused.
 """
 from abc import ABC, abstractmethod
 
-from PySide2.QtCore import QObject
-from PySide2.QtGui import QPainter
+from PySide6.QtCore import QObject
+from PySide6.QtGui import QPainter
 
 """
 This abstract class represents a canvas tool, usually interacts with events such as keyboard or mouse

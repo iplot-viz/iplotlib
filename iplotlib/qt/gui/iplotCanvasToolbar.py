@@ -13,9 +13,9 @@ This module is deprecated and unused.
 from functools import partial
 import typing
 
-from PySide2.QtCore import QMargins, Signal
-from PySide2.QtWidgets import (
-    QAction, QActionGroup,  QSizePolicy, QToolBar, QWidget)
+from PySide6.QtCore import QMargins, Signal
+from PySide6.QtWidgets import SizePolicy, QToolBar, QWidget
+from PySide6.QtGui import QAction, QActionGroup
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.qt.utils.icon_loader import create_icon

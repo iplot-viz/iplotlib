@@ -15,9 +15,10 @@ import os
 import pkgutil
 import sys
 
-from PySide2.QtCore import Qt
-from PySide2.QtWidgets import QAction, QActionGroup, QApplication
-from PySide2.QtGui import QGuiApplication, QKeySequence
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import  QApplication
+from PySide6.QtGui import (QGuiApplication, QKeySequence, 
+        QAction, QActionGroup)
 
 from iplotlib.core import Canvas
 from iplotlib import examples as iplotExamples

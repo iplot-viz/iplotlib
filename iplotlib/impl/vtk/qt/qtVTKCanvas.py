@@ -5,9 +5,9 @@
 #               -Port to PySide2 [Jaswant Sai Panchumarti]
 
 
-from PySide2.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QWidget
-from PySide2.QtGui import QResizeEvent, QShowEvent
-from PySide2.QtCore import Qt
+from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtGui import QResizeEvent, QShowEvent
+from PySide6.QtCore import Qt
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
@@ -17,7 +17,7 @@ from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 # Maintain consistent qt api across vtk and iplotlib
 import vtkmodules.qt
-vtkmodules.qt.PyQtImpl = 'PySide2'
+vtkmodules.qt.PyQtImpl = 'PySide6'
 
 # vtk requirements
 from vtkmodules.vtkCommonDataModel import vtkVector2f
@@ -30,7 +30,7 @@ from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__)
 
 try:
-    assert(PyQtImpl == 'PySide2')
+    assert(PyQtImpl == 'PySide6')
 except AssertionError as e:
     logger.warning("Invalid python Qt binding: the sanity check failed")
     logger.exception(e)

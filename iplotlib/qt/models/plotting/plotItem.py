@@ -6,8 +6,8 @@ Container of axes, signals in the Model/View architecture
 
 import typing
 
-from PySide2.QtCore import Qt
-from PySide2.QtGui import QStandardItem
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QStandardItem
 
 from iplotlib.core import Axis, Plot
 from iplotlib.qt.models.plotting.axisItem import AxisItem

@@ -8,9 +8,9 @@ A color dialog box.
 #              -Port to PySide2 [Jaswant Sai Panchumarti]
 
 
-from PySide2.QtCore import QMargins, QEvent, Qt, Property
-from PySide2.QtGui import QColor, QKeyEvent
-from PySide2.QtWidgets import QApplication, QColorDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtCore import QMargins, QEvent, Qt, Property
+from PySide6.QtGui import QColor, QKeyEvent
+from PySide6.QtWidgets import QApplication, QColorDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
 class ColorPicker(QWidget):
     """

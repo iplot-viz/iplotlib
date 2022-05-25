@@ -7,8 +7,8 @@ from iplotlib.core.signal import SimpleSignal
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.qVTKAppTestAdapter import QVTKAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
-from PySide2.QtCore import QPoint
-from PySide2.QtTest import QTest
+from PySide6.QtCore import QPoint
+from PySide6.QtTest import QTest
 
 
 class VTKCanvasTesting(QVTKAppTestAdapter):

@@ -1,6 +1,6 @@
-from PySide2 import QtCore
-from PySide2.QtCore import QPoint, QPointF, Qt, QRect, Signal
-from PySide2.QtGui import QPainter, QPen, QColor
+from PySide6 import QtCore
+from PySide6.QtCore import QPoint, QPointF, Qt, QRect, Signal
+from PySide6.QtGui import QPainter, QPen, QColor
 
 
 from iplotlib.qt.gui.iplotOverlayCanvasTool import QtOverlayCanvasTool

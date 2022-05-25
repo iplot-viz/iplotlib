@@ -38,9 +38,9 @@ setuptools.setup(
     python_requires=">=3.8",
     install_requires=[
         "iplotProcessing >= 0.4.0",
-        "matplotlib >= 3.3.3",
+        "matplotlib >= 3.5.1",
         "pandas >= 1.1.4",
-        "PySide2 >= 5.14.2",
+        "PySide6 >= 6.2.3",
         "vtk >= 9.1.0"
     ],
     entry_points={

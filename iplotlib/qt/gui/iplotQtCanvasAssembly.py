@@ -6,9 +6,9 @@ An assembly of canvas widgets arranged into a QStandardItemModel.
 
 import typing
 
-from PySide2.QtCore import Qt, Signal
-from PySide2.QtGui import QStandardItemModel
-from PySide2.QtWidgets import QStackedWidget, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QStandardItemModel
+from PySide6.QtWidgets import QStackedWidget, QWidget
 from iplotlib.core.command import IplotCommand
 
 from iplotlib.qt.utils.message_box import show_msg
