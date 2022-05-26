@@ -14,7 +14,7 @@ from functools import partial
 import typing
 
 from PySide6.QtCore import QMargins, Signal
-from PySide6.QtWidgets import SizePolicy, QToolBar, QWidget
+from PySide6.QtWidgets import QSizePolicy, QToolBar, QWidget
 from PySide6.QtGui import QAction, QActionGroup
 
 from iplotlib.core.canvas import Canvas
