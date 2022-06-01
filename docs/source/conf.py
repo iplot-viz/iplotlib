@@ -143,5 +143,4 @@ napoleon_use_rtype = False
 
 autodoc_member_order = 'bysource'
 # this is in order to support numpy and friends documentation on RTD
-#autodoc_mock_imports = ['pandas', 'numpy',  'scipy', 'iplotLogging', 'matplotlib', 'vtk']
-autodoc_mock_imports = ['pandas', 'scipy', 'iplotLogging', 'matplotlib', 'vtk']
+autodoc_mock_imports = ['pandas', 'numpy', 'scipy', 'iplotLogging', 'matplotlib', 'vtk', 'PySide6']
