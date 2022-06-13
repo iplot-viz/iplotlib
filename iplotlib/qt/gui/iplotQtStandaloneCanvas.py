@@ -83,7 +83,7 @@ class QStandaloneCanvas:
         """
         if not self.main_window:
             logger.warning(
-                "Not yet. Please prepare the Qt5 application. Call 'prepare'")
+                "Not yet. Please prepare the Qt application. Call 'prepare'")
             return
 
         qt_canvas = IplotQtCanvasFactory.new(

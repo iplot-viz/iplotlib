@@ -1,5 +1,6 @@
 # Fixed requirements for CODAC Core System
 iplotProcessing==0.4.0
+packaging>=20.0
 matplotlib==3.5.1
 pandas==1.2.0
 pyside6==6.2.3
