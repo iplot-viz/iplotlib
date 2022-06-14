@@ -4,7 +4,7 @@
 #   Sept 2021:  -Fix orphaned matploitlib figure. [Jaswant Sai Panchumarti]
 #               -Fix draw_in_main_thread for when C++ object might have been deleted. [Jaswant Sai Panchumarti]
 #               -Refactor qt classes [Jaswant Sai Panchumarti]
-#               -Port to PySide2 [Jaswant Sai Panchumarti]
+#               -Port to PySide6 [Jaswant Sai Panchumarti]
 #   Jan 2022:   -Introduce custom HistoryManagement for zooming and panning with git style revision control [Jaswant Sai Panchumarti]
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
@@ -16,8 +16,8 @@ from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
 
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, MouseEvent
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
@@ -64,6 +64,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Sets new iplotlib canvas and redraw"""
 
         prev_canvas = self._parser.canvas
+        
         if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
             self.unfocus_plot()
 
