@@ -16,8 +16,8 @@ from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
 
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, MouseEvent
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
