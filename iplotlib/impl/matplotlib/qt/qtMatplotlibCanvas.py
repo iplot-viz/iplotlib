@@ -4,11 +4,11 @@
 #   Sept 2021:  -Fix orphaned matploitlib figure. [Jaswant Sai Panchumarti]
 #               -Fix draw_in_main_thread for when C++ object might have been deleted. [Jaswant Sai Panchumarti]
 #               -Refactor qt classes [Jaswant Sai Panchumarti]
-#               -Port to PySide6 [Jaswant Sai Panchumarti]
+#               -Port to PySide2 [Jaswant Sai Panchumarti]
 #   Jan 2022:   -Introduce custom HistoryManagement for zooming and panning with git style revision control [Jaswant Sai Panchumarti]
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
-
+#   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
 
 from PySide6.QtCore import QMargins, QMetaObject, Qt, Slot
 from PySide6.QtGui import QKeyEvent
