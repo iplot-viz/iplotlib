@@ -497,7 +497,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         if len(self.children):
             # ask child signals to fetch data
             for child in self.children:
-                if child._needs_refresh() :
+                if child._needs_refresh():
                     child._fetch_data()
                 if child.status_info.result == Result.FAIL:
                     self.set_da_fail(msg=child.status_info.msg) # get exact reason for failure from child.
