@@ -21,7 +21,7 @@
 #  Dec 2021:   Changes by Jaswant
 #              - If the number of child signals is > 1, then align them onto a common grid before evaluating an expression.
 #              - The alignment modifies the data_store. After evaluation, restore the original buffers.
-import traceback
+
 from collections import defaultdict
 from dataclasses import dataclass, field, fields
 import numpy as np
@@ -31,8 +31,6 @@ import typing
 from iplotlib.core.signal import ArraySignal
 from iplotlib.interface.utils import string_classifier as iplotStrUtils
 from iplotProcessing.common.errors import InvalidExpression
-from iplotProcessing.common.grid_mixing import GridAlignmentMode
-from iplotProcessing.common.interpolation import InterpolationKind
 from iplotProcessing.core import BufferObject
 from iplotProcessing.core import Signal as ProcessingSignal
 from iplotProcessing.math.pre_processing.grid_mixing import align
@@ -111,7 +109,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     ts_end: int = None
     ts_relative: bool = False
     envelope: bool = False
-    isDownsampled: bool =False
+    isDownsampled: bool = False
     x_expr: str = '${self}.time'
     y_expr: str = '${self}.data'
     z_expr: str = '${self}.data_store[2]'
@@ -227,9 +225,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         # Evaluate each expression.
         for key, expr in kwargs.items():
             try:
-                logger.debug(" in compute key={} expr={}".format(key,expr))
+                logger.debug(" in compute key={} expr={}".format(key, expr))
                 data_arrays.update({key: ParserHelper.evaluate(self, expr)})
-            except Exception as e:
+            except:
                 continue
         return data_arrays
 
@@ -290,8 +288,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info.num_points = 0
         logger.warning(f"Processing Error: {msg}")
 
-    def inject_external(self, append : bool = False, **kwargs):
-        AccessHelper.on_fetch_done(self, kwargs, append = append)
+    def inject_external(self, append: bool = False, **kwargs):
+        AccessHelper.on_fetch_done(self, kwargs, append=append)
         self._access_md5sum = self.calculate_data_hash()
         self._do_data_processing()
 
@@ -416,7 +414,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                             setattr(self, name, data[i].view(BufferObject))
                         except IndexError:
                             break
-                        logger.debug("[UDA len_data={} name={}  i={} len_data_i={}] ".format(len(data),name,i,len(data[i])))
+                        logger.debug("[UDA len_data={} name={}  i={} len_data_i={}] ".format(len(data), name, i, len(data[i])))
         # 2. Fix x-y shape mismatch.
         self.y_data = self.acquire_shape(self.y_data, self.x_data)
 
@@ -637,7 +635,7 @@ class AccessHelper:
     def on_fetch_done(signal: IplotSignalAdapter, res: dict, append: bool = False):
 
         if not isinstance(res, dict):
-            signal.set_da_fail(msg="¯\_(ツ)_/¯ Unknown error while fetching data")
+            signal.set_da_fail(msg=r"¯\_(ツ)_/¯ Unknown error while fetching data")
             return
 
         signal.alias_map.clear()
@@ -676,7 +674,7 @@ class AccessHelper:
         try:
             result = AccessHelper._request_data(**in_params)
             out_params.update(result)
-            signal.isDownsampled=result['isds']
+            signal.isDownsampled = result['isds']
         except Exception as e:
             # Indicate failure with message.
             signal.set_da_fail(msg=str(e))
@@ -703,8 +701,8 @@ class AccessHelper:
         pulse = da_params.get('pulse')
         envelope = da_params.get('envelope')
         tRelative = da_params.get('tsFormat') == 'relative'
-        ##indicate if the signal was downsampled
-        ds=False
+        # indicate if the signal was downsampled
+        ds = False
         result = dict(alias_map={},
                       d0=[],
                       d1=[],
@@ -723,16 +721,14 @@ class AccessHelper:
             if envelope:
                 da_params.update({'nbp': AccessHelper.num_samples})
                 (d_env) = AccessHelper.da.getEnvelope(**da_params)
-                if d_env.errcode < 0 :
-                    
+                if d_env.errcode < 0:
                     if d_env.errcode < 0:
                         message = f"ErrCode: {d_env.errcode} | getEnvelope (minimum) failed for -1 and {AccessHelper.num_samples} samples. {da_params}"
                         raise DataAccessError(message)
-                    
 
                 xdata = np_nvl(d_env.xdata if d_env else None) if tRelative else np_nvl(
                     d_env.xdata if d_env else None)
-                
+
                 result['alias_map'] = {
                         'time': {'idx': 0, 'independent': True},
                         'dmin': {'idx': 1},
@@ -744,7 +740,7 @@ class AccessHelper:
                 result['d0_unit'] = d_env.xunit if d_env else ''
                 result['d1_unit'] = d_env.yunit if d_env else ''
                 result['d2_unit'] = d_env.yunit if d_env else ''
-                result['isds']=True
+                result['isds'] = True
                 logger.debug("[UDA ] nbsMIN={} nbsMAX={}".format(len(d_env.ydata_min),len(d_env.ydata_max)))
 
             else:
@@ -753,11 +749,11 @@ class AccessHelper:
                     if raw.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval, use decimation or read data by chunks.':
                         da_params.update({'nbp': AccessHelper.num_samples})
                         raw = AccessHelper.da.getData(**da_params)
-                        ds=True
-                    #if raw.errcode < 0: # try with fallback no. of points.
-                     #   da_params.update({'nbp': AccessHelper.num_samples})
-                      #  raw = AccessHelper.da.getData(**da_params)
-                    ##means no data found
+                        ds = True
+                    # if raw.errcode < 0: # try with fallback no. of points.
+                    #     da_params.update({'nbp': AccessHelper.num_samples})
+                    #     raw = AccessHelper.da.getData(**da_params)
+                    # means no data found
                     if raw.errcode < 0:
                         message = f"ErrCode: {raw.errcode} | getData failed. Error: {raw.errdesc}"
                         raise DataAccessError(message)
@@ -779,13 +775,12 @@ class AccessHelper:
                         'data': {'idx': 1}
                     }
                 result['d0'] = xdata
-               
                 result['d1'] = np_nvl(raw.ydata)
                 result['d2'] = np.empty(0).astype('double')
                 result['d0_unit'] = raw.xunit if raw.xunit else ''
                 result['d1_unit'] = raw.yunit if raw.yunit else ''
                 result['d2_unit'] = ''
-                result['isds']=ds
+                result['isds'] = ds
         else:
             raise DataAccessError(
                 f"tsS={tsS}, tsE={tsE}, pulse_nb={pulse}")
@@ -872,15 +867,15 @@ class ParserHelper:
                 expression = expression.replace(match, replacement)
                 logger.debug(f"|==> replaced {match} with {replacement}")
                 logger.debug(f"expression: {expression}")
-        
+
         p.clear_expr()
         p.set_expression(expression)
         if not p.is_valid:
             raise InvalidExpression(f"expression: {expression} is invalid!")
 
         p.substitute_var(local_env)
-        p.eval_expr()       
+        p.eval_expr()
         if p.has_time_units:
-                return p.result.astype('int64')
+            return p.result.astype('int64')
         else:
             return p.result
