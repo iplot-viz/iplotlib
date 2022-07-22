@@ -152,7 +152,9 @@ class MatplotlibParser(BackendParserBase):
               #  draw_fn = mpl_axes.step
 
             line_1 = draw_fn(x_data, y1_data, **params)
-            line_2 = draw_fn(x_data, y2_data, **params)
+            params2 = params.copy()
+            params2.update(color=line_1[0].get_color(), label='')
+            line_2 = draw_fn(x_data, y2_data, **params2)
             area = mpl_axes.fill_between(x_data, y1_data, y2_data,
                                          alpha=0.3,
                                          color=params.get('color'),
