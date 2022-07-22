@@ -157,7 +157,7 @@ class MatplotlibParser(BackendParserBase):
             line_2 = draw_fn(x_data, y2_data, **params2)
             area = mpl_axes.fill_between(x_data, y1_data, y2_data,
                                          alpha=0.3,
-                                         color=params.get('color'),
+                                         color=params2['color'],
                                          step=STEP_MAP[step.lower()].replace('steps-',''))
 
             self._signal_impl_shape_lut.update({id(signal): [line_1, line_2, area]})
