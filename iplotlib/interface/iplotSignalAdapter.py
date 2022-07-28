@@ -111,8 +111,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     envelope: bool = False
     isDownsampled: bool = False
     x_expr: str = '${self}.time'
-    y_expr: str = '${self}.data_store[1]'
-    z_expr: str = '${self}.data_store[2]'
+    y_expr: str = '${self}.data_store[1]'  # Changed by IDV-333
+    z_expr: str = '${self}.data_store[2]'  # Changed by IDV-333
 
     plot_type: str = ''
 
@@ -474,6 +474,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             return
 
         # 3. Finally, apply x, y, z expressions to populate `x_data`, `y_data` and `z_data` respectively
+        # self.compute evaluates expressions (IDV-333)
         data_arrays = self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
         self._finalize_xyz_data([data_arrays.get('x'), data_arrays.get('y'), data_arrays.get('z')])
         #logger.debug("[UDA x={} y={} z={} ] ".format(len(data_arrays.get('x')),len(data_arrays.get('y')),len(data_arrays.get('z'))))
