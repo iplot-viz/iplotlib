@@ -250,7 +250,7 @@ class BackendParserBase(ABC):
                     self.set_impl_x_axis_label_text(impl_plot, label)
         # label from preferences takes precedence.
         if hasattr(xaxis, "_label") and xaxis._label:
-            self.set_impl_x_axis_label_text(impl_plot, label)
+            self.set_impl_x_axis_label_text(impl_plot, xaxis._label)
 
     def update_range_axis(self, range_axis: RangeAxis, ax_idx: int, impl_plot: Any, which='current'):
         """
