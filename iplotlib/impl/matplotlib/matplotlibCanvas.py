@@ -282,6 +282,7 @@ class MatplotlibParser(BackendParserBase):
 
                 mpl_axes = self.figure.add_subplot(
                     subgrid_item[row_id, 0], sharex=mpl_axes_prev)
+                mpl_axes_prev = mpl_axes
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
                 # Keep references to iplotlib instances for ease of access in callbacks.
                 self._impl_plot_cache_table.register(mpl_axes, self.canvas, plot, key, signals)
