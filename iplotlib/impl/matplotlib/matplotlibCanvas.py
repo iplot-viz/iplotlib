@@ -302,7 +302,7 @@ class MatplotlibParser(BackendParserBase):
                 # If this is a stacked plot the X axis should be visible only on the bottom plot of the stack
                 # hides an axis in a way that grid remains visible,
                 # by default in matplotlib the gird is treated as part of the axis
-                visible = stack_id + 1 == len(plot.signals.values())
+                visible = (stack_id + 1 == len(plot.signals.values())) or is_stack_plot_focused
                 for e in mpl_axes.get_xaxis().get_children():
                     if isinstance(e, Tick):
                         e.tick1line.set_visible(visible)
