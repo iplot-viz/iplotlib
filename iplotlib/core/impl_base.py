@@ -256,7 +256,7 @@ class BackendParserBase(ABC):
         """
         If axis is a RangeAxis update its min and max to implementation chart's view limits
         """
-        if not isinstance(range_axis, RangeAxis):
+        if not isinstance(range_axis, RangeAxis) or impl_plot is None:
             return
         limits = self.get_oaw_axis_limits(impl_plot, ax_idx)
         if which == 'current':
