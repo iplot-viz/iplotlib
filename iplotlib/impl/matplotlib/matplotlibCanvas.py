@@ -299,10 +299,12 @@ class MatplotlibParser(BackendParserBase):
                         fs = None
                     mpl_axes.set_title(plot.title, color=fc, size=fs)
 
-                # If this is a stacked plot the X axis should be visible only on the bottom plot of the stack
-                # hides an axis in a way that grid remains visible,
-                # by default in matplotlib the gird is treated as part of the axis
-                visible = (stack_id + 1 == len(plot.signals.values())) or is_stack_plot_focused
+                # If this is a stacked plot the X axis should be visible only at the bottom
+                # plot of the stack except it is focused
+                # Hides an axis in a way that grid remains visible,
+                # By default in matplotlib the grid is treated as part of the axis
+                visible = ((stack_id + 1 == len(plot.signals.values())) or
+                           (is_stack_plot_focused and not self.canvas.full_mode_all_stack))
                 for e in mpl_axes.get_xaxis().get_children():
                     if isinstance(e, Tick):
                         e.tick1line.set_visible(visible)
