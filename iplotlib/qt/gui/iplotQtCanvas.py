@@ -57,8 +57,8 @@ class IplotQtCanvas(QWidget):
         return self._parser._hm.get_next_redo_cmd_name()
 
     def draw_in_main_thread(self):
-        import shiboken2
-        if shiboken2.isValid(self):
+        import shiboken6
+        if shiboken6.isValid(self):
             QMetaObject.invokeMethod(self, "flush_draw_queue")
 
     @Slot()
