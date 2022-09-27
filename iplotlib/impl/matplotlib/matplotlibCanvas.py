@@ -449,7 +449,7 @@ class MatplotlibParser(BackendParserBase):
             return
 
         # All good, make a data access request.
-        logger.debug(f"\tprocessipsignal before ts_start {signal.ts_start} ts_end {signal.ts_end} status: {signal.status_info.result} ")
+        #logger.debug(f"\tprocessipsignal before ts_start {signal.ts_start} ts_end {signal.ts_end} status: {signal.status_info.result} ")
         signal_data = signal.get_data()
         data = self.transform_data(mpl_axes, signal_data)
         #logger.debug(f"\tprocessipsignal data[0] {data[0]} data[1] {data[1]} ax_idx: {type(signal_data)} ")
