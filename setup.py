@@ -6,20 +6,21 @@
 
 import setuptools
 from iplotlib._version import __version__
+import versioneer
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setuptools.setup(
     name="iplotlib",
-    setup_requires=[
-        "setuptools-git-versioning"
-    ],
-    version_config={
-        "version_callback": __version__,
-        "template": "{tag}",
-        "dirty_template": "{tag}.{ccount}.{sha}",
-    },
+    version=versioneer.get_version(),
+    cmdclass=versioneer.get_cmdclass(),
+    setup_requires=["setuptools-git-versioning"],
+    # version_config={
+    #     "version_callback": __version__,
+    #     "template": "{tag}",
+    #     "dirty_template": "{tag}.{ccount}.{sha}",
+    # },
     author="Panchumarti Jaswant EXT",
     author_email="jaswant.panchumarti@iter.org",
     description="ITER plotting library",
@@ -41,12 +42,12 @@ setuptools.setup(
         "matplotlib >= 3.5.1",
         "pandas >= 1.1.4",
         "PySide6 >= 6.2.3",
-        "vtk >= 9.1.0"
+        "vtk >= 9.1.0",
     ],
     entry_points={
-        'console_scripts': ['iplotlib-qt-canvas = iplotlib.qt.gui.iplotQtStandaloneCanvas:main']
+        "console_scripts": [
+            "iplotlib-qt-canvas = iplotlib.qt.gui.iplotQtStandaloneCanvas:main"
+        ]
     },
-    package_data = {
-        "iplotlib.qt": ["icons/*.png", "icons/*.svg"]
-    }
+    package_data={"iplotlib.qt": ["icons/*.png", "icons/*.svg"]},
 )
