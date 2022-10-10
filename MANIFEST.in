@@ -1,0 +1,4 @@
+graft iplotlib
+recursive-exclude * *.py[co]
+include versioneer.py
+include iplotlib/_version.py
