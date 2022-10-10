@@ -5,7 +5,8 @@
 # Note For changes to this file, please add the author to the list of PR reviewers
 
 import setuptools
-from iplotlib._version import __version__
+
+# from iplotlib._version import __version__
 import versioneer
 
 with open("README.md", "r", encoding="utf-8") as fh:
