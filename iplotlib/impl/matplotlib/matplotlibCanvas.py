@@ -141,9 +141,9 @@ class MatplotlibParser(BackendParserBase):
                                          color=shapes[1][0].get_color(),
                                          step=STEP_MAP[step.lower()].replace('steps-',''))
             shapes.append(area)
-            shapes[0][0].draw()
-            shapes[1][0].draw()
-            shapes[2].draw()
+            shapes[0][0].draw(mpl_axes.figure.canvas.renderer)
+            shapes[1][0].draw(mpl_axes.figure.canvas.renderer)
+            shapes[2].draw(mpl_axes.figure.canvas.renderer)
         else:
             params = dict(**style)
             draw_fn = mpl_axes.plot
