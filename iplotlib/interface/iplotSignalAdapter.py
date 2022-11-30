@@ -175,6 +175,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self._do_data_access()
         # 2. Use iplotProcessing to evaluate x_data, y_data, z_data
         self._do_data_processing()
+
         return [self.x_data, self.y_data, self.z_data]
 
     def set_data(self, data=None):
@@ -641,7 +642,7 @@ class AccessHelper:
         signal.alias_map.update(res['alias_map'])
 
         # we can append to existing data if required (in case of real time streaming)
-        if append:
+        if append and len(signal.data_store[0]) > 0:
             signal.data_store[0] = BufferObject(np.append(signal.data_store[0], res['d0']))
             signal.data_store[1] = BufferObject(np.append(signal.data_store[1], res['d1']))
             signal.data_store[2] = BufferObject(np.append(signal.data_store[2], res['d2']))

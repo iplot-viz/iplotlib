@@ -2,8 +2,6 @@ import time
 from functools import partial
 from threading import Thread
 
-import numpy as np
-
 import iplotLogging.setupLogger as ls
 
 logger = ls.get_logger(__name__)
@@ -28,12 +26,16 @@ class CanvasStreamer:
                 for (stack_id, signals) in plot.signals.items():
                     all_signals += signals
 
-        self.signals = {s.name: s for s in all_signals}
+        signals = {}
+        for s in all_signals:
+            signals[s.name] = signals.get(s.name, []) + [s]
+        self.signals = signals
 
         signals_by_ds = dict()
         for s in all_signals:
             if signals_by_ds.get(s.data_source):
-                signals_by_ds[s.data_source].append(s.name)
+                if s.name not in signals_by_ds[s.data_source]:
+                    signals_by_ds[s.data_source].append(s.name)
             else:
                 signals_by_ds[s.data_source] = [s.name]
 
@@ -73,18 +75,22 @@ class CanvasStreamer:
         self.streamers.clear()
 
     def handler(self, callback, varname, dobj):
-        signal = self.signals.get(varname)
-        if hasattr(signal, 'inject_external'):
-            result = dict(alias_map={
-                        'time': {'idx': 0, 'independent': True},
-                        'data': {'idx': 1}
-                        },
-                      d0=dobj.xdata,
-                      d1=dobj.ydata,
-                      d2=[],
-                      d0_unit=dobj.xunit,
-                      d1_unit=dobj.yunit,
-                      d2_unit='')
-            signal.inject_external(append=True, **result)
-            logger.info(f"Updated {varname} with {len(dobj.xdata)} new samples")
-            callback(signal)
+        signals_by_name = self.signals.get(varname)
+        if signals_by_name is None:
+            logger.warning(f'signal name {varname} was not found')
+            return
+        for signal in signals_by_name:
+            if hasattr(signal, 'inject_external'):
+                result = dict(alias_map={
+                            'time': {'idx': 0, 'independent': True},
+                            'data': {'idx': 1}
+                            },
+                          d0=dobj.xdata,
+                          d1=dobj.ydata,
+                          d2=[],
+                          d0_unit=dobj.xunit,
+                          d1_unit=dobj.yunit,
+                          d2_unit='')
+                signal.inject_external(append=True, **result)
+                logger.info(f"Updated {varname} with {len(dobj.xdata)} new samples")
+                callback(signal)

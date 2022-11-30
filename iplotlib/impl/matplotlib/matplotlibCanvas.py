@@ -451,6 +451,7 @@ class MatplotlibParser(BackendParserBase):
         # All good, make a data access request.
         # logger.debug(f"\tprocessipsignal before ts_start {signal.ts_start} ts_end {signal.ts_end} status: {signal.status_info.result} ")
         signal_data = signal.get_data()
+
         data = self.transform_data(mpl_axes, signal_data)
         #logger.debug(f"\tprocessipsignal data[0] {data[0]} data[1] {data[1]} ax_idx: {type(signal_data)} ")
         if not len(data[0]) or not len(data[1]):
@@ -588,6 +589,7 @@ class MatplotlibParser(BackendParserBase):
     def create_offset(vals):
         """Given a collection of values determine if creting offset is necessary and return it
         Returns None otherwise"""
+
         if isinstance(vals, Collection) and len(vals) > 0:
             if ((hasattr(vals, 'dtype') and vals.dtype.name == 'int64')
                     or (type(vals[0]) == int)
