@@ -7,7 +7,7 @@ one might want to use when plotting data.
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Collection, Union
 
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.signal import Signal
@@ -24,7 +24,7 @@ class Plot(ABC):
 
     title: str = None #: a plot title text, will be shown above the plot
 
-    axes: List[Axis] = None #: the plot axes.
+    axes: List[Union[Axis, Collection[Axis]]] = None #: the plot axes.
     signals: Dict[str, Signal] = None #: the signals drawn in this plot
     _type: str = None
 
@@ -48,6 +48,25 @@ class Plot(ABC):
         self.font_size = Plot.font_size
         self.font_color = Plot.font_color
 
+    def merge(self, old_plot: 'Plot'):
+        self.title = old_plot.title
+        self.legend = old_plot.legend
+        self.font_size = old_plot.font_size
+        self.font_color = old_plot.font_color
+
+        for idxAxis, axis in enumerate(self.axes):
+            if axis and idxAxis < len(old_plot.axes):
+                # Found matching axes
+                if isinstance(axis, Collection) and isinstance(old_plot.axes[idxAxis], Collection):
+                    for idxSubAxis, subAxis in enumerate(axis):
+                        if subAxis and idxSubAxis < len(old_plot.axes[idxAxis]):
+                            old_axis = old_plot.axes[idxAxis][idxSubAxis]
+                            subAxis.merge(old_axis)
+                else:
+                    old_axis = old_plot.axes[idxAxis]
+                    axis.merge(old_axis)
+
+
 
 @dataclass
 class PlotContour(Plot):
@@ -55,6 +74,9 @@ class PlotContour(Plot):
 
     def reset_preferences(self):
         super().reset_preferences()
+
+    def merge(self, old_plot: 'PlotContour'):
+        super().merge(old_plot)
 
 
 @dataclass
@@ -64,6 +86,9 @@ class PlotSurface(Plot):
     def reset_preferences(self):
         super().reset_preferences()
 
+    def merge(self, old_plot: 'PlotSurface'):
+        super().merge(old_plot)
+
 
 @dataclass
 class PlotImage(Plot):
@@ -71,6 +96,9 @@ class PlotImage(Plot):
 
     def reset_preferences(self):
         super().reset_preferences()
+
+    def merge(self, old_plot: 'PlotImage'):
+        super().merge(old_plot)
 
 
 @dataclass
@@ -100,4 +128,13 @@ class PlotXY(Plot):
         self.marker = PlotXY.marker
         self.marker_size = PlotXY.marker_size
         self.step = PlotXY.step
-        return super().reset_preferences()
+        super().reset_preferences()
+
+    def merge(self, old_plot: 'PlotXY'):
+        self.grid = old_plot.grid
+        self.line_style = old_plot.line_style
+        self.line_size = old_plot.line_size
+        self.marker = old_plot.marker
+        self.marker_size = old_plot.marker_size
+        self.step = old_plot.step
+        super().merge(old_plot)

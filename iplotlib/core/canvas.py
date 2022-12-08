@@ -102,14 +102,14 @@ class Canvas(ABC):
         return JSONExporter().to_dict(self)
 
     @staticmethod
-    def from_dict(inp_dict):
+    def from_dict(inp_dict) -> 'Canvas':
         return JSONExporter().from_dict(inp_dict)
 
     def to_json(self):
         return JSONExporter().to_json(self)
 
     @staticmethod
-    def from_json(inp_file):
+    def from_json(inp_file) -> 'Canvas':
         return JSONExporter().from_json(inp_file)
 
     def export_image(self, filename: str, **kwargs):
@@ -133,3 +133,28 @@ class Canvas(ABC):
         self.marker_size = Canvas.marker_size
         self.step = Canvas.step
         self.full_mode_all_stack = Canvas.full_mode_all_stack
+
+    def merge(self, old_canvas: 'Canvas'):
+        """
+        Reset the preferences to default values.
+        """
+        self.title = old_canvas.title
+        self.font_size = old_canvas.font_size
+        self.shared_x_axis = old_canvas.shared_x_axis
+        self.grid = old_canvas.grid
+        self.legend = old_canvas.legend
+        self.font_color = old_canvas.font_color
+        self.line_style = old_canvas.line_style
+        self.line_size = old_canvas.line_size
+        self.marker = old_canvas.marker
+        self.marker_size = old_canvas.marker_size
+        self.step = old_canvas.step
+        self.full_mode_all_stack = old_canvas.full_mode_all_stack
+
+        for idxColumn, columns in enumerate(self.plots):
+            for idxPlot, plot in enumerate(columns):
+                if plot and idxColumn < len(old_canvas.plots) and idxPlot < len(old_canvas.plots[idxColumn]):
+                    # Found matching plot
+                    old_plot = old_canvas.plots[idxColumn][idxPlot]
+                    plot.merge(old_plot)
+
