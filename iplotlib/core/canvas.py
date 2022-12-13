@@ -4,10 +4,11 @@ This module defines the `Canvas` object.
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import List
+from typing import List, Union
 
 from iplotlib.core.persistence import JSONExporter
 from iplotlib.core.plot import Plot
+from iplotlib.core.signal import Signal
 
 
 @dataclass
@@ -46,7 +47,7 @@ class Canvas(ABC):
 
     mouse_mode: str = MOUSE_MODE_SELECT #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
 
-    plots: List[List[Plot]] = None #: A 22-level nested list of plots.
+    plots: List[List[Union[Plot,None]]] = None #: A 22-level nested list of plots.
 
     crosshair_enabled: bool = False #: visibility of crosshair.
     crosshair_color: str = "red" #: color of the crosshair cursor lines.
@@ -151,6 +152,7 @@ class Canvas(ABC):
         self.step = old_canvas.step
         self.full_mode_all_stack = old_canvas.full_mode_all_stack
 
+
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
                 if plot and idxColumn < len(old_canvas.plots) and idxPlot < len(old_canvas.plots[idxColumn]):
@@ -158,3 +160,27 @@ class Canvas(ABC):
                     old_plot = old_canvas.plots[idxColumn][idxPlot]
                     plot.merge(old_plot)
 
+        # Gather all old signals into a map with uid as key
+        def computeSignalUniqKey(signal: Signal):
+            # Consider signal is same if it has the same row uid, name
+            key = signal.uid + ";" + signal.name
+            return key
+
+        mapOldSignals:dict[str, Signal] = {}
+        for columns in old_canvas.plots:
+            for old_plot in columns:
+                if old_plot:
+                    for old_signals in old_plot.signals.values():
+                        for old_signal in old_signals:
+                            key = computeSignalUniqKey(old_signal)
+                            mapOldSignals[key] = old_signal
+        
+        # Merge signals at canvas level to handle move between plots
+        for columns in self.plots:
+            for plot in columns:
+                if plot:
+                    for signals in plot.signals.values():
+                        for signal in signals:
+                            key = computeSignalUniqKey(signal)
+                            if key in mapOldSignals:
+                                signal.merge(mapOldSignals[key])

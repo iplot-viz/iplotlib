@@ -23,6 +23,8 @@ class Signal(ABC):
     """
     Main abstraction for a Signal.
     """
+    uid: str = None #: Signal uid.
+    name: str = '' #: Signal variable name.
     label: str = None #: Signal label. This value is presented on plot legend
     color: str = None
     line_style: str = None
@@ -56,6 +58,14 @@ class Signal(ABC):
         self.marker = Signal.marker
         self.marker_size = Signal.marker_size
         self.step = Signal.step
+
+    def merge(self, old_signal: 'Signal'):
+        self.color = old_signal.color
+        self.line_style = old_signal.line_style
+        self.line_size = old_signal.line_size
+        self.marker = old_signal.marker
+        self.marker_size = old_signal.marker_size
+        self.step = old_signal.step
 
 
 @dataclass

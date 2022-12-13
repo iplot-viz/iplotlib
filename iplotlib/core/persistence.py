@@ -6,6 +6,7 @@ import dataclasses
 import json
 from json import JSONEncoder
 from typing import Dict, List
+import uuid
 
 import numpy as np
 

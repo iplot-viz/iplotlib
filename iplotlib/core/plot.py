@@ -25,7 +25,7 @@ class Plot(ABC):
     title: str = None #: a plot title text, will be shown above the plot
 
     axes: List[Union[Axis, Collection[Axis]]] = None #: the plot axes.
-    signals: Dict[str, Signal] = None #: the signals drawn in this plot
+    signals: Dict[str, List[Signal]] = None #: the signals drawn in this plot
     _type: str = None
 
 
@@ -65,6 +65,10 @@ class Plot(ABC):
                 else:
                     old_axis = old_plot.axes[idxAxis]
                     axis.merge(old_axis)
+
+        # signals are merged at canvas level to handle move between plots
+
+        
 
 
 
