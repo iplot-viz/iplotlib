@@ -33,7 +33,7 @@ from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__)
 
 AXIS_MAP = [vtkAxis.BOTTOM, vtkAxis.LEFT]
-STEP_MAP = {"none": "none", "mid": "steps-mid", "post": "steps-post",
+STEP_MAP = {"linear": "none", "mid": "steps-mid", "post": "steps-post",
             "pre": "steps-pre", "steps-mid": "steps-mid", "steps-post": "steps-post", "steps-pre": "steps-pre"}
 
 

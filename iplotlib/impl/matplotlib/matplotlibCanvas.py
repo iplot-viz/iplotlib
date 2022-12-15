@@ -25,7 +25,7 @@ from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 
 logger = sl.get_logger(__name__)
-STEP_MAP = {"default": "default", "mid": "steps-mid", "post": "steps-post",
+STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post",
             "pre": "steps-pre", "steps-mid": "steps-mid", "steps-post": "steps-post", "steps-pre": "steps-pre"}
 
 class MatplotlibParser(BackendParserBase):
@@ -77,12 +77,13 @@ class MatplotlibParser(BackendParserBase):
         step = style.pop('drawstyle', None)
         logger.debug(f"mpl_line_plot step=: {step}")
         if step is None:
-            step='Default'
+            step='linear'
+        style.update({'drawstyle': STEP_MAP[step.lower()]})
+
         if isinstance(lines, list):
             line = lines[0][0]  # type: Line2D
             line.set_xdata(x_data)
             line.set_ydata(y_data)
-            style.update({'drawstyle': STEP_MAP[step.lower()]})
             for k, v in style.items():
                 setter = getattr(line, f"set_{k}")
                 if v is None and k != "drawstyle":
@@ -95,7 +96,6 @@ class MatplotlibParser(BackendParserBase):
             self.figure.canvas.draw_idle()
         else:
             logger.debug(f"mpl_line_plot step case 2=: {step}")
-            style.update({'drawstyle': STEP_MAP[step.lower()]})
             params = dict(**style)
             draw_fn = mpl_axes.plot
             ##if step is not None and step != 'None':

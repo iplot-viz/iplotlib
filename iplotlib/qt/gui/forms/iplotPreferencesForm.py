@@ -157,4 +157,4 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_linepath_widget():
-        return IplotPreferencesForm.create_comboBox({"None": "Linear", "post": "Last Value"})
+        return IplotPreferencesForm.create_comboBox({"linear": "Linear", "post": "Last Value"})
