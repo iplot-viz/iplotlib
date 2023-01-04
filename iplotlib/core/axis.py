@@ -37,6 +37,10 @@ class Axis:
         self.font_size = Axis.font_size
         self.font_color = Axis.font_color
 
+    def merge(self, old_axis: 'Axis'):
+        self.font_size = old_axis.font_size
+        self.font_color = old_axis.font_color
+
 
 @dataclass
 class RangeAxis(Axis):
@@ -68,7 +72,7 @@ class RangeAxis(Axis):
         """
         self.begin = RangeAxis.begin
         self.end = RangeAxis.end
-        return super().reset_preferences()
+        super().reset_preferences()
 
 
 @dataclass

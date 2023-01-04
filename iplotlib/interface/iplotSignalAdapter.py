@@ -101,7 +101,6 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         data_access_enabled, processing_enabled
     """
     data_source: str = ''
-    name: str = ''
     alias: str = ''
 
     pulse_nb: int = None
