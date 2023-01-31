@@ -43,6 +43,7 @@ class Canvas(ABC):
     dec_samples: int = 1000 #: the default no. of samples for a data access fetch call.
 
     legend: bool = True #: a boolean that suggests the visibility of a plot legend box.
+    legend_position = 'best'  #: indicate the location of the plot legend
     grid: bool = False #: a boolean that suggests the visibility of a plot grid
 
     mouse_mode: str = MOUSE_MODE_SELECT #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
@@ -127,6 +128,7 @@ class Canvas(ABC):
         self.shared_x_axis = Canvas.shared_x_axis
         self.grid = Canvas.grid
         self.legend = Canvas.legend
+        self.legend_position = Canvas.legend_position
         self.font_color = Canvas.font_color
         self.line_style = Canvas.line_style
         self.line_size = Canvas.line_size
@@ -144,6 +146,7 @@ class Canvas(ABC):
         self.shared_x_axis = old_canvas.shared_x_axis
         self.grid = old_canvas.grid
         self.legend = old_canvas.legend
+        self.legend_position = Canvas.legend_position
         self.font_color = old_canvas.font_color
         self.line_style = old_canvas.line_style
         self.line_size = old_canvas.line_size

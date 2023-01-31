@@ -158,3 +158,20 @@ class IplotPreferencesForm(QWidget):
     @staticmethod
     def default_linepath_widget():
         return IplotPreferencesForm.create_comboBox({"linear": "Linear", "post": "Last Value"})
+
+    @staticmethod
+    def default_canvas_legend_position_widget():
+        return IplotPreferencesForm.create_comboBox({'best': 'best', 'upper left': 'upper left',
+                                                     'upper right': 'upper right', 'upper center': 'upper center',
+                                                     'lower left': 'lower left', 'lower right': 'lower right',
+                                                     'lower center': 'lower center', 'center left': 'center left',
+                                                     'center right': 'center right', 'center': 'center'})
+
+    @staticmethod
+    def default_plot_legend_position_widget():
+        return IplotPreferencesForm.create_comboBox({'same as canvas': 'same as canvas', 'best': 'best',
+                                                     'upper left': 'upper left', 'upper right': 'upper right',
+                                                     'upper center': 'upper center', 'lower left': 'lower left',
+                                                     'lower right': 'lower right', 'lower center': 'lower center',
+                                                     'center left': 'center left', 'center right': 'center right',
+                                                     'center': 'center'})

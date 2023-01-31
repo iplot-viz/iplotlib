@@ -35,6 +35,8 @@ class CanvasForm(IplotPreferencesForm):
                 "widget":  self.create_checkbox()},
             {"label": "Legend", "property": "legend",
                 "widget": self.create_checkbox()},
+            {"label": "Legend position", "property": "legend_position",
+                "widget": self.default_canvas_legend_position_widget()},
             {"label": "Font color", "property": "font_color", "widget": ColorPicker()},
             {"label": "Line style", "property": "line_style",
                 "widget": self.default_linestyle_widget()},
