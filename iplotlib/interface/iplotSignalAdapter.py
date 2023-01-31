@@ -253,9 +253,14 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         self.ts_start = np_convert(ranges[0])
         self.ts_end = np_convert(ranges[1])
+
+        if self.pulse_nb is not None:
+            self._access_md5sum = self.calculate_data_hash()
+
         for child in self.children:
             child.ts_start = self.ts_start
             child.ts_end = self.ts_end
+            child._access_md5sum = self._access_md5sum
 
         # self.ts_start = ranges[0].astype(target_type).item() if isinstance(ranges[0], np.generic) else ranges[0]
         # self.ts_end = ranges[1].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][1]
