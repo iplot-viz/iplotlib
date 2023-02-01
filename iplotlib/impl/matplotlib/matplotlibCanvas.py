@@ -1,3 +1,6 @@
+# Changelog:
+#   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
+
 from contextlib import ExitStack
 from typing import Any, Callable, Collection, List
 import traceback

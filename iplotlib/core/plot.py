@@ -5,6 +5,9 @@ one might want to use when plotting data.
 :data:`~iplotlib.core.plot.PlotXY` is a commonly used concrete class for plotting XY data.
 """
 
+# Changelog:
+#   Jan 2023:   -Added legend position and layout properties [Alberto Luengo]
+
 from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, List, Collection, Union

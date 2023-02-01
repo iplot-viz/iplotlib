@@ -4,8 +4,9 @@ An abstract widget that maps a python entity's properties to widgets in the form
 
 # Author: Piotr Mazur
 # Changelog:
-#   Sept 2021: -Refactor qt classes [Jaswant Sai Panchumarti]
-#              -Port to PySide2 [Jaswant Sai Panchumarti]
+#   Sept 2021:  -Refactor qt classes [Jaswant Sai Panchumarti]
+#               -Port to PySide2 [Jaswant Sai Panchumarti]
+#   Jan 2023:   -Added methods to create legend position and layout combobox [Alberto Luengo]
 
 from dataclasses import fields
 import typing

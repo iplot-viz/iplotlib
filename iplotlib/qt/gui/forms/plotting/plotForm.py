@@ -4,8 +4,9 @@ Map properties of a Plot object to a form.
 
 # Author: Piotr Mazur
 # Changelog:
-#   Sept 2021: -Refactor qt classes [Jaswant Sai Panchumarti]
-#              -Port to PySide2 [Jaswant Sai Panchumarti]
+#   Sept 2021:  -Refactor qt classes [Jaswant Sai Panchumarti]
+#               -Port to PySide2 [Jaswant Sai Panchumarti]
+#   Jan 2023:   -Added legend position and layout options [Alberto Luengo]
 
 import typing
 

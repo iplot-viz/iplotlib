@@ -2,6 +2,9 @@
 This module defines the `Canvas` object.
 """
 
+# Changelog:
+#   Jan 2023:   -Added legend position and layout properties [Alberto Luengo]
+
 from abc import ABC
 from dataclasses import dataclass
 from typing import List, Union
