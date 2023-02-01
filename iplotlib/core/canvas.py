@@ -44,6 +44,7 @@ class Canvas(ABC):
 
     legend: bool = True #: a boolean that suggests the visibility of a plot legend box.
     legend_position = 'best'  #: indicate the location of the plot legend
+    legend_layout = 'vertical'  #: indicate the layout of the plot legend
     grid: bool = False #: a boolean that suggests the visibility of a plot grid
 
     mouse_mode: str = MOUSE_MODE_SELECT #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
@@ -129,6 +130,7 @@ class Canvas(ABC):
         self.grid = Canvas.grid
         self.legend = Canvas.legend
         self.legend_position = Canvas.legend_position
+        self.legend_layout = Canvas.legend_layout
         self.font_color = Canvas.font_color
         self.line_style = Canvas.line_style
         self.line_size = Canvas.line_size
@@ -147,6 +149,7 @@ class Canvas(ABC):
         self.grid = old_canvas.grid
         self.legend = old_canvas.legend
         self.legend_position = Canvas.legend_position
+        self.legend_layout = Canvas.legend_layout
         self.font_color = old_canvas.font_color
         self.line_style = old_canvas.line_style
         self.line_size = old_canvas.line_size

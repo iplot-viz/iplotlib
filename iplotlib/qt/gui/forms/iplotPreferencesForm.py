@@ -161,17 +161,27 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_canvas_legend_position_widget():
-        return IplotPreferencesForm.create_comboBox({'best': 'best', 'upper left': 'upper left',
-                                                     'upper right': 'upper right', 'upper center': 'upper center',
-                                                     'lower left': 'lower left', 'lower right': 'lower right',
-                                                     'lower center': 'lower center', 'center left': 'center left',
-                                                     'center right': 'center right', 'center': 'center'})
+        return IplotPreferencesForm.create_comboBox({'best': 'Best', 'upper left': 'Upper left',
+                                                     'upper right': 'Upper right', 'uper center': 'Upper center',
+                                                     'lower left': 'Lower left', 'lower right': 'Lower right',
+                                                     'lower center': 'Lower center', 'center left': 'Center left',
+                                                     'center right': 'Center right', 'center': 'Center'})
 
     @staticmethod
     def default_plot_legend_position_widget():
-        return IplotPreferencesForm.create_comboBox({'same as canvas': 'same as canvas', 'best': 'best',
-                                                     'upper left': 'upper left', 'upper right': 'upper right',
-                                                     'upper center': 'upper center', 'lower left': 'lower left',
-                                                     'lower right': 'lower right', 'lower center': 'lower center',
-                                                     'center left': 'center left', 'center right': 'center right',
-                                                     'center': 'center'})
+        return IplotPreferencesForm.create_comboBox({'same as canvas': 'Same as canvas', 'best': 'Best',
+                                                     'upper left': 'Upper left', 'upper right': 'Upper right',
+                                                     'upper center': 'Upper center', 'lower left': 'Lower left',
+                                                     'lower right': 'Lower right', 'lower center': 'Lower center',
+                                                     'center left': 'Center left', 'center right': 'Center right',
+                                                     'center': 'Center'})
+
+    @staticmethod
+    def default_canvas_legend_layout_widget():
+        return IplotPreferencesForm.create_comboBox({'vertical': 'Vertical',
+                                                     'horizontal': 'Horizontal'})
+
+    @staticmethod
+    def default_plot_legend_layout_widget():
+        return IplotPreferencesForm.create_comboBox({'same as canvas': 'Same as canvas', 'vertical': 'Vertical',
+                                                     'horizontal': 'Horizontal'})

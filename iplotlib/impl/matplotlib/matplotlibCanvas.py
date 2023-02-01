@@ -336,10 +336,18 @@ class MatplotlibParser(BackendParserBase):
                 if show_legend:
                     plot_leg_position = self._pm.get_value('legend_position', self.canvas, plot)
                     canvas_leg_position = self._pm.get_value('legend_position', self.canvas)
+                    plot_leg_layout = self._pm.get_value('legend_layout', self.canvas, plot)
+                    canvas_leg_layout = self._pm.get_value('legend_layout', self.canvas)
+
                     plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' \
                         else plot_leg_position
+                    plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' \
+                        else plot_leg_layout
+
+                    ncols = 1 if plot_leg_layout == 'vertical' else len(signals)
+
                     legend_props = dict(size=self.legend_size)
-                    leg = mpl_axes.legend(prop=legend_props, loc=plot_leg_position)
+                    leg = mpl_axes.legend(prop=legend_props, loc=plot_leg_position, ncol=ncols)
                     if self.figure.get_tight_layout():
                         leg.set_in_layout(False)
 

@@ -33,6 +33,8 @@ class PlotForm(IplotPreferencesForm):
                 "widget": self.create_checkbox()},
             {"label": "Legend position", "property": "legend_position",
              "widget": self.default_plot_legend_position_widget()},
+            {"label": "Legend layout", "property": "legend_layout",
+             "widget": self.default_plot_legend_layout_widget()},
             {"label": "Font size", "property": "font_size",
                 "widget": self.default_fontsize_widget()},
             {"label": "Font color", "property": "font_color", "widget": ColorPicker()},
