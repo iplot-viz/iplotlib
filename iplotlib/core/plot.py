@@ -34,7 +34,7 @@ class Plot(ABC):
 
     font_size: int = None #: the font size of the plot title text
     font_color: str = None #: the font color of the plot title text
-    legend: bool = None #: indicate if the plot legend must be shown
+    legend: bool = True #: indicate if the plot legend must be shown
     legend_position = 'same as canvas'  #: indicate the location of the plot legend
     legend_layout = 'same as canvas'  #: indicate the layout of the plot legend
 
@@ -58,8 +58,8 @@ class Plot(ABC):
     def merge(self, old_plot: 'Plot'):
         self.title = old_plot.title
         self.legend = old_plot.legend
-        self.legend_position = Plot.legend_position
-        self.legend_layout = Plot.legend_layout
+        self.legend_position = old_plot.legend_position
+        self.legend_layout = old_plot.legend_layout
         self.font_size = old_plot.font_size
         self.font_color = old_plot.font_color
 

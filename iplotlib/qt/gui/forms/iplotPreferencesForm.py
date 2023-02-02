@@ -162,19 +162,19 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_canvas_legend_position_widget():
-        return IplotPreferencesForm.create_comboBox({'best': 'Best', 'upper left': 'Upper left',
-                                                     'upper right': 'Upper right', 'uper center': 'Upper center',
-                                                     'lower left': 'Lower left', 'lower right': 'Lower right',
-                                                     'lower center': 'Lower center', 'center left': 'Center left',
-                                                     'center right': 'Center right', 'center': 'Center'})
+        return IplotPreferencesForm.create_comboBox({'upper right': 'Upper right', 'upper left': 'Upper left',
+                                                     'uper center': 'Upper center', 'lower right': 'Lower right',
+                                                     'lower left': 'Lower left', 'lower center': 'Lower center',
+                                                     'center right': 'Center right', 'center left': 'Center left',
+                                                     'center': 'Center'})
 
     @staticmethod
     def default_plot_legend_position_widget():
-        return IplotPreferencesForm.create_comboBox({'same as canvas': 'Same as canvas', 'best': 'Best',
-                                                     'upper left': 'Upper left', 'upper right': 'Upper right',
-                                                     'upper center': 'Upper center', 'lower left': 'Lower left',
-                                                     'lower right': 'Lower right', 'lower center': 'Lower center',
-                                                     'center left': 'Center left', 'center right': 'Center right',
+        return IplotPreferencesForm.create_comboBox({'same as canvas': 'Same as canvas',
+                                                     'upper right': 'Upper right', 'upper left': 'Upper left',
+                                                     'uper center': 'Upper center', 'lower right': 'Lower right',
+                                                     'lower left': 'Lower left', 'lower center': 'Lower center',
+                                                     'center right': 'Center right', 'center left': 'Center left',
                                                      'center': 'Center'})
 
     @staticmethod
