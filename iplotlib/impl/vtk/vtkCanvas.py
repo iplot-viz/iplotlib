@@ -22,7 +22,7 @@ import vtkmodules.vtkRenderingOpenGL2
 # needed for runtime vtk-opengl libs
 import vtkmodules.vtkRenderingContextOpenGL2
 from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti
-from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine, vtkPlotPoints, vtkChartLegend, vtkColorLegend
+from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine, vtkPlotPoints, vtkChartLegend
 from vtkmodules.vtkPythonContext2D import vtkPythonItem
 from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkRenderWindow
 from vtkmodules.vtkRenderingContext2D import vtkContextMouseEvent, vtkMarkerUtilities, vtkPen
