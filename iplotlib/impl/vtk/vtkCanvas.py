@@ -22,7 +22,7 @@ import vtkmodules.vtkRenderingOpenGL2
 # needed for runtime vtk-opengl libs
 import vtkmodules.vtkRenderingContextOpenGL2
 from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti
-from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine, vtkPlotPoints
+from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine, vtkPlotPoints, vtkChartLegend, vtkColorLegend
 from vtkmodules.vtkPythonContext2D import vtkPythonItem
 from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkRenderWindow
 from vtkmodules.vtkRenderingContext2D import vtkContextMouseEvent, vtkMarkerUtilities, vtkPen
@@ -36,6 +36,15 @@ AXIS_MAP = [vtkAxis.BOTTOM, vtkAxis.LEFT]
 STEP_MAP = {"linear": "none", "mid": "steps-mid", "post": "steps-post",
             "pre": "steps-pre", "steps-mid": "steps-mid", "steps-post": "steps-post", "steps-pre": "steps-pre"}
 
+LEGEND_POS_MAP = {'upper right': (vtkChartLegend.TOP, vtkChartLegend.RIGHT),
+                  'upper left': (vtkChartLegend.TOP, vtkChartLegend.LEFT),
+                  'uper center': (vtkChartLegend.TOP, vtkChartLegend.CENTER),
+                  'lower right': (vtkChartLegend.BOTTOM, vtkChartLegend.RIGHT),
+                  'lower left': (vtkChartLegend.BOTTOM, vtkChartLegend.LEFT),
+                  'lower center': (vtkChartLegend.BOTTOM, vtkChartLegend.CENTER),
+                  'center right': (vtkChartLegend.CENTER, vtkChartLegend.RIGHT),
+                  'center left': (vtkChartLegend.CENTER, vtkChartLegend.LEFT),
+                  'center': (vtkChartLegend.CENTER, vtkChartLegend.CENTER)}
 
 @dataclass
 class VTKParser(BackendParserBase):
@@ -585,8 +594,21 @@ class VTKParser(BackendParserBase):
         """
         for chart in self._plot_impl_plot_lut[id(plot)]:
             legend = self._pm.get_value('legend', self.canvas, plot)
-            if legend is not None:
-                chart.SetShowLegend(legend)
+            chart.SetShowLegend(legend)
+            if legend:
+                canvas_leg_position = self._pm.get_value('legend_position', self.canvas)
+                canvas_leg_layout = self._pm.get_value('legend_layout', self.canvas)
+                plot_leg_position = self._pm.get_value('legend_position', self.canvas, plot)
+                plot_leg_layout = self._pm.get_value('legend_layout', self.canvas, plot)
+
+                plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' \
+                    else plot_leg_position
+                plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' \
+                    else plot_leg_layout
+
+                chart_legend = chart.GetLegend()
+                chart_legend.SetVerticalAlignment(LEGEND_POS_MAP[plot_leg_position][0])
+                chart_legend.SetHorizontalAlignment(LEGEND_POS_MAP[plot_leg_position][1])
 
     def refresh_mouse_mode(self, mmode: str):
         """Refresh mouse mmode across all charts
