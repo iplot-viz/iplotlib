@@ -21,6 +21,8 @@
 #  Dec 2021:   Changes by Jaswant
 #              - If the number of child signals is > 1, then align them onto a common grid before evaluating an expression.
 #              - The alignment modifies the data_store. After evaluation, restore the original buffers.
+#  Feb 2023:   Changes by Alberto Luengo
+#              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
 
 from collections import defaultdict
 from dataclasses import dataclass, field, fields
@@ -123,6 +125,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     processing_enabled: bool = True
 
     time_out_value: float = 60  # Unimplemented.
+    depends_on: typing.List[IplotSignalAdapterT] = field(default_factory=list)
 
     def __post_init__(self):
         super().__post_init__()
@@ -559,6 +562,14 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         else:
             return False
 
+    def needs_realign(self):
+        if len(self.depends_on) == 0:
+            return False
+        for sig1, sig2 in zip(self.depends_on[:-1], self.depends_on[1:]):
+            if not (sig1.x_data.shape == sig2.x_data.shape):
+                return True
+        return False
+
     def _contained_bounds(self):
         if not hasattr(self.x_data, '__len__'):
             return
@@ -871,6 +882,9 @@ class ParserHelper:
                 expression = expression.replace(match, replacement)
                 logger.debug(f"|==> replaced {match} with {replacement}")
                 logger.debug(f"expression: {expression}")
+            if var_name != 'self':
+                signal.depends_on.append(local_env[var_name]) if local_env[var_name] not in signal.depends_on \
+                    else signal.depends_on
 
         p.clear_expr()
         p.set_expression(expression)
@@ -878,6 +892,11 @@ class ParserHelper:
             raise InvalidExpression(f"expression: {expression} is invalid!")
 
         p.substitute_var(local_env)
+
+        # Realign the signals on which it depends if necessary
+        if signal.needs_realign():
+            align(signal.depends_on)
+
         p.eval_expr()
         if p.has_time_units:
             return p.result.astype('int64')
