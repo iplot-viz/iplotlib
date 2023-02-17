@@ -125,7 +125,6 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     processing_enabled: bool = True
 
     time_out_value: float = 60  # Unimplemented.
-    depends_on: typing.List[IplotSignalAdapterT] = field(default_factory=list)
 
     def __post_init__(self):
         super().__post_init__()
@@ -158,6 +157,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info = StatusInfo()
         self.status_info.result = Result.BUSY
         self._init_children(self.name)
+
+        # 5. Initialize dependencies
+        self.depends_on = list()
 
         if self.status_info.result == Result.INVALID:
             return
@@ -883,7 +885,7 @@ class ParserHelper:
                 logger.debug(f"|==> replaced {match} with {replacement}")
                 logger.debug(f"expression: {expression}")
             if var_name != 'self':
-                signal.depends_on.append(local_env[var_name]) if local_env[var_name].uid not in [s.uid for s in signal.depends_on] \
+                signal.depends_on.append(local_env[var_name]) if local_env[var_name] not in signal.depends_on \
                     else signal.depends_on
 
         p.clear_expr()
