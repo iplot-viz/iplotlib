@@ -884,7 +884,6 @@ class ParserHelper:
                 expression = expression.replace(match, replacement)
                 logger.debug(f"|==> replaced {match} with {replacement}")
                 logger.debug(f"expression: {expression}")
-            #if var_name != 'self':
             signal.depends_on.append(local_env[var_name]) if local_env[var_name] not in signal.depends_on \
                 else signal.depends_on
 
