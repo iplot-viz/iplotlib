@@ -294,7 +294,7 @@ class MatplotlibParser(BackendParserBase):
                 mpl_axes.set_autoscaley_on(True)
 
                 # Set the plot title
-                if plot.title is not None:
+                if plot.title is not None and stack_id == 0:
                     fc = self._pm.get_value(
                         'font_color', self.canvas, plot) or 'black'
                     fs = self._pm.get_value('font_size', self.canvas, plot)
@@ -324,7 +324,7 @@ class MatplotlibParser(BackendParserBase):
                 # Update properties of the plot axes
                 for ax_idx in range(len(plot.axes)):
                     if isinstance(plot.axes[ax_idx], Collection):
-                        axis = plot.axes[ax_idx][stack_id]
+                        axis = plot.axes[ax_idx][stack_id]Title in
                         self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
                     else:
                         axis = plot.axes[ax_idx]
