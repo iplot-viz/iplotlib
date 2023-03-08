@@ -324,7 +324,7 @@ class MatplotlibParser(BackendParserBase):
                 # Update properties of the plot axes
                 for ax_idx in range(len(plot.axes)):
                     if isinstance(plot.axes[ax_idx], Collection):
-                        axis = plot.axes[ax_idx][stack_id]Title in
+                        axis = plot.axes[ax_idx][stack_id]
                         self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
                     else:
                         axis = plot.axes[ax_idx]
