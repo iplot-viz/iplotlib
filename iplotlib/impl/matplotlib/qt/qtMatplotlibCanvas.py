@@ -10,7 +10,7 @@
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
 import pandas as pd
-from PySide6.QtCore import QMargins, QMetaObject, Qt, Slot
+from PySide6.QtCore import QMargins, QMetaObject, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
 
@@ -31,6 +31,8 @@ logger = ls.get_logger(__name__)
 
 class QtMatplotlibCanvas(IplotQtCanvas):
     """Qt widget that internally uses a matplotlib canvas backend"""
+
+    dropSignal = Signal(object)
 
     def __init__(self, parent=None, tight_layout=True, **kwargs):
         super().__init__(parent, **kwargs)
@@ -258,13 +260,17 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """
         super(QtMatplotlibCanvas, self).dropEvent(event)
         plot = self.get_plot(event)
-        dragged_item = event.source().dragged_item
-        row, col = self.get_postion(plot)
-        new_data = pd.DataFrame([['codacuda', f"{dragged_item.key}", f'{col}.{row}']],
-                                columns=['DS', 'Variable', 'Stack'])
-        self.parent().parent().parent().parent().sigCfgWidget._model.append_dataframe(new_data)
-        self.parent().parent().parent().parent().drawClicked()
 
+        row, col = self.get_postion(plot)
+        self.dropInfo.row=row
+        self.dropInfo.col=col
+        self.dropInfo.dragged_item = event.source().dragged_item
+        self.dropSignal.emit(self.dropInfo)
+        #row, col = self.get_postion(plot)
+        #new_data = pd.DataFrame([['codacuda', f"{dragged_item.key}", f'{col}.{row}']],
+        #                       columns=['DS', 'Variable', 'Stack'])
+        #self.parent().parent().parent().parent().sigCfgWidget._model.append_dataframe(new_data)
+        #self.parent().parent().parent().parent().drawClicked()
         event.ignore()
 
     def get_plot(self, event):
