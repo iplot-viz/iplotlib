@@ -23,7 +23,7 @@
 #              - The alignment modifies the data_store. After evaluation, restore the original buffers.
 #  Feb 2023:   Changes by Alberto Luengo
 #              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
-
+import copy
 from collections import defaultdict
 from dataclasses import dataclass, field, fields
 import numpy as np
@@ -159,7 +159,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self._init_children(self.name)
 
         # 5. Initialize dependencies
-        self.depends_on = list()
+        self.depends_on = ParserHelper.get_dependencies([self.x_expr, self.y_expr, self.z_expr])
 
         if self.status_info.result == Result.INVALID:
             return
@@ -488,6 +488,11 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         data_arrays = self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
         self._finalize_xyz_data([data_arrays.get('x'), data_arrays.get('y'), data_arrays.get('z')])
         #logger.debug("[UDA x={} y={} z={} ] ".format(len(data_arrays.get('x')),len(data_arrays.get('y')),len(data_arrays.get('z'))))
+
+        # 4. Set ts_start and ts_end to avoid hash mismatch
+        self.set_xranges([data_arrays.get('x')[0], data_arrays.get('x')[-1]])
+        self._access_md5sum = self.calculate_data_hash()
+
         self.set_proc_success()
 
     def _fetch_data(self):
@@ -563,14 +568,6 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 return True
         else:
             return False
-
-    def needs_realign(self):
-        if len(self.depends_on) == 0:
-            return False
-        for sig1, sig2 in zip(self.depends_on[:-1], self.depends_on[1:]):
-            if not (sig1.x_data.shape == sig2.x_data.shape):
-                return True
-        return False
 
     def _contained_bounds(self):
         if not hasattr(self.x_data, '__len__'):
@@ -863,8 +860,7 @@ class ParserHelper:
         logger.debug(
             f"Evaluating {expression} in scope of signal: {signal.name} @{id(signal)}")
         local_env = dict(ParserHelper.env)
-        if expression.count('self'):
-            local_env.update({'self': signal})
+        local_env.update({'self': signal})
 
         p = Parser()
         p.inject(Parser.get_member_list(type(signal)))
@@ -884,23 +880,51 @@ class ParserHelper:
                 expression = expression.replace(match, replacement)
                 logger.debug(f"|==> replaced {match} with {replacement}")
                 logger.debug(f"expression: {expression}")
-            if var_name != 'self':
-                signal.depends_on.append(local_env[var_name]) if local_env[var_name] not in signal.depends_on \
-                    else signal.depends_on
 
         p.clear_expr()
         p.set_expression(expression)
         if not p.is_valid:
             raise InvalidExpression(f"expression: {expression} is invalid!")
 
-        p.substitute_var(local_env)
-
         # Realign the signals on which it depends if necessary
-        if signal.needs_realign():
-            align(signal.depends_on)
+        needs_realign = False
+        dependencies = list()
+        for var_name in signal.depends_on:
+            dependencies.append(local_env[var_name])
+        for sig1, sig2 in zip(dependencies[:-1], dependencies[1:]):
+            if not (sig1.data_store[0].shape == sig2.data_store[0].shape):
+                needs_realign = True
 
+        if needs_realign:
+            tmp_local_env = dict()
+            dependencies = list()
+            for var_name in signal.depends_on:
+                tmp_local_env[var_name] = copy.deepcopy(local_env[var_name])
+                if not (var_name == 'self' and len(tmp_local_env[var_name].data_store[0]) == 0):
+                    dependencies.append(tmp_local_env[var_name])
+            align(dependencies)
+        else:
+            tmp_local_env = local_env
+
+        p.substitute_var(tmp_local_env)
         p.eval_expr()
         if p.has_time_units:
             return p.result.astype('int64')
         else:
             return p.result
+
+    @staticmethod
+    def get_dependencies(expr_list: list) -> set:
+        dependencies = set()
+        for expr in expr_list:
+            while True:
+                if expr.find(Parser.marker_in) == -1 or expr.find(Parser.marker_out) == -1:
+                    break
+                marker_in_pos = expr.find(Parser.marker_in)
+                marker_out_pos = expr.find(Parser.marker_out)
+                var = expr[marker_in_pos + len(Parser.marker_in):marker_out_pos]
+                match = Parser.marker_in + var + Parser.marker_out
+                replc = 'X'
+                expr = expr.replace(match, replc)
+                dependencies.add(var)
+        return dependencies
