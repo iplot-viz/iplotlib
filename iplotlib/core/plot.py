@@ -28,7 +28,7 @@ class Plot(ABC):
     title: str = None #: a plot title text, will be shown above the plot
 
     axes: List[Union[Axis, Collection[Axis]]] = None #: the plot axes.
-    signals: Dict[int, List[Signal]] = None #: the signals drawn in this plot
+    signals: Dict[str, List[Signal]] = None #: the signals drawn in this plot
     _type: str = None
 
 
@@ -44,9 +44,9 @@ class Plot(ABC):
             self.signals = {}
 
     def add_signal(self, signal, stack: int = 1):
-        if stack not in self.signals:
-            self.signals[stack] = []
-        self.signals[stack].append(signal)
+        if str(stack) not in self.signals:
+            self.signals[str(stack)] = []
+        self.signals[str(stack)].append(signal)
 
     def reset_preferences(self):
         self.legend = Plot.legend
