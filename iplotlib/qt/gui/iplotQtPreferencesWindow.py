@@ -124,7 +124,10 @@ class IplotQtPreferencesWindow(QMainWindow):
         self.treeView.expandAll()
 
     def showEvent(self, event: QShowEvent):
-        self.treeView.selectionModel().select(self.treeView.model().index(0, 0), QItemSelectionModel.ClearAndSelect)
+        # Clear selection in the Selection Model
+        self.treeView.selectionModel().clearSelection()
+        # Select model using the specified command
+        self.treeView.selectionModel().select(self.treeView.model().index(0, 0), QItemSelectionModel.Select)
         return super().showEvent(event)
 
     def manualReset(self, idx: int):
