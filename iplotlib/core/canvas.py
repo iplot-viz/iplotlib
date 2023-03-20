@@ -167,7 +167,8 @@ class Canvas(ABC):
                 if plot and idxColumn < len(old_canvas.plots) and idxPlot < len(old_canvas.plots[idxColumn]):
                     # Found matching plot
                     old_plot = old_canvas.plots[idxColumn][idxPlot]
-                    plot.merge(old_plot)
+                    if old_plot:
+                        plot.merge(old_plot)
 
         # Gather all old signals into a map with uid as key
         def computeSignalUniqKey(signal: Signal):
