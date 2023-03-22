@@ -532,6 +532,9 @@ class MatplotlibParser(BackendParserBase):
                                 f"Setting range on plot {id(plot)} focused= {id(self._focus_plot)} begin={begin}")
                             set_x_axis_range(plot, begin, end)
 
+                # Required to draw correctly
+                plot = None
+
         self._focus_plot = plot
         self._focus_plot_stack_key = stack_key
 
