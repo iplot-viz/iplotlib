@@ -526,11 +526,11 @@ class MatplotlibParser(BackendParserBase):
                 begin, end = get_x_axis_range(self._focus_plot)
 
                 for columns in self.canvas.plots:
-                    for plot in columns:
-                        if plot != self._focus_plot:
+                    for plot_temp in columns:
+                        if plot_temp != self._focus_plot:
                             logger.debug(
-                                f"Setting range on plot {id(plot)} focused= {id(self._focus_plot)} begin={begin}")
-                            set_x_axis_range(plot, begin, end)
+                                f"Setting range on plot {id(plot_temp)} focused= {id(self._focus_plot)} begin={begin}")
+                            set_x_axis_range(plot_temp, begin, end)
 
         self._focus_plot = plot
         self._focus_plot_stack_key = stack_key
