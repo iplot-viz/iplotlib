@@ -12,6 +12,7 @@ from iplotlib.core.axis import RangeAxis
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.command import IplotCommand
+from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.impl_base import BackendParserBase
 import iplotLogging.setupLogger as sl
@@ -31,6 +32,8 @@ class IplotQtCanvas(QWidget):
         self._staging_cmds = [] #type: List[IplotAxesRangeCmd]
         self._commitd_cmds = [] #type: List[IplotAxesRangeCmd]
         self._refresh_original_ranges = True
+        self.dropInfo = DropInfo()
+
 
     @abstractmethod
     def undo(self):

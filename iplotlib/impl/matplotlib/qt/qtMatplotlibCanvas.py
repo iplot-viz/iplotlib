@@ -9,8 +9,8 @@
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
-
-from PySide6.QtCore import QMargins, QMetaObject, Qt, Slot
+import pandas as pd
+from PySide6.QtCore import QMargins, QMetaObject, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
 
@@ -31,6 +31,8 @@ logger = ls.get_logger(__name__)
 
 class QtMatplotlibCanvas(IplotQtCanvas):
     """Qt widget that internally uses a matplotlib canvas backend"""
+
+    dropSignal = Signal(object)
 
     def __init__(self, parent=None, tight_layout=True, **kwargs):
         super().__init__(parent, **kwargs)
@@ -58,19 +60,20 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
+        self.setAcceptDrops(True)
 
     # Implement basic superclass functionality
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
 
         prev_canvas = self._parser.canvas
-        
+
         if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
             self.unfocus_plot()
 
         self._parser.deactivate_cursor()
         self._parser.process_ipl_canvas(canvas)
-        
+
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
@@ -87,7 +90,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if self._mpl_toolbar:
             self._mpl_toolbar.mode = _Mode.NONE
             self._parser.deactivate_cursor()
-        
+
         if self._mmode is None:
             return
 
@@ -150,7 +153,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
                 # Stage a command to obtain original view limits
                 self.stage_view_lim_cmd()
-                
+
                 # Reset plot to original view limits
                 original_limits = self._parser.get_plot_limits(plot, which='original')
                 self._parser.set_plot_limits(original_limits)
@@ -219,7 +222,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # push uncommited changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
-    
+
     def keyPressEvent(self, event: QKeyEvent):
         if event.text() == 'n':
             self.redo()
@@ -228,3 +231,59 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _debug_log_event(self, event: Event, msg: str):
         logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")
+
+    def dragEnterEvent(self, event):
+        """
+        This function will detect the drag enter event from the mouse on the main window
+        """
+        super(QtMatplotlibCanvas, self).dragEnterEvent(event)
+        event.accept()
+
+    def dragMoveEvent(self, event):
+        """
+        This function will detect the drag move event on the main window
+        """
+        x = event.position().x()
+        y = event.position().y()
+        height = self._parser.figure.bbox.height
+        for axe in self._parser.figure.axes:
+            if axe.bbox.x0 < x < axe.bbox.x1 and height - axe.bbox.y0 > y > height - axe.bbox.y1:
+                event.accept()
+                print("entre las x\n\n")
+                return
+        event.ignore()
+
+    def dropEvent(self, event):
+        """
+        This function will enable the drop file directly on to the
+        main window. The file location will be stored in the self.filename
+        """
+        super(QtMatplotlibCanvas, self).dropEvent(event)
+        plot = self.get_plot(event)
+
+        row, col = self.get_postion(plot)
+        self.dropInfo.row=row
+        self.dropInfo.col=col
+        self.dropInfo.dragged_item = event.source().dragged_item
+        self.dropSignal.emit(self.dropInfo)
+        #row, col = self.get_postion(plot)
+        #new_data = pd.DataFrame([['codacuda', f"{dragged_item.key}", f'{col}.{row}']],
+        #                       columns=['DS', 'Variable', 'Stack'])
+        #self.parent().parent().parent().parent().sigCfgWidget._model.append_dataframe(new_data)
+        #self.parent().parent().parent().parent().drawClicked()
+        event.ignore()
+
+    def get_plot(self, event):
+        x = event.position().x()
+        y = event.position().y()
+        height = self._parser.figure.bbox.height
+        for axe in self._parser.figure.axes:
+            if axe.bbox.x0 < x < axe.bbox.x1 and height - axe.bbox.y0 > y > height - axe.bbox.y1:
+                return self._parser._impl_plot_cache_table.get_cache_item(axe).plot()
+
+    def get_postion(self, plot):
+        all_plots = self._parser.canvas.plots
+        for column, col_plots in enumerate(all_plots):
+            for row, row_plot in enumerate(col_plots):
+                if row_plot == plot:
+                    return row + 1, column + 1
