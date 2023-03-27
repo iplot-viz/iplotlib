@@ -39,7 +39,7 @@ setuptools.setup(
     packages=setuptools.find_packages(where="."),
     python_requires=">=3.8",
     install_requires=[
-        "iplotProcessing >= 0.4*",
+        "iplotProcessing >= 0.4.0",
         "matplotlib >= 3.5.1",
         "pandas >= 1.1.4",
         "PySide6 >= 6.2.3",
