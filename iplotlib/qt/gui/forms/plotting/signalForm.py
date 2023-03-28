@@ -29,7 +29,7 @@ class SignalForm(IplotPreferencesForm):
                 "widget": self.create_lineedit()},
             {"label": "Varname", "property": "varname",
                 "widget":  self.create_lineedit(readonly=True)},
-            {"label": "Color", "property": "color", "widget": ColorPicker()},
+            {"label": "Color", "property": "color", "widget": ColorPicker("color")},
             {"label": "Line style", "property":  "line_style",
                 "widget": self.default_linestyle_widget()},
             {"label": "Line size", "property": "line_size",

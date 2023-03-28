@@ -29,7 +29,7 @@ class AxisForm(IplotPreferencesForm):
                 "widget": self.create_lineedit()},
             {"label": "Font size", "property": "font_size",
                 "widget": self.default_fontsize_widget()},
-            {"label": "Font color", "property": "font_color", "widget": ColorPicker()},
+            {"label": "Font color", "property": "font_color", "widget": ColorPicker("font_color")},
             {"label": "Min value", "property": "begin",
                 "widget": self.create_lineedit()},
             {"label": "Max value", "property": "end",

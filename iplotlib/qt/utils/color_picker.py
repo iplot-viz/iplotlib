@@ -16,10 +16,12 @@ class ColorPicker(QWidget):
     """
     A color dialog box.
     """
-    def __init__(self):
+    def __init__(self, name_property):
         super().__init__()
         self.setLayout(QHBoxLayout())
         self.layout().setContentsMargins(QMargins())
+
+        self.name = name_property
 
         # TODO: Find out if this button can be replaced with a colored box.
         self.selectButton = QPushButton("Select color", self)
@@ -53,7 +55,13 @@ class ColorPicker(QWidget):
         if not isinstance(color, str):
             color = "#000000"
         elif not len(color):
-            color = "#000000"
+            if self.name == "crosshair_color":
+                color = "#ff0000"  # Default color for crosshair will be red
+
+            elif self.name == "font_color":
+                color = "#000000"  # Default color for font will be black
+            else:
+                color = "#000000"
         if color[0] == "#" and len(color) == 7:
             # Convert hex string to RGB
             r, g, b = tuple(int(color[i:i + 2], 16) for i in range(1, 7, 2))
