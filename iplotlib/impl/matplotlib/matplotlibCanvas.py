@@ -553,7 +553,7 @@ class MatplotlibParser(BackendParserBase):
             axes = [self.figure.axes]
 
         for axes_group in axes:
-            self._cursors.append(MultiCursor2(self.figure.canvas, axes_group, color=self.canvas.crosshair_color, lw=self.canvas.crosshair_line_width, horizOn=False or self.canvas.crosshair_horizontal,
+            self._cursors.append(MultiCursor2(self.figure.canvas, axes_group, label=self.canvas.enable_labels_crosshair, color=self.canvas.crosshair_color, lw=self.canvas.crosshair_line_width, horizOn=False or self.canvas.crosshair_horizontal,
                                               vertOn=self.canvas.crosshair_vertical, useblit=True, cache_table=self._impl_plot_cache_table))
 
     @BackendParserBase.run_in_one_thread
@@ -735,6 +735,7 @@ class MultiCursor2(MultiCursor):
 
     def __init__(self, canvas: FigureCanvasBase,
                  axes: MPLAxes,
+                 label: bool = True,
                  useblit: bool = True,
                  horizOn=False,
                  vertOn=True,
@@ -753,7 +754,7 @@ class MultiCursor2(MultiCursor):
         self.vertOn = vertOn
         self.x_label = x_label
         self.y_label = y_label
-        self.value_label = val_label
+        self.value_label = label
         self.text_color = text_color
         self.font_size = font_size
         self._cache_table = cache_table

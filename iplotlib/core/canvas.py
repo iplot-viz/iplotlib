@@ -51,6 +51,7 @@ class Canvas(ABC):
     grid: bool = False #: a boolean that suggests the visibility of a plot grid
 
     mouse_mode: str = MOUSE_MODE_SELECT #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
+    enable_labels_crosshair = True
 
     plots: List[List[Union[Plot,None]]] = None #: A 22-level nested list of plots.
 
@@ -134,6 +135,8 @@ class Canvas(ABC):
         self.legend = Canvas.legend
         self.legend_position = Canvas.legend_position
         self.legend_layout = Canvas.legend_layout
+        self.enable_labels_crosshair = Canvas.enable_labels_crosshair
+        self.crosshair_color = Canvas.crosshair_color
         self.font_color = Canvas.font_color
         self.line_style = Canvas.line_style
         self.line_size = Canvas.line_size
@@ -153,6 +156,8 @@ class Canvas(ABC):
         self.legend = old_canvas.legend
         self.legend_position = old_canvas.legend_position
         self.legend_layout = old_canvas.legend_layout
+        self.enable_labels_crosshair = old_canvas.enable_labels_crosshair
+        self.crosshair_color = old_canvas.crosshair_color
         self.font_color = old_canvas.font_color
         self.line_style = old_canvas.line_style
         self.line_size = old_canvas.line_size
