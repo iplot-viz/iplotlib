@@ -490,8 +490,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         #logger.debug("[UDA x={} y={} z={} ] ".format(len(data_arrays.get('x')),len(data_arrays.get('y')),len(data_arrays.get('z'))))
 
         # 4. Set ts_start and ts_end to avoid hash mismatch
-        self.set_xranges([data_arrays.get('x')[0], data_arrays.get('x')[-1]])
-        self._access_md5sum = self.calculate_data_hash()
+        if len(data_arrays.get('x')) > 0:
+            self.set_xranges([data_arrays.get('x')[0], data_arrays.get('x')[-1]])
+            self._access_md5sum = self.calculate_data_hash()
 
         self.set_proc_success()
 
