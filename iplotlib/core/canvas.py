@@ -46,12 +46,14 @@ class Canvas(ABC):
     dec_samples: int = 1000 #: the default no. of samples for a data access fetch call.
 
     legend: bool = True #: a boolean that suggests the visibility of a plot legend box.
-    legend_position = 'upper right'  #: indicate the location of the plot legend
-    legend_layout = 'vertical'  #: indicate the layout of the plot legend
+    legend_position: str = 'upper right'  #: indicate the location of the plot legend
+    legend_layout: str = 'vertical'  #: indicate the layout of the plot legend
     grid: bool = False #: a boolean that suggests the visibility of a plot grid
 
     mouse_mode: str = MOUSE_MODE_SELECT #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
-    enable_labels_crosshair = True
+    enable_Xlabel_crosshair: bool = True
+    enable_Ylabel_crosshair: bool = True
+    enable_ValLabel_crosshair: bool = True
 
     plots: List[List[Union[Plot,None]]] = None #: A 22-level nested list of plots.
 
@@ -135,7 +137,9 @@ class Canvas(ABC):
         self.legend = Canvas.legend
         self.legend_position = Canvas.legend_position
         self.legend_layout = Canvas.legend_layout
-        self.enable_labels_crosshair = Canvas.enable_labels_crosshair
+        self.enable_Xlabel_crosshair = Canvas.enable_Xlabel_crosshair
+        self.enable_Ylabel_crosshair = Canvas.enable_Ylabel_crosshair
+        self.enable_ValLabel_crosshair = Canvas.enable_ValLabel_crosshair
         self.crosshair_color = Canvas.crosshair_color
         self.font_color = Canvas.font_color
         self.line_style = Canvas.line_style
@@ -156,7 +160,9 @@ class Canvas(ABC):
         self.legend = old_canvas.legend
         self.legend_position = old_canvas.legend_position
         self.legend_layout = old_canvas.legend_layout
-        self.enable_labels_crosshair = old_canvas.enable_labels_crosshair
+        self.enable_Xlabel_crosshair = old_canvas.enable_Xlabel_crosshair
+        self.enable_Ylabel_crosshair = old_canvas.enable_Ylabel_crosshair
+        self.enable_ValLabel_crosshair = old_canvas.enable_ValLabel_crosshair
         self.crosshair_color = old_canvas.crosshair_color
         self.font_color = old_canvas.font_color
         self.line_style = old_canvas.line_style
