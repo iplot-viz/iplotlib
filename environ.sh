@@ -98,3 +98,6 @@ case $toolchain in
     echo "Unknown toolchain $toolchain"
     ;;
 esac
+
+export HOME=$PWD
+echo "HOME was set to $HOME"
