@@ -255,17 +255,17 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                     return value.astype('int').item()
             else:
                 return value
-
+        if self.pulse_nb is not None and self.ts_start == '' and self.ts_end == '':
+            self.ts_start = np_convert(ranges[0])
+            self.ts_end = np_convert(ranges[1])
+            self._access_md5sum = self.calculate_data_hash()
         self.ts_start = np_convert(ranges[0])
         self.ts_end = np_convert(ranges[1])
-
-        if self.pulse_nb is not None:
-            self._access_md5sum = self.calculate_data_hash()
 
         for child in self.children:
             child.ts_start = self.ts_start
             child.ts_end = self.ts_end
-            child._access_md5sum = self._access_md5sum
+            # child._access_md5sum = self._access_md5sum
 
         # self.ts_start = ranges[0].astype(target_type).item() if isinstance(ranges[0], np.generic) else ranges[0]
         # self.ts_end = ranges[1].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][1]
@@ -490,9 +490,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         #logger.debug("[UDA x={} y={} z={} ] ".format(len(data_arrays.get('x')),len(data_arrays.get('y')),len(data_arrays.get('z'))))
 
         # 4. Set ts_start and ts_end to avoid hash mismatch
-        if len(data_arrays.get('x')) > 0:
-            self.set_xranges([data_arrays.get('x')[0], data_arrays.get('x')[-1]])
-            self._access_md5sum = self.calculate_data_hash()
+        # if len(data_arrays.get('x')) > 0:
+        #     self.set_xranges([data_arrays.get('x')[0], data_arrays.get('x')[-1]])
+        #     self._access_md5sum = self.calculate_data_hash()
 
         self.set_proc_success()
 
