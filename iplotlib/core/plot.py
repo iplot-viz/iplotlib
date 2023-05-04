@@ -34,7 +34,7 @@ class Plot(ABC):
 
     font_size: int = None #: the font size of the plot title text
     font_color: str = None #: the font color of the plot title text
-    legend: bool = True #: indicate if the plot legend must be shown
+    legend: bool = None #: indicate if the plot legend must be shown
     legend_position = 'same as canvas'  #: indicate the location of the plot legend
     legend_layout = 'same as canvas'  #: indicate the layout of the plot legend
 
