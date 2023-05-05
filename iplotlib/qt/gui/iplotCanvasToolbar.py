@@ -64,8 +64,8 @@ class IplotQtCanvasToolbar(QToolBar):
         # Saving, etc..
         self.importAction = QAction(create_icon('open_file'), '&Import Workspace', self)
         self.exportAction = QAction(create_icon('save_as'), '&Export Workspace', self)
-        self.addAction(self.exportAction)
         self.addAction(self.importAction)
+        self.addAction(self.exportAction)
 
         # Draw..
         self.redrawAction = QAction(create_icon('rotate180'), '&Redraw', self)
