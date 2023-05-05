@@ -35,8 +35,8 @@ class Plot(ABC):
     font_size: int = None #: the font size of the plot title text
     font_color: str = None #: the font color of the plot title text
     legend: bool = None #: indicate if the plot legend must be shown
-    legend_position = 'same as canvas'  #: indicate the location of the plot legend
-    legend_layout = 'same as canvas'  #: indicate the layout of the plot legend
+    legend_position: str = 'same as canvas'  #: indicate the location of the plot legend
+    legend_layout: str = 'same as canvas'  #: indicate the layout of the plot legend
 
     def __post_init__(self):
         self._type = self.__class__.__module__+'.'+self.__class__.__qualname__
