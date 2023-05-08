@@ -1,6 +1,8 @@
 """
 A color dialog box.
 """
+import logging
+import iplotlib.qt.utils.color_constants as cc
 
 # Author: Piotr Mazur
 # Changelog:
@@ -54,10 +56,13 @@ class ColorPicker(QWidget):
     def setCurrentColor(self, color):
         if not isinstance(color, str):
             color = "#000000"
-        elif not len(color):
+        if len(color) and color[0] != "#":
+            color=cc.name_to_hex(color)
+        if not len(color) or color is None:
+        #elif not len(color):
+            logging.warning("Received color='%s' for color_picker has a wrong format. Setting default color",color)
             if self.name == "crosshair_color":
                 color = "#ff0000"  # Default color for crosshair will be red
-
             elif self.name == "font_color":
                 color = "#000000"  # Default color for font will be black
             else:
