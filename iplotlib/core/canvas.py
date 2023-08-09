@@ -219,7 +219,7 @@ class Canvas(ABC):
                         if signal.alias:
                             col_name += f"_{signal.alias}"
                         else:
-                            col_name += f"_{signal.label}"
+                            col_name += f"_{signal.name}"
                         print()
                         if signal.envelope:
                             result = []
