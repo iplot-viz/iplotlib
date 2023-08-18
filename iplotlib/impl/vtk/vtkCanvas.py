@@ -28,6 +28,7 @@ from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkRenderWindow
 from vtkmodules.vtkRenderingContext2D import vtkContextMouseEvent, vtkMarkerUtilities, vtkPen
 from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.util import numpy_support
+from vtkmodules.vtkCommonDataModel import vtkPolygon
 
 from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__)
@@ -174,6 +175,56 @@ class VTKParser(BackendParserBase):
         line.SetLegendVisibility(True)
         line.SetLabel(name)
         return line
+
+    def do_vtk_envelope_plot(self, signal: Signal, chart: vtkChart, x_data, y1_data, y2_data):
+        if not isinstance(chart, vtkChart):
+            return
+
+        shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+        try:
+            cache_item = self._impl_plot_cache_table.get_cache_item(chart)
+            plot = cache_item.plot()
+        except AttributeError:
+            plot = None
+        style = self.get_signal_style(signal, plot)
+        step = style.pop('drawstyle', None)
+        if step is None:
+            step = 'post'
+
+        if shapes is not None:
+            shapes[0][0].SetPoints(x_data, y1_data)
+            shapes[1][0].SetPoints(x_data, y2_data)
+            chart.RemovePlot(shapes[2])
+            shapes.pop()
+            style.update({'drawstyle': STEP_MAP[step.lower()]})
+            for k, v in style.items():
+                setter = getattr(shapes[0][0], f"set_{k}")
+                if v is None and k != "drawstyle":
+                    continue
+                setter(v)
+                setter = getattr(shapes[1][0], f"set_{k}")
+                setter(v)
+            area = vtkPolygon()
+            area.SetPoints(x_data, y1_data, y2_data)
+            area.SetColor(shapes[1][0].GetColor())
+            chart.AddPlot(area)
+            chart.GetRenderWindow().Render()
+
+        else:
+            params = dict(**style)
+            draw_fn = chart.AddPlotLine
+
+            line_1 = draw_fn(vtkChart.LINE, x_data, y1_data, **params)
+            params2 = params.copy()
+            params2.update(Color=line_1.GetColor(), Label='')
+            line_2 = draw_fn(vtkChart.LINE, x_data, y2_data, **params2)
+            area = vtkPolygon()
+            area.SetPoints(x_data, y1_data, y2_data)
+            area.SetColor(params2['Color'])
+            chart.AddPlot(area)
+            chart.GetRenderWindow().Render()
+
+            self._signal_impl_shape_lut.update({id(signal): [line_1, line_2, area]})
 
     def clear(self):
         if self._shared_x_axis:
@@ -746,6 +797,9 @@ class VTKParser(BackendParserBase):
                     f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data arrays (==3). {signal}")
                 return
             # TODO: Use functional bag for envelope plots
+            self.do_vtk_envelope_plot(
+                signal, chart, data[0], data[1], data[2])
+
         else:
             if ndims < 2:
                 logger.error(
@@ -940,6 +994,27 @@ class VTKParser(BackendParserBase):
             except AttributeError:
                 self._focus_plot = None
                 self._focus_plot_stack_key = None
+
+    def get_signal_style(self, signal: Signal, plot: Plot = None):
+        style = dict()
+
+        if signal.label:
+            style['label'] = signal.label
+        if hasattr(signal, "color"):
+            style['color'] = signal.color
+
+        style['linewidth'] = self._pm.get_value(
+            'line_size', self.canvas, plot, signal=signal) or 1
+        style['linestyle'] = (self._pm.get_value(
+            'line_style', self.canvas, plot, signal=signal) or "Solid").lower()
+        style['marker'] = self._pm.get_value(
+            'marker', self.canvas, plot, signal=signal)
+        style['markersize'] = self._pm.get_value(
+            'marker_size', self.canvas, plot, signal=signal) or 0
+        style["drawstyle"] = self._pm.get_value(
+            'step', self.canvas, plot, signal=signal)
+
+        return style
 
     def get_impl_x_axis(self, impl_plot: Any):
         try:
