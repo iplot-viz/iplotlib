@@ -77,15 +77,30 @@ class Plot(ABC):
 
         # signals are merged at canvas level to handle move between plots
 
-        
-
-
 
 @dataclass
 class PlotContour(Plot):
-    pass
+    grid: bool = None  #: indiacte if the grid must be drawn
+    line_style: str = None  #: set the line style of all signals.
+    line_size: int = None  #: set the line size of all signals.
+    marker: str = None  #: set the marker shape of all signals.
+    marker_size: int = None  #: set the marker size of all signals.
+    step: str = None  #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
+    hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires special handling
+    dec_samples: int = None  #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.axes is None:
+            self.axes = [LinearAxis(), LinearAxis()]
 
     def reset_preferences(self):
+        self.grid = PlotContour.grid
+        self.line_style = PlotContour.line_style
+        self.line_size = PlotContour.line_size
+        self.marker = PlotContour.marker
+        self.marker_size = PlotContour.marker_size
+        self.step = PlotContour.step
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotContour'):
@@ -119,15 +134,15 @@ class PlotXY(Plot):
     """
     Ä concrete Plot class specialized for 2D plottling.
     """
-    
-    grid: bool = None #: indiacte if the grid must be drawn
-    line_style: str = None #: set the line style of all signals.
-    line_size: int = None #: set the line size of all signals.
-    marker: str = None #: set the marker shape of all signals.
-    marker_size: int = None #: set the marker size of all signals.
-    step: str = None #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
-    hi_precision_data: bool = None #: indicate whether the data is sensitive to round off errors and requires special handling
-    dec_samples: int = None #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
+
+    grid: bool = None  #: indiacte if the grid must be drawn
+    line_style: str = None  #: set the line style of all signals.
+    line_size: int = None  #: set the line size of all signals.
+    marker: str = None  #: set the marker shape of all signals.
+    marker_size: int = None  #: set the marker size of all signals.
+    step: str = None  #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
+    hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires special handling
+    dec_samples: int = None  #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
 
     def __post_init__(self):
         super().__post_init__()
