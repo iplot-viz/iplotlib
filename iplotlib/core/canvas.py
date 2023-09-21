@@ -220,14 +220,14 @@ class Canvas(ABC):
                             col_name += f"_{signal.alias}"
                         else:
                             col_name += f"_{signal.name}"
-                        print()
+
                         if signal.envelope:
                             result = []
                             for i in range(len(signal.y_data)):
-                                value1 = signal.y_data[i]
-                                value2 = signal.z_data[i]
-                                mean = (value1 + value2) / 2
-                                result.append(f"({value1};{mean};{value2})")
+                                min_values = signal.y_data[i]
+                                max_values = signal.z_data[i]
+                                avg_values = signal.data_store[3][i]
+                                result.append(f"({min_values};{avg_values};{max_values})")
                             x[f"{col_name}.time"] = pd.Series(signal.x_data, name=f"{col_name}.time")
                             x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
                         else:
