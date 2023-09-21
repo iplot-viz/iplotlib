@@ -21,14 +21,19 @@ from iplotlib.impl.vtk.tools import CanvasTitleItem, CrosshairCursorWidget, VTK6
 import vtkmodules.vtkRenderingOpenGL2
 # needed for runtime vtk-opengl libs
 import vtkmodules.vtkRenderingContextOpenGL2
-from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti
+from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti, vtkPolygon, vtkPolyData, vtkCellArray
 from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine, vtkPlotPoints, vtkChartLegend
 from vtkmodules.vtkPythonContext2D import vtkPythonItem
-from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkRenderWindow
+from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkActor, vtkPolyDataMapper, vtkRenderWindow, vtkRenderWindowInteractor, vtkRenderer
 from vtkmodules.vtkRenderingContext2D import vtkContextMouseEvent, vtkMarkerUtilities, vtkPen
 from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.util import numpy_support
-from vtkmodules.vtkCommonDataModel import vtkPolygon
+# noinspection PyUnresolvedReferences
+import vtkmodules.vtkInteractionStyle
+# noinspection PyUnresolvedReferences
+import vtkmodules.vtkRenderingOpenGL2
+from vtkmodules.vtkCommonColor import vtkNamedColors
+from vtkmodules.vtkCommonCore import vtkPoints
 
 from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__)
@@ -180,16 +185,17 @@ class VTKParser(BackendParserBase):
         if not isinstance(chart, vtkChart):
             return
 
-        shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+        shapes = self._signal_impl_shape_lut.get(id(signal))  #  type: vtkPlot
         try:
-            cache_item = self._impl_plot_cache_table.get_cache_item(chart)
-            plot = cache_item.plot()
+            plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
         except AttributeError:
             plot = None
         style = self.get_signal_style(signal, plot)
         step = style.pop('drawstyle', None)
         if step is None:
             step = 'post'
+
+        hi_prec_nanos = self.hi_precision_needed(plot)
 
         if shapes is not None:
             shapes[0][0].SetPoints(x_data, y1_data)
@@ -212,19 +218,64 @@ class VTKParser(BackendParserBase):
 
         else:
             params = dict(**style)
-            draw_fn = chart.AddPlotLine
-
-            line_1 = draw_fn(vtkChart.LINE, x_data, y1_data, **params)
+            line_1 = self.add_vtk_line_plot(chart, signal.label, x_data, y1_data, hi_prec_nanos)  # type: vtkPlotLine
             params2 = params.copy()
-            params2.update(Color=line_1.GetColor(), Label='')
-            line_2 = draw_fn(vtkChart.LINE, x_data, y2_data, **params2)
-            area = vtkPolygon()
-            area.SetPoints(x_data, y1_data, y2_data)
-            area.SetColor(params2['Color'])
-            chart.AddPlot(area)
-            chart.GetRenderWindow().Render()
+            params2.update(color='', label='')
+            line_2 = self.add_vtk_line_plot(chart, signal.label, x_data, y2_data, hi_prec_nanos)  # type: vtkPlotLine
 
-            self._signal_impl_shape_lut.update({id(signal): [line_1, line_2, area]})
+            # Calculate the filled area points
+            filled_area_points = vtkPoints()
+
+            """
+            filled_area_points.InsertNextPoint(0.0, 0.0, 0.0)
+            filled_area_points.InsertNextPoint(5000.0, 0.0, 0.0)
+            filled_area_points.InsertNextPoint(5000.0, y1_data[0], 0.0)
+            filled_area_points.InsertNextPoint(0.0, y1_data[0], 0.0)
+            """
+
+            for i in range(len(x_data)):
+                filled_area_points.InsertNextPoint(x_data[i], y1_data[i], 0.0)
+                filled_area_points.InsertNextPoint(x_data[i], y2_data[i], 0.0)
+
+            # Create a polygon to represent the filled area
+            colors = vtkNamedColors()
+            filled_area = vtkPolygon()
+
+            for i in range(filled_area_points.GetNumberOfPoints()):
+                filled_area.GetPointIds().InsertNextId(i)
+
+            # Create cell array and add the filled area polygon to it
+            cell_array = vtkCellArray()
+            cell_array.InsertNextCell(filled_area)
+
+            # Create PolyData object to represent the filled area
+            polygon_polydata = vtkPolyData()
+            polygon_polydata.SetPoints(filled_area_points)
+            polygon_polydata.SetPolys(cell_array)
+
+            # Mapper and Actor to visualize the filled region
+            mapper = vtkPolyDataMapper()
+            mapper.SetInputData(polygon_polydata)
+
+            actor = vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetColor(colors.GetColor3d('Silver'))
+            # actor.GetProperty().SetColor(params2['color'])
+
+            # Visualize
+            renderer = vtkRenderer()
+            render_window = vtkRenderWindow()
+            render_window.SetWindowName('Polygon')
+            render_window.AddRenderer(renderer)
+            render_window_interactor = vtkRenderWindowInteractor()
+            render_window_interactor.SetRenderWindow(render_window)
+
+            renderer.AddActor(actor)
+            renderer.SetBackground(colors.GetColor3d('Salmon'))
+            render_window.Render()
+            render_window_interactor.Start()
+
+            self._signal_impl_shape_lut.update({id(signal): [line_1, line_2, filled_area]})
 
     def clear(self):
         if self._shared_x_axis:
@@ -780,6 +831,8 @@ class VTKParser(BackendParserBase):
         data = signal.get_data()
         ndims = len(data)
 
+        trans_data = self.transform_data(chart, data)
+
         if not len(data[0]) or not len(data[1]):
             if hasattr(signal, 'ts_start') and hasattr(signal, 'ts_end'):
                 self.set_oaw_axis_limits(chart, 0, [signal.ts_start, signal.ts_end])
@@ -796,9 +849,8 @@ class VTKParser(BackendParserBase):
                 logger.error(
                     f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data arrays (==3). {signal}")
                 return
-            # TODO: Use functional bag for envelope plots
-            self.do_vtk_envelope_plot(
-                signal, chart, data[0], data[1], data[2])
+            self.do_vtk_envelope_plot(signal, chart, data[0], data[1], data[2])
+            #self.do_vtk_envelope_plot(signal, chart, trans_data[0], trans_data[1], trans_data[2])
 
         else:
             if ndims < 2:
@@ -1112,4 +1164,25 @@ class VTKParser(BackendParserBase):
         """This function post processes 64-bitdata if it cannot be plotted with VTK directly.
         NOTE: This function is unused in the VTK implementation.
         """
-        pass
+        # pass
+
+        ret = []
+        if isinstance(data, Collection):
+            for i, d in enumerate(data):
+                logger.debug(f"\t transform data i={i} d = {d} ")
+                ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+                if hasattr(ci, 'offsets') and ci.offsets[i] is None:
+                    new_offset = self.create_offset(d)
+                    if new_offset is not None:
+                        ci.offsets[i] = d[0]
+
+                if hasattr(ci, 'offsets') and ci.offsets[i] is not None:
+                    logger.debug(
+                        f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
+                    if isinstance(d, Collection):
+                        ret.append([e - ci.offsets[i] for e in d])
+                    else:
+                        ret.append(d - ci.offsets[i])
+                else:
+                    ret.append(d)
+        return ret
