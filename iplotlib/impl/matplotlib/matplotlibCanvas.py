@@ -22,7 +22,7 @@ from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
                            BackendParserBase,
-                           Plot,
+                           Plot, PlotXY, PlotContour,
                            Signal)
 from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
@@ -47,7 +47,7 @@ class MatplotlibParser(BackendParserBase):
         self._cursors = []
 
         register_matplotlib_converters()
-        self.figure = Figure()
+        self.figure = Figure(figsize=(50,50))
         self._impl_plot_ranges_hash = dict()
 
         if tight_layout:
@@ -65,7 +65,7 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
-    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data):
+    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data, z_data):
         if not isinstance(mpl_axes, MPLAxes):
             return
         #logger.debug(f"mpl_line_plot : {traceback.print_stack()}")
@@ -100,12 +100,18 @@ class MatplotlibParser(BackendParserBase):
         else:
             logger.debug(f"mpl_line_plot step case 2=: {step}")
             params = dict(**style)
-            draw_fn = mpl_axes.plot
-            ##if step is not None and step != 'None':
-              ##  params.update({'where': step})
-                ##draw_fn = mpl_axes.step
 
-            lines = draw_fn(x_data, y_data, **params)
+            # draw_fn = mpl_axes.plot
+            # lines = draw_fn(x_data, y_data, **params)
+            ##if step is not None and step != 'None':
+            ##  params.update({'where': step})
+            ##draw_fn = mpl_axes.step
+            if isinstance(plot, PlotXY):
+                draw_fn = mpl_axes.plot
+                lines = draw_fn(x_data, y_data, **params)
+            elif isinstance(plot, PlotContour):
+                draw_fn = mpl_axes.contour
+                lines = draw_fn(x_data, y_data, z_data, **params)
             self._signal_impl_shape_lut.update({id(signal): [lines]})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
@@ -490,7 +496,7 @@ class MatplotlibParser(BackendParserBase):
                 logger.error(
                     f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data arrays (<2). {signal}")
                 return
-            self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1])
+            self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1], data[2])
 
         self.update_axis_labels_with_units(mpl_axes, signal)
 
