@@ -6,7 +6,7 @@ from typing import Any, Callable, Collection, List
 import traceback
 import numpy as np
 from matplotlib.axes import Axes as MPLAxes
-from matplotlib.axis import Tick
+from matplotlib.axis import Tick, XAxis
 from matplotlib.axis import Axis as MPLAxis
 from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.figure import Figure
@@ -14,6 +14,7 @@ from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.text import Annotation, Text
 from matplotlib.widgets import MultiCursor
+from matplotlib.ticker import MaxNLocator
 from pandas.plotting import register_matplotlib_converters
 
 import iplotLogging.setupLogger as sl
@@ -246,6 +247,9 @@ class MatplotlibParser(BackendParserBase):
             if stop_drawing:
                 break
 
+        # Update the previous number of ticks at Canvas level.
+        self.canvas.prev_tick_number = self.canvas.tick_number
+
         # 4. Update the title at the top of canvas.
         if canvas.title is not None:
             if not canvas.font_size:
@@ -417,8 +421,7 @@ class MatplotlibParser(BackendParserBase):
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
 
         if isinstance(axis, Axis):
-            fc = self._pm.get_value(
-                'font_color', self.canvas, axis, plot) or 'black'
+            fc = self._pm.get_value('font_color', self.canvas, axis, plot) or 'black'
             fs = self._pm.get_value('font_size', self.canvas, axis, plot)
 
             mpl_axis._font_color = fc
@@ -432,6 +435,17 @@ class MatplotlibParser(BackendParserBase):
                 tick_props.update({'labelsize': fs})
             if axis.label is not None:
                 mpl_axis.set_label_text(axis.label, **label_props)
+
+            # Configurate number of ticks and labels
+            if isinstance(mpl_axis, XAxis):
+                if self.canvas.tick_number != self.canvas.prev_tick_number:
+                    mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
+                    # Refresh tick number for each plot
+                    axis.tick_number = self.canvas.tick_number
+                elif axis.tick_number != self.canvas.tick_number:
+                    mpl_axis.set_major_locator(MaxNLocator(axis.tick_number))
+                else:
+                    mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
 
             mpl_axis.set_tick_params(**tick_props)
 

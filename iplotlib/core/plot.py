@@ -34,6 +34,8 @@ class Plot(ABC):
 
     font_size: int = None #: the font size of the plot title text
     font_color: str = None #: the font color of the plot title text
+    background_color: str = '#FFFFFF'
+    tick_number: int = 7
     legend: bool = None #: indicate if the plot legend must be shown
     legend_position: str = 'same as canvas'  #: indicate the location of the plot legend
     legend_layout: str = 'same as canvas'  #: indicate the layout of the plot legend
@@ -54,6 +56,8 @@ class Plot(ABC):
         self.legend_layout = Plot.legend_layout
         self.font_size = Plot.font_size
         self.font_color = Plot.font_color
+        self.background_color = Plot.background_color
+        self.tick_number = Plot.tick_number
 
     def merge(self, old_plot: 'Plot'):
         self.title = old_plot.title
@@ -62,6 +66,8 @@ class Plot(ABC):
         self.legend_layout = old_plot.legend_layout
         self.font_size = old_plot.font_size
         self.font_color = old_plot.font_color
+        self.background_color = old_plot.background_color
+        self.tick_number = old_plot.tick_number
 
         for idxAxis, axis in enumerate(self.axes):
             if axis and idxAxis < len(old_plot.axes):

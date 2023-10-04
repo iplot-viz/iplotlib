@@ -33,6 +33,9 @@ class Canvas(ABC):
 
     font_size: int = None #: default font size that will be cascaded across plots and axes of this canvas.
     font_color: str = None #: default font color that will be cascaded across plots and axes of this canvas.
+    background_color: str = '#FFFFFF'
+    tick_number: int = 7
+    prev_tick_number = 7
 
     line_style: str = None #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
     line_size: int = None #: default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent points should be canvas impementation dependent
@@ -142,6 +145,9 @@ class Canvas(ABC):
         self.enable_ValLabel_crosshair = Canvas.enable_ValLabel_crosshair
         self.crosshair_color = Canvas.crosshair_color
         self.font_color = Canvas.font_color
+        self.background_color = Canvas.background_color
+        self.tick_number = Canvas.tick_number
+        self.prev_tick_number = Canvas.prev_tick_number
         self.line_style = Canvas.line_style
         self.line_size = Canvas.line_size
         self.marker = Canvas.marker
@@ -165,6 +171,9 @@ class Canvas(ABC):
         self.enable_ValLabel_crosshair = old_canvas.enable_ValLabel_crosshair
         self.crosshair_color = old_canvas.crosshair_color
         self.font_color = old_canvas.font_color
+        self.background_color = old_canvas.background_color
+        self.tick_number = old_canvas.tick_number
+        self.prev_tick_number = old_canvas.prev_tick_number
         self.line_style = old_canvas.line_style
         self.line_size = old_canvas.line_size
         self.marker = old_canvas.marker
