@@ -21,13 +21,24 @@ from iplotlib.impl.vtk.tools import CanvasTitleItem, CrosshairCursorWidget, VTK6
 import vtkmodules.vtkRenderingOpenGL2
 # needed for runtime vtk-opengl libs
 import vtkmodules.vtkRenderingContextOpenGL2
-from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti
-from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, vtkPlotLine, vtkPlotPoints, vtkChartLegend
+from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti, vtkPolygon, vtkPolyData, \
+    vtkCellArray
+from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, \
+    vtkPlotLine, vtkPlotPoints, vtkChartLegend
 from vtkmodules.vtkPythonContext2D import vtkPythonItem
-from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkRenderWindow
+from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkActor, vtkPolyDataMapper, vtkRenderWindow, \
+    vtkRenderWindowInteractor, vtkRenderer
 from vtkmodules.vtkRenderingContext2D import vtkContextMouseEvent, vtkMarkerUtilities, vtkPen
 from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.util import numpy_support
+# noinspection PyUnresolvedReferences
+import vtkmodules.vtkInteractionStyle
+# noinspection PyUnresolvedReferences
+import vtkmodules.vtkRenderingOpenGL2
+from vtkmodules.vtkCommonColor import vtkNamedColors
+from vtkmodules.vtkCommonCore import vtkPoints
+import vtkmodules.all as vtk
+
 
 from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__)
@@ -50,10 +61,13 @@ LEGEND_POS_MAP = {'upper right': (vtkChartLegend.TOP, vtkChartLegend.RIGHT),
 class VTKParser(BackendParserBase):
     """This class parses the core iplotlib classes into a VTK charts pipeline.
     """
-    def __init__(self, canvas: Canvas = None, focus_plot=None, focus_plot_stack_key=None, impl_flush_method: Callable = None) -> None:
+
+    def __init__(self, canvas: Canvas = None, focus_plot=None, focus_plot_stack_key=None,
+                 impl_flush_method: Callable = None) -> None:
         """Initialize underlying vtk classes.
         """
-        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key, impl_flush_method=impl_flush_method)
+        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
+                         impl_flush_method=impl_flush_method)
         self._impl_focus_plot = None
         self._focus_plot_index = vtkVector2i(-1, -1)
 
@@ -163,7 +177,8 @@ class VTKParser(BackendParserBase):
         matrix.SetChartSpan(pos, span)
         return sub_matrix
 
-    def add_vtk_line_plot(self, chart: vtkChart, name: str, xdata: np.ndarray, ydata: np.ndarray, hi_prec_nanos: bool = False) -> vtkPlotLine:
+    def add_vtk_line_plot(self, chart: vtkChart, name: str, xdata: np.ndarray, ydata: np.ndarray,
+                          hi_prec_nanos: bool = False) -> vtkPlotLine:
 
         if not hasattr(xdata, "__getitem__") and not hasattr(ydata, "__getitem__"):
             return None
@@ -174,6 +189,95 @@ class VTKParser(BackendParserBase):
         line.SetLegendVisibility(True)
         line.SetLabel(name)
         return line
+
+    def do_vtk_envelope_plot(self, signal: Signal, chart: vtkChart, x_data, y1_data, y2_data):
+        if not isinstance(chart, vtkChart):
+            return
+
+        shapes = self._signal_impl_shape_lut.get(id(signal))  # type: vtkPlot
+        try:
+            plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
+        except AttributeError:
+            plot = None
+        style = self.get_signal_style(signal, plot)
+        step = style.pop('drawstyle', None)
+        if step is None:
+            step = 'post'
+
+        hi_prec_nanos = self.hi_precision_needed(plot)
+
+        if shapes is not None:
+            shapes[0][0].SetPoints(x_data, y1_data)
+            shapes[1][0].SetPoints(x_data, y2_data)
+            chart.RemovePlot(shapes[2])
+            shapes.pop()
+            style.update({'drawstyle': STEP_MAP[step.lower()]})
+            for k, v in style.items():
+                setter = getattr(shapes[0][0], f"set_{k}")
+                if v is None and k != "drawstyle":
+                    continue
+                setter(v)
+                setter = getattr(shapes[1][0], f"set_{k}")
+                setter(v)
+            area = vtkPolygon()
+            area.SetPoints(x_data, y1_data, y2_data)
+            area.SetColor(shapes[1][0].GetColor())
+            chart.AddPlot(area)
+            chart.GetRenderWindow().Render()
+
+        else:
+            params = dict(**style)
+            line_1 = self.add_vtk_line_plot(chart, signal.label, x_data, y1_data, hi_prec_nanos)  # type: vtkPlotLine
+            params2 = params.copy()
+            params2.update(color='', label='')
+            line_2 = self.add_vtk_line_plot(chart, signal.label, x_data, y2_data, hi_prec_nanos)  # type: vtkPlotLine
+
+            # Calculate the filled area points
+            filled_area_points = vtkPoints()
+
+            for i in range(len(x_data)):
+                filled_area_points.InsertNextPoint(x_data[i], y1_data[i], 0.0)
+                filled_area_points.InsertNextPoint(x_data[i], y2_data[i], 0.0)
+
+            # Create a polygon to represent the filled area
+            colors = vtkNamedColors()
+            filled_area = vtkPolygon()
+
+            for i in range(filled_area_points.GetNumberOfPoints()):
+                filled_area.GetPointIds().InsertNextId(i)
+
+            # Create cell array and add the filled area polygon to it
+            cell_array = vtkCellArray()
+            cell_array.InsertNextCell(filled_area)
+
+            # Create PolyData object to represent the filled area
+            polygon_polydata = vtkPolyData()
+            polygon_polydata.SetPoints(filled_area_points)
+            polygon_polydata.SetPolys(cell_array)
+
+            # Mapper and Actor to visualize the filled region
+            mapper = vtkPolyDataMapper()
+            mapper.SetInputData(polygon_polydata)
+
+            actor = vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetColor(colors.GetColor3d('Silver'))
+            # actor.GetProperty().SetColor(params2['color'])
+
+            # Visualize
+            renderer = vtkRenderer()
+            render_window = vtkRenderWindow()
+            render_window.SetWindowName('Polygon')
+            render_window.AddRenderer(renderer)
+            render_window_interactor = vtkRenderWindowInteractor()
+            render_window_interactor.SetRenderWindow(render_window)
+
+            renderer.AddActor(actor)
+            renderer.SetBackground(colors.GetColor3d('Salmon'))
+            render_window.Render()
+            render_window_interactor.Start()
+
+            self._signal_impl_shape_lut.update({id(signal): [line_1, line_2, filled_area]})
 
     def clear(self):
         if self._shared_x_axis:
@@ -214,7 +318,7 @@ class VTKParser(BackendParserBase):
 
     def get_internal_row_id(self, r: int, plot: Plot) -> int:
         """This method accounts for the difference in row numbering convention
-            b/w iplotlib against vtk. 
+            b/w iplotlib against vtk.
 
             In vtk the ordering of rows is bottom to top
             whereas in iplotlib it is from top to bottom.
@@ -254,7 +358,7 @@ class VTKParser(BackendParserBase):
             self.canvas = canvas
             self.clear()
             return
-    
+
         # 1. Clear layout.
         self.clear()
         self.canvas = canvas
@@ -288,6 +392,9 @@ class VTKParser(BackendParserBase):
 
                 if stop_drawing:
                     break
+
+        # Update the previous background color at Canvas level
+        self.canvas.prev_background_color = self.canvas.background_color
 
         # 4. Update the title at the top of canvas.
         self._refresh_canvas_title(canvas.title, canvas.font_color or '#000000')
@@ -377,6 +484,7 @@ class VTKParser(BackendParserBase):
         # translate plot properties to chart
         self._refresh_plot_title(plot)
         self._refresh_legend(plot)
+        self._refresh_background_color(plot)
 
         # translate PlotXY properties to chart
         self._refresh_grid(plot)
@@ -422,7 +530,7 @@ class VTKParser(BackendParserBase):
                     self.matrix.UnlinkAll(vtkVector2i(c, r))
 
     def _axis_update_callback(self, obj, ev):
-        chart = obj.GetParent() # type: vtkChart
+        chart = obj.GetParent()  # type: vtkChart
         if not isinstance(chart, vtkChart):
             return
 
@@ -432,7 +540,7 @@ class VTKParser(BackendParserBase):
         ci = self._impl_plot_cache_table.get_cache_item(chart)
 
         try:
-            plot = ci.plot() # type: Plot
+            plot = ci.plot()  # type: Plot
         except (AttributeError, TypeError):
             return
 
@@ -441,17 +549,17 @@ class VTKParser(BackendParserBase):
         for ax_idx in range(2):
             if self.get_impl_axis(chart, ax_idx) == obj:
                 break
-        
+
         axes = plot.axes[ax_idx]
         axis = None
         try:
-            assert(len(plot.signals.keys()) == len(axes))
+            assert (len(plot.signals.keys()) == len(axes))
             for stack_id, stack_key in enumerate(plot.signals.keys()):
                 if stack_key == ci.stack_key:
                     axis = axes[stack_id]
         except (AssertionError, TypeError):
             axis = axes
-        
+
         ranges_hash = hash(self.get_oaw_axis_limits(chart, ax_idx))
         current_hash = self._impl_plot_ranges_hash[plt_id][ax_idx].get(ci.stack_key)
         if current_hash is not None and (ranges_hash == current_hash):
@@ -459,7 +567,7 @@ class VTKParser(BackendParserBase):
 
         self._impl_plot_ranges_hash[plt_id][ax_idx].update({ci.stack_key: ranges_hash})
         self.update_range_axis(axis, ax_idx, chart)
-        
+
         if ax_idx != 0:
             return
 
@@ -552,7 +660,7 @@ class VTKParser(BackendParserBase):
             if ax_impl_id == vtkAxis.BOTTOM:
                 # translate LinearAxis properties
                 self._vtk_custom_tickers[id(plot)].update({stack_key: VTK64BitTimePlotSupport()})
-                ticker = self._vtk_custom_tickers.get(id(plot)).get(stack_key) # type: VTK64BitTimePlotSupport
+                ticker = self._vtk_custom_tickers.get(id(plot)).get(stack_key)  # type: VTK64BitTimePlotSupport
                 vtk_axis.AddObserver(
                     vtkChart.UpdateRange, self._vtk_custom_tickers[id(plot)].get(stack_key).generateTics)
 
@@ -713,6 +821,34 @@ class VTKParser(BackendParserBase):
                 if fs is not None:
                     appearance.SetFontSize(fs)
 
+    def _refresh_background_color(self, plot: Plot):
+        """Update plot background color
+        """
+        for i, chart in enumerate(self._plot_impl_plot_lut[id(plot)]):
+            if self.canvas.background_color != self.canvas.prev_background_color:
+                rgb_color = self.hex_to_rgb(self.canvas.background_color)
+                # Refresh background color for each plot
+                plot.background_color = self.canvas.background_color
+            elif plot.background_color != self.canvas.background_color:
+                rgb_color = self.hex_to_rgb(plot.background_color)
+            else:
+                rgb_color = self.hex_to_rgb(self.canvas.background_color)
+
+            # Set the background color using vtkBrush
+            background_brush = vtk.vtkBrush()
+            background_brush.SetColorF(rgb_color)
+
+            chart.SetBackgroundBrush(background_brush)
+
+    def hex_to_rgb(self, hex_color):
+        # Remove the '#' character if it is present in the hexadecimal format
+        hex_color = hex_color.lstrip('#')
+        # Convert the hexadecimal value into three color components (R, G, B)
+        r = int(hex_color[0:2], 16) / 255.0
+        g = int(hex_color[2:4], 16) / 255.0
+        b = int(hex_color[4:6], 16) / 255.0
+        return r, g, b
+
     @BackendParserBase.run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
         """Refresh a specific signal
@@ -729,6 +865,8 @@ class VTKParser(BackendParserBase):
         data = signal.get_data()
         ndims = len(data)
 
+        trans_data = self.transform_data(chart, data)
+
         if not len(data[0]) or not len(data[1]):
             if hasattr(signal, 'ts_start') and hasattr(signal, 'ts_end'):
                 self.set_oaw_axis_limits(chart, 0, [signal.ts_start, signal.ts_end])
@@ -739,13 +877,15 @@ class VTKParser(BackendParserBase):
         except AttributeError:
             return
         hi_prec_nanos = self.hi_precision_needed(plot)
-    
+
         if hasattr(signal, 'envelope') and signal.envelope:
             if ndims != 3:
                 logger.error(
                     f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data arrays (==3). {signal}")
                 return
-            # TODO: Use functional bag for envelope plots
+            # self.do_vtk_envelope_plot(signal, chart, data[0], data[1], data[2])
+            self.do_vtk_envelope_plot(signal, chart, trans_data[0], trans_data[1], trans_data[2])
+
         else:
             if ndims < 2:
                 logger.error(
@@ -941,6 +1081,27 @@ class VTKParser(BackendParserBase):
                 self._focus_plot = None
                 self._focus_plot_stack_key = None
 
+    def get_signal_style(self, signal: Signal, plot: Plot = None):
+        style = dict()
+
+        if signal.label:
+            style['label'] = signal.label
+        if hasattr(signal, "color"):
+            style['color'] = signal.color
+
+        style['linewidth'] = self._pm.get_value(
+            'line_size', self.canvas, plot, signal=signal) or 1
+        style['linestyle'] = (self._pm.get_value(
+            'line_style', self.canvas, plot, signal=signal) or "Solid").lower()
+        style['marker'] = self._pm.get_value(
+            'marker', self.canvas, plot, signal=signal)
+        style['markersize'] = self._pm.get_value(
+            'marker_size', self.canvas, plot, signal=signal) or 0
+        style["drawstyle"] = self._pm.get_value(
+            'step', self.canvas, plot, signal=signal)
+
+        return style
+
     def get_impl_x_axis(self, impl_plot: Any):
         try:
             return impl_plot.GetAxis(vtkAxis.BOTTOM)
@@ -1004,7 +1165,7 @@ class VTKParser(BackendParserBase):
 
         if ax_idx == 0:
             if begin == end and begin is not None:
-                begin = end-1
+                begin = end - 1
             return self.set_impl_x_axis_limits(impl_plot, (begin, end))
         elif ax_idx == 1:
             return self.set_impl_y_axis_limits(impl_plot, (begin, end))

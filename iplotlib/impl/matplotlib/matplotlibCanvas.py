@@ -246,6 +246,9 @@ class MatplotlibParser(BackendParserBase):
             if stop_drawing:
                 break
 
+        # Update the previous background color at Canvas level
+        self.canvas.prev_background_color = self.canvas.background_color
+
         # 4. Update the title at the top of canvas.
         if canvas.title is not None:
             if not canvas.font_size:
@@ -301,6 +304,16 @@ class MatplotlibParser(BackendParserBase):
                     if not fs:
                         fs = None
                     mpl_axes.set_title(plot.title, color=fc, size=fs)
+
+                # Set the background color
+                if self.canvas.background_color != self.canvas.prev_background_color:
+                    mpl_axes.set_facecolor(self.canvas.background_color)
+                    # Refresh background color for each plot
+                    plot.background_color = self.canvas.background_color
+                elif plot.background_color != self.canvas.background_color:
+                    mpl_axes.set_facecolor(plot.background_color)
+                else:
+                    mpl_axes.set_facecolor(self.canvas.background_color)
 
                 # If this is a stacked plot the X axis should be visible only at the bottom
                 # plot of the stack except it is focused
