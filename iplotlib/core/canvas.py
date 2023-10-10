@@ -49,6 +49,7 @@ class Canvas(ABC):
     legend_position: str = 'upper right'  #: indicate the location of the plot legend
     legend_layout: str = 'vertical'  #: indicate the layout of the plot legend
     grid: bool = False #: a boolean that suggests the visibility of a plot grid
+    ticks_position: bool = False
 
     mouse_mode: str = MOUSE_MODE_SELECT #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
     enable_Xlabel_crosshair: bool = True

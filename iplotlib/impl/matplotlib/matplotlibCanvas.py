@@ -426,7 +426,12 @@ class MatplotlibParser(BackendParserBase):
             mpl_axis._label = axis.label
 
             label_props = dict(color=fc)
-            tick_props = dict(color=fc, labelcolor=fc)
+            # Set ticks on the top and right axis
+            if self.canvas.ticks_position:
+                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True)
+            else:
+                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
+
             if fs is not None and fs > 0:
                 label_props.update({'fontsize': fs})
                 tick_props.update({'labelsize': fs})
