@@ -69,9 +69,10 @@ class Stage:
 class StatusInfo:
     msg: str = ''
     num_points: int = 0
-    result: Result = Result.READY
+    result: str = Result.READY
     sep = '|'
-    stage: Stage = Stage.INIT
+    stage: str = Stage.INIT
+    inf: int = 0
 
     def reset(self):
         self.msg = ''
@@ -79,18 +80,19 @@ class StatusInfo:
         self.result = Result.READY
         self.stage = Stage.INIT
         self.sep = '|'
+        self.inf = 0
 
     def __str__(self) -> str:
-        if self.result == Result.BUSY:
-            return self.result + self.sep + self.stage
-        elif self.result == Result.INVALID:
+        if self.result == Result.BUSY or self.result == Result.INVALID:
             return self.result + self.sep + self.stage
         elif self.result == Result.FAIL:
-            return self.stage + self.sep + f'{self.num_points}' + ' points'
+            return f"{self.stage}{self.sep}{self.num_points} points" + \
+                (f"{self.sep} {self.inf} infinities" if self.inf > 0 else "")
         elif self.result == Result.READY:
             return self.result
         elif self.result == Result.SUCCESS:
-            return self.result + self.sep + f'{self.num_points}' + ' points'
+            return f"{self.result}{self.sep}{self.num_points} points" + \
+                (f"{self.sep} {self.inf} infinities" if self.inf > 0 else "")
 
 
 @dataclass
@@ -275,6 +277,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info.stage = Stage.DA
         self.status_info.result = Result.SUCCESS
         self.status_info.num_points = len(self.data_store[0])
+        self.status_info.inf = int(np.sum(np.isinf(self.data_store[1])))
 
     def set_da_fail(self, msg: str = ''):
         self.status_info.reset()
@@ -288,6 +291,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info.reset()
         self.status_info.stage = Stage.PROC
         self.status_info.num_points = len(self.x_data)
+        self.status_info.inf = int(np.sum(np.isinf(self.y_data)))
         self.status_info.result = Result.SUCCESS
 
     def set_proc_fail(self, msg: str = ''):
