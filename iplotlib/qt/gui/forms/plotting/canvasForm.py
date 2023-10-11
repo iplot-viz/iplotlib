@@ -34,6 +34,7 @@ class CanvasForm(IplotPreferencesForm):
                 "widget": self.create_checkbox()},
             {"label": "Grid", "property": "grid",
                 "widget":  self.create_checkbox()},
+            {"label": "Background color", "property": "background_color", "widget": ColorPicker("background_color")},
             {"label": "Legend", "property": "legend",
                 "widget": self.create_checkbox()},
             {"label": "Legend position", "property": "legend_position",
