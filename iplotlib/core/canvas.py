@@ -26,45 +26,45 @@ class Canvas(ABC):
     MOUSE_MODE_ZOOM = 'MM_ZOOM'
     MOUSE_MODE_DIST = 'MM_DIST'
 
-    rows: int = 1 #: Number of rows in the grid. If specified the space for this nuber of rows should be reserved when rendering canvas since some of the plots can be empty
-    cols: int = 1 #: Number of columns in the grid. If specified the space for this number of columns should be reserved when rendering canvas since some of the plots may be empty
-    title: str = None #: Canvas title - should be shown above the canvas grid centered horizontally
+    rows: int = 1  #: Number of rows in the grid. If specified the space for this nuber of rows should be reserved when rendering canvas since some of the plots can be empty
+    cols: int = 1  #: Number of columns in the grid. If specified the space for this number of columns should be reserved when rendering canvas since some of the plots may be empty
+    title: str = None  #: Canvas title - should be shown above the canvas grid centered horizontally
 
 
-    font_size: int = None #: default font size that will be cascaded across plots and axes of this canvas.
-    font_color: str = None #: default font color that will be cascaded across plots and axes of this canvas.
-    background_color: str = '#FFFFFF'
-    prev_background_color = '#FFFFFF'
-    tick_number: int = 7
+    font_size: int = None  #: default font size that will be cascaded across plots and axes of this canvas.
+    font_color: str = None  #: default font color that will be cascaded across plots and axes of this canvas.
+    background_color: str = '#FFFFFF'  # default background color will be white for each plot
+    prev_background_color = '#FFFFFF'  # previous background color used to keep consistency between Canvas and Plot preferences
+    tick_number: int = 7  # default number of ticks for each plot
     prev_tick_number = 7
 
-    line_style: str = None #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
-    line_size: int = None #: default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent points should be canvas impementation dependent
+    line_style: str = None  #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
+    line_size: int = None  #: default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent points should be canvas impementation dependent
 
-    marker: str = None #: default marker type to display. If set a marker is drawn at every point of the data sample. Markers and lines can be drawn together and are not mutually exclusive. Supported types: 'x','o', None, default: None (no markers are drawn)
-    marker_size: int = None #: default marker size. Whether it is mapped to pixels or DPI independent points should be canvas impementation dependent
+    marker: str = None  #: default marker type to display. If set a marker is drawn at every point of the data sample. Markers and lines can be drawn together and are not mutually exclusive. Supported types: 'x','o', None, default: None (no markers are drawn)
+    marker_size: int = None  #: default marker size. Whether it is mapped to pixels or DPI independent points should be canvas impementation dependent
 
-    step: str = None # default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
+    step: str = None  # default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
 
-    hi_precision_data: bool = False #: a boolean that suggests the data is sensitive to round off errors and requires special handling
-    dec_samples: int = 1000 #: the default no. of samples for a data access fetch call.
+    hi_precision_data: bool = False  #: a boolean that suggests the data is sensitive to round off errors and requires special handling
+    dec_samples: int = 1000  #: the default no. of samples for a data access fetch call.
 
-    legend: bool = True #: a boolean that suggests the visibility of a plot legend box.
+    legend: bool = True  #: a boolean that suggests the visibility of a plot legend box.
     legend_position: str = 'upper right'  #: indicate the location of the plot legend
     legend_layout: str = 'vertical'  #: indicate the layout of the plot legend
-    grid: bool = False #: a boolean that suggests the visibility of a plot grid
+    grid: bool = False  #: a boolean that suggests the visibility of a plot grid
 
-    mouse_mode: str = MOUSE_MODE_SELECT #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
+    mouse_mode: str = MOUSE_MODE_SELECT  #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
     enable_Xlabel_crosshair: bool = True
     enable_Ylabel_crosshair: bool = True
     enable_ValLabel_crosshair: bool = True
 
-    plots: List[List[Union[Plot,None]]] = None #: A 22-level nested list of plots.
+    plots: List[List[Union[Plot, None]]] = None  #: A 22-level nested list of plots.
 
-    crosshair_enabled: bool = False #: visibility of crosshair.
-    crosshair_color: str = "red" #: color of the crosshair cursor lines.
-    crosshair_line_width: int = 1 # width of the crosshair cursor lines.
-    crosshair_horizontal: bool = True # visibility of the hori
+    crosshair_enabled: bool = False  #: visibility of crosshair.
+    crosshair_color: str = "red"  #: color of the crosshair cursor lines.
+    crosshair_line_width: int = 1  # width of the crosshair cursor lines.
+    crosshair_horizontal: bool = True  # visibility of the hori
     crosshair_vertical: bool = True
     crosshair_per_plot: bool = False
 
@@ -81,7 +81,7 @@ class Canvas(ABC):
     _type: str = None
 
     def __post_init__(self):
-        self._type = self.__class__.__module__+'.'+self.__class__.__qualname__
+        self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.plots is None:
             self.plots = [[] for _ in range(self.cols)]
 
@@ -92,7 +92,8 @@ class Canvas(ABC):
         if col >= len(self.plots):
             raise Exception("Cannot add plot to column {}: Canvas has only {} column(s)".format(col, len(self.plots)))
         if len(self.plots[col]) >= self.rows:
-            raise Exception("Cannot add plot to column {}: Column is has {}/{} plots".format(col, len(self.plots[col]), self.rows))
+            raise Exception(
+                "Cannot add plot to column {}: Column is has {}/{} plots".format(col, len(self.plots[col]), self.rows))
         self.plots[col].append(plot)
 
     def set_mouse_mode(self, mode):
@@ -197,7 +198,7 @@ class Canvas(ABC):
             key = signal.uid + ";" + signal.name
             return key
 
-        mapOldSignals:dict[str, Signal] = {}
+        mapOldSignals: dict[str, Signal] = {}
         for columns in old_canvas.plots:
             for old_plot in columns:
                 if old_plot:
@@ -205,7 +206,7 @@ class Canvas(ABC):
                         for old_signal in old_signals:
                             key = computeSignalUniqKey(old_signal)
                             mapOldSignals[key] = old_signal
-        
+
         # Merge signals at canvas level to handle move between plots
         for columns in self.plots:
             for plot in columns:
@@ -215,3 +216,33 @@ class Canvas(ABC):
                             key = computeSignalUniqKey(signal)
                             if key in mapOldSignals:
                                 signal.merge(mapOldSignals[key])
+
+    def get_signals_as_csv(self):
+        print("\n\n")
+        import pandas as pd
+        x = pd.DataFrame()
+        for c, column in enumerate(self.plots):
+            for r, row in enumerate(column):
+                for p, plot in enumerate(row.signals.values()):
+                    for s, signal in enumerate(plot):
+                        col_name = f"plot{r + 1}.{c + 1}"
+                        if len(row.signals) > 1:
+                            col_name += f".{p + 1}"
+                        if signal.alias:
+                            col_name += f"_{signal.alias}"
+                        else:
+                            col_name += f"_{signal.name}"
+
+                        if signal.envelope:
+                            result = []
+                            for i in range(len(signal.y_data)):
+                                min_values = signal.y_data[i]
+                                max_values = signal.z_data[i]
+                                avg_values = signal.data_store[3][i]
+                                result.append(f"({min_values};{avg_values};{max_values})")
+                            x[f"{col_name}.time"] = pd.Series(signal.x_data, name=f"{col_name}.time")
+                            x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
+                        else:
+                            x[f"{col_name}.time"] = pd.Series(signal.x_data, name=f"{col_name}.time")
+                            x[f"{col_name}.data"] = pd.Series(signal.y_data, name=f"{col_name}.data")
+        return x.to_csv(index=False)
