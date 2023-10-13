@@ -105,8 +105,9 @@ class MatplotlibParser(BackendParserBase):
               ##  params.update({'where': step})
                 ##draw_fn = mpl_axes.step
 
-            lines = draw_fn(x_data, y_data, **params)
-            self._signal_impl_shape_lut.update({id(signal): [lines]})
+            lines = [draw_fn(x_data, y_data, **params)]
+            signal.color = lines[0][0].get_color()
+            self._signal_impl_shape_lut.update({id(signal): lines})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
         if not isinstance(mpl_axes, MPLAxes):
