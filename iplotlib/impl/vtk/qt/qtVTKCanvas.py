@@ -7,7 +7,7 @@
 
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QWidget
 from PySide6.QtGui import QResizeEvent, QShowEvent
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
@@ -54,6 +54,8 @@ class QtVTKCanvas(IplotQtCanvas):
     """A Qt container widget that emebeds a VTKCanvas.
         See set_canvas, get_canvas
     """
+
+    dropSignal = Signal(object)
 
     def __init__(self, parent: QWidget = None, **kwargs):
         """Initialize a VTK Canvas embedded in QWidget
