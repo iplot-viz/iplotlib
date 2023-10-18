@@ -7,7 +7,7 @@
 
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QWidget
 from PySide6.QtGui import QResizeEvent, QShowEvent
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Signal
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
@@ -17,7 +17,7 @@ from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 # Maintain consistent qt api across vtk and iplotlib
 import vtkmodules.qt
-vtkmodules.qt.PyQtImpl = 'PySide6'
+
 
 # vtk requirements
 from vtkmodules.vtkCommonDataModel import vtkVector2f
@@ -27,13 +27,16 @@ from vtkmodules.vtkChartsCore import vtkChart, vtkAxis
 
 # iplot utilities
 from iplotLogging import setupLogger as sl
+
+vtkmodules.qt.PyQtImpl = 'PySide6'
 logger = sl.get_logger(__name__)
 
 try:
-    assert(PyQtImpl == 'PySide6')
+    assert (PyQtImpl == 'PySide6')
 except AssertionError as e:
     logger.warning("Invalid python Qt binding: the sanity check failed")
     logger.exception(e)
+
 
 class IplotQVTKRwi(QVTKRenderWindowInteractor):
     """This subclass is a small hack to disable the timer that constantly makes a Render call every 10 ms.
@@ -44,16 +47,19 @@ class IplotQVTKRwi(QVTKRenderWindowInteractor):
     :param QVTKRenderWindowInteractor: [description]
     :type QVTKRenderWindowInteractor: [type]
     """
+
     def __init__(self, parent=None, **kw):
         super().__init__(parent=parent, **kw)
-    
+
     def TimerEvent(self):
         return
+
 
 class QtVTKCanvas(IplotQtCanvas):
     """A Qt container widget that emebeds a VTKCanvas.
         See set_canvas, get_canvas
     """
+    dropSignal = Signal()
 
     def __init__(self, parent: QWidget = None, **kwargs):
         """Initialize a VTK Canvas embedded in QWidget
@@ -65,7 +71,7 @@ class QtVTKCanvas(IplotQtCanvas):
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
-        
+
         self._vtk_size_pol = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._vtk_renderer = IplotQVTKRwi(self, **kwargs)
         self._vtk_renderer._Timer.stop()
@@ -98,7 +104,7 @@ class QtVTKCanvas(IplotQtCanvas):
 
         self._parser.remove_crosshair_widget()
         self._parser.process_ipl_canvas(canvas)
-        
+
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
@@ -141,7 +147,7 @@ class QtVTKCanvas(IplotQtCanvas):
         size = event.size()
         if not size.width():
             size.setWidth(5)
-        
+
         if not size.height():
             size.setHeight(5)
 
@@ -187,7 +193,7 @@ class QtVTKCanvas(IplotQtCanvas):
 
                 # Stage a command to obtain original view limits
                 self.stage_view_lim_cmd()
-                
+
                 # Reset plot to original view limits
                 original_limits = self._parser.get_plot_limits(plot, which='original')
                 self._parser.set_plot_limits(original_limits)
@@ -235,7 +241,7 @@ class QtVTKCanvas(IplotQtCanvas):
                     is_date = plot.axes[0].is_date
                 except (AttributeError, IndexError):
                     is_date = False
-                impl_axis = self._parser.get_impl_axis(chart, 0) # type: vtkAxis
+                impl_axis = self._parser.get_impl_axis(chart, 0)  # type: vtkAxis
                 shift, scale = impl_axis.GetShift(), impl_axis.GetScalingFactor()
                 if is_date:
                     x = (int(pos[0] / scale) - int(shift))
@@ -256,7 +262,6 @@ class QtVTKCanvas(IplotQtCanvas):
                     self._dist_calculator.reset()
                 else:
                     self._dist_calculator.set_src(x, pos[1], plot, ci.stack_key)
-
 
     def _vtk_mouse_release_handler(self, obj, ev):
         if ev not in ["LeftButtonReleaseEvent"]:
@@ -282,6 +287,6 @@ class QtVTKCanvas(IplotQtCanvas):
 
     def get_vtk_renderer(self) -> QVTKRenderWindowInteractor:
         return self._vtk_renderer
-    
+
     def _debug_log_event(self, event: vtkCommand, msg: str):
         logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")
