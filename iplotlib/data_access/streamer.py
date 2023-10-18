@@ -89,9 +89,11 @@ class CanvasStreamer:
                           d0=dobj.xdata,
                           d1=dobj.ydata,
                           d2=[],
+                          d3=[],
                           d0_unit=dobj.xunit,
                           d1_unit=dobj.yunit,
-                          d2_unit='')
+                          d2_unit='',
+                          d3_unit='')
                 signal.inject_external(append=True, **result)
                 logger.info(f"Updated {varname} with {len(dobj.xdata)} new samples")
                 callback(signal)
