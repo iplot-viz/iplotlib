@@ -68,7 +68,7 @@ class ColorPicker(QWidget):
                 color = "#ff0000"
             elif self.name == "font_color":
                 color = "#000000"
-            elif color == "background_color":
+            elif self.name == "background_color":
                 color = "#FFFFFF"  # Default color for background of plot will be white
             else:
                 color = "#000000"
