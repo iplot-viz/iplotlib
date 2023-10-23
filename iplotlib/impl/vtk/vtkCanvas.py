@@ -25,10 +25,11 @@ from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkRenderWindow
 from vtkmodules.vtkRenderingContext2D import vtkContextMouseEvent, vtkMarkerUtilities, vtkPen
 from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.util import numpy_support
-# noinspection PyUnresolvedReferences
+
+# DON'T REMOVE THIS IMPORTS - NEEDED
 import vtkmodules.vtkInteractionStyle
-# noinspection PyUnresolvedReferences
 import vtkmodules.vtkRenderingOpenGL2
+import vtkmodules.vtkRenderingContextOpenGL2
 
 from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__)
