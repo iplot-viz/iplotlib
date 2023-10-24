@@ -32,7 +32,7 @@ class Canvas(ABC):
 
 
     font_size: int = None  #: default font size that will be cascaded across plots and axes of this canvas.
-    font_color: str = None  #: default font color that will be cascaded across plots and axes of this canvas.
+    font_color: str = '#000000'  #: default font color that will be cascaded across plots and axes of this canvas.
     background_color: str = '#FFFFFF'  # default background color will be white for each plot
     prev_background_color = '#FFFFFF'  # previous background color used to keep consistency between Canvas and Plot preferences
     tick_number: int = 7  # default number of ticks for each plot
