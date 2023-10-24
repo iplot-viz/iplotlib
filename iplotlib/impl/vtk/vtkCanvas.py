@@ -14,18 +14,18 @@ from iplotlib.core import (Axis,
                            ArraySignal,
                            Signal)
 
+# DON'T REMOVE THIS IMPORTS - NEEDED
+import vtkmodules.vtkInteractionStyle
+import vtkmodules.vtkRenderingOpenGL2
+import vtkmodules.vtkRenderingContextOpenGL2
+
 from iplotlib.impl.vtk import utils as vtkImplUtils
 from iplotlib.impl.vtk.tools import CanvasTitleItem, CrosshairCursorWidget, VTK64BitTimePlotSupport, queryMatrix
 
+from vtkmodules.vtkChartsCore import vtkPlotArea
+
+
 from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti
-from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, \
-    vtkPlotLine, vtkPlotPoints, vtkChartLegend, vtkPlotArea
-# needed for runtime vtk-opengl libs
-import vtkmodules.vtkRenderingOpenGL2
-# needed for runtime vtk-opengl libs
-import vtkmodules.vtkRenderingContextOpenGL2
-from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti, vtkPolygon, vtkPolyData, \
-    vtkCellArray
 from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, \
     vtkPlotLine, vtkPlotPoints, vtkChartLegend
 from vtkmodules.vtkPythonContext2D import vtkPythonItem
@@ -33,19 +33,8 @@ from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkRenderWindow
 from vtkmodules.vtkRenderingContext2D import vtkContextMouseEvent, vtkMarkerUtilities, vtkPen
 from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.util import numpy_support
-# noinspection PyUnresolvedReferences
-import vtkmodules.vtkInteractionStyle
-# noinspection PyUnresolvedReferences
-import vtkmodules.vtkRenderingOpenGL2
-from vtkmodules.vtkCommonColor import vtkNamedColors
-from vtkmodules.vtkCommonCore import vtkPoints
+
 import vtkmodules.all as vtk
-
-
-# DON'T REMOVE THIS IMPORTS - NEEDED
-import vtkmodules.vtkInteractionStyle
-import vtkmodules.vtkRenderingOpenGL2
-import vtkmodules.vtkRenderingContextOpenGL2
 
 from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__)
