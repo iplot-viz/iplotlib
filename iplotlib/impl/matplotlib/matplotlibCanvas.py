@@ -432,8 +432,8 @@ class MatplotlibParser(BackendParserBase):
 
         if isinstance(axis, Axis):
             fc = self._pm.get_value(
-                'font_color', self.canvas, axis, plot) or 'black'
-            fs = self._pm.get_value('font_size', self.canvas, axis, plot)
+                'font_color', self.canvas, plot, axis) or 'black'
+            fs = self._pm.get_value('font_size', self.canvas, plot, axis)
 
             mpl_axis._font_color = fc
             mpl_axis._font_size = fs

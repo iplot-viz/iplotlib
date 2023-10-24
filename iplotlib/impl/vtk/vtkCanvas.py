@@ -500,8 +500,8 @@ class VTKParser(BackendParserBase):
                 vtk_axis.SetTitle(axis.label)
 
             appearance = vtk_axis.GetTitleProperties()  # type: vtkTextProperty
-            fc = self._pm.get_value('font_color', self.canvas, axis, plot)
-            fs = self._pm.get_value('font_size', self.canvas, axis, plot)
+            fc = self._pm.get_value('font_color', self.canvas, plot, axis)
+            fs = self._pm.get_value('font_size', self.canvas, plot, axis)
             if fc is not None:
                 appearance.SetColor(*vtkImplUtils.get_color3d(fc))
                 logger.debug(f"Ax color: {vtkImplUtils.get_color3d(fc)}")
@@ -840,7 +840,8 @@ class VTKParser(BackendParserBase):
 
             chart.SetBackgroundBrush(background_brush)
 
-    def hex_to_rgb(self, hex_color):
+    @staticmethod
+    def hex_to_rgb(hex_color):
         # Remove the '#' character if it is present in the hexadecimal format
         hex_color = hex_color.lstrip('#')
         # Convert the hexadecimal value into three color components (R, G, B)
@@ -848,6 +849,11 @@ class VTKParser(BackendParserBase):
         g = int(hex_color[2:4], 16) / 255.0
         b = int(hex_color[4:6], 16) / 255.0
         return r, g, b
+
+    @staticmethod
+    def rgb_to_hex(rgb_color):
+        r, g, b, _ = rgb_color
+        return "#{:02X}{:02X}{:02X}".format(r, g, b)
 
     @BackendParserBase.run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
@@ -894,6 +900,8 @@ class VTKParser(BackendParserBase):
             line = self._signal_impl_shape_lut.get(id(signal))
             if not isinstance(line, vtkPlot):
                 line = self.add_vtk_line_plot(chart, signal.label, data[0], data[1], hi_prec_nanos)
+                if not signal.color:
+                    signal.color = self.rgb_to_hex(line.GetBrush().GetColorObject())
                 self._signal_impl_shape_lut.update({id(signal): line})
                 try:
                     ticker = self._vtk_custom_tickers.get(id(plot)).get(ci.stack_key)
