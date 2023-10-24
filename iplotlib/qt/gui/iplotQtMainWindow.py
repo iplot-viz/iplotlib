@@ -66,7 +66,9 @@ class IplotQtMainWindow(QMainWindow):
         self.toolBar.configureAction.triggered.connect(
             lambda:
                 [self.prefWindow.setWindowTitle(self.windowTitle()),
-                 self.prefWindow.show()])
+                 self.prefWindow.show(),
+                 self.prefWindow.raise_(),
+                 self.prefWindow.activateWindow()])
 
     def undo(self):
         w = self.canvasStack.currentWidget()

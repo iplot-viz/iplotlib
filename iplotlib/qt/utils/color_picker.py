@@ -65,6 +65,8 @@ class ColorPicker(QWidget):
                 color = "#ff0000"  # Default color for crosshair will be red
             elif self.name == "font_color":
                 color = "#000000"  # Default color for font will be black
+            elif color == "background_color":
+                color = "#FFFFFF"  # Default color for background of plot will be white
             else:
                 color = "#000000"
         if color[0] == "#" and len(color) == 7:

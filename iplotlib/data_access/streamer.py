@@ -23,8 +23,9 @@ class CanvasStreamer:
         all_signals = []
         for col in canvas.plots:
             for plot in col:
-                for (stack_id, signals) in plot.signals.items():
-                    all_signals += signals
+                if plot:
+                    for (stack_id, signals) in plot.signals.items():
+                        all_signals += signals
 
         signals = {}
         for s in all_signals:
