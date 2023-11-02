@@ -14,31 +14,27 @@ from iplotlib.core import (Axis,
                            ArraySignal,
                            Signal)
 
+# DON'T REMOVE THIS IMPORTS - NEEDED
+import vtkmodules.vtkInteractionStyle
+import vtkmodules.vtkRenderingOpenGL2
+import vtkmodules.vtkRenderingContextOpenGL2
+
 from iplotlib.impl.vtk import utils as vtkImplUtils
 from iplotlib.impl.vtk.tools import CanvasTitleItem, CrosshairCursorWidget, VTK64BitTimePlotSupport, queryMatrix
 
-# needed for runtime vtk-opengl libs
-import vtkmodules.vtkRenderingOpenGL2
-# needed for runtime vtk-opengl libs
-import vtkmodules.vtkRenderingContextOpenGL2
-from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti, vtkPolygon, vtkPolyData, \
-    vtkCellArray
+from vtkmodules.vtkChartsCore import vtkPlotArea
+
+
+from vtkmodules.vtkCommonDataModel import vtkTable, vtkVector2i, vtkRectd, vtkRecti
 from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart, vtkChartXY, vtkContextArea, vtkPlot, \
     vtkPlotLine, vtkPlotPoints, vtkChartLegend
 from vtkmodules.vtkPythonContext2D import vtkPythonItem
-from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkActor, vtkPolyDataMapper, vtkRenderWindow, \
-    vtkRenderWindowInteractor, vtkRenderer
+from vtkmodules.vtkRenderingCore import vtkTextProperty, vtkRenderWindow
 from vtkmodules.vtkRenderingContext2D import vtkContextMouseEvent, vtkMarkerUtilities, vtkPen
 from vtkmodules.vtkViewsContext2D import vtkContextView
 from vtkmodules.util import numpy_support
-# noinspection PyUnresolvedReferences
-import vtkmodules.vtkInteractionStyle
-# noinspection PyUnresolvedReferences
-import vtkmodules.vtkRenderingOpenGL2
-from vtkmodules.vtkCommonColor import vtkNamedColors
-from vtkmodules.vtkCommonCore import vtkPoints
-import vtkmodules.all as vtk
 
+import vtkmodules.all as vtk
 
 from iplotLogging import setupLogger as sl
 logger = sl.get_logger(__name__)
@@ -183,9 +179,9 @@ class VTKParser(BackendParserBase):
         if not hasattr(xdata, "__getitem__") and not hasattr(ydata, "__getitem__"):
             return None
 
-        line = chart.AddPlot(vtkChart.LINE)  # type: vtkPlotLine
-        self.refresh_impl_plot_data(
-            line, xdata, ydata, name, hi_prec_nanos)
+        line = chart.AddPlot(vtkChart.LINE)
+        self.refresh_impl_plot_data(line, xdata, ydata, name, hi_prec_nanos)
+
         line.SetLegendVisibility(True)
         line.SetLabel(name)
         return line
@@ -206,78 +202,42 @@ class VTKParser(BackendParserBase):
 
         hi_prec_nanos = self.hi_precision_needed(plot)
 
-        if shapes is not None:
-            shapes[0][0].SetPoints(x_data, y1_data)
-            shapes[1][0].SetPoints(x_data, y2_data)
-            chart.RemovePlot(shapes[2])
-            shapes.pop()
-            style.update({'drawstyle': STEP_MAP[step.lower()]})
-            for k, v in style.items():
-                setter = getattr(shapes[0][0], f"set_{k}")
-                if v is None and k != "drawstyle":
-                    continue
-                setter(v)
-                setter = getattr(shapes[1][0], f"set_{k}")
-                setter(v)
-            area = vtkPolygon()
-            area.SetPoints(x_data, y1_data, y2_data)
-            area.SetColor(shapes[1][0].GetColor())
-            chart.AddPlot(area)
-            chart.GetRenderWindow().Render()
+        xs = numpy_support.numpy_to_vtk(x_data)
+        ys1 = numpy_support.numpy_to_vtk(y1_data)
+        ys2 = numpy_support.numpy_to_vtk(y2_data)
+        xs.SetName("X-Axis")
+        ys1.SetName(f"{signal.label}_min")
+        ys2.SetName(f"{signal.label}_max")
+        table = vtkTable()
+        table.AddColumn(xs)
+        table.AddColumn(ys1)
+        table.AddColumn(ys2)
 
+        if np.array_equal(y1_data, y2_data):
+            if isinstance(shapes, vtkPlotLine):
+                self.refresh_impl_plot_data(shapes,x_data,y1_data,signal.label,hi_prec_nanos)
+            else:
+                chart.RemovePlotInstance(shapes)
+                shapes = self.add_vtk_line_plot(chart, signal.label, x_data, y1_data, hi_prec_nanos)
+
+            self._signal_impl_shape_lut.update({id(signal): shapes})
         else:
-            params = dict(**style)
-            line_1 = self.add_vtk_line_plot(chart, signal.label, x_data, y1_data, hi_prec_nanos)  # type: vtkPlotLine
-            params2 = params.copy()
-            params2.update(color='', label='')
-            line_2 = self.add_vtk_line_plot(chart, signal.label, x_data, y2_data, hi_prec_nanos)  # type: vtkPlotLine
+            table = vtkTable()
+            table.AddColumn(xs)
+            table.AddColumn(ys1)
+            table.AddColumn(ys2)
 
-            # Calculate the filled area points
-            filled_area_points = vtkPoints()
+            if isinstance(shapes, vtkPlotArea):
+                area = shapes
+            else:
+                chart.RemovePlotInstance(shapes)
+                area = vtkPlotArea.SafeDownCast(chart.AddPlot(vtkChart.AREA))
+            area.SetInputData(table)
+            area.SetInputArray(0, "X-Axis")
+            area.SetInputArray(1, f"{signal.label}_min")
+            area.SetInputArray(2, f"{signal.label}_max")
+            self._signal_impl_shape_lut.update({id(signal): area})
 
-            for i in range(len(x_data)):
-                filled_area_points.InsertNextPoint(x_data[i], y1_data[i], 0.0)
-                filled_area_points.InsertNextPoint(x_data[i], y2_data[i], 0.0)
-
-            # Create a polygon to represent the filled area
-            colors = vtkNamedColors()
-            filled_area = vtkPolygon()
-
-            for i in range(filled_area_points.GetNumberOfPoints()):
-                filled_area.GetPointIds().InsertNextId(i)
-
-            # Create cell array and add the filled area polygon to it
-            cell_array = vtkCellArray()
-            cell_array.InsertNextCell(filled_area)
-
-            # Create PolyData object to represent the filled area
-            polygon_polydata = vtkPolyData()
-            polygon_polydata.SetPoints(filled_area_points)
-            polygon_polydata.SetPolys(cell_array)
-
-            # Mapper and Actor to visualize the filled region
-            mapper = vtkPolyDataMapper()
-            mapper.SetInputData(polygon_polydata)
-
-            actor = vtkActor()
-            actor.SetMapper(mapper)
-            actor.GetProperty().SetColor(colors.GetColor3d('Silver'))
-            # actor.GetProperty().SetColor(params2['color'])
-
-            # Visualize
-            renderer = vtkRenderer()
-            render_window = vtkRenderWindow()
-            render_window.SetWindowName('Polygon')
-            render_window.AddRenderer(renderer)
-            render_window_interactor = vtkRenderWindowInteractor()
-            render_window_interactor.SetRenderWindow(render_window)
-
-            renderer.AddActor(actor)
-            renderer.SetBackground(colors.GetColor3d('Salmon'))
-            render_window.Render()
-            render_window_interactor.Start()
-
-            self._signal_impl_shape_lut.update({id(signal): [line_1, line_2, filled_area]})
 
     def clear(self):
         if self._shared_x_axis:
@@ -786,12 +746,10 @@ class VTKParser(BackendParserBase):
         if bitSequencing:
             # insert least->highest significant bits into table columns
             as16bits = x.view(np.uint16)
-            bitSequences = [
-                as16bits[::4],
-                as16bits[1::4],
-                as16bits[2::4],
-                as16bits[3::4],
-            ]
+            bitSequences = [as16bits[::4],
+                            as16bits[1::4],
+                            as16bits[2::4],
+                            as16bits[3::4],]
             for i, bitSeq in enumerate(bitSequences):
                 vtkArr = numpy_support.numpy_to_vtk(bitSeq)
                 vtkArr.SetName(f"Bit-Sequence: {i}")
@@ -883,8 +841,7 @@ class VTKParser(BackendParserBase):
                 logger.error(
                     f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data arrays (==3). {signal}")
                 return
-            # self.do_vtk_envelope_plot(signal, chart, data[0], data[1], data[2])
-            self.do_vtk_envelope_plot(signal, chart, trans_data[0], trans_data[1], trans_data[2])
+            self.do_vtk_envelope_plot(signal, chart, data[0], data[1], data[2])
 
         else:
             if ndims < 2:
@@ -918,25 +875,23 @@ class VTKParser(BackendParserBase):
 
         self.update_axis_labels_with_units(chart, signal)
 
-    def _process_ipl_signal_color(self, signal: ArraySignal):
-        line = self._signal_impl_shape_lut.get(
-            id(signal))  # type: vtkPlot
-        if not isinstance(line, vtkPlot):
+    def _process_ipl_signal_color(self, signal: Signal):
+        line = self._signal_impl_shape_lut.get(id(signal))
+        if not isinstance(line, (vtkPlot, vtkPlotArea)):
             return
+
         if signal.color is not None:
             line.SetColor(*vtkImplUtils.get_color4ub(signal.color))
 
     def _process_ipl_signal_label(self, signal: Signal):
-        line = self._signal_impl_shape_lut.get(
-            id(signal))  # type: vtkPlot
-        if not isinstance(line, vtkPlot):
+        lines = self._signal_impl_shape_lut.get(id(signal))
+        if not isinstance(lines, vtkPlot):
             return
         if signal.label is not None:
-            line.SetLabel(signal.label)
+            lines.SetLabel(signal.label)
 
     def _refresh_step_type(self, signal: ArraySignal):
-        line = self._signal_impl_shape_lut.get(
-            id(signal))  # type: vtkPlot
+        line = self._signal_impl_shape_lut.get(id(signal))
 
         if not isinstance(line, vtkPlotPoints):
             return
@@ -986,8 +941,7 @@ class VTKParser(BackendParserBase):
             line, newxs, newys, var_name, bitSequencing)
 
     def _refresh_line_size(self, signal: ArraySignal):
-        line = self._signal_impl_shape_lut.get(
-            id(signal))  # type: vtkPlot
+        line = self._signal_impl_shape_lut.get(id(signal))
         if not isinstance(line, vtkPlot):
             return
         chart = self._signal_impl_plot_lut.get(
@@ -1000,8 +954,7 @@ class VTKParser(BackendParserBase):
             pen.SetWidth(ls)
 
     def _refresh_line_style(self, signal: ArraySignal):
-        line = self._signal_impl_shape_lut.get(
-            id(signal))  # type: vtkPlot
+        line = self._signal_impl_shape_lut.get(id(signal))
         if not isinstance(line, vtkPlotPoints):
             return
         chart = self._signal_impl_plot_lut.get(
@@ -1022,8 +975,7 @@ class VTKParser(BackendParserBase):
             pen.SetLineType(vtkPen.DOT_LINE)
 
     def _refresh_marker_size(self, signal: ArraySignal):
-        line = self._signal_impl_shape_lut.get(
-            id(signal))  # type: vtkPlot
+        line = self._signal_impl_shape_lut.get(id(signal))
         if not isinstance(line, vtkPlotPoints):
             return
         chart = self._signal_impl_plot_lut.get(
@@ -1035,8 +987,7 @@ class VTKParser(BackendParserBase):
             line.SetMarkerSize(ms)
 
     def _refresh_marker_style(self, signal: ArraySignal):
-        line = self._signal_impl_shape_lut.get(
-            id(signal))  # type: vtkPlot
+        line = self._signal_impl_shape_lut.get(id(signal))
         if not isinstance(line, vtkPlotPoints):
             return
         chart = self._signal_impl_plot_lut.get(
@@ -1198,4 +1149,30 @@ class VTKParser(BackendParserBase):
         """This function post processes 64-bitdata if it cannot be plotted with VTK directly.
         NOTE: This function is unused in the VTK implementation.
         """
-        pass
+        # pass
+
+        ret = []
+        if isinstance(data, Collection):
+            for i, d in enumerate(data):
+                logger.debug(f"\t transform data i={i} d = {d} ")
+                ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+                if hasattr(ci, 'offsets') and ci.offsets[i] is None:
+                    new_offset = self.create_offset(d)
+                    if new_offset is not None:
+                        ci.offsets[i] = d[0]
+
+                if hasattr(ci, 'offsets') and ci.offsets[i] is not None:
+                    logger.debug(
+                        f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
+                    if isinstance(d, Collection):
+                        ret.append([e - ci.offsets[i] for e in d])
+                    else:
+                        ret.append(d - ci.offsets[i])
+                else:
+                    ret.append(d)
+        return ret
+
+    @staticmethod
+    def rgb_to_hex(rgb):
+
+        return "#{:02X}{:02X}{:02X}".format(rgb[0], rgb[1], rgb[2])

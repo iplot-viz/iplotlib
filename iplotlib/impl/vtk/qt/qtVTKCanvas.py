@@ -7,7 +7,7 @@
 
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QWidget
 from PySide6.QtGui import QResizeEvent, QShowEvent
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
@@ -17,7 +17,7 @@ from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 # Maintain consistent qt api across vtk and iplotlib
 import vtkmodules.qt
-
+vtkmodules.qt.PyQtImpl = 'PySide6'
 
 # vtk requirements
 from vtkmodules.vtkCommonDataModel import vtkVector2f
@@ -28,7 +28,6 @@ from vtkmodules.vtkChartsCore import vtkChart, vtkAxis
 # iplot utilities
 from iplotLogging import setupLogger as sl
 
-vtkmodules.qt.PyQtImpl = 'PySide6'
 logger = sl.get_logger(__name__)
 
 try:
@@ -59,7 +58,8 @@ class QtVTKCanvas(IplotQtCanvas):
     """A Qt container widget that emebeds a VTKCanvas.
         See set_canvas, get_canvas
     """
-    dropSignal = Signal()
+
+    dropSignal = Signal(object)
 
     def __init__(self, parent: QWidget = None, **kwargs):
         """Initialize a VTK Canvas embedded in QWidget
