@@ -100,8 +100,7 @@ class NanosecondDateFormatter(ScalarFormatter):
             # Implemented rounding only at the hour level, so the separator must be in that exact position
             if ret[2] == 'T' or ret[5] == 'T':
                 return self.round_hour(ret)
-        else:
-            return ret
+        return ret
 
     @staticmethod
     def round_hour(ret):
