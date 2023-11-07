@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import typing
 from contextlib import contextmanager
+import datetime
 
 from vtkmodules.vtkCommonCore import vtkAbstractArray, vtkStringArray
 from vtkmodules.vtkCommonDataModel import vtkTable
@@ -465,19 +466,19 @@ class VTK64BitTimePlotSupport:
         tickLabelFmt = "%Y-%m-%dT%H:%M:%S.%f.nano"
         if uniq_year:
             prefixFmt += "%Y-"
-            removeSuffix = "T%H:%M:%S.%f.nano"
+            removeSuffix = ":%S.%f.nano"
             if uniq_month:
                 prefixFmt += "%m-"
-                removeSuffix = ":%M:%S.%f.nano"
+                removeSuffix = ".%f.nano"
                 if uniq_day:
                     prefixFmt += "%dT"
-                    removeSuffix = ":%S.%f.nano"
+                    removeSuffix = ".nano"
                     if uniq_hour:
                         prefixFmt += "%H:"
-                        removeSuffix = ".%f.nano"
+                        removeSuffix = ".nano"
                         if uniq_minute:
                             prefixFmt += "%M:"
-                            removeSuffix = ".nano"
+                            removeSuffix = ""
                             if uniq_second:
                                 prefixFmt += "%S."
                                 removeSuffix = ""
@@ -494,6 +495,11 @@ class VTK64BitTimePlotSupport:
         tick_labels = vtkStringArray()
         for ts in tss:
             tick_label = ts.strftime(tickLabelFmt)
+            # Check if the round hour option is enabled
+            if xAxis.GetBehavior() == 1 and 'T' in tick_label:
+                # Implemented rounding only at the hour level, so the separator must be in that exact position
+                if tick_label[2] == 'T' or tick_label[5] == 'T':
+                    tick_label = self.round_hour(tick_label)
             tick_label = tick_label.replace("nano",
                                             str(ts.nanosecond).zfill(3))
             tick_labels.InsertNextValue(tick_label)
@@ -505,3 +511,27 @@ class VTK64BitTimePlotSupport:
             logger.critical(f"There is no data for chart. Setting xAxis title to 'X Axis'")
             xAxis.SetTitle('X Axis')
         xAxis.Update()
+
+    @staticmethod
+    def round_hour(ret):
+        parts = ret.split('T')
+        hour_str = parts[1]
+
+        if len(hour_str) == 5:
+            hour = datetime.datetime.strptime(hour_str, '%H:%M')
+        else:
+            hour = datetime.datetime.strptime(hour_str, '%H:%M:%S')
+
+        if hour.minute >= 30:
+            hour += datetime.timedelta(hours=1)
+
+        if len(hour_str) == 5:
+            hour = hour.replace(minute=0)
+            round_hour_str = hour.strftime('%H:%M')
+        else:
+            hour = hour.replace(minute=0, second=0)
+            round_hour_str = hour.strftime('%H:%M:%S')
+
+        new_ret = f"{parts[0]}T{round_hour_str}"
+
+        return new_ret

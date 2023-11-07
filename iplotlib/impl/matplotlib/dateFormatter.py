@@ -1,3 +1,5 @@
+import datetime
+
 from matplotlib.ticker import ScalarFormatter
 import pandas
 
@@ -23,7 +25,7 @@ class NanosecondDateFormatter(ScalarFormatter):
     """Formats for each date segment"""
     formats = ["{:4d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:03d}", "{:03d}", "{:03d}"]
 
-    def __init__(self, ax_idx: int, label_segments=4, postfix_end=True, postfix_start=False, offset_lut: list=None):
+    def __init__(self, ax_idx: int, label_segments=4, postfix_end=True, postfix_start=False, offset_lut: list=None, round=False):
         super().__init__()
         self.postfix_end = postfix_end
         self.posfix_start = postfix_start
@@ -32,6 +34,7 @@ class NanosecondDateFormatter(ScalarFormatter):
         self.cut_start = -1
         self._offset_lut = offset_lut
         self._ax_idx = ax_idx
+        self._round = round
 
     @property
     def offsetns(self):
@@ -93,7 +96,36 @@ class NanosecondDateFormatter(ScalarFormatter):
             if (i < end or postfix_end) and i < len(self.postfixes):
                 ret += self.postfixes[i]
 
-        return ret
+        if self._round and 'T' in ret:
+            # Implemented rounding only at the hour level, so the separator must be in that exact position
+            if ret[2] == 'T' or ret[5] == 'T':
+                return self.round_hour(ret)
+        else:
+            return ret
+
+    @staticmethod
+    def round_hour(ret):
+        parts = ret.split('T')
+        hour_str = parts[1]
+
+        if len(hour_str) == 5:
+            hour = datetime.datetime.strptime(hour_str, '%H:%M')
+        else:
+            hour = datetime.datetime.strptime(hour_str, '%H:%M:%S')
+
+        if hour.minute >= 30:
+            hour += datetime.timedelta(hours=1)
+
+        if len(hour_str) == 5:
+            hour = hour.replace(minute=0)
+            round_hour_str = hour.strftime('%H:%M')
+        else:
+            hour = hour.replace(minute=0, second=0)
+            round_hour_str = hour.strftime('%H:%M:%S')
+
+        new_ret = f"{parts[0]}T{round_hour_str}"
+
+        return new_ret
 
     def lcp(self, start, end):
         """Returns last common segment of two dates given as start and end"""

@@ -306,6 +306,16 @@ class MatplotlibParser(BackendParserBase):
                         fs = None
                     mpl_axes.set_title(plot.title, color=fc, size=fs)
 
+                # Set the background color
+                if self.canvas.background_color != self.canvas.prev_background_color:
+                    mpl_axes.set_facecolor(self.canvas.background_color)
+                    # Refresh background color for each plot
+                    plot.background_color = self.canvas.background_color
+                elif plot.background_color != self.canvas.background_color:
+                    mpl_axes.set_facecolor(plot.background_color)
+                else:
+                    mpl_axes.set_facecolor(self.canvas.background_color)
+
                 # If this is a stacked plot the X axis should be visible only at the bottom
                 # plot of the stack except it is focused
                 # Hides an axis in a way that grid remains visible,
@@ -435,18 +445,6 @@ class MatplotlibParser(BackendParserBase):
                 tick_props.update({'labelsize': fs})
             if axis.label is not None:
                 mpl_axis.set_label_text(axis.label, **label_props)
-
-            # Configurate number of ticks and labels
-            if isinstance(mpl_axis, XAxis):
-                if self.canvas.tick_number != self.canvas.prev_tick_number:
-                    mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
-                    # Refresh tick number for each plot
-                    axis.tick_number = self.canvas.tick_number
-                elif axis.tick_number != self.canvas.tick_number:
-                    mpl_axis.set_major_locator(MaxNLocator(axis.tick_number))
-                else:
-                    mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
-
             mpl_axis.set_tick_params(**tick_props)
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None and (axis.begin or axis.end):
@@ -457,7 +455,18 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(axis, LinearAxis):
             if axis.is_date:
                 ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-                mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets))
+                mpl_axis.set_major_formatter(
+                    NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, round=self.canvas.round_hour))
+
+        # Configurate number of ticks and labels
+        if self.canvas.tick_number != self.canvas.prev_tick_number:
+            mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
+            # Refresh tick number for each plot
+            axis.tick_number = self.canvas.tick_number
+        elif axis.tick_number != self.canvas.tick_number:
+            mpl_axis.set_major_locator(MaxNLocator(axis.tick_number))
+        else:
+            mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
 
     @BackendParserBase.run_in_one_thread
     def process_ipl_signal(self, signal: Signal):

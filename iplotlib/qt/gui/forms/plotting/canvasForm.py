@@ -32,6 +32,8 @@ class CanvasForm(IplotPreferencesForm):
                 "widget": self.default_fontsize_widget()},
             {"label": "Shared x axis", "property": "shared_x_axis",
                 "widget": self.create_checkbox()},
+            {"label": "Round hours", "property": "round_hour",
+             "widget": self.create_checkbox()},
             {"label": "Grid", "property": "grid",
                 "widget":  self.create_checkbox()},
             {"label": "Number of ticks and labels", "property": "tick_number",

@@ -34,8 +34,11 @@ class Canvas(ABC):
     font_size: int = None #: default font size that will be cascaded across plots and axes of this canvas.
     font_color: str = None #: default font color that will be cascaded across plots and axes of this canvas.
     background_color: str = '#FFFFFF'
+    prev_background_color = '#FFFFFF'
     tick_number: int = 7
     prev_tick_number = 7
+
+    round_hour: bool = False
 
     line_style: str = None #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
     line_size: int = None #: default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent points should be canvas impementation dependent

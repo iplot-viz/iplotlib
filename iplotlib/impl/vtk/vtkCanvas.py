@@ -214,7 +214,7 @@ class VTKParser(BackendParserBase):
 
     def get_internal_row_id(self, r: int, plot: Plot) -> int:
         """This method accounts for the difference in row numbering convention
-            b/w iplotlib against vtk. 
+            b/w iplotlib against vtk.
 
             In vtk the ordering of rows is bottom to top
             whereas in iplotlib it is from top to bottom.
@@ -254,7 +254,7 @@ class VTKParser(BackendParserBase):
             self.canvas = canvas
             self.clear()
             return
-    
+
         # 1. Clear layout.
         self.clear()
         self.canvas = canvas
@@ -288,6 +288,9 @@ class VTKParser(BackendParserBase):
 
                 if stop_drawing:
                     break
+
+        # Update the previous number of ticks at Canvas level.
+        self.canvas.prev_tick_number = self.canvas.tick_number
 
         # 4. Update the title at the top of canvas.
         self._refresh_canvas_title(canvas.title, canvas.font_color or '#000000')
@@ -399,6 +402,11 @@ class VTKParser(BackendParserBase):
                 logger.debug(f"Ax color: {vtkImplUtils.get_color3d(fc)}")
             if fs is not None:
                 appearance.SetFontSize(fs)
+
+            if vtk_axis.GetTitle() == 'X Axis':
+                if self.canvas.round_hour:
+                    vtk_axis.SetBehavior(1)  # Fixed behavior"
+
         if isinstance(axis, RangeAxis) and not (isinstance(axis, LinearAxis) and axis.follow):
             if axis.begin is not None and axis.end is not None:
                 self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
@@ -407,6 +415,14 @@ class VTKParser(BackendParserBase):
                 ax_max = self.get_oaw_axis_limits(impl_plot, ax_idx)[1]
                 self.set_oaw_axis_limits(impl_plot, ax_idx, [ax_max - axis.window, ax_max])
         vtk_axis.AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
+
+        # Configurate the number of ticks and labels
+        if self.canvas.tick_number != self.canvas.prev_tick_number:
+            vtk_axis.SetNumberOfTicks(self.canvas.tick_number)
+            # Refresh tick number for each plot
+            axis.tick_number = self.canvas.tick_number
+        elif axis.tick_number != self.canvas.tick_number:
+            vtk_axis.SetNumberOfTicks(axis.tick_number)
 
     def _refresh_shared_x_axis(self):
         size = self.matrix.GetSize()
@@ -441,7 +457,7 @@ class VTKParser(BackendParserBase):
         for ax_idx in range(2):
             if self.get_impl_axis(chart, ax_idx) == obj:
                 break
-        
+
         axes = plot.axes[ax_idx]
         axis = None
         try:
@@ -451,7 +467,7 @@ class VTKParser(BackendParserBase):
                     axis = axes[stack_id]
         except (AssertionError, TypeError):
             axis = axes
-        
+
         ranges_hash = hash(self.get_oaw_axis_limits(chart, ax_idx))
         current_hash = self._impl_plot_ranges_hash[plt_id][ax_idx].get(ci.stack_key)
         if current_hash is not None and (ranges_hash == current_hash):
@@ -459,7 +475,7 @@ class VTKParser(BackendParserBase):
 
         self._impl_plot_ranges_hash[plt_id][ax_idx].update({ci.stack_key: ranges_hash})
         self.update_range_axis(axis, ax_idx, chart)
-        
+
         if ax_idx != 0:
             return
 
@@ -739,7 +755,7 @@ class VTKParser(BackendParserBase):
         except AttributeError:
             return
         hi_prec_nanos = self.hi_precision_needed(plot)
-    
+
         if hasattr(signal, 'envelope') and signal.envelope:
             if ndims != 3:
                 logger.error(
