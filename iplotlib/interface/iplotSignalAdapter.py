@@ -192,7 +192,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         """
         if data is None:
             super().set_data() # as of now this does nothing.
-        
+
         self._finalize_xyz_data(data)
 
         # Pure processing, in that case, emulate a successful data access
@@ -443,7 +443,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         if len(self.children):
             vm = dict(self._local_env)
             vm.update(ParserHelper.env) # makes aliases accessible to parser
-            
+
             # 2.1 Ensure all child signals have their time, data vectors (if DA enabled)
             children_data = defaultdict(list)
             for c, child in enumerate(self.children):
@@ -782,8 +782,7 @@ class AccessHelper:
                         message = f"ErrCode: {raw.errcode} | getData failed. Error: {raw.errdesc}"
                         raise DataAccessError(message)
 
-                xdata = np_nvl(raw.xdata) if tRelative else np_nvl(
-                    raw.xdata).astype('int')
+                xdata = np_nvl(raw.xdata) if tRelative else np_nvl(raw.xdata).astype('int64')
 
                 if len(xdata) > 0:
                     logger.debug(
