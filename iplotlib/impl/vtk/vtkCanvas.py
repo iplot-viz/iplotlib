@@ -4,6 +4,8 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Any, Callable, Collection, Sequence, Tuple, Union
 
+from vtkmodules.vtkRenderingAnnotation import vtkAxisActor2D
+
 from iplotlib.core import (Axis,
                            LinearAxis,
                            RangeAxis,
@@ -347,6 +349,43 @@ class VTKParser(BackendParserBase):
                 chart = self.add_vtk_chart(element, 0, row_id)
             elif isinstance(element, vtkChart):
                 chart = element
+                # Change this to make visible all axis
+                chart.SetAutoAxes(False)
+                chart.GetAxis(vtkAxis.RIGHT).SetVisible(True)
+                chart.GetAxis(vtkAxis.TOP).SetVisible(True)
+                chart.GetAxis(vtkAxis.TOP).SetTitle("Top")
+                chart.GetAxis(vtkAxis.RIGHT).SetTitle("Right")
+                chart.GetAxis(vtkAxis.TOP).SetTitleVisible(False)
+                chart.GetAxis(vtkAxis.RIGHT).SetTitleVisible(False)
+
+                # Label visibility
+                chart.GetAxis(vtkAxis.RIGHT).SetLabelsVisible(False)
+                chart.GetAxis(vtkAxis.TOP).SetLabelsVisible(False)
+
+                # axisid = [vtkAxis.LEFT, vtkAxis.BOTTOM, vtkAxis.RIGHT, vtkAxis.TOP]
+                # for i in range(4):
+                # axis = chart.GetAxis(axisid[i])
+                # axis.SetNumberOfTicks(self.canvas.ticks_number)
+
+                if self.canvas.ticks_position:
+                    # Ticks visibility
+                    chart.GetAxis(vtkAxis.RIGHT).SetTicksVisible(True)
+                    chart.GetAxis(vtkAxis.TOP).SetTicksVisible(True)
+                    # Ticks position
+                    chart.GetAxis(vtkAxis.TOP).SetPosition(1)
+                    chart.GetAxis(vtkAxis.RIGHT).SetPosition(0)
+                    #chart.GetAxis(vtkAxis.BOTTOM).SetPosition(3)
+                    #chart.GetAxis(vtkAxis.LEFT).SetPosition(2)
+
+                    # chart.GetAxis(vtkAxis.BOTTOM).Label
+                    # chart.GetAxis(vtkAxis.BOTTOM).GetLabelProperties().SetVerticalJustification(2)
+                    chart.GetAxis(vtkAxis.LEFT).GetLabelProperties()
+                else:
+                    # Ticks visibility
+                    chart.GetAxis(vtkAxis.RIGHT).SetTicksVisible(False)
+                    chart.GetAxis(vtkAxis.TOP).SetTicksVisible(False)
+                    chart.GetAxis(vtkAxis.BOTTOM).SetPosition(1)
+                    chart.GetAxis(vtkAxis.LEFT).SetPosition(0)
             else:
                 logger.critical(
                     f"Unexpected code path in process_ipl_plot {column}, {row}, {row_id}")
@@ -407,6 +446,10 @@ class VTKParser(BackendParserBase):
                 ax_max = self.get_oaw_axis_limits(impl_plot, ax_idx)[1]
                 self.set_oaw_axis_limits(impl_plot, ax_idx, [ax_max - axis.window, ax_max])
         vtk_axis.AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
+        if ax_idx == 0:
+            impl_plot.GetAxis(vtkAxis.TOP).AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
+        else:
+            impl_plot.GetAxis(vtkAxis.RIGHT).AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
 
     def _refresh_shared_x_axis(self):
         size = self.matrix.GetSize()
@@ -585,6 +628,8 @@ class VTKParser(BackendParserBase):
                 if grid is not None:
                     chart.GetAxis(vtkAxis.BOTTOM).SetGridVisible(grid)
                     chart.GetAxis(vtkAxis.LEFT).SetGridVisible(grid)
+                    chart.GetAxis(vtkAxis.TOP).SetGridVisible(grid)
+                    chart.GetAxis(vtkAxis.RIGHT).SetGridVisible(grid)
 
     def _refresh_legend(self, plot: Plot):
         """Update legend visibility
@@ -733,6 +778,7 @@ class VTKParser(BackendParserBase):
             if hasattr(signal, 'ts_start') and hasattr(signal, 'ts_end'):
                 self.set_oaw_axis_limits(chart, 0, [signal.ts_start, signal.ts_end])
                 chart.GetAxis(vtkAxis.BOTTOM).InvokeEvent(vtkChart.UpdateRange)
+                #chart.GetAxis(vtkAxis.TOP).InvokeEvent(vtkChart.UpdateRange)
         try:
             ci = self._impl_plot_cache_table.get_cache_item(chart)
             plot = ci.plot()
@@ -988,6 +1034,7 @@ class VTKParser(BackendParserBase):
     def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
         try:
             impl_plot.GetAxis(vtkAxis.LEFT).SetRange(limits[0], limits[1])
+            impl_plot.GetAxis(vtkAxis.RIGHT).SetRange(limits[0], limits[1])
         except AttributeError:
             return
 

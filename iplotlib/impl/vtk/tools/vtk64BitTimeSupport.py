@@ -314,6 +314,9 @@ class VTK64BitTimePlotSupport:
                 xAxis = chart.GetAxis(vtkAxis.BOTTOM)
                 xAxis.SetMinimum(tMin)
                 xAxis.SetMaximum(tMax)
+                xAxis_top = chart.GetAxis(vtkAxis.TOP)
+                xAxis_top.SetMinimum(tMin)
+                xAxis_top.SetMaximum(tMax)
 
     def dynamicSelectColumns(self, chart: vtkChart):
         """Dynamically select columns (if bit sequencing was enabled)
@@ -436,9 +439,16 @@ class VTK64BitTimePlotSupport:
         xAxis.SetNumberOfTicks(6)
         xAxis.SetTickLabelAlgorithm(vtkAxis.TICK_SIMPLE)
 
+        # Top ticks
+        xAxis_top = chart.GetAxis(vtkAxis.TOP)  # type: vtkAxis
+        xAxis_top.SetCustomTickPositions(None, None)
+        xAxis_top.SetNumberOfTicks(6)
+        xAxis_top.SetTickLabelAlgorithm(vtkAxis.TICK_SIMPLE)
+
         self.computeOffsetValue(chart)
 
         xAxis.Update()
+        xAxis_top.Update()
         tickPositionsVtkArr = xAxis.GetTickPositions()
         tickPositionsNpArr = numpy_support.vtk_to_numpy(tickPositionsVtkArr)
         tss = []
@@ -499,9 +509,11 @@ class VTK64BitTimePlotSupport:
             tick_labels.InsertNextValue(tick_label)
 
         xAxis.SetCustomTickPositions(tickPositionsVtkArr, tick_labels)
+        xAxis_top.SetCustomTickPositions(tickPositionsVtkArr, tick_labels)
         try:
             xAxis.SetTitle(tss[0].strftime(prefixFmt))
         except IndexError:
             logger.critical(f"There is no data for chart. Setting xAxis title to 'X Axis'")
             xAxis.SetTitle('X Axis')
         xAxis.Update()
+        xAxis_top.Update()

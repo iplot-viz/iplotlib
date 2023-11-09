@@ -428,7 +428,7 @@ class MatplotlibParser(BackendParserBase):
             label_props = dict(color=fc)
             # Set ticks on the top and right axis
             if self.canvas.ticks_position:
-                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True)
+                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
             else:
                 tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
 
