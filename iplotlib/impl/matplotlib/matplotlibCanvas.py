@@ -6,7 +6,7 @@ from typing import Any, Callable, Collection, List
 import traceback
 import numpy as np
 from matplotlib.axes import Axes as MPLAxes
-from matplotlib.axis import Tick, XAxis
+from matplotlib.axis import Tick
 from matplotlib.axis import Axis as MPLAxis
 from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.figure import Figure
@@ -106,8 +106,9 @@ class MatplotlibParser(BackendParserBase):
               ##  params.update({'where': step})
                 ##draw_fn = mpl_axes.step
 
-            lines = draw_fn(x_data, y_data, **params)
-            self._signal_impl_shape_lut.update({id(signal): [lines]})
+            lines = [draw_fn(x_data, y_data, **params)]
+            signal.color = lines[0][0].get_color()
+            self._signal_impl_shape_lut.update({id(signal): lines})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
         if not isinstance(mpl_axes, MPLAxes):
@@ -218,7 +219,7 @@ class MatplotlibParser(BackendParserBase):
             self.canvas = canvas
             self.clear()
             return
-        
+
         # 1. Clear layout.
         self.clear()
 
@@ -247,8 +248,11 @@ class MatplotlibParser(BackendParserBase):
             if stop_drawing:
                 break
 
-        # Update the previous number of ticks at Canvas level.
+        # Update the previous number of ticks at Canvas level
         self.canvas.prev_tick_number = self.canvas.tick_number
+
+        # Update the previous background color at Canvas level
+        self.canvas.prev_background_color = self.canvas.background_color
 
         # 4. Update the title at the top of canvas.
         if canvas.title is not None:
@@ -415,7 +419,7 @@ class MatplotlibParser(BackendParserBase):
                 continue
             if not ci.signals:
                 continue
- 
+
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_xranges"):
@@ -431,8 +435,9 @@ class MatplotlibParser(BackendParserBase):
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
 
         if isinstance(axis, Axis):
-            fc = self._pm.get_value('font_color', self.canvas, axis, plot) or 'black'
-            fs = self._pm.get_value('font_size', self.canvas, axis, plot)
+            fc = self._pm.get_value(
+                'font_color', self.canvas, plot, axis) or 'black'
+            fs = self._pm.get_value('font_size', self.canvas, plot, axis)
 
             mpl_axis._font_color = fc
             mpl_axis._font_size = fs
@@ -445,6 +450,7 @@ class MatplotlibParser(BackendParserBase):
                 tick_props.update({'labelsize': fs})
             if axis.label is not None:
                 mpl_axis.set_label_text(axis.label, **label_props)
+
             mpl_axis.set_tick_params(**tick_props)
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None and (axis.begin or axis.end):
@@ -541,9 +547,9 @@ class MatplotlibParser(BackendParserBase):
         else:
             plot = None
             stack_key = None
-        
+
         logger.debug(f"Focusing on plot: {id(plot)}, stack_key: {stack_key}")
-                
+
         if self._focus_plot is not None and plot is None:
             if self.canvas.shared_x_axis and len(self._focus_plot.axes) > 0 and isinstance(self._focus_plot.axes[0], RangeAxis):
                 begin, end = get_x_axis_range(self._focus_plot)
@@ -603,7 +609,7 @@ class MatplotlibParser(BackendParserBase):
             'marker_size', self.canvas, plot, signal=signal) or 0
         style["drawstyle"] = self._pm.get_value(
             'step', self.canvas, plot, signal=signal)
-       
+
         return style
 
     def _redraw_in_frame_with_grid(self, a):
@@ -770,6 +776,7 @@ class MultiCursor2(MultiCursor):
                  cache_table: ImplementationPlotCacheTable = None,
                  **lineprops):
 
+        super().__init__(canvas, axes, useblit, horizOn, vertOn, **lineprops)
         self.canvas = canvas
         self.axes = axes
         self.horizOn = horizOn
@@ -865,6 +872,10 @@ class MultiCursor2(MultiCursor):
 
     def clear(self, event):
         super().clear(event)
+        # In matplolib 3.6, for the MultiCursor object type,
+        # the way of storing certain information such as background is changed.
+        if hasattr(self, "_canvas_infos"):
+            self.background = self._canvas_infos[self.canvas]["background"]
         # self.background = None
         for arrow in self.x_arrows + self.y_arrows:
             arrow.set_visible(False)

@@ -5,32 +5,33 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.property_manager import PropertyManager
 
+
 class TestPropertyManager(unittest.TestCase):
     def setUp(self) -> None:
         self.pm = PropertyManager()
         self.canvas = Canvas(
-            font_size = 24,
-            font_color = "black",
-            line_style = "solid",
-            line_size = 4,
-            marker = 'x',
-            marker_size = 8,
-            step = "steps-mid",
-            hi_precision_data = True,
-            dec_samples = 1000,
-            legend = True,
-            grid = False,
-            mouse_mode = Canvas.MOUSE_MODE_SELECT,
-            crosshair_enabled = False,
-            crosshair_color = "red",
-            crosshair_line_width = 1,
-            crosshair_horizontal = True,
-            crosshair_vertical = True,
-            crosshair_per_plot = False,
-            streaming = False,
-            shared_x_axis = False,
-            autoscale = True,
-            auto_refresh = 0
+            font_size=24,
+            font_color="#000000",
+            line_style="solid",
+            line_size=4,
+            marker='x',
+            marker_size=8,
+            step="steps-mid",
+            hi_precision_data=True,
+            dec_samples=1000,
+            legend=True,
+            grid=False,
+            mouse_mode=Canvas.MOUSE_MODE_SELECT,
+            crosshair_enabled=False,
+            crosshair_color="red",
+            crosshair_line_width=1,
+            crosshair_horizontal=True,
+            crosshair_vertical=True,
+            crosshair_per_plot=False,
+            streaming=False,
+            shared_x_axis=False,
+            autoscale=True,
+            auto_refresh=0
         )
         super().setUp()
 
@@ -54,9 +55,8 @@ class TestPropertyManager(unittest.TestCase):
         self.assertEqual(f("marker_size"), self.canvas.marker_size)
         self.assertEqual(f("step"), self.canvas.step)
         self.assertEqual(f("dec_samples"), self.canvas.dec_samples)
-    
-    def test_axis_inherits_canvas_properties(self):
 
+    def test_axis_inherits_canvas_properties(self):
         plot = PlotXY()
 
         self.canvas.add_plot(plot)
@@ -67,7 +67,6 @@ class TestPropertyManager(unittest.TestCase):
             self.assertEqual(f("font_size"), self.canvas.font_size)
 
     def test_signal_inherits_plot_properties(self):
-
         plot = PlotXY()
         signal = SimpleSignal()
         plot.add_signal(signal)

@@ -33,7 +33,7 @@ class Plot(ABC):
 
 
     font_size: int = None #: the font size of the plot title text
-    font_color: str = None #: the font color of the plot title text
+    font_color: str = '#000000'  #: the font color of the plot title text
     background_color: str = '#FFFFFF'
     tick_number: int = 7
     legend: bool = None #: indicate if the plot legend must be shown

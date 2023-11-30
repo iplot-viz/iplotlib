@@ -192,7 +192,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         """
         if data is None:
             super().set_data() # as of now this does nothing.
-        
+
         self._finalize_xyz_data(data)
 
         # Pure processing, in that case, emulate a successful data access
@@ -443,7 +443,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         if len(self.children):
             vm = dict(self._local_env)
             vm.update(ParserHelper.env) # makes aliases accessible to parser
-            
+
             # 2.1 Ensure all child signals have their time, data vectors (if DA enabled)
             children_data = defaultdict(list)
             for c, child in enumerate(self.children):
@@ -661,11 +661,13 @@ class AccessHelper:
             signal.data_store[0] = BufferObject(np.append(signal.data_store[0], res['d0']))
             signal.data_store[1] = BufferObject(np.append(signal.data_store[1], res['d1']))
             signal.data_store[2] = BufferObject(np.append(signal.data_store[2], res['d2']))
+            signal.data_store[3] = BufferObject(np.append(signal.data_store[3], res['d3']))
         else:
             signal.data_store.clear()
             signal.data_store.append(BufferObject(res['d0']))
             signal.data_store.append(BufferObject(res['d1']))
             signal.data_store.append(BufferObject(res['d2']))
+            signal.data_store.append(BufferObject(res['d3']))
         logger.debug("on_fetch_done: {} ".format(len(res['d1'])))
         # units can be specified separately, if your data access module does not use the BufferObject subclass.
         if res.get('d0_unit'):
@@ -674,6 +676,8 @@ class AccessHelper:
             signal.data_store[1].unit = res['d1_unit']
         if res.get('d2_unit'):
             signal.data_store[2].unit = res['d2_unit']
+        if res.get('d3_unit'):
+            signal.data_store[3].unit = res['d3_unit']
 
         signal.set_da_success()
 
@@ -722,9 +726,11 @@ class AccessHelper:
                       d0=[],
                       d1=[],
                       d2=[],
+                      d3=[],
                       d0_unit='',
                       d1_unit='',
                       d2_unit='',
+                      d3_unit='',
                       isds=False)
         da_params.pop('envelope')  # getEnvelope does not need this.
 
@@ -747,14 +753,17 @@ class AccessHelper:
                 result['alias_map'] = {
                         'time': {'idx': 0, 'independent': True},
                         'dmin': {'idx': 1},
-                        'dmax': {'idx': 2}
+                        'dmax': {'idx': 2},
+                        'davg': {'idx': 3}
                     }
                 result['d0'] = np_nvl(xdata)
                 result['d1'] = np_nvl(d_env.ydata_min if d_env else None)
                 result['d2'] = np_nvl(d_env.ydata_max if d_env else None)
+                result['d3'] = np_nvl(d_env.ydata_avg if d_env else None)
                 result['d0_unit'] = d_env.xunit if d_env else ''
                 result['d1_unit'] = d_env.yunit if d_env else ''
                 result['d2_unit'] = d_env.yunit if d_env else ''
+                result['d3_unit'] = d_env.yunit if d_env else ''
                 result['isds'] = True
                 logger.debug("[UDA ] nbsMIN={} nbsMAX={}".format(len(d_env.ydata_min),len(d_env.ydata_max)))
 
@@ -773,8 +782,7 @@ class AccessHelper:
                         message = f"ErrCode: {raw.errcode} | getData failed. Error: {raw.errdesc}"
                         raise DataAccessError(message)
 
-                xdata = np_nvl(raw.xdata) if tRelative else np_nvl(
-                    raw.xdata).astype('int')
+                xdata = np_nvl(raw.xdata) if tRelative else np_nvl(raw.xdata).astype('int64')
 
                 if len(xdata) > 0:
                     logger.debug(
@@ -792,9 +800,11 @@ class AccessHelper:
                 result['d0'] = xdata
                 result['d1'] = np_nvl(raw.ydata)
                 result['d2'] = np.empty(0).astype('double')
+                result['d3'] = np.empty(0).astype('double')
                 result['d0_unit'] = raw.xunit if raw.xunit else ''
                 result['d1_unit'] = raw.yunit if raw.yunit else ''
                 result['d2_unit'] = ''
+                result['d3_unit'] = ''
                 result['isds'] = ds
         else:
             raise DataAccessError(

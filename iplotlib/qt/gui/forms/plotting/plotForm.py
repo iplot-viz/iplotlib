@@ -39,6 +39,7 @@ class PlotForm(IplotPreferencesForm):
             {"label": "Font size", "property": "font_size",
                 "widget": self.default_fontsize_widget()},
             {"label": "Font color", "property": "font_color", "widget": ColorPicker("font_color")},
+            {"label": "Background color", "property": "background_color", "widget": ColorPicker("background_color")},
             {"label": "Line style", "property": "line_style",
                 "widget": self.default_linestyle_widget()},
             {"label": "Line size", "property": "line_size",
