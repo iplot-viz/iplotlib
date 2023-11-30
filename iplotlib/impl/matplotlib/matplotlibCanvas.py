@@ -218,7 +218,7 @@ class MatplotlibParser(BackendParserBase):
             self.canvas = canvas
             self.clear()
             return
-        
+
         # 1. Clear layout.
         self.clear()
 
@@ -415,7 +415,7 @@ class MatplotlibParser(BackendParserBase):
                 continue
             if not ci.signals:
                 continue
- 
+
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_xranges"):
@@ -532,9 +532,9 @@ class MatplotlibParser(BackendParserBase):
         else:
             plot = None
             stack_key = None
-        
+
         logger.debug(f"Focusing on plot: {id(plot)}, stack_key: {stack_key}")
-                
+
         if self._focus_plot is not None and plot is None:
             if self.canvas.shared_x_axis and len(self._focus_plot.axes) > 0 and isinstance(self._focus_plot.axes[0], RangeAxis):
                 begin, end = get_x_axis_range(self._focus_plot)
@@ -594,7 +594,7 @@ class MatplotlibParser(BackendParserBase):
             'marker_size', self.canvas, plot, signal=signal) or 0
         style["drawstyle"] = self._pm.get_value(
             'step', self.canvas, plot, signal=signal)
-       
+
         return style
 
     def _redraw_in_frame_with_grid(self, a):
@@ -747,20 +747,12 @@ def get_data_range(data, axis_idx):
 
 class MultiCursor2(MultiCursor):
 
-    def __init__(self, canvas: FigureCanvasBase,
-                 axes: MPLAxes,
-                 x_label: bool = True,
-                 y_label: bool = True,
-                 val_label: bool = True,
-                 useblit: bool = True,
-                 horizOn=False,
-                 vertOn=True,
-                 val_tolerance: float = 0.05,
-                 text_color: str = "white",
-                 font_size: int = 8,
-                 cache_table: ImplementationPlotCacheTable = None,
+    def __init__(self, canvas: FigureCanvasBase, axes: MPLAxes, x_label: bool = True, y_label: bool = True,
+                 val_label: bool = True, useblit: bool = True, horizOn=False, vertOn=True, val_tolerance: float = 0.05,
+                 text_color: str = "white", font_size: int = 8, cache_table: ImplementationPlotCacheTable = None,
                  **lineprops):
 
+        super().__init__(canvas, axes, useblit, horizOn, vertOn, **lineprops)
         self.canvas = canvas
         self.axes = axes
         self.horizOn = horizOn
@@ -856,6 +848,10 @@ class MultiCursor2(MultiCursor):
 
     def clear(self, event):
         super().clear(event)
+        # In matplolib 3.6, for the MultiCursor object type,
+        # the way of storing certain information such as background is changed.
+        if hasattr(self, "_canvas_infos"):
+            self.background = self._canvas_infos[self.canvas]["background"]
         # self.background = None
         for arrow in self.x_arrows + self.y_arrows:
             arrow.set_visible(False)
