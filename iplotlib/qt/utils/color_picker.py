@@ -1,6 +1,8 @@
 """
 A color dialog box.
 """
+import logging
+import iplotlib.qt.utils.color_constants as cc
 
 # Author: Piotr Mazur
 # Changelog:
@@ -12,10 +14,12 @@ from PySide6.QtCore import QMargins, QEvent, Qt, Property
 from PySide6.QtGui import QColor, QKeyEvent
 from PySide6.QtWidgets import QApplication, QColorDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
+
 class ColorPicker(QWidget):
     """
     A color dialog box.
     """
+
     def __init__(self, name_property):
         super().__init__()
         self.setLayout(QHBoxLayout())
@@ -23,7 +27,6 @@ class ColorPicker(QWidget):
 
         self.name = name_property
 
-        # TODO: Find out if this button can be replaced with a colored box.
         self.selectButton = QPushButton("Select color", self)
         self.selectButton.clicked.connect(self.openColorDialog)
 
@@ -34,10 +37,11 @@ class ColorPicker(QWidget):
         self.colorWindow.setFixedHeight(40)
         self.layout().addWidget(self.selectButton)
         self.layout().addWidget(self.colorWindow)
-        
+
         self.colorDialog = QColorDialog(self)
         self.colorDialog.currentColorChanged.connect(self.indicateColorChange)
-        self._rgbValue = '#FFFFFF'
+        self._rgbValue = None
+        self.is_initial_color_set = False
 
     def openColorDialog(self):
         self.colorDialog.show()
@@ -45,29 +49,33 @@ class ColorPicker(QWidget):
     def indicateColorChange(self, color: QColor):
         self._rgbValue = '#{:02X}{:02X}{:02X}'.format(color.red(), color.green(), color.blue())
         self.colorWindow.setStyleSheet("background-color: {}".format(self._rgbValue))
-        QApplication.postEvent(
-            self, QKeyEvent(QEvent.KeyPress, Qt.Key_Enter, Qt.NoModifier))
-    
-    def currentcolor(self) -> str:
+        QApplication.postEvent(self, QKeyEvent(QEvent.KeyPress, Qt.Key_Enter, Qt.NoModifier))
+
+    def current_color(self) -> str:
         return self._rgbValue
 
     def setCurrentColor(self, color):
+        if not self.is_initial_color_set:
+            self.is_initial_color_set = True  # Disables the call at startup
+            return
         if not isinstance(color, str):
             color = "#000000"
-        elif not len(color):
+        if len(color) and color[0] != "#":
+            color = cc.name_to_hex(color)
+        if not len(color) or color is None:
+            logging.warning("Received color='%s' for color_picker has a wrong format. Setting default color", color)
             if self.name == "crosshair_color":
-                color = "#ff0000"  # Default color for crosshair will be red
-
+                color = "#ff0000"
             elif self.name == "font_color":
-                color = "#000000"  # Default color for font will be black
+                color = "#000000"
+            elif self.name == "background_color":
+                color = "#FFFFFF"  # Default color for background of plot will be white
             else:
                 color = "#000000"
         if color[0] == "#" and len(color) == 7:
-            # Convert hex string to RGB
             r, g, b = tuple(int(color[i:i + 2], 16) for i in range(1, 7, 2))
             self.colorDialog.setCurrentColor(QColor(r, g, b))
         else:
             return self.indicateColorChange(self.colorDialog.currentColor())
 
-    currentColor = Property(str, currentcolor, setCurrentColor, user=True)
-
+    currentColor = Property(str, current_color, setCurrentColor, user=True)
