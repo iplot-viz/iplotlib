@@ -14,6 +14,7 @@ from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.text import Annotation, Text
 from matplotlib.widgets import MultiCursor
+from matplotlib.ticker import MaxNLocator
 from pandas.plotting import register_matplotlib_converters
 
 import iplotLogging.setupLogger as sl
@@ -47,7 +48,7 @@ class MatplotlibParser(BackendParserBase):
         self._cursors = []
 
         register_matplotlib_converters()
-        self.figure = Figure(figsize=(50,50))
+        self.figure = Figure()
         self._impl_plot_ranges_hash = dict()
 
         if tight_layout:
@@ -101,11 +102,6 @@ class MatplotlibParser(BackendParserBase):
             logger.debug(f"mpl_line_plot step case 2=: {step}")
             params = dict(**style)
 
-            # draw_fn = mpl_axes.plot
-            # lines = draw_fn(x_data, y_data, **params)
-            ##if step is not None and step != 'None':
-            ##  params.update({'where': step})
-            ##draw_fn = mpl_axes.step
             if isinstance(plot, PlotXY):
                 draw_fn = mpl_axes.plot
                 lines = draw_fn(x_data, y_data, **params)
@@ -229,7 +225,7 @@ class MatplotlibParser(BackendParserBase):
             self.canvas = canvas
             self.clear()
             return
-        
+
         # 1. Clear layout.
         self.clear()
 
@@ -257,6 +253,12 @@ class MatplotlibParser(BackendParserBase):
 
             if stop_drawing:
                 break
+
+        # Update the previous number of ticks at Canvas level
+        self.canvas.prev_tick_number = self.canvas.tick_number
+
+        # Update the previous background color at Canvas level
+        self.canvas.prev_background_color = self.canvas.background_color
 
         # 4. Update the title at the top of canvas.
         if canvas.title is not None:
@@ -313,6 +315,16 @@ class MatplotlibParser(BackendParserBase):
                     if not fs:
                         fs = None
                     mpl_axes.set_title(plot.title, color=fc, size=fs)
+
+                # Set the background color
+                if self.canvas.background_color != self.canvas.prev_background_color:
+                    mpl_axes.set_facecolor(self.canvas.background_color)
+                    # Refresh background color for each plot
+                    plot.background_color = self.canvas.background_color
+                elif plot.background_color != self.canvas.background_color:
+                    mpl_axes.set_facecolor(plot.background_color)
+                else:
+                    mpl_axes.set_facecolor(self.canvas.background_color)
 
                 # If this is a stacked plot the X axis should be visible only at the bottom
                 # plot of the stack except it is focused
@@ -413,7 +425,7 @@ class MatplotlibParser(BackendParserBase):
                 continue
             if not ci.signals:
                 continue
- 
+
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_xranges"):
@@ -430,15 +442,20 @@ class MatplotlibParser(BackendParserBase):
 
         if isinstance(axis, Axis):
             fc = self._pm.get_value(
-                'font_color', self.canvas, axis, plot) or 'black'
-            fs = self._pm.get_value('font_size', self.canvas, axis, plot)
+                'font_color', self.canvas, plot, axis) or 'black'
+            fs = self._pm.get_value('font_size', self.canvas, plot, axis)
 
             mpl_axis._font_color = fc
             mpl_axis._font_size = fs
             mpl_axis._label = axis.label
 
             label_props = dict(color=fc)
-            tick_props = dict(color=fc, labelcolor=fc)
+            # Set ticks on the top and right axis
+            if self.canvas.ticks_position:
+                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
+            else:
+                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
+
             if fs is not None and fs > 0:
                 label_props.update({'fontsize': fs})
                 tick_props.update({'labelsize': fs})
@@ -455,7 +472,18 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(axis, LinearAxis):
             if axis.is_date:
                 ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-                mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets))
+                mpl_axis.set_major_formatter(
+                    NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, round=self.canvas.round_hour))
+
+        # Configurate number of ticks and labels
+        if self.canvas.tick_number != self.canvas.prev_tick_number:
+            mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
+            # Refresh tick number for each plot
+            axis.tick_number = self.canvas.tick_number
+        elif axis.tick_number != self.canvas.tick_number:
+            mpl_axis.set_major_locator(MaxNLocator(axis.tick_number))
+        else:
+            mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
 
     @BackendParserBase.run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
@@ -530,9 +558,9 @@ class MatplotlibParser(BackendParserBase):
         else:
             plot = None
             stack_key = None
-        
+
         logger.debug(f"Focusing on plot: {id(plot)}, stack_key: {stack_key}")
-                
+
         if self._focus_plot is not None and plot is None:
             if self.canvas.shared_x_axis and len(self._focus_plot.axes) > 0 and isinstance(self._focus_plot.axes[0], RangeAxis):
                 begin, end = get_x_axis_range(self._focus_plot)
@@ -592,7 +620,7 @@ class MatplotlibParser(BackendParserBase):
             'marker_size', self.canvas, plot, signal=signal) or 0
         style["drawstyle"] = self._pm.get_value(
             'step', self.canvas, plot, signal=signal)
-       
+
         return style
 
     def _redraw_in_frame_with_grid(self, a):
@@ -759,6 +787,7 @@ class MultiCursor2(MultiCursor):
                  cache_table: ImplementationPlotCacheTable = None,
                  **lineprops):
 
+        super().__init__(canvas, axes, useblit, horizOn, vertOn, **lineprops)
         self.canvas = canvas
         self.axes = axes
         self.horizOn = horizOn
@@ -854,6 +883,10 @@ class MultiCursor2(MultiCursor):
 
     def clear(self, event):
         super().clear(event)
+        # In matplolib 3.6, for the MultiCursor object type,
+        # the way of storing certain information such as background is changed.
+        if hasattr(self, "_canvas_infos"):
+            self.background = self._canvas_infos[self.canvas]["background"]
         # self.background = None
         for arrow in self.x_arrows + self.y_arrows:
             arrow.set_visible(False)

@@ -23,8 +23,9 @@ class CanvasStreamer:
         all_signals = []
         for col in canvas.plots:
             for plot in col:
-                for (stack_id, signals) in plot.signals.items():
-                    all_signals += signals
+                if plot:
+                    for (stack_id, signals) in plot.signals.items():
+                        all_signals += signals
 
         signals = {}
         for s in all_signals:
@@ -88,9 +89,11 @@ class CanvasStreamer:
                           d0=dobj.xdata,
                           d1=dobj.ydata,
                           d2=[],
+                          d3=[],
                           d0_unit=dobj.xunit,
                           d1_unit=dobj.yunit,
-                          d2_unit='')
+                          d2_unit='',
+                          d3_unit='')
                 signal.inject_external(append=True, **result)
                 logger.info(f"Updated {varname} with {len(dobj.xdata)} new samples")
                 callback(signal)

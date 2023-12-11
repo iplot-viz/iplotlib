@@ -7,11 +7,12 @@ This module defines the `Canvas` object.
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import List, Union
+from typing import List, Union, Dict
 
 from iplotlib.core.persistence import JSONExporter
 from iplotlib.core.plot import Plot
 from iplotlib.core.signal import Signal
+import pandas as pd
 
 
 @dataclass
@@ -26,41 +27,61 @@ class Canvas(ABC):
     MOUSE_MODE_ZOOM = 'MM_ZOOM'
     MOUSE_MODE_DIST = 'MM_DIST'
 
-    rows: int = 1 #: Number of rows in the grid. If specified the space for this nuber of rows should be reserved when rendering canvas since some of the plots can be empty
-    cols: int = 1 #: Number of columns in the grid. If specified the space for this number of columns should be reserved when rendering canvas since some of the plots may be empty
-    title: str = None #: Canvas title - should be shown above the canvas grid centered horizontally
+    #: Number of rows in the grid. If specified the space for this nuber of rows should be reserved
+    # when rendering canvas since some plots can be empty
+    rows: int = 1
+    #: Number of columns in the grid. If specified the space for this number of columns should be reserved
+    # when rendering canvas since some plots may be empty
+    cols: int = 1
+    title: str = None  #: Canvas title - should be shown above the canvas grid centered horizontally
 
+    font_size: int = None  #: default font size that will be cascaded across plots and axes of this canvas.
+    font_color: str = '#000000'  #: default font color that will be cascaded across plots and axes of this canvas.
+    background_color: str = '#FFFFFF'  # default background color will be white for each plot
+    # previous background color used to keep consistency between Canvas and Plot preferences
+    prev_background_color = '#FFFFFF'
+    tick_number: int = 7  # default number of ticks for each plot
+    prev_tick_number = 7
 
-    font_size: int = None #: default font size that will be cascaded across plots and axes of this canvas.
-    font_color: str = None #: default font color that will be cascaded across plots and axes of this canvas.
+    round_hour: bool = False
 
-    line_style: str = None #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
-    line_size: int = None #: default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent points should be canvas impementation dependent
+    line_style: str = None  #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
+    # default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent
+    # points should be canvas impementation dependent
+    line_size: int = None
 
-    marker: str = None #: default marker type to display. If set a marker is drawn at every point of the data sample. Markers and lines can be drawn together and are not mutually exclusive. Supported types: 'x','o', None, default: None (no markers are drawn)
-    marker_size: int = None #: default marker size. Whether it is mapped to pixels or DPI independent points should be canvas impementation dependent
+    #: default marker type to display. If set a marker is drawn at every point of the data sample.
+    # Markers and lines can be drawn together and are not mutually exclusive.
+    # Supported types: 'x','o', None, default: None (no markers are drawn)
+    marker: str = None
+    #: default marker size. Whether it is mapped to pixels or DPI independent points should
+    # be canvas implementation dependent
+    marker_size: int = None
 
-    step: str = None # default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
+    step: str = None  # default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
 
-    hi_precision_data: bool = False #: a boolean that suggests the data is sensitive to round off errors and requires special handling
-    dec_samples: int = 1000 #: the default no. of samples for a data access fetch call.
+    #: a boolean that suggests the data is sensitive to round off errors and requires special handling
+    hi_precision_data: bool = False
+    dec_samples: int = 1000  #: the default no. of samples for a data access fetch call.
 
-    legend: bool = True #: a boolean that suggests the visibility of a plot legend box.
+    legend: bool = True  #: a boolean that suggests the visibility of a plot legend box.
     legend_position: str = 'upper right'  #: indicate the location of the plot legend
     legend_layout: str = 'vertical'  #: indicate the layout of the plot legend
     grid: bool = False #: a boolean that suggests the visibility of a plot grid
+    ticks_position: bool = False
 
-    mouse_mode: str = MOUSE_MODE_SELECT #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
+    #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
+    mouse_mode: str = MOUSE_MODE_SELECT
     enable_Xlabel_crosshair: bool = True
     enable_Ylabel_crosshair: bool = True
     enable_ValLabel_crosshair: bool = True
 
-    plots: List[List[Union[Plot,None]]] = None #: A 22-level nested list of plots.
+    plots: List[List[Union[Plot, None]]] = None  #: A 22-level nested list of plots.
 
-    crosshair_enabled: bool = False #: visibility of crosshair.
-    crosshair_color: str = "red" #: color of the crosshair cursor lines.
-    crosshair_line_width: int = 1 # width of the crosshair cursor lines.
-    crosshair_horizontal: bool = True # visibility of the hori
+    crosshair_enabled: bool = False  #: visibility of crosshair.
+    crosshair_color: str = "red"  #: color of the crosshair cursor lines.
+    crosshair_line_width: int = 1  # width of the crosshair cursor lines.
+    crosshair_horizontal: bool = True  # visibility of the hori
     crosshair_vertical: bool = True
     crosshair_per_plot: bool = False
 
@@ -80,7 +101,7 @@ class Canvas(ABC):
     _type: str = None
 
     def __post_init__(self):
-        self._type = self.__class__.__module__+'.'+self.__class__.__qualname__
+        self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.plots is None:
             self.plots = [[] for _ in range(self.cols)]
 
@@ -91,7 +112,8 @@ class Canvas(ABC):
         if col >= len(self.plots):
             raise Exception("Cannot add plot to column {}: Canvas has only {} column(s)".format(col, len(self.plots)))
         if len(self.plots[col]) >= self.rows:
-            raise Exception("Cannot add plot to column {}: Column is has {}/{} plots".format(col, len(self.plots[col]), self.rows))
+            raise Exception(
+                "Cannot add plot to column {}: Column is has {}/{} plots".format(col, len(self.plots[col]), self.rows))
         self.plots[col].append(plot)
 
     def set_mouse_mode(self, mode):
@@ -145,6 +167,9 @@ class Canvas(ABC):
         self.enable_ValLabel_crosshair = Canvas.enable_ValLabel_crosshair
         self.crosshair_color = Canvas.crosshair_color
         self.font_color = Canvas.font_color
+        self.background_color = Canvas.background_color
+        self.tick_number = Canvas.tick_number
+        self.prev_tick_number = Canvas.prev_tick_number
         self.line_style = Canvas.line_style
         self.line_size = Canvas.line_size
         self.marker = Canvas.marker
@@ -170,13 +195,15 @@ class Canvas(ABC):
         self.enable_ValLabel_crosshair = old_canvas.enable_ValLabel_crosshair
         self.crosshair_color = old_canvas.crosshair_color
         self.font_color = old_canvas.font_color
+        self.background_color = old_canvas.background_color
+        self.tick_number = old_canvas.tick_number
+        self.prev_tick_number = old_canvas.prev_tick_number
         self.line_style = old_canvas.line_style
         self.line_size = old_canvas.line_size
         self.marker = old_canvas.marker
         self.marker_size = old_canvas.marker_size
         self.step = old_canvas.step
         self.full_mode_all_stack = old_canvas.full_mode_all_stack
-
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
@@ -187,20 +214,20 @@ class Canvas(ABC):
                         plot.merge(old_plot)
 
         # Gather all old signals into a map with uid as key
-        def computeSignalUniqKey(signal: Signal):
+        def computeSignalUniqKey(computed_signal: Signal):
             # Consider signal is same if it has the same row uid, name
-            key = signal.uid + ";" + signal.name
-            return key
+            signal_key = computed_signal.uid + ";" + computed_signal.name
+            return signal_key
 
-        mapOldSignals:dict[str, Signal] = {}
+        map_old_signals: Dict[str, Signal] = {}
         for columns in old_canvas.plots:
             for old_plot in columns:
                 if old_plot:
                     for old_signals in old_plot.signals.values():
                         for old_signal in old_signals:
                             key = computeSignalUniqKey(old_signal)
-                            mapOldSignals[key] = old_signal
-        
+                            map_old_signals[key] = old_signal
+
         # Merge signals at canvas level to handle move between plots
         for columns in self.plots:
             for plot in columns:
@@ -208,5 +235,37 @@ class Canvas(ABC):
                     for signals in plot.signals.values():
                         for signal in signals:
                             key = computeSignalUniqKey(signal)
-                            if key in mapOldSignals:
-                                signal.merge(mapOldSignals[key])
+                            if key in map_old_signals:
+                                signal.merge(map_old_signals[key])
+
+    def get_signals_as_csv(self):
+        x = pd.DataFrame()
+        for c, column in enumerate(self.plots):
+            for r, row in enumerate(column):
+                for p, plot in enumerate(row.signals.values()):
+                    for s, pl_signal in enumerate(plot):
+                        col_name = f"plot{r + 1}.{c + 1}"
+                        if len(row.signals) > 1:
+                            col_name += f".{p + 1}"
+                        if pl_signal.alias:
+                            col_name += f"_{pl_signal.alias}"
+                        else:
+                            col_name += f"_{pl_signal.name}"
+
+                        timestamps = [pd.Timestamp(value) for value in pl_signal.x_data]
+                        format_ts = [ts.strftime("%Y-%m-%dT%H:%M:%S.%f") + "{:03d}".format(ts.nanosecond) + "Z"
+                                     for ts in timestamps]
+                        if pl_signal.envelope:
+                            result = []
+                            for i in range(len(pl_signal.y_data)):
+                                min_values = pl_signal.y_data[i]
+                                max_values = pl_signal.z_data[i]
+                                avg_values = pl_signal.data_store[3][i]
+                                result.append(f"({min_values};{avg_values};{max_values})")
+                            x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
+                            x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
+                        else:
+
+                            x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
+                            x[f"{col_name}.data"] = pd.Series(pl_signal.y_data, name=f"{col_name}.data")
+        return x.to_csv(index=False)

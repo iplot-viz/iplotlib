@@ -110,9 +110,9 @@ class BackendParserBase(ABC):
         self._focus_plot_stack_key = focus_plot_stack_key
         self._layout = None
         self._axis_impl_plot_lut = weakref.WeakValueDictionary() # type: Dict[Axis, Any] # key is id(Axis)
-        self._plot_impl_plot_lut = defaultdict(list) # type: Dict[Plot, List[Any]] # key is id(Plot)
-        self._signal_impl_plot_lut = weakref.WeakValueDictionary() # type: Dict[Signal, Any] # key is id(Signal)
-        self._signal_impl_shape_lut = dict() # type: Dict[Signal, Any] # key is id(Signal)
+        self._plot_impl_plot_lut = defaultdict(list) # type: Dict[int, List[Any]] # key is id(Plot)
+        self._signal_impl_plot_lut = weakref.WeakValueDictionary() # type: Dict[int, Any] # key is id(Signal)
+        self._signal_impl_shape_lut = dict() # type: Dict[int, Any] # key is id(Signal)
         self._stale_citems = list() # type: List[ImplementationPlotCacheItem]
         self._impl_plot_ranges_hash = defaultdict(lambda: defaultdict(dict)) # type: Dict[Any, int] # key is id(impl_plot)
 

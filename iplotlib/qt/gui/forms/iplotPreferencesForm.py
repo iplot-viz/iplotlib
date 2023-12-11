@@ -154,6 +154,10 @@ class IplotPreferencesForm(QWidget):
         return IplotPreferencesForm.create_spinbox(min=min_value, max_value=max_value)
 
     @staticmethod
+    def default_ticknumber_widget():
+        return IplotPreferencesForm.create_spinbox(min=1, max=7)
+
+    @staticmethod
     def default_linestyle_widget():
         return IplotPreferencesForm.create_comboBox(
             {"Solid": "Solid", "Dotted": "Dotted", "Dashed": "Dashed", "None": "None"})
