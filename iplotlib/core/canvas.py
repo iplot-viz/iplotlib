@@ -68,6 +68,9 @@ class Canvas(ABC):
     shared_x_axis: bool = False
     autoscale: bool = True
 
+    contour_levels: int = 30
+    contour_filled: bool = False
+
     """Indicates that when we switch to full mode for a stacked plot we should put entire stacked plot in full mode or only one of the subplots"""
     full_mode_all_stack: bool = True
 
@@ -148,6 +151,8 @@ class Canvas(ABC):
         self.marker_size = Canvas.marker_size
         self.step = Canvas.step
         self.full_mode_all_stack = Canvas.full_mode_all_stack
+        self.contour_levels = Canvas.contour_levels
+        self.contour_filled = Canvas.contour_filled
 
     def merge(self, old_canvas: 'Canvas'):
         """

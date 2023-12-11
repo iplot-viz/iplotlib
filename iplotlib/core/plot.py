@@ -31,12 +31,13 @@ class Plot(ABC):
     signals: Dict[int, List[Signal]] = None #: the signals drawn in this plot
     _type: str = None
 
-
     font_size: int = None #: the font size of the plot title text
     font_color: str = None #: the font color of the plot title text
     legend: bool = None #: indicate if the plot legend must be shown
     legend_position: str = 'same as canvas'  #: indicate the location of the plot legend
     legend_layout: str = 'same as canvas'  #: indicate the layout of the plot legend
+    slider: bool = False
+    slider_last_val: int = 0
 
     def __post_init__(self):
         self._type = self.__class__.__module__+'.'+self.__class__.__qualname__
@@ -87,7 +88,9 @@ class PlotContour(Plot):
     marker_size: int = None  #: set the marker size of all signals.
     step: str = None  #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
     hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires special handling
-    dec_samples: int = None  #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
+    dec_samples: int = None  #: DEPRECATED No. of samples for each signal. Forwarded to data-access module.
+    contour_levels: int = None  #: set the number of levels for the plot.
+    contour_filled: bool = False  #: set if the plot is filled or not.
 
     def __post_init__(self):
         super().__post_init__()

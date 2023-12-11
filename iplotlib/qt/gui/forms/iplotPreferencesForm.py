@@ -27,7 +27,8 @@ class IplotPreferencesForm(QWidget):
     onApply = Signal()
     onReset = Signal()
 
-    def __init__(self, fields: typing.List[dict] = [{}], label: str = "Preferences", parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
+    def __init__(self, fields: typing.List[dict] = [{}], label: str = "Preferences",
+                 parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         super().__init__(parent=parent, f=f)
 
         self.top_label = QLabel(label)
@@ -149,8 +150,13 @@ class IplotPreferencesForm(QWidget):
         return IplotPreferencesForm.create_spinbox(min=0, max=20)
 
     @staticmethod
+    def default_spinbox_widget(min_value: int = 0, max_value: int = 100):
+        return IplotPreferencesForm.create_spinbox(min=min_value, max_value=max_value)
+
+    @staticmethod
     def default_linestyle_widget():
-        return IplotPreferencesForm.create_comboBox({"Solid": "Solid", "Dotted": "Dotted", "Dashed": "Dashed", "None": "None"})
+        return IplotPreferencesForm.create_comboBox(
+            {"Solid": "Solid", "Dotted": "Dotted", "Dashed": "Dashed", "None": "None"})
 
     @staticmethod
     def default_marker_widget():
