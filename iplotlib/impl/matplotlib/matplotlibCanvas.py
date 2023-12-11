@@ -110,8 +110,14 @@ class MatplotlibParser(BackendParserBase):
                 draw_fn = mpl_axes.plot
                 lines = draw_fn(x_data, y_data, **params)
             elif isinstance(plot, PlotContour):
-                draw_fn = mpl_axes.contour
-                lines = draw_fn(x_data, y_data, z_data, **params)
+                contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
+                contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
+                if contour_filled:
+                    draw_fn = mpl_axes.contourf
+                else:
+                    draw_fn = mpl_axes.contourf
+                lines = draw_fn(x_data, y_data, z_data, **params, levels=contour_levels)
+                mpl_axes.set_aspect('equal', adjustable='box')
             self._signal_impl_shape_lut.update({id(signal): [lines]})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
