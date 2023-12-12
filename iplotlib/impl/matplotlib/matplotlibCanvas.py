@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.text import Annotation, Text
-from matplotlib.widgets import MultiCursor
+from matplotlib.widgets import MultiCursor, Slider
 from matplotlib.ticker import MaxNLocator
 from pandas.plotting import register_matplotlib_converters
 
@@ -46,6 +46,7 @@ class MatplotlibParser(BackendParserBase):
 
         self.legend_size = 8
         self._cursors = []
+        self.sliders = []
 
         register_matplotlib_converters()
         self.figure = Figure()
@@ -278,12 +279,23 @@ class MatplotlibParser(BackendParserBase):
 
         if not self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None:
             stack_sz = 1
+            heights = [1.8, 0.2]
         else:
             stack_sz = len(plot.signals.keys())
+            if stack_sz > 1:
+                heights = [1.7 for _ in range(stack_sz)]
+                heights.append(0.3)
+            else:
+                heights = [1.8 for _ in range(stack_sz)]
+                heights.append(0.2)
 
-        # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
-        subgrid_item = grid_item.subgridspec(
-            stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
+        if plot.signals[1][0].plot_type in ['PlotXYSlider', 'PlotContour']:
+            # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
+            subgrid_item = grid_item.subgridspec(
+                stack_sz+1, 1, hspace=0, height_ratios=heights)  # type: GridSpecFromSubplotSpec
+        else:
+            subgrid_item = grid_item.subgridspec(
+                stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
 
         mpl_axes_prev = None
         for stack_id, key in enumerate(sorted(plot.signals.keys())):
@@ -299,6 +311,33 @@ class MatplotlibParser(BackendParserBase):
 
                 mpl_axes = self.figure.add_subplot(
                     subgrid_item[row_id, 0], sharex=mpl_axes_prev)
+
+                # Add Slider
+                if signals[0].plot_type in ['PlotXYSlider', 'PlotContour'] and key == len(plot.signals.keys()):
+                    #aux = subgrid_item[row_id + 1, 0].get_position(self.figure)
+                    # Obtener la posición del área del subplot
+                    slider_ax_position = grid_item.get_position(self.figure)
+                    slider_ax = self.figure.add_axes([
+                        slider_ax_position.x0,
+                        slider_ax_position.y0 - 0.015,
+                        slider_ax_position.width*0.8,
+                        0.03],
+                        facecolor='lightgoldenrodyellow'
+                    )
+                    if not plot.slider:
+                        slider = Slider(slider_ax, '', 0, 100)
+                        self.sliders.append(slider)
+                        plot.slider = True
+                    else:
+                        slider = Slider(slider_ax, '', 0, 100)
+                        slider.set_val(plot.slider_last_val)
+                        self.sliders.append(slider)
+
+                    def update_slider(event):
+                        plot.slider_last_val = event
+
+                    slider.on_changed(update_slider)
+
                 mpl_axes_prev = mpl_axes
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
                 # Keep references to iplotlib instances for ease of access in callbacks.

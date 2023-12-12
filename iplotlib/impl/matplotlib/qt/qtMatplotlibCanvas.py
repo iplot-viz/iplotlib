@@ -78,6 +78,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
         self.render()
+        # Needed just for the first execution to adjust slider bounds (Maybe change)
+        self._parser.process_ipl_canvas(canvas)
+
         super().set_canvas(canvas)
 
     def get_canvas(self) -> Canvas:
