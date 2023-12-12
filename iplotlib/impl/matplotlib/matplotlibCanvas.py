@@ -112,7 +112,7 @@ class MatplotlibParser(BackendParserBase):
                 if contour_filled:
                     draw_fn = mpl_axes.contourf
                 else:
-                    draw_fn = mpl_axes.contourf
+                    draw_fn = mpl_axes.contour
                 lines = draw_fn(x_data, y_data, z_data, **params, levels=contour_levels)
                 mpl_axes.set_aspect('equal', adjustable='box')
             self._signal_impl_shape_lut.update({id(signal): [lines]})
