@@ -315,6 +315,9 @@ class MatplotlibParser(BackendParserBase):
                     mpl_axes.set_facecolor(self.canvas.background_color)
                     # Refresh background color for each plot
                     plot.background_color = self.canvas.background_color
+                elif plot.background_color is None:
+                    mpl_axes.set_facecolor(self.canvas.background_color)
+                    plot.background_color = self.canvas.background_color
                 elif plot.background_color != self.canvas.background_color:
                     mpl_axes.set_facecolor(plot.background_color)
                 else:
