@@ -5,8 +5,10 @@
 # Note For changes to this file, please add the author to the list of PR reviewers
 
 import setuptools
+import os
+import sys
 
-# from iplotlib._version import __version__
+sys.path.append(os.getcwd())
 import versioneer
 
 with open("README.md", "r", encoding="utf-8") as fh:
@@ -16,12 +18,6 @@ setuptools.setup(
     name="iplotlib",
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
-    setup_requires=["setuptools-git-versioning"],
-    # version_config={
-    #     "version_callback": __version__,
-    #     "template": "{tag}",
-    #     "dirty_template": "{tag}.{ccount}.{sha}",
-    # },
     author="Panchumarti Jaswant EXT",
     author_email="jaswant.panchumarti@iter.org",
     description="ITER plotting library",
