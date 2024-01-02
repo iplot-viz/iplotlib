@@ -587,8 +587,18 @@ class MatplotlibParser(BackendParserBase):
             axes = [self.figure.axes]
 
         for axes_group in axes:
-            self._cursors.append(MultiCursor2(self.figure.canvas, axes_group, x_label=self.canvas.enable_Xlabel_crosshair, y_label=self.canvas.enable_Ylabel_crosshair, val_label=self.canvas.enable_ValLabel_crosshair, color=self.canvas.crosshair_color, lw=self.canvas.crosshair_line_width, horizOn=False or self.canvas.crosshair_horizontal,
-                                              vertOn=self.canvas.crosshair_vertical, useblit=True, cache_table=self._impl_plot_cache_table))
+            if not axes_group:
+                continue
+
+            self._cursors.append(
+                MultiCursor2(self.figure.canvas, axes_group,
+                             x_label=self.canvas.enable_Xlabel_crosshair,
+                             y_label=self.canvas.enable_Ylabel_crosshair,
+                             val_label=self.canvas.enable_ValLabel_crosshair,
+                             color=self.canvas.crosshair_color, lw=self.canvas.crosshair_line_width,
+                             horizOn=False or self.canvas.crosshair_horizontal,
+                             vertOn=self.canvas.crosshair_vertical, useblit=True,
+                             cache_table=self._impl_plot_cache_table))
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
