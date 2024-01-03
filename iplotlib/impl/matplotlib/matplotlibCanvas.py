@@ -180,32 +180,30 @@ class MatplotlibParser(BackendParserBase):
     def _get_all_shared_axes(self, base_mpl_axes: MPLAxes):
         if not isinstance(self.canvas, Canvas):
             return []
-        if self.canvas.shared_x_axis:
-            return self.figure.axes
-        else:
-            cache_item = self._impl_plot_cache_table.get_cache_item(base_mpl_axes)
-            if not hasattr(cache_item, 'plot'):
-                return
-            base_plot = cache_item.plot()
-            if not isinstance(base_plot, Plot):
-                return
-            shared = list()
-            base_limits = self.get_plot_limits(base_plot, which='original')
-            base_begin, base_end = base_limits.axes_ranges[0].begin, base_limits.axes_ranges[0].end
 
-            if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
-                for axes in self.figure.axes:
-                    cache_item = self._impl_plot_cache_table.get_cache_item(axes)
-                    if not hasattr(cache_item, 'plot'):
-                        continue
-                    plot = cache_item.plot()
-                    if not isinstance(plot, Plot):
-                        continue
-                    limits = self.get_plot_limits(plot, which='original')
-                    begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                    if (begin, end) == (base_begin, base_end):
-                        shared.append(axes)
-            return shared
+        cache_item = self._impl_plot_cache_table.get_cache_item(base_mpl_axes)
+        if not hasattr(cache_item, 'plot'):
+            return
+        base_plot = cache_item.plot()
+        if not isinstance(base_plot, Plot):
+            return
+        shared = list()
+        base_limits = self.get_plot_limits(base_plot, which='original')
+        base_begin, base_end = base_limits.axes_ranges[0].begin, base_limits.axes_ranges[0].end
+
+        if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
+            for axes in self.figure.axes:
+                cache_item = self._impl_plot_cache_table.get_cache_item(axes)
+                if not hasattr(cache_item, 'plot'):
+                    continue
+                plot = cache_item.plot()
+                if not isinstance(plot, Plot):
+                    continue
+                limits = self.get_plot_limits(plot, which='original')
+                begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
+                if (begin, end) == (base_begin, base_end):
+                    shared.append(axes)
+        return shared
 
     def process_ipl_canvas(self, canvas: Canvas):
         """This method analyzes the iplotlib canvas data structure and maps it
@@ -564,7 +562,9 @@ class MatplotlibParser(BackendParserBase):
                         if plot_temp != self._focus_plot:
                             logger.debug(
                                 f"Setting range on plot {id(plot_temp)} focused= {id(self._focus_plot)} begin={begin}")
-                            set_x_axis_range(plot_temp, begin, end)
+                            if plot_temp.axes[0].original_begin == self._focus_plot.axes[0].original_begin and \
+                                    plot_temp.axes[0].original_end == self._focus_plot.axes[0].original_end:
+                                set_x_axis_range(plot_temp, begin, end)
 
         self._focus_plot = plot
         self._focus_plot_stack_key = stack_key
