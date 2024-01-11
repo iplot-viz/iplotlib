@@ -23,7 +23,7 @@ from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
                            BackendParserBase,
-                           Plot, PlotXY, PlotContour,
+                           Plot, PlotXY, PlotContour, PlotXYSlider,
                            Signal)
 from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
@@ -46,7 +46,6 @@ class MatplotlibParser(BackendParserBase):
 
         self.legend_size = 8
         self._cursors = []
-        self.sliders = []
 
         register_matplotlib_converters()
         self.figure = Figure()
@@ -103,7 +102,7 @@ class MatplotlibParser(BackendParserBase):
             logger.debug(f"mpl_line_plot step case 2=: {step}")
             params = dict(**style)
 
-            if isinstance(plot, PlotXY):
+            if isinstance(plot, PlotXY) or isinstance(plot, PlotXYSlider):
                 draw_fn = mpl_axes.plot
                 lines = draw_fn(x_data, y_data, **params)
             elif isinstance(plot, PlotContour):
@@ -289,7 +288,7 @@ class MatplotlibParser(BackendParserBase):
                 heights = [1.8 for _ in range(stack_sz)]
                 heights.append(0.2)
 
-        if plot.signals[1][0].plot_type in ['PlotXYSlider', 'PlotContour']:
+        if isinstance(plot, PlotXYSlider) or isinstance(plot, PlotContour):
             # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
             subgrid_item = grid_item.subgridspec(
                 stack_sz+1, 1, hspace=0, height_ratios=heights)  # type: GridSpecFromSubplotSpec
@@ -313,8 +312,7 @@ class MatplotlibParser(BackendParserBase):
                     subgrid_item[row_id, 0], sharex=mpl_axes_prev)
 
                 # Add Slider
-                if signals[0].plot_type in ['PlotXYSlider', 'PlotContour'] and key == len(plot.signals.keys()):
-                    #aux = subgrid_item[row_id + 1, 0].get_position(self.figure)
+                if isinstance(plot, PlotXYSlider) or isinstance(plot, PlotContour):
                     # Obtener la posición del área del subplot
                     slider_ax_position = grid_item.get_position(self.figure)
                     slider_ax = self.figure.add_axes([
@@ -324,19 +322,21 @@ class MatplotlibParser(BackendParserBase):
                         0.03],
                         facecolor='lightgoldenrodyellow'
                     )
-                    if not plot.slider:
-                        slider = Slider(slider_ax, '', 0, 100)
-                        self.sliders.append(slider)
-                        plot.slider = True
+                    if plot.slider_last_val == 0:
+                        slider = Slider(slider_ax, '', plot.axes[0].begin, plot.axes[0].end, (plot.axes[0].begin+plot.axes[0].end)/2)
+                        plot.slider = slider
+                        #self.sliders.append(slider)
+                        #plot.slider = True
                     else:
-                        slider = Slider(slider_ax, '', 0, 100)
-                        slider.set_val(plot.slider_last_val)
-                        self.sliders.append(slider)
+                        slider = Slider(slider_ax, '', plot.axes[0].begin, plot.axes[0].end, (plot.axes[0].begin+plot.axes[0].end)/2)
+                        plot.slider = slider
+                        plot.slider.set_val(plot.slider_last_val)
+                        #self.sliders.append(slider)
 
                     def update_slider(event):
                         plot.slider_last_val = event
 
-                    slider.on_changed(update_slider)
+                    plot.slider.on_changed(update_slider)
 
                 mpl_axes_prev = mpl_axes
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
