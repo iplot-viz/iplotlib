@@ -36,7 +36,7 @@ from iplotProcessing.common.errors import InvalidExpression
 from iplotProcessing.core import BufferObject
 from iplotProcessing.core import Signal as ProcessingSignal
 from iplotProcessing.math.pre_processing.grid_mixing import align
-from iplotProcessing.tools.parsers import Parser, ParserSingleton
+from iplotProcessing.tools.parsers import Parser
 from iplotProcessing.tools import hash_code
 
 import iplotLogging.setupLogger as sl
@@ -322,7 +322,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         # The first case would result in len(children) > 0. We find them (if they are pre-defined aliases) or create them.
         try:
-            p = ParserSingleton().set_expression(expression)
+            p = Parser().set_expression(expression)
         except InvalidExpression as e:
             self.status_info.reset()
             self.status_info.msg = f"{e}"
@@ -457,7 +457,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
             # 2.2 Evaluate self.name. It is an expression combining multiple other signals.
             try:
-                p = ParserSingleton().set_expression(self.name)
+                p = Parser().set_expression(self.name)
                 p.substitute_var(vm)
                 p.eval_expr()
                 if isinstance(p.result, ProcessingSignal):
@@ -870,12 +870,9 @@ class ParserHelper:
         local_env = dict(ParserHelper.env)
         local_env.update({'self': signal})
 
-        p = ParserSingleton()
-        """
+        p = Parser()
         p.inject(Parser.get_member_list(type(signal)))
         p.inject(signal.alias_map)
-        p.inject(Parser.get_member_list(BufferObject))
-        """
         p.set_expression(expression)
         if not p.is_valid:
             raise InvalidExpression(f"expression: {expression} is invalid!")
