@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from typing import Any, Callable, Collection, List
 import traceback
 import numpy as np
+import pandas
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick
 from matplotlib.axis import Axis as MPLAxis
@@ -13,17 +14,18 @@ from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.text import Annotation, Text
-from matplotlib.widgets import MultiCursor
+from matplotlib.widgets import MultiCursor, Slider
 from matplotlib.ticker import MaxNLocator
 from pandas.plotting import register_matplotlib_converters
 
 import iplotLogging.setupLogger as sl
+from iplotProcessing.core import BufferObject
 from iplotlib.core import (Axis,
                            LinearAxis,
                            RangeAxis,
                            Canvas,
                            BackendParserBase,
-                           Plot,
+                           Plot, PlotXY, PlotContour,
                            Signal)
 from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
@@ -66,7 +68,7 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
-    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data):
+    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data, z_data):
         if not isinstance(mpl_axes, MPLAxes):
             return
         #logger.debug(f"mpl_line_plot : {traceback.print_stack()}")
@@ -85,30 +87,90 @@ class MatplotlibParser(BackendParserBase):
         style.update({'drawstyle': STEP_MAP[step.lower()]})
 
         if isinstance(lines, list):
-            line = lines[0][0]  # type: Line2D
-            line.set_xdata(x_data)
-            line.set_ydata(y_data)
-            for k, v in style.items():
-                setter = getattr(line, f"set_{k}")
-                if v is None and k != "drawstyle":
-                    continue
-                setter(v)
-            if self.canvas.streaming:
-                mpl_axes.set_ylim(min(y_data) - 0.01, max(y_data) + 0.01)
-                ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
-                mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
+            if isinstance(plot, PlotXY):
+                if isinstance(plot, PlotXYWithSlider):
+
+                    actual_time = self._pm.get_value('slider_last_val', plot)
+                    lines[0].set_ydata(y_data[:, actual_time])
+
+                    for k, v in style.items():
+                        setter = getattr(lines[0], f"set_{k}")
+                        if v is None and k != "drawstyle":
+                            continue
+                        setter(v)
+                else:
+                    for i, line in enumerate(lines):
+                        if len(lines) == 1:
+                            line.set_ydata(y_data)
+                        else:
+                            line.set_ydata(y_data[:, i])
+
+                        for k, v in style.items():
+                            setter = getattr(line, f"set_{k}")
+                            if v is None and k != "drawstyle":
+                                continue
+                            setter(v)
+
+                if self.canvas.streaming:
+                    mpl_axes.set_ylim(min(y_data) - 0.01, max(y_data) + 0.01)
+                    ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
+                    mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
+            else:
+                for tp in lines[0].collections:
+                    tp.remove()
+                contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
+                contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
+                if contour_filled:
+                    draw_fn = mpl_axes.contourf
+                else:
+                    draw_fn = mpl_axes.contour
+                if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                    lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
+                elif x_data.ndim == y_data.ndim == z_data.ndim == 3:
+                    actual_time = self._pm.get_value('slider_last_val', plot)
+                    lines = [draw_fn(x_data[:, :, actual_time],
+                                     y_data[:, :, actual_time],
+                                     z_data[:, :, actual_time],
+                                     levels=contour_levels)]
+                mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
         else:
             logger.debug(f"mpl_line_plot step case 2=: {step}")
             params = dict(**style)
-            draw_fn = mpl_axes.plot
-            ##if step is not None and step != 'None':
-              ##  params.update({'where': step})
-                ##draw_fn = mpl_axes.step
 
-            lines = [draw_fn(x_data, y_data, **params)]
-            signal.color = lines[0][0].get_color()
-            self._signal_impl_shape_lut.update({id(signal): lines})
+            if isinstance(plot, PlotXY) or isinstance(plot, PlotXYWithSlider):
+                draw_fn = mpl_axes.plot
+                if x_data.ndim == 1 and y_data.ndim == 1:
+                    lines = draw_fn(x_data, y_data, **params)
+                elif x_data.ndim == 2 and y_data.ndim == 2:
+                    actual_time = self._pm.get_value('slider_last_val', plot)
+                    lines = draw_fn(x_data[:, actual_time],
+                                    y_data[:, actual_time],
+                                    **params)
+                elif x_data.ndim == 1 and y_data.ndim == 2:
+                    if isinstance(plot, PlotXYWithSlider):
+                        actual_time = self._pm.get_value('slider_last_val', plot)
+                        lines = draw_fn(x_data, y_data[:, actual_time], **params)
+                    else:
+                        lines = draw_fn(x_data, y_data, **params)
+
+            elif isinstance(plot, PlotContour):
+                contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
+                contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
+                if contour_filled:
+                    draw_fn = mpl_axes.contourf
+                else:
+                    draw_fn = mpl_axes.contour
+                if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                    lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
+                elif x_data.ndim == y_data.ndim == z_data.ndim == 3:
+                    actual_time = self._pm.get_value('slider_last_val', plot)
+                    lines = [draw_fn(x_data[:, :, actual_time],
+                                     y_data[:, :, actual_time],
+                                     z_data[:, :, actual_time],
+                                     levels=contour_levels)]
+                mpl_axes.set_aspect('equal', adjustable='box')
+        self._signal_impl_shape_lut.update({id(signal): lines})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
         if not isinstance(mpl_axes, MPLAxes):
@@ -267,17 +329,39 @@ class MatplotlibParser(BackendParserBase):
         if not isinstance(plot, Plot):
             return
 
-        grid_item = self._layout[row: row + plot.row_span,
-                             column: column + plot.col_span]  # type: SubplotSpec
+        grid_item = self._layout[row: row + plot.row_span, column: column + plot.col_span]  # type: SubplotSpec
 
-        if not self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None:
+        if self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None:
             stack_sz = 1
+            heights = [0.03, 1.0]
         else:
             stack_sz = len(plot.signals.keys())
+            heights = [0.03 * self.canvas.rows] + [1.0] * stack_sz
 
-        # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
-        subgrid_item = grid_item.subgridspec(
-            stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
+        if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
+            # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
+            subgrid_item = grid_item.subgridspec(stack_sz+1, 1, hspace=0, height_ratios=heights)
+            sub_subgrid_item = subgrid_item[0, 0].subgridspec(1, 2, hspace=0, width_ratios=[0.9, 0.15])
+            # Add Slider
+            slider_ax = self.figure.add_subplot(sub_subgrid_item[0, 0])
+            if not plot.slider_last_val:
+                plot.slider_last_val = plot.signals[1][0].y_data.shape[1] // 2
+
+            slider = Slider(slider_ax, '', 0, plot.signals[1][0].y_data.shape[1], plot.slider_last_val, valstep=1)
+
+            # slider.valtext.set_text(pandas.Timestamp(slider.val))
+            slider.canvas = None
+            plot.slider = slider
+
+            def update_slider(event):
+                # slider.valtext.set_text(pandas.Timestamp(event))
+                plot.slider_last_val = event
+
+            plot.slider.on_changed(update_slider)
+            add_slider = 1
+        else:
+            subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
+            add_slider = 0
 
         mpl_axes_prev = None
         for stack_id, key in enumerate(sorted(plot.signals.keys())):
@@ -291,8 +375,8 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     row_id = stack_id
 
-                mpl_axes = self.figure.add_subplot(
-                    subgrid_item[row_id, 0], sharex=mpl_axes_prev)
+                mpl_axes = self.figure.add_subplot(subgrid_item[row_id + add_slider, 0], sharex=mpl_axes_prev)
+
                 mpl_axes_prev = mpl_axes
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
                 # Keep references to iplotlib instances for ease of access in callbacks.
@@ -314,9 +398,6 @@ class MatplotlibParser(BackendParserBase):
                 if self.canvas.background_color != self.canvas.prev_background_color:
                     mpl_axes.set_facecolor(self.canvas.background_color)
                     # Refresh background color for each plot
-                    plot.background_color = self.canvas.background_color
-                elif plot.background_color is None:
-                    mpl_axes.set_facecolor(self.canvas.background_color)
                     plot.background_color = self.canvas.background_color
                 elif plot.background_color != self.canvas.background_color:
                     mpl_axes.set_facecolor(plot.background_color)
@@ -527,7 +608,7 @@ class MatplotlibParser(BackendParserBase):
                 logger.error(
                     f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data arrays (<2). {signal}")
                 return
-            self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1])
+            self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1], data[2])
 
         self.update_axis_labels_with_units(mpl_axes, signal)
 
@@ -590,18 +671,8 @@ class MatplotlibParser(BackendParserBase):
             axes = [self.figure.axes]
 
         for axes_group in axes:
-            if not axes_group:
-                continue
-
-            self._cursors.append(
-                MultiCursor2(self.figure.canvas, axes_group,
-                             x_label=self.canvas.enable_Xlabel_crosshair,
-                             y_label=self.canvas.enable_Ylabel_crosshair,
-                             val_label=self.canvas.enable_ValLabel_crosshair,
-                             color=self.canvas.crosshair_color, lw=self.canvas.crosshair_line_width,
-                             horizOn=False or self.canvas.crosshair_horizontal,
-                             vertOn=self.canvas.crosshair_vertical, useblit=True,
-                             cache_table=self._impl_plot_cache_table))
+            self._cursors.append(MultiCursor2(self.figure.canvas, axes_group, x_label=self.canvas.enable_Xlabel_crosshair, y_label=self.canvas.enable_Ylabel_crosshair, val_label=self.canvas.enable_ValLabel_crosshair, color=self.canvas.crosshair_color, lw=self.canvas.crosshair_line_width, horizOn=False or self.canvas.crosshair_horizontal,
+                                              vertOn=self.canvas.crosshair_vertical, useblit=True, cache_table=self._impl_plot_cache_table))
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
