@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from typing import Any, Callable, Collection, List
 import traceback
 import numpy as np
+import pandas
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick
 from matplotlib.axis import Axis as MPLAxis
@@ -18,12 +19,13 @@ from matplotlib.ticker import MaxNLocator
 from pandas.plotting import register_matplotlib_converters
 
 import iplotLogging.setupLogger as sl
+from iplotProcessing.core import BufferObject
 from iplotlib.core import (Axis,
                            LinearAxis,
                            RangeAxis,
                            Canvas,
                            BackendParserBase,
-                           Plot, PlotXY, PlotContour, PlotXYSlider,
+                           Plot, PlotXY, PlotContour,
                            Signal)
 from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
@@ -85,26 +87,47 @@ class MatplotlibParser(BackendParserBase):
         style.update({'drawstyle': STEP_MAP[step.lower()]})
 
         if isinstance(lines, list):
-            line = lines[0][0]  # type: Line2D
-            line.set_xdata(x_data)
-            line.set_ydata(y_data)
-            for k, v in style.items():
-                setter = getattr(line, f"set_{k}")
-                if v is None and k != "drawstyle":
-                    continue
-                setter(v)
-            if self.canvas.streaming:
-                mpl_axes.set_ylim(min(y_data) - 0.01, max(y_data) + 0.01)
-                ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
-                mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
+            if isinstance(plot, PlotXY):
+                for i, line in enumerate(lines):
+                    if len(lines) == 1:
+                        line.set_ydata(y_data)
+                    else:
+                        line.set_ydata(y_data[:, i])
+
+                    for k, v in style.items():
+                        setter = getattr(line, f"set_{k}")
+                        if v is None and k != "drawstyle":
+                            continue
+                        setter(v)
+
+                if self.canvas.streaming:
+                    mpl_axes.set_ylim(min(y_data) - 0.01, max(y_data) + 0.01)
+                    ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
+                    mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
+            else:
+                for tp in lines[0].collections:
+                    tp.remove()
+                contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
+                contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
+                if contour_filled:
+                    draw_fn = mpl_axes.contourf
+                else:
+                    draw_fn = mpl_axes.contour
+                if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                    lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
+                mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
         else:
             logger.debug(f"mpl_line_plot step case 2=: {step}")
             params = dict(**style)
 
-            if isinstance(plot, PlotXY) or isinstance(plot, PlotXYSlider):
+            if isinstance(plot, PlotXY):
                 draw_fn = mpl_axes.plot
-                lines = draw_fn(x_data, y_data, **params)
+                if x_data.ndim == 1 and y_data.ndim == 1:
+                    lines = draw_fn(x_data, y_data, **params)
+                elif x_data.ndim == 1 and y_data.ndim == 2:
+                    lines = draw_fn(x_data, y_data, **params)
+
             elif isinstance(plot, PlotContour):
                 contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
                 contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
@@ -112,9 +135,10 @@ class MatplotlibParser(BackendParserBase):
                     draw_fn = mpl_axes.contourf
                 else:
                     draw_fn = mpl_axes.contour
-                lines = draw_fn(x_data, y_data, z_data, **params, levels=contour_levels)
+                if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                    lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
                 mpl_axes.set_aspect('equal', adjustable='box')
-            self._signal_impl_shape_lut.update({id(signal): [lines]})
+        self._signal_impl_shape_lut.update({id(signal): lines})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
         if not isinstance(mpl_axes, MPLAxes):
@@ -273,28 +297,14 @@ class MatplotlibParser(BackendParserBase):
         if not isinstance(plot, Plot):
             return
 
-        grid_item = self._layout[row: row + plot.row_span,
-                             column: column + plot.col_span]  # type: SubplotSpec
+        grid_item = self._layout[row: row + plot.row_span, column: column + plot.col_span]  # type: SubplotSpec
 
         if not self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None:
             stack_sz = 1
-            heights = [1.8, 0.2]
         else:
             stack_sz = len(plot.signals.keys())
-            if stack_sz > 1:
-                heights = [1.7 for _ in range(stack_sz)]
-                heights.append(0.3)
-            else:
-                heights = [1.8 for _ in range(stack_sz)]
-                heights.append(0.2)
 
-        if isinstance(plot, PlotXYSlider) or isinstance(plot, PlotContour):
-            # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
-            subgrid_item = grid_item.subgridspec(
-                stack_sz+1, 1, hspace=0, height_ratios=heights)  # type: GridSpecFromSubplotSpec
-        else:
-            subgrid_item = grid_item.subgridspec(
-                stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
+        subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
 
         mpl_axes_prev = None
         for stack_id, key in enumerate(sorted(plot.signals.keys())):
@@ -795,7 +805,7 @@ class MatplotlibParser(BackendParserBase):
                     logger.debug(
                         f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
                     if isinstance(d, Collection):
-                        ret.append([e - ci.offsets[i] for e in d])
+                        ret.append(BufferObject([e - ci.offsets[i] for e in d]))
                     else:
                         ret.append(d - ci.offsets[i])
                 else:
