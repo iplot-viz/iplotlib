@@ -95,11 +95,11 @@ class StatusInfo:
 
 @dataclass
 class IplotSignalAdapter(ArraySignal, ProcessingSignal):
-    """This is an adapter class that is the culmination of two crucial classes in the iplotlib framework. 
+    """This is an adapter class that is the culmination of two crucial classes in the iplotlib framework.
         It's purpose is to make ProcessingSignal interface compatible with the ArraySignal interface.
 
         Warning: Consider this class as a frozen blueprint, i.e, do not expect it to be consistent once
-        some of the parameters are modified after initialization. Such parameters are name, alias, 
+        some of the parameters are modified after initialization. Such parameters are name, alias,
         data_access_enabled, processing_enabled
     """
     data_source: str = ''
@@ -322,10 +322,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         # The first case would result in len(children) > 0. We find them (if they are pre-defined aliases) or create them.
         try:
-            p = Parser()\
-                .inject(Parser.get_member_list(ProcessingSignal))\
-                .inject(Parser.get_member_list(BufferObject))\
-                .set_expression(expression)
+            p = Parser().set_expression(expression)
         except InvalidExpression as e:
             self.status_info.reset()
             self.status_info.msg = f"{e}"
@@ -878,7 +875,6 @@ class ParserHelper:
         p = Parser()
         p.inject(Parser.get_member_list(type(signal)))
         p.inject(signal.alias_map)
-        p.inject(Parser.get_member_list(BufferObject))
         p.set_expression(expression)
         if not p.is_valid:
             raise InvalidExpression(f"expression: {expression} is invalid!")
