@@ -19,6 +19,7 @@ from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, Mouse
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
+from iplotlib.core.plot import PlotContour
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.distance import DistanceCalculator
@@ -78,8 +79,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
         self.render()
-        # Needed just for the first execution to adjust slider bounds (Maybe change)
-        self._parser.process_ipl_canvas(canvas)
 
         super().set_canvas(canvas)
 
@@ -178,16 +177,18 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         else:
             if event.inaxes is None:
                 return
-            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                # Stage a command to obtain original view limits
-                self.stage_view_lim_cmd()
-                return
-            if event.button != MouseButton.LEFT:
-                return
             ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
             if not hasattr(ci, 'plot'):
                 return
             plot = ci.plot()
+            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                # Stage a command to obtain original view limits
+                if isinstance(plot, PlotContour):
+                    return
+                self.stage_view_lim_cmd()
+                return
+            if event.button != MouseButton.LEFT:
+                return
             if not plot:
                 self._dist_calculator.reset()
                 return
