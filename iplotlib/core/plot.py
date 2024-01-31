@@ -14,8 +14,6 @@ from typing import Dict, List, Collection, Union
 
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.signal import Signal
-from matplotlib.widgets import Slider
-import matplotlib.pyplot as plt
 
 
 @dataclass
@@ -144,7 +142,7 @@ class PlotXY(Plot):
     Ä concrete Plot class specialized for 2D plottling.
     """
 
-    grid: bool = None  #: indiacte if the grid must be drawn
+    grid: bool = None  #: indicate if the grid must be drawn
     line_style: str = None  #: set the line style of all signals.
     line_size: int = None  #: set the line size of all signals.
     marker: str = None  #: set the marker shape of all signals.
@@ -176,47 +174,3 @@ class PlotXY(Plot):
         self.step = old_plot.step
         super().merge(old_plot)
 
-@dataclass
-class PlotXYSlider(Plot):
-    """
-    A concrete Plot class specialized for 2D plottling.
-    """
-
-    grid: bool = None  #: indiacte if the grid must be drawn
-    line_style: str = None  #: set the line style of all signals.
-    line_size: int = None  #: set the line size of all signals.
-    marker: str = None  #: set the marker shape of all signals.
-    marker_size: int = None  #: set the marker size of all signals.
-    step: str = None  #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
-    hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires special handling
-    dec_samples: int = None  #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
-
-    slider: Slider = None
-    slider_last_val: int = 0
-
-    def __post_init__(self):
-        super().__post_init__()
-        if self.axes is None:
-            self.axes = [LinearAxis(), LinearAxis()]
-
-        if self.slider is None:
-            slider_ax = plt.axes([0.2, 0.1, 0.65, 0.03]) # Any values
-            self.slider = Slider(slider_ax, '', 0, 1, 0)
-
-    def reset_preferences(self):
-        self.grid = PlotXY.grid
-        self.line_style = PlotXY.line_style
-        self.line_size = PlotXY.line_size
-        self.marker = PlotXY.marker
-        self.marker_size = PlotXY.marker_size
-        self.step = PlotXY.step
-        super().reset_preferences()
-
-    def merge(self, old_plot: 'PlotXY'):
-        self.grid = old_plot.grid
-        self.line_style = old_plot.line_style
-        self.line_size = old_plot.line_size
-        self.marker = old_plot.marker
-        self.marker_size = old_plot.marker_size
-        self.step = old_plot.step
-        super().merge(old_plot)
