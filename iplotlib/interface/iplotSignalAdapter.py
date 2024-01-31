@@ -561,8 +561,10 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         elif self._access_md5sum != target_md5sum:
             self._access_md5sum = target_md5sum
 
-            if AccessHelper.num_samples_override or self.isDownsampled==True:
+            if AccessHelper.num_samples_override or self.isDownsampled:
                 return True
+            elif self.plot_type == 'PlotContour':
+                return False
             elif self._contained_bounds():
                 return False
             else:
