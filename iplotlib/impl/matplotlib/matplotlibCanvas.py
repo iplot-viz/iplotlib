@@ -14,7 +14,7 @@ from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.text import Annotation, Text
-from matplotlib.widgets import MultiCursor, Slider
+from matplotlib.widgets import MultiCursor
 from matplotlib.ticker import MaxNLocator
 from pandas.plotting import register_matplotlib_converters
 
@@ -320,33 +320,6 @@ class MatplotlibParser(BackendParserBase):
 
                 mpl_axes = self.figure.add_subplot(
                     subgrid_item[row_id, 0], sharex=mpl_axes_prev)
-
-                # Add Slider
-                if isinstance(plot, PlotXYSlider) or isinstance(plot, PlotContour):
-                    # Obtener la posición del área del subplot
-                    slider_ax_position = grid_item.get_position(self.figure)
-                    slider_ax = self.figure.add_axes([
-                        slider_ax_position.x0,
-                        slider_ax_position.y0 - 0.015,
-                        slider_ax_position.width*0.8,
-                        0.03],
-                        facecolor='lightgoldenrodyellow'
-                    )
-                    if plot.slider_last_val == 0:
-                        slider = Slider(slider_ax, '', plot.axes[0].begin, plot.axes[0].end, (plot.axes[0].begin+plot.axes[0].end)/2)
-                        plot.slider = slider
-                        #self.sliders.append(slider)
-                        #plot.slider = True
-                    else:
-                        slider = Slider(slider_ax, '', plot.axes[0].begin, plot.axes[0].end, (plot.axes[0].begin+plot.axes[0].end)/2)
-                        plot.slider = slider
-                        plot.slider.set_val(plot.slider_last_val)
-                        #self.sliders.append(slider)
-
-                    def update_slider(event):
-                        plot.slider_last_val = event
-
-                    plot.slider.on_changed(update_slider)
 
                 mpl_axes_prev = mpl_axes
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
