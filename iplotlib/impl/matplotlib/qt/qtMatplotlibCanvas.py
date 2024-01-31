@@ -13,6 +13,7 @@ import pandas as pd
 from PySide6.QtCore import QMargins, QMetaObject, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
+from iplotlib.core.plot import PlotContour, PlotContourWithSlider
 
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, MouseEvent
@@ -175,8 +176,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         else:
             if event.inaxes is None:
                 return
+            ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+            if not hasattr(ci, 'plot'):
+                return
+            plot = ci.plot()
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
                 # Stage a command to obtain original view limits
+                if isinstance(plot, PlotContour) or isinstance(plot, PlotContourWithSlider):
+                    return
                 self.stage_view_lim_cmd()
                 return
             if event.button != MouseButton.LEFT:
@@ -222,6 +229,17 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # push uncommited changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
+            if event.inaxes is None:
+                return
+            if self._parser._impl_plot_cache_table.get_cache_item(event.inaxes):
+                return
+
+            pos = event.inaxes.figure.axes.index(event.inaxes)
+            ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes.figure.axes[pos + 1])
+            plot = ci.plot()
+            for row in plot.signals.values():
+                for signal in row:
+                    self._parser.process_ipl_signal(signal)
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.text() == 'n':
