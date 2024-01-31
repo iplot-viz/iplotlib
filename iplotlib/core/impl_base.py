@@ -24,7 +24,7 @@ import weakref
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits
-from iplotlib.core.plot import Plot
+from iplotlib.core.plot import Plot, PlotXYWithSlider
 from iplotlib.core.signal import Signal
 import iplotLogging.setupLogger as sl
 
@@ -336,6 +336,13 @@ class BackendParserBase(ABC):
                 if not isinstance(plot_lims, IplPlotViewLimits):
                     continue
                 all_limits.append(plot_lims)
+                # Process the Slider limits in case the slider exits
+                if isinstance(plot, PlotXYWithSlider):
+                    plot.slider.valmin = plot_lims.axes_ranges[0].begin
+                    plot.slider.valmax = plot_lims.axes_ranges[0].end
+                    plot.slider.set_val((plot_lims.axes_ranges[0].begin+plot_lims.axes_ranges[0].end)/2)
+                    plot.slider.ax.set_xlim(plot_lims.axes_ranges[0].begin, plot_lims.axes_ranges[0].end)
+
         return all_limits
 
     def get_plot_limits(self, plot: Plot, which='current') -> IplPlotViewLimits:
