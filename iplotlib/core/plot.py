@@ -14,6 +14,7 @@ from typing import Dict, List, Collection, Union
 
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.signal import Signal
+from matplotlib.widgets import Slider
 
 
 @dataclass
@@ -22,26 +23,25 @@ class Plot(ABC):
     Main abstraction of a Plot
     """
 
-    row_span: int = 1 #: no. of rows of canvas grid that this plot will span
-    col_span: int = 1 #: no. of columns of canvas grid that this plot will span
+    row_span: int = 1  #: no. of rows of canvas grid that this plot will span
+    col_span: int = 1  #: no. of columns of canvas grid that this plot will span
 
-    title: str = None #: a plot title text, will be shown above the plot
+    title: str = None  #: a plot title text, will be shown above the plot
 
-    axes: List[Union[Axis, Collection[Axis]]] = None #: the plot axes.
-    signals: Dict[int, List[Signal]] = None #: the signals drawn in this plot
+    axes: List[Union[Axis, Collection[Axis]]] = None  #: the plot axes.
+    signals: Dict[int, List[Signal]] = None  #: the signals drawn in this plot
     _type: str = None
 
-
-    font_size: int = None #: the font size of the plot title text
+    font_size: int = None  #: the font size of the plot title text
     font_color: str = '#000000'  #: the font color of the plot title text
     background_color: str = '#FFFFFF'
     tick_number: int = 7
-    legend: bool = None #: indicate if the plot legend must be shown
+    legend: bool = None  #: indicate if the plot legend must be shown
     legend_position: str = 'same as canvas'  #: indicate the location of the plot legend
     legend_layout: str = 'same as canvas'  #: indicate the layout of the plot legend
 
     def __post_init__(self):
-        self._type = self.__class__.__module__+'.'+self.__class__.__qualname__
+        self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.signals is None:
             self.signals = {}
 
@@ -83,9 +83,6 @@ class Plot(ABC):
 
         # signals are merged at canvas level to handle move between plots
 
-        
-
-
 
 @dataclass
 class PlotContour(Plot):
@@ -125,15 +122,15 @@ class PlotXY(Plot):
     """
     Ä concrete Plot class specialized for 2D plottling.
     """
-    
-    grid: bool = None #: indiacte if the grid must be drawn
-    line_style: str = None #: set the line style of all signals.
-    line_size: int = None #: set the line size of all signals.
-    marker: str = None #: set the marker shape of all signals.
-    marker_size: int = None #: set the marker size of all signals.
-    step: str = None #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
-    hi_precision_data: bool = None #: indicate whether the data is sensitive to round off errors and requires special handling
-    dec_samples: int = None #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
+
+    grid: bool = None  #: indiacte if the grid must be drawn
+    line_style: str = None  #: set the line style of all signals.
+    line_size: int = None  #: set the line size of all signals.
+    marker: str = None  #: set the marker shape of all signals.
+    marker_size: int = None  #: set the marker size of all signals.
+    step: str = None  #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
+    hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires special handling
+    dec_samples: int = None  #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
 
     def __post_init__(self):
         super().__post_init__()
@@ -157,3 +154,47 @@ class PlotXY(Plot):
         self.marker_size = old_plot.marker_size
         self.step = old_plot.step
         super().merge(old_plot)
+
+
+@dataclass
+class PlotXYWithSlider(PlotXY):
+    """
+    A concrete Plot class specialized for 2D plottling with a Slider to be able to move the plot across time.
+    """
+    slider: Slider = None
+    slider_last_val: int = 0
+
+    def __post_init__(self):
+        super().__post_init__()
+
+    def reset_preferences(self):
+        super().reset_preferences()
+        self.slider = PlotXYWithSlider.slider
+        self.slider_last_val = PlotXYWithSlider.slider_last_val
+
+    def merge(self, old_plot: 'PlotXYWithSlider'):
+        super().merge(old_plot)
+        self.slider = old_plot.slider
+        self.slider_last_val = old_plot.slider_last_val
+
+
+@dataclass
+class PlotContourWithSlider(PlotContour):
+    """
+    A concrete Plot class specialized for contour plottling with a Slider to be able to move the plot across time.
+    """
+    slider: Slider = None
+    slider_last_val: int = 0
+
+    def __post_init__(self):
+        super().__post_init__()
+
+    def reset_preferences(self):
+        super().reset_preferences()
+        self.slider = PlotContourWithSlider.slider
+        self.slider_last_val = PlotContourWithSlider.slider_last_val
+
+    def merge(self, old_plot: 'PlotContourWithSlider'):
+        super().merge(old_plot)
+        self.slider = old_plot.slider
+        self.slider_last_val = old_plot.slider_last_val
