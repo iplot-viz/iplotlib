@@ -499,15 +499,6 @@ class MatplotlibParser(BackendParserBase):
         signal_data = signal.get_data()
 
         data = self.transform_data(mpl_axes, signal_data)
-        #logger.debug(f"\tprocessipsignal data[0] {data[0]} data[1] {data[1]} ax_idx: {type(signal_data)} ")
-        if not len(data[0]) or not len(data[1]):
-            if hasattr(signal, 'ts_start') and hasattr(signal, 'ts_end'):
-                logger.debug(f"\tprocessipsignal ts_start {signal.ts_start} ts_end {signal.ts_end} status: {signal.status_info.result} ")
-                if not signal.ts_start or not signal.ts_end:
-                    ##case where we have a pulse id and no data being returned
-                    self.set_oaw_axis_limits(mpl_axes, 0, [None, None])
-                else:
-                    self.set_oaw_axis_limits(mpl_axes, 0, [signal.ts_start, signal.ts_end])
 
         if hasattr(signal, 'envelope') and signal.envelope:
             if len(data) != 3:
