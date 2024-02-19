@@ -14,7 +14,6 @@ from iplotlib.core.plot import Plot
 from iplotlib.core.signal import Signal
 import pandas as pd
 
-
 @dataclass
 class Canvas(ABC):
     """
@@ -77,6 +76,7 @@ class Canvas(ABC):
     enable_ValLabel_crosshair: bool = True
 
     plots: List[List[Union[Plot, None]]] = None  #: A 22-level nested list of plots.
+    focus_plot: Plot = None
 
     crosshair_enabled: bool = False  #: visibility of crosshair.
     crosshair_color: str = "red"  #: color of the crosshair cursor lines.
@@ -174,6 +174,7 @@ class Canvas(ABC):
         self.marker_size = Canvas.marker_size
         self.step = Canvas.step
         self.full_mode_all_stack = Canvas.full_mode_all_stack
+        self.focus_plot = Canvas.focus_plot
 
     def merge(self, old_canvas: 'Canvas'):
         """
@@ -200,6 +201,7 @@ class Canvas(ABC):
         self.marker_size = old_canvas.marker_size
         self.step = old_canvas.step
         self.full_mode_all_stack = old_canvas.full_mode_all_stack
+        self.focus_plot = old_canvas.focus_plot
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
@@ -236,32 +238,46 @@ class Canvas(ABC):
 
     def get_signals_as_csv(self):
         x = pd.DataFrame()
+        focus_plot = self.focus_plot
         for c, column in enumerate(self.plots):
             for r, row in enumerate(column):
-                for p, plot in enumerate(row.signals.values()):
-                    for s, pl_signal in enumerate(plot):
-                        col_name = f"plot{r + 1}.{c + 1}"
-                        if len(row.signals) > 1:
-                            col_name += f".{p + 1}"
-                        if pl_signal.alias:
-                            col_name += f"_{pl_signal.alias}"
-                        else:
-                            col_name += f"_{pl_signal.name}"
+                if not focus_plot or row==focus_plot:
+                    for p, plot in enumerate(row.signals.values()):
+                        for s, pl_signal in enumerate(plot):
+                            col_name = f"plot{r + 1}.{c + 1}"
+                            if len(row.signals) > 1:
+                                col_name += f".{p + 1}"
+                            if pl_signal.alias:
+                                col_name += f"_{pl_signal.alias}"
+                            else:
+                                col_name += f"_{pl_signal.name}"
 
-                        timestamps = [pd.Timestamp(value) for value in pl_signal.x_data]
-                        format_ts = [ts.strftime("%Y-%m-%dT%H:%M:%S.%f") + "{:03d}".format(ts.nanosecond) + "Z"
-                                     for ts in timestamps]
-                        if pl_signal.envelope:
-                            result = []
-                            for i in range(len(pl_signal.y_data)):
-                                min_values = pl_signal.y_data[i]
-                                max_values = pl_signal.z_data[i]
-                                avg_values = pl_signal.data_store[3][i]
-                                result.append(f"({min_values};{avg_values};{max_values})")
-                            x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
-                            x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
-                        else:
+                            # Refresh limits
+                            mask = (pl_signal.x_data >= pl_signal.ts_start) & (pl_signal.x_data <= pl_signal.ts_end)
+                            pl_signal.x_data = pl_signal.x_data[mask]
+                            pl_signal.y_data = pl_signal.y_data[mask]
 
-                            x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
-                            x[f"{col_name}.data"] = pd.Series(pl_signal.y_data, name=f"{col_name}.data")
+                            # Check min and max dates
+                            if pl_signal.x_data.size > 0 and bool(min(pl_signal.x_data) > (1 << 53) and
+                                                                  max(pl_signal.x_data) < pd.Timestamp.max.value):
+
+                                timestamps = [pd.Timestamp(value) for value in pl_signal.x_data]
+                                format_ts = [ts.strftime("%Y-%m-%dT%H:%M:%S.%f") + "{:03d}".format(ts.nanosecond) + "Z"
+                                             for ts in timestamps]
+                            else:
+                                format_ts = pl_signal.x_data
+
+                            if pl_signal.envelope:
+                                result = []
+                                for i in range(len(pl_signal.y_data)):
+                                    min_values = pl_signal.y_data[i]
+                                    max_values = pl_signal.z_data[i]
+                                    avg_values = pl_signal.data_store[3][i]
+                                    result.append(f"({min_values};{avg_values};{max_values})")
+                                x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
+                                x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
+                            else:
+
+                                x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
+                                x[f"{col_name}.data"] = pd.Series(pl_signal.y_data, name=f"{col_name}.data")
         return x.to_csv(index=False)

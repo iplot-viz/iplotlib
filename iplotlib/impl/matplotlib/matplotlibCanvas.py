@@ -220,8 +220,10 @@ class MatplotlibParser(BackendParserBase):
         # 2. Allocate
         self.canvas = canvas
         if self._focus_plot is None:
+            self.canvas.focus_plot = None
             self._layout = self.figure.add_gridspec(canvas.rows, canvas.cols)
         else:
+            self.canvas.focus_plot = self._focus_plot
             self._layout = self.figure.add_gridspec(1, 1)
 
         # 3. Fill the canvas with plots.
