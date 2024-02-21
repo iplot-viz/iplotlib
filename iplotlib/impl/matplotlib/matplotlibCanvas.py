@@ -30,7 +30,7 @@ from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 
 logger = sl.get_logger(__name__)
-STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post",
+STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "default": "steps-pre",
             "pre": "steps-pre", "steps-mid": "steps-mid", "steps-post": "steps-post", "steps-pre": "steps-pre"}
 
 class MatplotlibParser(BackendParserBase):
@@ -75,11 +75,6 @@ class MatplotlibParser(BackendParserBase):
         except AttributeError:
             plot = None
         style = self.get_signal_style(signal, plot)
-        step = style.pop('drawstyle', None)
-        logger.debug(f"mpl_line_plot step=: {step}")
-        if step is None:
-            step='linear'
-        style.update({'drawstyle': STEP_MAP[step.lower()]})
 
         if isinstance(lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -103,7 +98,6 @@ class MatplotlibParser(BackendParserBase):
             #             continue
             #         setter(v)
         else:
-            logger.debug(f"mpl_line_plot step case 2=: {step}")
             params = dict(**style)
             draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -123,9 +117,6 @@ class MatplotlibParser(BackendParserBase):
         except AttributeError:
             plot = None
         style = self.get_signal_style(signal, plot)
-        step = style.get('drawstyle', None)
-        if step is None:
-            step = 'post'
 
         if shapes is not None:
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
@@ -137,7 +128,7 @@ class MatplotlibParser(BackendParserBase):
                 shapes[0][2] = mpl_axes.fill_between(x_data, y1_data, y2_data,
                                                      alpha=0.3,
                                                      color=shapes[0][0].get_color(),
-                                                     step=STEP_MAP[step.lower()].replace('steps-', ''))
+                                                     step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
             self.figure.canvas.draw_idle()
 
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
@@ -157,8 +148,7 @@ class MatplotlibParser(BackendParserBase):
                 area = mpl_axes.fill_between(x_data, y1_data, y2_data,
                                              alpha=0.3,
                                              color=params2['color'],
-                                             step=STEP_MAP[step.lower()].replace('steps-', ''))
-
+                                             step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
 
                 self._signal_impl_shape_lut.update({id(signal): [line_1 + line_2 + [area]]})
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
@@ -615,16 +605,14 @@ class MatplotlibParser(BackendParserBase):
         if hasattr(signal, "color"):
             style['color'] = signal.color
 
-        style['linewidth'] = self._pm.get_value(
-            'line_size', self.canvas, plot, signal=signal) or 1
-        style['linestyle'] = (self._pm.get_value(
-            'line_style', self.canvas, plot, signal=signal) or "Solid").lower()
-        style['marker'] = self._pm.get_value(
-            'marker', self.canvas, plot, signal=signal)
-        style['markersize'] = self._pm.get_value(
-            'marker_size', self.canvas, plot, signal=signal) or 0
-        style["drawstyle"] = self._pm.get_value(
-            'step', self.canvas, plot, signal=signal)
+        style['linewidth'] = self._pm.get_value('line_size', self.canvas, plot, signal=signal) or 1
+        style['linestyle'] = (self._pm.get_value('line_style', self.canvas, plot, signal=signal) or "Solid").lower()
+        style['marker'] = self._pm.get_value('marker', self.canvas, plot, signal=signal)
+        style['markersize'] = self._pm.get_value('marker_size', self.canvas, plot, signal=signal) or 0
+        step =  self._pm.get_value('step', self.canvas, plot, signal=signal)
+        if step is None:
+            step = 'linear'
+        style["drawstyle"] = STEP_MAP[step]
 
         return style
 
