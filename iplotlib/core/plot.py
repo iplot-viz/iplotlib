@@ -119,10 +119,10 @@ class PlotImage(Plot):
 @dataclass
 class PlotXY(Plot):
     """
-    Ä concrete Plot class specialized for 2D plottling.
+    A concrete Plot class specialized for 2D plottling.
     """
 
-    grid: bool = None  #: indiacte if the grid must be drawn
+    grid: bool = None  #: indicate if the grid must be drawn
     line_style: str = None  #: set the line style of all signals.
     line_size: int = None  #: set the line size of all signals.
     marker: str = None  #: set the marker shape of all signals.
@@ -132,7 +132,8 @@ class PlotXY(Plot):
     dec_samples: int = None  #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
 
     _color_cycle = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
-                    '#bcbd22', '#17becf']
+                    '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',
+                    '#e6ff33', '#8a2be2', '#000080', '#cc6600']
     _color_index: int = None
 
     def __post_init__(self):
