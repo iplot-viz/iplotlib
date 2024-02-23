@@ -3,7 +3,7 @@
 
 from contextlib import ExitStack
 from typing import Any, Callable, Collection, List
-import traceback
+
 import numpy as np
 import pandas
 from matplotlib.axes import Axes as MPLAxes
@@ -31,17 +31,17 @@ from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 
 logger = sl.get_logger(__name__)
-STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post",
+STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "default": "steps-pre",
             "pre": "steps-pre", "steps-mid": "steps-mid", "steps-post": "steps-post", "steps-pre": "steps-pre"}
 
 class MatplotlibParser(BackendParserBase):
 
     def __init__(self,
-                canvas: Canvas = None,
-                tight_layout: bool = True,
-                focus_plot=None,
-                focus_plot_stack_key=None,
-                impl_flush_method: Callable = None) -> None:
+                 canvas: Canvas = None,
+                 tight_layout: bool = True,
+                 focus_plot=None,
+                 focus_plot_stack_key=None,
+                 impl_flush_method: Callable = None) -> None:
         """Initialize underlying matplotlib classes.
         """
         super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key, impl_flush_method=impl_flush_method)
@@ -69,36 +69,24 @@ class MatplotlibParser(BackendParserBase):
         self.figure.savefig(filename)
 
     def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data, z_data):
-        if not isinstance(mpl_axes, MPLAxes):
-            return
-        #logger.debug(f"mpl_line_plot : {traceback.print_stack()}")
-        lines = self._signal_impl_shape_lut.get(
-            id(signal))  # type: List[List[Line2D]]
+        lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = cache_item.plot()
         except AttributeError:
             plot = None
         style = self.get_signal_style(signal, plot)
-        step = style.pop('drawstyle', None)
-        logger.debug(f"mpl_line_plot step=: {step}")
-        if step is None:
-            step='linear'
-        style.update({'drawstyle': STEP_MAP[step.lower()]})
 
         if isinstance(lines, list):
             if isinstance(plot, PlotXY):
-                for i, line in enumerate(lines):
-                    if len(lines) == 1:
-                        line.set_ydata(y_data)
-                    else:
-                        line.set_ydata(y_data[:, i])
-
-                    for k, v in style.items():
-                        setter = getattr(line, f"set_{k}")
-                        if v is None and k != "drawstyle":
-                            continue
-                        setter(v)
+                if x_data.ndim == 1 and y_data.ndim == 1:
+                    line = lines[0][0]  # type: Line2D
+                    line.set_xdata(x_data)
+                    line.set_ydata(y_data)
+                elif x_data.ndim == 1 and y_data.ndim == 2:
+                    for i, line in enumerate(lines):
+                        line[0].set_xdata(x_data)
+                        line[0].set_ydata(y_data[:, i])
 
                 if self.canvas.streaming:
                     mpl_axes.set_ylim(min(y_data) - 0.01, max(y_data) + 0.01)
@@ -117,6 +105,13 @@ class MatplotlibParser(BackendParserBase):
                     lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
                 mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
+            # Not necessary, the lines has already all the style
+            # for line in lines:
+            #     for k, v in style.items():
+            #         setter = getattr(line[0], f"set_{k}")
+            #         if v is None and k != "drawstyle":
+            #             continue
+            #         setter(v)
         else:
             logger.debug(f"mpl_line_plot step case 2=: {step}")
             params = dict(**style)
@@ -125,8 +120,10 @@ class MatplotlibParser(BackendParserBase):
                 draw_fn = mpl_axes.plot
                 if x_data.ndim == 1 and y_data.ndim == 1:
                     lines = draw_fn(x_data, y_data, **params)
+                    signal.color = lines[0][0].get_color()
                 elif x_data.ndim == 1 and y_data.ndim == 2:
                     lines = draw_fn(x_data, y_data, **params)
+                    lines = [[line] for line in lines]
 
             elif isinstance(plot, PlotContour):
                 contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
@@ -141,61 +138,48 @@ class MatplotlibParser(BackendParserBase):
         self._signal_impl_shape_lut.update({id(signal): lines})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
-        if not isinstance(mpl_axes, MPLAxes):
-            return
-
-        shapes = self._signal_impl_shape_lut.get(
-            id(signal))  # type: List[List[Line2D]]
+        shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = cache_item.plot()
         except AttributeError:
             plot = None
         style = self.get_signal_style(signal, plot)
-        step = style.pop('drawstyle', None)
-        if step is None:
-            step='post'
 
         if shapes is not None:
-            shapes[0][0].set_xdata(x_data)
-            shapes[0][0].set_ydata(y1_data)
-            shapes[1][0].set_xdata(x_data)
-            shapes[1][0].set_ydata(y2_data)
-            shapes[2].remove()
-            shapes.pop()
-            style.update({'drawstyle': STEP_MAP[step.lower()]})
-            for k, v in style.items():
-                setter = getattr(shapes[0][0], f"set_{k}")
-                if v is None and k != "drawstyle":
-                    continue
-                setter(v)
-                setter = getattr(shapes[1][0], f"set_{k}")
-                setter(v)
-            area = mpl_axes.fill_between(x_data, y1_data, y2_data,
-                                         alpha=0.3,
-                                         color=shapes[1][0].get_color(),
-                                         step=STEP_MAP[step.lower()].replace('steps-',''))
-            shapes.append(area)
-            shapes[0][0].draw(mpl_axes.figure.canvas.renderer)
-            shapes[1][0].draw(mpl_axes.figure.canvas.renderer)
-            shapes[2].draw(mpl_axes.figure.canvas.renderer)
+            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
+                shapes[0][0].set_xdata(x_data)
+                shapes[0][0].set_ydata(y1_data)
+                shapes[0][1].set_xdata(x_data)
+                shapes[0][1].set_ydata(y2_data)
+                shapes[0][2].remove()
+                shapes[0][2] = mpl_axes.fill_between(x_data, y1_data, y2_data,
+                                                     alpha=0.3,
+                                                     color=shapes[0][0].get_color(),
+                                                     step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
+            self.figure.canvas.draw_idle()
+
+            # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
         else:
             params = dict(**style)
             draw_fn = mpl_axes.plot
-            #if step is not None and step != 'None':
-             #   params.update({'where': step})
-              #  draw_fn = mpl_axes.step
+            # if step is not None and step != 'None':
+            #   params.update({'where': step})
+            #  draw_fn = mpl_axes.step
 
-            line_1 = draw_fn(x_data, y1_data, **params)
-            params2 = params.copy()
-            params2.update(color=line_1[0].get_color(), label='')
-            line_2 = draw_fn(x_data, y2_data, **params2)
-            area = mpl_axes.fill_between(x_data, y1_data, y2_data,
-                                         alpha=0.3,
-                                         color=params2['color'],
-                                         step=STEP_MAP[step.lower()].replace('steps-',''))
+            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
+                line_1 = draw_fn(x_data, y1_data, **params)
+                params2 = params.copy()
+                signal.color = line_1[0].get_color()
+                params2.update(color=signal.color, label='')
+                line_2 = draw_fn(x_data, y2_data, **params2)
+                area = mpl_axes.fill_between(x_data, y1_data, y2_data,
+                                             alpha=0.3,
+                                             color=params2['color'],
+                                             step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
 
-            self._signal_impl_shape_lut.update({id(signal): [line_1, line_2, area]})
+                self._signal_impl_shape_lut.update({id(signal): [line_1 + line_2 + [area]]})
+            # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
 
     def clear(self):
         super().clear()
@@ -210,32 +194,30 @@ class MatplotlibParser(BackendParserBase):
     def _get_all_shared_axes(self, base_mpl_axes: MPLAxes):
         if not isinstance(self.canvas, Canvas):
             return []
-        if self.canvas.shared_x_axis:
-            return self.figure.axes
-        else:
-            cache_item = self._impl_plot_cache_table.get_cache_item(base_mpl_axes)
-            if not hasattr(cache_item, 'plot'):
-                return
-            base_plot = cache_item.plot()
-            if not isinstance(base_plot, Plot):
-                return
-            shared = list()
-            base_limits = self.get_plot_limits(base_plot, which='original')
-            base_begin, base_end = base_limits.axes_ranges[0].begin, base_limits.axes_ranges[0].end
 
-            if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
-                for axes in self.figure.axes:
-                    cache_item = self._impl_plot_cache_table.get_cache_item(axes)
-                    if not hasattr(cache_item, 'plot'):
-                        continue
-                    plot = cache_item.plot()
-                    if not isinstance(plot, Plot):
-                        continue
-                    limits = self.get_plot_limits(plot, which='original')
-                    begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                    if (begin, end) == (base_begin, base_end):
-                        shared.append(axes)
-            return shared
+        cache_item = self._impl_plot_cache_table.get_cache_item(base_mpl_axes)
+        if not hasattr(cache_item, 'plot'):
+            return
+        base_plot = cache_item.plot()
+        if not isinstance(base_plot, Plot):
+            return
+        shared = list()
+        base_limits = self.get_plot_limits(base_plot, which='original')
+        base_begin, base_end = base_limits.axes_ranges[0].begin, base_limits.axes_ranges[0].end
+
+        if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
+            for axes in self.figure.axes:
+                cache_item = self._impl_plot_cache_table.get_cache_item(axes)
+                if not hasattr(cache_item, 'plot'):
+                    continue
+                plot = cache_item.plot()
+                if not isinstance(plot, Plot):
+                    continue
+                limits = self.get_plot_limits(plot, which='original')
+                begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
+                if (begin, end) == (base_begin, base_end):
+                    shared.append(axes)
+        return shared
 
     def process_ipl_canvas(self, canvas: Canvas):
         """This method analyzes the iplotlib canvas data structure and maps it
@@ -256,8 +238,10 @@ class MatplotlibParser(BackendParserBase):
         # 2. Allocate
         self.canvas = canvas
         if self._focus_plot is None:
+            self.canvas.focus_plot = None
             self._layout = self.figure.add_gridspec(canvas.rows, canvas.cols)
         else:
+            self.canvas.focus_plot = self._focus_plot
             self._layout = self.figure.add_gridspec(1, 1)
 
         # 3. Fill the canvas with plots.
@@ -533,15 +517,6 @@ class MatplotlibParser(BackendParserBase):
         signal_data = signal.get_data()
 
         data = self.transform_data(mpl_axes, signal_data)
-        #logger.debug(f"\tprocessipsignal data[0] {data[0]} data[1] {data[1]} ax_idx: {type(signal_data)} ")
-        if not len(data[0]) or not len(data[1]):
-            if hasattr(signal, 'ts_start') and hasattr(signal, 'ts_end'):
-                logger.debug(f"\tprocessipsignal ts_start {signal.ts_start} ts_end {signal.ts_end} status: {signal.status_info.result} ")
-                if not signal.ts_start or not signal.ts_end:
-                    ##case where we have a pulse id and no data being returned
-                    self.set_oaw_axis_limits(mpl_axes, 0, [None, None])
-                else:
-                    self.set_oaw_axis_limits(mpl_axes, 0, [signal.ts_start, signal.ts_end])
 
         if hasattr(signal, 'envelope') and signal.envelope:
             if len(data) != 3:
@@ -595,7 +570,9 @@ class MatplotlibParser(BackendParserBase):
                         if plot_temp != self._focus_plot:
                             logger.debug(
                                 f"Setting range on plot {id(plot_temp)} focused= {id(self._focus_plot)} begin={begin}")
-                            set_x_axis_range(plot_temp, begin, end)
+                            if plot_temp.axes[0].original_begin == self._focus_plot.axes[0].original_begin and \
+                                    plot_temp.axes[0].original_end == self._focus_plot.axes[0].original_end:
+                                set_x_axis_range(plot_temp, begin, end)
 
         self._focus_plot = plot
         self._focus_plot_stack_key = stack_key
@@ -645,16 +622,14 @@ class MatplotlibParser(BackendParserBase):
         if hasattr(signal, "color"):
             style['color'] = signal.color
 
-        style['linewidth'] = self._pm.get_value(
-            'line_size', self.canvas, plot, signal=signal) or 1
-        style['linestyle'] = (self._pm.get_value(
-            'line_style', self.canvas, plot, signal=signal) or "Solid").lower()
-        style['marker'] = self._pm.get_value(
-            'marker', self.canvas, plot, signal=signal)
-        style['markersize'] = self._pm.get_value(
-            'marker_size', self.canvas, plot, signal=signal) or 0
-        style["drawstyle"] = self._pm.get_value(
-            'step', self.canvas, plot, signal=signal)
+        style['linewidth'] = self._pm.get_value('line_size', self.canvas, plot, signal=signal) or 1
+        style['linestyle'] = (self._pm.get_value('line_style', self.canvas, plot, signal=signal) or "Solid").lower()
+        style['marker'] = self._pm.get_value('marker', self.canvas, plot, signal=signal)
+        style['markersize'] = self._pm.get_value('marker_size', self.canvas, plot, signal=signal) or 0
+        step =  self._pm.get_value('step', self.canvas, plot, signal=signal)
+        if step is None:
+            step = 'linear'
+        style["drawstyle"] = STEP_MAP[step]
 
         return style
 
