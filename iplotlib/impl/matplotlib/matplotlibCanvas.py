@@ -74,6 +74,10 @@ class MatplotlibParser(BackendParserBase):
             plot = cache_item.plot()
         except AttributeError:
             plot = None
+
+        if signal.color is None:
+            signal.color = plot.get_next_color()
+
         style = self.get_signal_style(signal, plot)
 
         if isinstance(lines, list):
@@ -102,7 +106,6 @@ class MatplotlibParser(BackendParserBase):
             draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
                 lines = [draw_fn(x_data, y_data, **params)]
-                signal.color = lines[0][0].get_color()
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 lines = draw_fn(x_data, y_data, **params)
                 lines = [[line] for line in lines]

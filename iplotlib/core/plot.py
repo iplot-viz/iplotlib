@@ -22,26 +22,25 @@ class Plot(ABC):
     Main abstraction of a Plot
     """
 
-    row_span: int = 1 #: no. of rows of canvas grid that this plot will span
-    col_span: int = 1 #: no. of columns of canvas grid that this plot will span
+    row_span: int = 1  #: no. of rows of canvas grid that this plot will span
+    col_span: int = 1  #: no. of columns of canvas grid that this plot will span
 
-    title: str = None #: a plot title text, will be shown above the plot
+    title: str = None  #: a plot title text, will be shown above the plot
 
-    axes: List[Union[Axis, Collection[Axis]]] = None #: the plot axes.
-    signals: Dict[int, List[Signal]] = None #: the signals drawn in this plot
+    axes: List[Union[Axis, Collection[Axis]]] = None  #: the plot axes.
+    signals: Dict[int, List[Signal]] = None  #: the signals drawn in this plot
     _type: str = None
 
-
-    font_size: int = None #: the font size of the plot title text
+    font_size: int = None  #: the font size of the plot title text
     font_color: str = '#000000'  #: the font color of the plot title text
     background_color: str = '#FFFFFF'
     tick_number: int = 7
-    legend: bool = None #: indicate if the plot legend must be shown
+    legend: bool = None  #: indicate if the plot legend must be shown
     legend_position: str = 'same as canvas'  #: indicate the location of the plot legend
     legend_layout: str = 'same as canvas'  #: indicate the layout of the plot legend
 
     def __post_init__(self):
-        self._type = self.__class__.__module__+'.'+self.__class__.__qualname__
+        self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.signals is None:
             self.signals = {}
 
@@ -83,9 +82,6 @@ class Plot(ABC):
 
         # signals are merged at canvas level to handle move between plots
 
-        
-
-
 
 @dataclass
 class PlotContour(Plot):
@@ -123,22 +119,35 @@ class PlotImage(Plot):
 @dataclass
 class PlotXY(Plot):
     """
-    Ä concrete Plot class specialized for 2D plottling.
+    A concrete Plot class specialized for 2D plottling.
     """
-    
-    grid: bool = None #: indiacte if the grid must be drawn
-    line_style: str = None #: set the line style of all signals.
-    line_size: int = None #: set the line size of all signals.
-    marker: str = None #: set the marker shape of all signals.
-    marker_size: int = None #: set the marker size of all signals.
-    step: str = None #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
-    hi_precision_data: bool = None #: indicate whether the data is sensitive to round off errors and requires special handling
-    dec_samples: int = None #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
+
+    grid: bool = None  #: indicate if the grid must be drawn
+    line_style: str = None  #: set the line style of all signals.
+    line_size: int = None  #: set the line size of all signals.
+    marker: str = None  #: set the marker shape of all signals.
+    marker_size: int = None  #: set the marker size of all signals.
+    step: str = None  #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
+    hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires special handling
+    dec_samples: int = None  #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
+
+    _color_cycle = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
+                    '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',
+                    '#e6ff33', '#8a2be2', '#000080', '#cc6600']
+    _color_index: int = None
 
     def __post_init__(self):
         super().__post_init__()
         if self.axes is None:
             self.axes = [LinearAxis(), LinearAxis()]
+        self._color_index = 0
+
+    def get_next_color(self):
+        position = self._color_index % len(self._color_cycle)
+        color_signal = self._color_cycle[position]
+        self._color_index += 1
+
+        return color_signal
 
     def reset_preferences(self):
         self.grid = PlotXY.grid
@@ -156,4 +165,5 @@ class PlotXY(Plot):
         self.marker = old_plot.marker
         self.marker_size = old_plot.marker_size
         self.step = old_plot.step
+        self._color_index = old_plot._color_index
         super().merge(old_plot)
