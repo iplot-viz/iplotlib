@@ -14,6 +14,7 @@ from iplotlib.core.plot import Plot
 from iplotlib.core.signal import Signal
 import pandas as pd
 
+
 @dataclass
 class Canvas(ABC):
     """
@@ -66,7 +67,7 @@ class Canvas(ABC):
     legend: bool = True  #: a boolean that suggests the visibility of a plot legend box.
     legend_position: str = 'upper right'  #: indicate the location of the plot legend
     legend_layout: str = 'vertical'  #: indicate the layout of the plot legend
-    grid: bool = False #: a boolean that suggests the visibility of a plot grid
+    grid: bool = False  #: a boolean that suggests the visibility of a plot grid
     ticks_position: bool = False
 
     #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
@@ -241,7 +242,7 @@ class Canvas(ABC):
         focus_plot = self.focus_plot
         for c, column in enumerate(self.plots):
             for r, row in enumerate(column):
-                if not focus_plot or row==focus_plot:
+                if row and (not focus_plot or row == focus_plot):
                     for p, plot in enumerate(row.signals.values()):
                         for s, pl_signal in enumerate(plot):
                             col_name = f"plot{r + 1}.{c + 1}"
