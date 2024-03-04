@@ -18,9 +18,10 @@ callable.
 from collections import deque
 from typing import Deque
 from iplotlib.core.command import IplotCommand
-import iplotLogging.setupLogger as ls
+import iplotLogging.setupLogger as Sl
 
-logger = ls.get_logger(__name__)
+logger = Sl.get_logger(__name__)
+
 
 class HistoryManager:
     """
@@ -28,9 +29,10 @@ class HistoryManager:
     A deque is used instead of a list to offer more features
     like event bubbling in the future, if necessary.
     """
+
     def __init__(self) -> None:
-        self._undo_stack = deque() # type: Deque[IplotCommand]
-        self._redo_stack = deque() # type: Deque[IplotCommand]
+        self._undo_stack = deque()  # type: Deque[IplotCommand]
+        self._redo_stack = deque()  # type: Deque[IplotCommand]
 
     def done(self, cmd: IplotCommand):
         """
@@ -48,7 +50,7 @@ class HistoryManager:
         This undoes the action of the command at the back of the undo stack.
         """
         try:
-            cmd = self._undo_stack.pop() # type: IplotCommand
+            cmd = self._undo_stack.pop()  # type: IplotCommand
             cmd.undo()
             self._redo_stack.append(cmd)
             logger.debug(f"Undo {cmd.name}")
@@ -64,7 +66,7 @@ class HistoryManager:
         This redoes the action of the command at the back of the redo stack.
         """
         try:
-            cmd = self._redo_stack.pop() # type: IplotCommand
+            cmd = self._redo_stack.pop()  # type: IplotCommand
             cmd()
             self._undo_stack.append(cmd)
             logger.debug(f"Redo {cmd.name}")
@@ -88,13 +90,13 @@ class HistoryManager:
         """
         Return True if undo is possible.
         """
-        return len(self._undo_stack)
+        return bool(self._undo_stack)
 
     def can_redo(self) -> bool:
         """
         Return True if redo is possible.
         """
-        return len(self._redo_stack)
+        return bool(self._redo_stack)
 
     def get_next_undo_cmd_name(self) -> str:
         """
