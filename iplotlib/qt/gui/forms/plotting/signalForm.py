@@ -22,22 +22,22 @@ class SignalForm(IplotPreferencesForm):
     """
     Map the properties of a Signal object to the widgets in a GUI form.
     """
-    
+
     def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         prototype = [
             {"label": "Label", "property": "label",
-                "widget": self.create_lineedit()},
+             "widget": self.create_lineedit()},
             {"label": "Varname", "property": "varname",
-                "widget":  self.create_lineedit(readonly=True)},
+             "widget": self.create_lineedit(readonly=True)},
             {"label": "Color", "property": "color", "widget": ColorPicker("color")},
-            {"label": "Line style", "property":  "line_style",
-                "widget": self.default_linestyle_widget()},
+            {"label": "Line style", "property": "line_style",
+             "widget": self.default_linestyle_widget()},
             {"label": "Line size", "property": "line_size",
-                "widget": self.default_linesize_widget()},
+             "widget": self.default_linesize_widget()},
             {"label": "Marker", "property": "marker",
-                "widget": self.default_marker_widget()},
+             "widget": self.default_marker_widget()},
             {"label": "Marker size", "property": "marker_size",
-                "widget": self.default_markersize_widget()},
+             "widget": self.default_markersize_widget()},
             {"label": "Line Path", "property": "step", "widget": self.default_linepath_widget()}]
         super().__init__(fields=prototype, label="A signal", parent=parent, f=f)
 
@@ -49,6 +49,6 @@ class SignalForm(IplotPreferencesForm):
             pyObject.reset_preferences()
         else:
             return
-        
+
         self.widgetMapper.revert()
         super().resetPrefs()

@@ -9,15 +9,14 @@ import typing
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import QStackedWidget, QWidget
-from iplotlib.core.command import IplotCommand
 
 from iplotlib.qt.utils.message_box import show_msg
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.models.plotting import CanvasItem
 
-from iplotLogging import setupLogger as sl
+from iplotLogging import setupLogger as Sl
 
-logger = sl.get_logger(__name__)
+logger = Sl.get_logger(__name__)
 
 
 class IplotQtCanvasAssembly(QStackedWidget):
@@ -38,9 +37,9 @@ class IplotQtCanvasAssembly(QStackedWidget):
         Refresh the links b/w the python canvas data object and the model.
         """
         for i in range(self.count()):
-            self.setCanvasData(i, self.widget(i))
+            self.set_canvas_data(i, self.widget(i))
 
-    def setCanvasData(self, idx, canvas: IplotQtCanvas):
+    def set_canvas_data(self, idx, canvas: IplotQtCanvas):
         """
         Set the canvas data object for the 'idx' row in the model.
         """
@@ -60,9 +59,9 @@ class IplotQtCanvasAssembly(QStackedWidget):
             canvasItem = CanvasItem(f'Canvas {idx + 1}')
             canvasItem.setEditable(False)
             self._parentItem.appendRow(canvasItem)
-            self.setCanvasData(idx, canvas)
+            self.set_canvas_data(idx, canvas)
             self.canvasAdded.emit(idx, canvas)
-    
+
     def insertWidget(self, idx: int, canvas: QWidget):
         if not isinstance(canvas, IplotQtCanvas):
             show_msg(
@@ -72,7 +71,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
             canvasItem = CanvasItem(f'Canvas {idx + 1}')
             canvasItem.setEditable(False)
             self._parentItem.insertRow(idx, canvasItem)
-            self.setCanvasData(idx, canvas)
+            self.set_canvas_data(idx, canvas)
             self.canvasAdded.emit(idx, canvas)
 
     def removeWidget(self, canvas: QWidget):

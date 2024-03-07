@@ -7,7 +7,9 @@ Sets up a Qt application ready for testing.
 import unittest
 
 from PySide6.QtWidgets import QApplication
+
 _instance = None
+
 
 class QAppTestAdapter(unittest.TestCase):
     """Helper class to provide QApplication instances"""

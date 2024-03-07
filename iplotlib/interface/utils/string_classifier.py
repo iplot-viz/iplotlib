@@ -5,14 +5,15 @@ class StringType:
     NON_EMPTY = 4
     EMPTY = 5
 
-def get_string_type(val: str) -> StringType:
+
+def get_string_type(val) -> int:
     if not isinstance(val, str):
         return StringType.NOT_A_STRING
 
     if val.isspace():
         if len(val) > 1:
             return StringType.MULTI_SPACE
-        else: # len(val) == 1; note: length cannot be zero, because isspace is strict (>=1)
+        else:  # len(val) == 1; note: length cannot be zero, because isspace is strict (>=1)
             return StringType.SINGLE_SPACE
     else:
         if len(val):
@@ -20,17 +21,22 @@ def get_string_type(val: str) -> StringType:
         else:
             return StringType.EMPTY
 
+
 def is_a_string(val: str) -> bool:
     return get_string_type(val) != StringType.NOT_A_STRING
+
 
 def is_multi_space(val: str) -> bool:
     return get_string_type(val) == StringType.MULTI_SPACE
 
+
 def is_single_space(val: str) -> bool:
     return get_string_type(val) == StringType.SINGLE_SPACE
 
-def is_non_empty(val: str) -> bool:
+
+def is_non_empty(val) -> bool:
     return get_string_type(val) == StringType.NON_EMPTY
+
 
 def is_empty(val: str) -> bool:
     return get_string_type(val) == StringType.EMPTY

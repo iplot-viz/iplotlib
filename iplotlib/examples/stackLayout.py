@@ -8,6 +8,7 @@ import numpy as np
 from iplotlib.core import SimpleSignal, Canvas, PlotXY
 import time
 
+
 def plot():
     ts = time.time_ns()
     te = ts + 8 * 32

@@ -15,25 +15,25 @@ from iplotlib.core.command import IplotCommand
 from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.impl_base import BackendParserBase
-import iplotLogging.setupLogger as sl
+import iplotLogging.setupLogger as Sl
 
-logger = sl.get_logger(__name__)
+logger = Sl.get_logger(__name__)
+
 
 class IplotQtCanvas(QWidget):
     """
-    Base class for all Qt related canvas implementaions
+    Base class for all Qt related canvas implementations
     """
     cmdDone = Signal(IplotCommand)
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent)
         self._mmode = None
-        self._parser = None # type: BackendParserBase
-        self._staging_cmds = [] #type: List[IplotAxesRangeCmd]
-        self._commitd_cmds = [] #type: List[IplotAxesRangeCmd]
+        self._parser = None  # type: BackendParserBase
+        self._staging_cmds = []  # type: List[IplotAxesRangeCmd]
+        self._commitd_cmds = []  # type: List[IplotAxesRangeCmd]
         self._refresh_original_ranges = True
         self.dropInfo = DropInfo()
-
 
     @abstractmethod
     def undo(self):
@@ -74,7 +74,7 @@ class IplotQtCanvas(QWidget):
         """Refresh the canvas from the current iplotlib.core.Canvas instance.
         """
         self.set_canvas(self.get_canvas())
-    
+
     @abstractmethod
     def reset(self):
         """Remove the current iplotlib.core.Canvas instance.
@@ -101,7 +101,7 @@ class IplotQtCanvas(QWidget):
             self.setCursor(Qt.ArrowCursor)
 
     @abstractmethod
-    def set_canvas(self, canvas: Canvas):
+    def set_canvas(self, canvas):
         """Sets new version of iplotlib canvas and redraw"""
 
         # Do some post processing stuff here.
@@ -155,7 +155,7 @@ class IplotQtCanvas(QWidget):
         assert len(cmd.new_lim) == len(cmd.old_lim)
         if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
             self._commitd_cmds.append(cmd)
-            logger.debug(f"Commited {cmd}")
+            logger.debug(f"Committed {cmd}")
         else:
             logger.debug(f"Rejected {cmd}")
 
@@ -178,7 +178,7 @@ class IplotQtCanvas(QWidget):
 
     def export_dict(self):
         return self.get_canvas().to_dict() if self.get_canvas() else None
-    
+
     def import_dict(self, input_dict):
         self.set_canvas(Canvas.from_dict(input_dict))
 

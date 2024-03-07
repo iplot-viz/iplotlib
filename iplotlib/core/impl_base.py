@@ -443,7 +443,7 @@ class BackendParserBase(ABC):
         Implementations should return the y axis
         """
 
-    def get_impl_axis(self, impl_plot: Plot, axis_idx):
+    def get_impl_axis(self, impl_plot, axis_idx):
         """
         Convenience method that gets implementation axis by index 
         instead of using separate methods `get_impl_x_axis`/`get_impl_y_axis`
