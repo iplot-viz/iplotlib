@@ -216,9 +216,13 @@ class BackendParserBase(ABC):
         """
         Prepare the implementation axis.
 
+        :param axis
+        :param ax_idx
         :param plot: An Axis instance
         :param impl_plot
         :type axis: Axis
+        :type ax_idx: int
+        :type plot: Plot
         :type impl_plot: Any
         """
 

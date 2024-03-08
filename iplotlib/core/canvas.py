@@ -12,7 +12,6 @@ from typing import List, Union, Dict
 from iplotlib.core.persistence import JSONExporter
 from iplotlib.core.plot import Plot
 from iplotlib.core.signal import Signal
-from iplotlib.interface.iplotSignalAdapter import IplotSignalAdapter
 import pandas as pd
 
 
