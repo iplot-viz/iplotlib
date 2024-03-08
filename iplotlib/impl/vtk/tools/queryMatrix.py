@@ -1,16 +1,18 @@
-import typing
+from typing import Union, List, Tuple
 from vtkmodules.vtkCommonDataModel import vtkVector2f, vtkVector2i
 from vtkmodules.vtkChartsCore import vtkChartMatrix, vtkChart, vtkPlot
 
-from iplotLogging import setupLogger as sl
-logger = sl.get_logger(__name__, "INFO")
+from iplotLogging import setupLogger as Sl
 
-def get_charts(matrix: vtkChartMatrix, charts: typing.List[vtkChart]):
+logger = Sl.get_logger(__name__, "INFO")
+
+
+def get_charts(matrix: vtkChartMatrix, charts: List[vtkChart]):
     """Get all constituent charts in a chart matrix
 
     Args:
         matrix (vtkChartMatrix): a chart matrix (possibly with a nested layout)
-        charts (typing.List[vtkChart]): a list of charts
+        charts (List[vtkChart]): a list of charts
     """
     size = matrix.GetSize()
     for c in range(size.GetX()):
@@ -23,13 +25,13 @@ def get_charts(matrix: vtkChartMatrix, charts: typing.List[vtkChart]):
                 charts.append(chart)
 
 
-def find_element_index(matrix: vtkChartMatrix, scenePosition: typing.Tuple) -> vtkVector2i:
+def find_element_index(matrix: vtkChartMatrix, scenePosition: Tuple) -> vtkVector2i:
     """Find the vtkChart/vtkChartMatrix that is near the given probing position in a chart matrix.
         This method is not determined to find a chart. It just returns the first element found.
 
     Args:
         matrix (vtkChartMatrix): a chart matrix (possibly with a nested layout)
-        scenePosition (typing.Tuple): a probe position
+        scenePosition (Tuple): a probe position
 
     Returns:
         vtkVector2i: A chart or none if no chart exists
@@ -39,16 +41,17 @@ def find_element_index(matrix: vtkChartMatrix, scenePosition: typing.Tuple) -> v
 
     return elementIndex
 
-def find_chart(matrix: vtkChartMatrix, scenePosition: typing.Tuple) -> typing.Union[None, vtkChart]:
+
+def find_chart(matrix: vtkChartMatrix, scenePosition: Tuple) -> Union[None, vtkChart]:
     """Find the vtkChart that is near the given probing position in a chart matrix.
         This method is determined to find a chart.
 
     Args:
         matrix (vtkChartMatrix): a chart matrix (possibly with a nested layout)
-        scenePosition (typing.Tuple): a probe position
+        scenePosition (Tuple): a probe position
 
     Returns:
-        typing.Union[None, vtkChart]: A chart or none if no chart exists
+        Union[None, vtkChart]: A chart or none if no chart exists
     """
     elementIndex = matrix.GetChartIndex(vtkVector2f(scenePosition))
     logger.debug(f"Mouse in element {elementIndex}")
@@ -64,15 +67,15 @@ def find_chart(matrix: vtkChartMatrix, scenePosition: typing.Tuple) -> typing.Un
         return chart
 
 
-def find_root_plot(matrix: vtkChartMatrix, scenePosition: typing.Tuple) -> typing.Union[None, vtkPlot]:
+def find_root_plot(matrix: vtkChartMatrix, scenePosition: Tuple) -> Union[None, vtkPlot]:
     """Find the root plot that is near the given probing position in a chart matrix.
 
     Args:
         matrix (vtkChartMatrix): a chart matrix (possibly with a nested layout)
-        scenePosition (typing.Tuple): a probe position
+        scenePosition (Tuple): a probe position
 
     Returns:
-        typing.Union[None, vtkPlot]: A plot or none if no plot exists
+        Union[None, vtkPlot]: A plot or none if no plot exists
     """
     elementIndex = matrix.GetChartIndex(vtkVector2f(scenePosition))
     logger.debug(f"Mouse in element {elementIndex}")

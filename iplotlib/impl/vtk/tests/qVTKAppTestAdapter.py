@@ -6,8 +6,10 @@
 from iplotlib.impl.vtk.qt import QtVTKCanvas
 from iplotlib.qt.testing import QAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
+
 _instance = None
 _qvtk_canvas = None
+
 
 class QVTKAppTestAdapter(QAppTestAdapter):
     """Helper class to provide QApplication instances"""
@@ -33,5 +35,5 @@ class QVTKAppTestAdapter(QAppTestAdapter):
         """Deletes the reference owned by self"""
         if not self.headless():
             self.canvas.hide()
-            del self.canvas 
+            del self.canvas
         super().tearDown()
