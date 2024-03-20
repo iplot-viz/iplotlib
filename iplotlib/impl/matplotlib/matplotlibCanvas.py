@@ -45,6 +45,7 @@ class MatplotlibParser(BackendParserBase):
         """
         super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key, impl_flush_method=impl_flush_method)
 
+        self.map_legend_to_ax = {}
         self.legend_size = 8
         self._cursors = []
 
@@ -363,6 +364,11 @@ class MatplotlibParser(BackendParserBase):
                     leg = mpl_axes.legend(prop=legend_props, loc=plot_leg_position, ncol=ncols)
                     if self.figure.get_tight_layout():
                         leg.set_in_layout(False)
+                    for legend_line, ax_line in zip(leg.get_lines(), mpl_axes.get_lines()):
+                        legend_line.set_picker(3)  # Enable picking on the legend line.
+                        self.map_legend_to_ax[legend_line] = ax_line
+
+
 
         # Observe the axis limit change events
         if not self.canvas.streaming:
