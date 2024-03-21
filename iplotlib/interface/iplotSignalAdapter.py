@@ -527,6 +527,11 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         nonempty_name = iplotStrUtils.is_non_empty(self.name)
         if nonempty_name and self.data_access_enabled:
             if self._needs_refresh():
+                if len(self.data_store[0]) and len(self.x_data) and self.x_expr != '${self}.time':
+                    idx = np.where((self.x_data >= self.ts_start) & (self.x_data <= self.ts_end))
+                    self.ts_start = self.data_store[0][idx][0]
+                    self.ts_end = self.data_store[0][idx][-1]
+
                 self._fetch_data()
             elif self.status_info.stage == Stage.PROC:
                 self.set_da_success()
