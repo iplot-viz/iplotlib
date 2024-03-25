@@ -176,9 +176,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
     def get_data(self):
         # 1. Populate time, data_primary, data_secondary (if needed)
-        self._do_data_access()
-        # 2. Use iplotProcessing to evaluate x_data, y_data, z_data
-        self._do_data_processing()
+        if self._do_data_access():
+            # 2. Use iplotProcessing to evaluate x_data, y_data, z_data
+            self._do_data_processing()
 
         return [self.x_data, self.y_data, self.z_data]
 
@@ -527,20 +527,25 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     def _do_data_access(self):
         # Skip if we are invalid.
         if self.status_info.result == Result.INVALID:
-            return
+            return False
 
         # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
         nonempty_name = iplotStrUtils.is_non_empty(self.name)
         if nonempty_name and self.data_access_enabled:
             if self._needs_refresh():
                 self._fetch_data()
+                return True
             elif self.status_info.stage == Stage.PROC:
                 self.set_da_success()
+                return False
         else:
             # 1. either name is empty, trivial (no data access, so emulate a success DA)
             # or 
             # 2.data_access_enabled = False. Assume that user called set_data(...), so, emulate a success DA
-            self.set_da_success()
+            if self.status_info.stage == Stage.INIT:
+                self.set_da_success()
+                return True
+            return False
 
     def _do_data_processing(self):
         # Skip if we are invalid.
