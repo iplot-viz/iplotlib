@@ -110,7 +110,12 @@ class MatplotlibParser(BackendParserBase):
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 lines = draw_fn(x_data, y_data, **params)
                 lines = [[line] for line in lines]
-
+                for i,line in enumerate(lines):
+                    line[0].set_label(f"{signal.label}[{i}]")
+            for new, old in zip(lines,signal.lines):
+                for n, o in zip(new, old):
+                    n.set_visible(o.get_visible())
+            signal.lines = lines
             self._signal_impl_shape_lut.update({id(signal): lines})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
@@ -347,7 +352,7 @@ class MatplotlibParser(BackendParserBase):
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value('legend', self.canvas, plot)
-                if show_legend:
+                if show_legend and mpl_axes.get_lines():
                     plot_leg_position = self._pm.get_value('legend_position', self.canvas, plot)
                     canvas_leg_position = self._pm.get_value('legend_position', self.canvas)
                     plot_leg_layout = self._pm.get_value('legend_layout', self.canvas, plot)
@@ -364,9 +369,14 @@ class MatplotlibParser(BackendParserBase):
                     leg = mpl_axes.legend(prop=legend_props, loc=plot_leg_position, ncol=ncols)
                     if self.figure.get_tight_layout():
                         leg.set_in_layout(False)
-                    for legend_line, ax_line in zip(leg.get_lines(), mpl_axes.get_lines()):
-                        legend_line.set_picker(3)  # Enable picking on the legend line.
-                        self.map_legend_to_ax[legend_line] = ax_line
+
+                    legend_lines = leg.get_lines()
+                    ix_legend = 0
+                    for signal in signals:
+                        for line in self._signal_impl_shape_lut.get(id(signal)):
+                            self.map_legend_to_ax[legend_lines[ix_legend]] = [line, signal]
+                            legend_lines[ix_legend].set_picker(3)
+                            ix_legend += 1
 
 
 

@@ -135,9 +135,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # proxy line, and toggle its visibility.
         legend_line = event.artist
 
-        ax_line = self._parser.map_legend_to_ax[legend_line]
-        visible = not ax_line.get_visible()
-        ax_line.set_visible(visible)
+        ax_lines,signal = self._parser.map_legend_to_ax[legend_line]
+        visible = True
+        for ax_line in ax_lines:
+            visible = not ax_line.get_visible()
+            ax_line.set_visible(visible)
+
+        # signal.lines = ax_lines
         # Change the alpha on the line in the legend, so we can see what lines
         # have been toggled.
         legend_line.set_alpha(1.0 if visible else 0.2)

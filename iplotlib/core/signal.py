@@ -35,6 +35,7 @@ class Signal(ABC):
     hi_precision_data: bool = None
     plot_type: str = ''
     _type: str = None
+    lines = []
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
