@@ -176,9 +176,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
     def get_data(self):
         # 1. Populate time, data_primary, data_secondary (if needed)
-        self._do_data_access()
+        if self._do_data_access():
         # 2. Use iplotProcessing to evaluate x_data, y_data, z_data
-        self._do_data_processing()
+            self._do_data_processing()
 
         return [self.x_data, self.y_data, self.z_data]
 
@@ -195,12 +195,10 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         self._finalize_xyz_data(data)
 
-        # Pure processing, in that case, emulate a successful data access
-        if not self.data_access_enabled:
-            self.data_store[0] = self.x_data
-            self.data_store[1] = self.y_data
-            self.data_store[2] = self.z_data
-            self.set_da_success()
+        self.data_store[0] = self.x_data
+        self.data_store[1] = self.y_data
+        self.data_store[2] = self.z_data
+        self.set_da_success()
 
     @staticmethod
     def acquire_shape(source: BufferObject, target: BufferObject) -> BufferObject:
@@ -521,11 +519,12 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     def _do_data_access(self):
         # Skip if we are invalid.
         if self.status_info.result == Result.INVALID:
-            return
+            return False
 
         # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
         nonempty_name = iplotStrUtils.is_non_empty(self.name)
         if nonempty_name and self.data_access_enabled:
+
             if self._needs_refresh():
                 if len(self.data_store[0]) and len(self.x_data) and self.x_expr != '${self}.time':
                     idx = np.where((self.x_data >= self.ts_start) & (self.x_data <= self.ts_end))
@@ -533,13 +532,18 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                     self.ts_end = self.data_store[0][idx][-1]
 
                 self._fetch_data()
+                return True
             elif self.status_info.stage == Stage.PROC:
                 self.set_da_success()
+                return False
         else:
             # 1. either name is empty, trivial (no data access, so emulate a success DA)
             # or 
             # 2.data_access_enabled = False. Assume that user called set_data(...), so, emulate a success DA
-            self.set_da_success()
+            if self.status_info.stage == Stage.INIT:
+                self.set_da_success()
+                return True
+            return False
 
     def _do_data_processing(self):
         # Skip if we are invalid.
@@ -564,6 +568,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             self._access_md5sum = target_md5sum
 
             if AccessHelper.num_samples_override or self.isDownsampled==True:
+                return True
+            elif self.x_expr != "${self}.time":
                 return True
             elif self._contained_bounds():
                 return False
@@ -912,12 +918,19 @@ class ParserHelper:
             dependencies = list()
             for var_name in signal.depends_on:
                 tmp_local_env[var_name] = copy.deepcopy(local_env[var_name])
-                if not (var_name == 'self' and len(tmp_local_env[var_name].data_store[0]) == 0):
+                tmp_local_env[var_name].ts_start = signal.ts_start
+                tmp_local_env[var_name].ts_end = signal.ts_end
+                if var_name != "self":
+                    tmp_local_env[var_name].get_data()
+                if var_name != 'self' or len(tmp_local_env[var_name].data_store[0]) != 0:
                     dependencies.append(tmp_local_env[var_name])
             align(dependencies)
+            signal.set_data(tmp_local_env['self'].data_store)
         else:
             tmp_local_env = local_env
 
+        p.clear_expr()
+        p.set_expression(expression)
         p.substitute_var(tmp_local_env)
         p.eval_expr()
         if p.has_time_units:
