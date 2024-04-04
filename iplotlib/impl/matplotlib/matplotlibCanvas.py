@@ -523,6 +523,9 @@ class MatplotlibParser(BackendParserBase):
                 logger.error(
                     f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data arrays (<2). {signal}")
                 return
+            if len(data[0]) == 0 or len(data[1]) == 0:
+                logger.warning(f"Requested to draw line for sig({id(signal)}), but it does not have data {signal}")
+                return
             self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1])
 
         self.update_axis_labels_with_units(mpl_axes, signal)
