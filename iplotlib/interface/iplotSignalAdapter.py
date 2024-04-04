@@ -746,7 +746,7 @@ class AccessHelper:
 
             if envelope:
                 da_params.update({'nbp': AccessHelper.num_samples})
-                (d_env) = AccessHelper.da.getEnvelope(**da_params)
+                (d_env) = AccessHelper.da.get_envelope(**da_params)
                 if d_env.errcode < 0:
                     if d_env.errcode < 0:
                         message = f"ErrCode: {d_env.errcode} | getEnvelope (minimum) failed for -1 and" \
@@ -774,12 +774,12 @@ class AccessHelper:
                 logger.debug("[UDA ] nbsMIN={} nbsMAX={}".format(len(d_env.ydata_min), len(d_env.ydata_max)))
 
             else:
-                raw = AccessHelper.da.getData(**da_params)
+                raw = AccessHelper.da.get_data(**da_params)
                 if raw.errcode < 0:
                     if raw.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval,' \
                                       ' use decimation or read data by chunks.':
                         da_params.update({'nbp': AccessHelper.num_samples})
-                        raw = AccessHelper.da.getData(**da_params)
+                        raw = AccessHelper.da.get_data(**da_params)
                         ds = True
                     # if raw.errcode < 0: # try with fallback no. of points.
                     #     da_params.update({'nbp': AccessHelper.num_samples})
