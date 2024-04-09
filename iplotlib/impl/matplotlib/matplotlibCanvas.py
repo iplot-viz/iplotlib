@@ -158,8 +158,12 @@ class MatplotlibParser(BackendParserBase):
                                              alpha=0.3,
                                              color=params2['color'],
                                              step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
-
-                self._signal_impl_shape_lut.update({id(signal): [line_1 + line_2 + [area]]})
+                lines = [line_1 + line_2 + [area]]
+                for new, old in zip(lines, signal.lines):
+                    for n, o in zip(new, old):
+                        n.set_visible(o.get_visible())
+                signal.lines = lines
+                self._signal_impl_shape_lut.update({id(signal): lines})
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
 
     def clear(self):
@@ -876,15 +880,16 @@ class MultiCursor2(MultiCursor):
             for ax in axes:
                 ci = self._cache_table.get_cache_item(ax)
                 if hasattr(ci, "signals") and ci.signals is not None:
+                    xmin, xmax = ax.get_xbound()
+                    ymin, ymax = ax.get_ybound()
                     for signal in ci.signals:
-                        xmin, xmax = ax.get_xbound()
-                        ymin, ymax = ax.get_ybound()
-                        value_annotation = Annotation("", xy=(xmin + (xmax - xmin) / 2, ymin + (ymax - ymin) / 2), xycoords="data",  # xytext=(-200, 0),
-                                                      verticalalignment="top", horizontalalignment="left", **value_arrow_props)
-                        value_annotation.set_visible(False)
-                        value_annotation._ipl_signal = signal
-                        ax.add_artist(value_annotation)
-                        self.value_annotations.append(value_annotation)
+                        for line in signal().lines:
+                            value_annotation = Annotation("", xy=(xmin + (xmax - xmin) / 2, ymin + (ymax - ymin) / 2), xycoords="data",  # xytext=(-200, 0),
+                                                          verticalalignment="top", horizontalalignment="left", **value_arrow_props)
+                            value_annotation.set_visible(False)
+                            value_annotation.line = line
+                            ax.add_artist(value_annotation)
+                            self.value_annotations.append(value_annotation)
 
         # Needs to be done for blitting to work. As it saves current background
         self.clear(None)
@@ -917,6 +922,20 @@ class MultiCursor2(MultiCursor):
         self.disconnect()
 
     def onmove(self, event):
+        def get_values_from_line(lines, x_value):
+            if len(lines) == 1:
+                x, y = lines[0].get_xdata(), lines[0].get_ydata()
+            else:
+                x = lines[0].get_xdata()
+                y = (lines[0].get_ydata() + lines[1].get_ydata()) / 2
+            ix = np.searchsorted(x, x_value)
+            if ix == len(x):
+                ix = len(x) - 1
+
+            # Either return values at index or values at index-1
+            if ix > 0 and abs(x[ix - 1] - x_value) < abs(x[ix] - x_value):
+                ix = ix - 1
+            return x[ix], y[ix]
 
         if self.ignore(event):
             return
@@ -929,12 +948,12 @@ class MultiCursor2(MultiCursor):
             return
         if self.vertOn:
             for line in self.vlines:
-                line.set_xdata((event.xdata, event.xdata))
+                line.set_xdata(event.xdata)
                 line.set_visible(self.visible)
 
         if self.horizOn:
             for line in self.hlines:
-                line.set_ydata((event.ydata, event.ydata))
+                line.set_ydata(event.ydata)
                 line.set_visible(self.visible)
 
         if self.x_label:
@@ -959,31 +978,29 @@ class MultiCursor2(MultiCursor):
 
         if self.value_label:
             for annotation in self.value_annotations:
-                if hasattr(annotation, "_ipl_signal"):
+                if hasattr(annotation, "line"):
                     annotation.set_visible(self.visible)
-                    signal = annotation._ipl_signal()
-                    if signal is not None:
+                    line = annotation.line
+                    if line is not None and line[0].get_visible():
                         ax = annotation.axes
 
-                        xvalue = self._cache_table.transform_value(
-                            ax, 0, event.xdata)
-                        values = signal.pick(xvalue)
+                        xvalue = self._cache_table.transform_value(ax, 0, event.xdata)
+                        values = get_values_from_line(line,xvalue)
                         logger.debug(F"Found {values} for xvalue: {xvalue}")
                         if values is not None:
                             dx = abs(xvalue - values[0])
                             xmin, xmax = ax.get_xbound()
                             if dx < (xmax - xmin) * self.val_tolerance:
-                                pos_x = self._cache_table.transform_value(
-                                    ax, 0, values[0], True)
-                                pos_y = self._cache_table.transform_value(
-                                    ax, 1, values[1], True)
+                                pos_x = self._cache_table.transform_value(ax, 0, values[0], True)
+                                pos_y = self._cache_table.transform_value(ax, 1, values[1], True)
                                 annotation.set_position((pos_x, pos_y))
                                 annotation.set_text(ax.format_ydata(values[1]))
                             else:
                                 annotation.set_visible(False)
-
                         else:
                             annotation.set_visible(False)
+                    else:
+                        annotation.set_visible(False)
                 else:
                     annotation.set_visible(False)
 
