@@ -611,7 +611,7 @@ class AccessHelper:
 
     @staticmethod
     def construct_da_params(signal: IplotSignalAdapter):
-        return dict(dataSName=signal.data_source,
+        return dict(data_s_name=signal.data_source,
                     varname=signal.name,
                     tsS=AccessHelper.uda_ts(signal, signal.ts_start),
                     tsE=AccessHelper.uda_ts(signal, signal.ts_end),
