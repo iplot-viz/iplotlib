@@ -42,9 +42,9 @@ from iplotProcessing.math.pre_processing.grid_mixing import align
 from iplotProcessing.tools.parsers import Parser
 from iplotProcessing.tools import hash_code
 
-import iplotLogging.setupLogger as Sl
+from iplotLogging import setupLogger
 
-logger = Sl.get_logger(__name__)
+logger = setupLogger.get_logger(__name__)
 
 IplotSignalAdapterT = typing.TypeVar('IplotSignalAdapterT', bound='IplotSignalAdapter')
 
@@ -74,6 +74,7 @@ class StatusInfo:
     result: str = Result.READY
     sep = '|'
     stage: str = Stage.INIT
+    inf: int = 0
 
     def reset(self):
         self.msg = ''
@@ -81,18 +82,19 @@ class StatusInfo:
         self.result = Result.READY
         self.stage = Stage.INIT
         self.sep = '|'
+        self.inf = 0
 
     def __str__(self) -> str:
-        if self.result == Result.BUSY:
-            return self.result + self.sep + self.stage
-        elif self.result == Result.INVALID:
+        if self.result == Result.BUSY or self.result == Result.INVALID:
             return self.result + self.sep + self.stage
         elif self.result == Result.FAIL:
-            return self.stage + self.sep + f'{self.num_points}' + ' points'
+            return f"{self.stage}{self.sep}{self.num_points} points" + \
+                (f"{self.sep} {self.inf} infinities" if self.inf > 0 else "")
         elif self.result == Result.READY:
             return self.result
         elif self.result == Result.SUCCESS:
-            return self.result + self.sep + f'{self.num_points}' + ' points'
+            return f"{self.result}{self.sep}{self.num_points} points" + \
+                (f"{self.sep} {self.inf} infinities" if self.inf > 0 else "")
 
 
 @dataclass
@@ -277,6 +279,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info.stage = Stage.DA
         self.status_info.result = Result.SUCCESS
         self.status_info.num_points = len(self.data_store[0])
+        self.status_info.inf = int(np.sum(np.isinf(self.data_store[1])))
 
     def set_da_fail(self, msg: str = ''):
         self.status_info.reset()
@@ -290,6 +293,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info.reset()
         self.status_info.stage = Stage.PROC
         self.status_info.num_points = len(self.x_data)
+        self.status_info.inf = int(np.sum(np.isinf(self.y_data)))
         self.status_info.result = Result.SUCCESS
 
     def set_proc_fail(self, msg: str = ''):
@@ -612,7 +616,7 @@ class AccessHelper:
 
     @staticmethod
     def construct_da_params(signal: IplotSignalAdapter):
-        return dict(dataSName=signal.data_source,
+        return dict(data_s_name=signal.data_source,
                     varname=signal.name,
                     tsS=AccessHelper.uda_ts(signal, signal.ts_start),
                     tsE=AccessHelper.uda_ts(signal, signal.ts_end),
@@ -751,7 +755,7 @@ class AccessHelper:
 
             if envelope:
                 da_params.update({'nbp': AccessHelper.num_samples})
-                (d_env) = AccessHelper.da.getEnvelope(**da_params)
+                (d_env) = AccessHelper.da.get_envelope(**da_params)
                 if d_env.errcode < 0:
                     if d_env.errcode < 0:
                         message = f"ErrCode: {d_env.errcode} | getEnvelope (minimum) failed for -1 and" \
@@ -779,12 +783,12 @@ class AccessHelper:
                 logger.debug("[UDA ] nbsMIN={} nbsMAX={}".format(len(d_env.ydata_min), len(d_env.ydata_max)))
 
             else:
-                raw = AccessHelper.da.getData(**da_params)
+                raw = AccessHelper.da.get_data(**da_params)
                 if raw.errcode < 0:
                     if raw.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval,' \
                                       ' use decimation or read data by chunks.':
                         da_params.update({'nbp': AccessHelper.num_samples})
-                        raw = AccessHelper.da.getData(**da_params)
+                        raw = AccessHelper.da.get_data(**da_params)
                         ds = True
                     # if raw.errcode < 0: # try with fallback no. of points.
                     #     da_params.update({'nbp': AccessHelper.num_samples})

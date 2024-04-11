@@ -52,15 +52,15 @@ class CanvasStreamer:
         self.collectors.append(collect_thread)
 
     def stream_thread(self, ds, varnames, callback):
-        logger.info(F"STREAM START vars={varnames} ds={ds} startSubscription={self.da.startSubscription}")
-        streaming_thread = Thread(name="receiver", target=self.da.startSubscription, args=(ds,),
+        logger.info(F"STREAM START vars={varnames} ds={ds} startSubscription={self.da.start_subscription}")
+        streaming_thread = Thread(name="receiver", target=self.da.start_subscription, args=(ds,),
                                   kwargs={'params': varnames}, daemon=True)
         streaming_thread.start()
         self.streamers.append(streaming_thread)
 
         while not self.stop_flag:
             for varname in varnames:
-                dobj = self.da.getNextData(ds, varname)
+                dobj = self.da.get_next_data(ds, varname)
 
                 if dobj is not None and dobj.xdata is not None and len(dobj.xdata) > 0 and callback is not None:
                     callback(varname, dobj)
@@ -69,7 +69,7 @@ class CanvasStreamer:
         logger.info("Issuing stop subscription...")
 
         # self.da.stopSubscription(ds)
-        stopping_thread = Thread(name="stopper", target=self.da.stopSubscription, args=(ds,))
+        stopping_thread = Thread(name="stopper", target=self.da.stop_subscription, args=(ds,))
         stopping_thread.start()
 
     def stop(self):
