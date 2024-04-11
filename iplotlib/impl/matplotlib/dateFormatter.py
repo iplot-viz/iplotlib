@@ -3,15 +3,14 @@ import datetime
 from matplotlib.ticker import ScalarFormatter
 import pandas
 
-from iplotlib.core.impl_base import ImplementationPlotCacheTable
-import iplotLogging.setupLogger as ls
+import iplotLogging.setupLogger as Sl
 
+logger = Sl.get_logger(__name__)
 
-logger = ls.get_logger(__name__)
 
 class NanosecondDateFormatter(ScalarFormatter):
     """Date axis formatter that takes into account ns offset if it is defined on this formatter axis
-    Additionaly it formats date as common_part + postfix and includes nanosecond precision if data is given as int64"""
+    Additionally it formats date as common_part + postfix and includes nanosecond precision if data is given as int64"""
 
     """Date segment names constants"""
     YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, MILISECOND, MICROSECOND, NANOSECOND = range(0, 9)
@@ -25,7 +24,8 @@ class NanosecondDateFormatter(ScalarFormatter):
     """Formats for each date segment"""
     formats = ["{:4d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:03d}", "{:03d}", "{:03d}"]
 
-    def __init__(self, ax_idx: int, label_segments=4, postfix_end=True, postfix_start=False, offset_lut: list=None, round=False):
+    def __init__(self, ax_idx: int, label_segments=4, postfix_end=True, postfix_start=False, offset_lut: list = None,
+                 round=False):
         super().__init__()
         self.postfix_end = postfix_end
         self.posfix_start = postfix_start
@@ -46,7 +46,7 @@ class NanosecondDateFormatter(ScalarFormatter):
 
     def set_locs(self, locs):
         if locs is not None and len(locs) > 0:
-            if (self.offsetns):
+            if self.offsetns:
                 self.cut_start = self.lcp(self.offsetns + int(locs[0]), self.offsetns + int(locs[-1]))
             else:
                 self.cut_start = self.lcp(self.offsetns + locs[0], self.offsetns + locs[-1])
@@ -54,7 +54,7 @@ class NanosecondDateFormatter(ScalarFormatter):
             if self.cut_start is None:
                 self.cut_start = 0
             self.offset_str = 'UTC:' + self.date_fmt(self.offsetns + locs[0], self.YEAR, self.cut_start,
-                                            postfix_end=self.postfix_end, postfix_start=self.posfix_start)
+                                                     postfix_end=self.postfix_end, postfix_start=self.posfix_start)
 
         super().set_locs(locs)
 

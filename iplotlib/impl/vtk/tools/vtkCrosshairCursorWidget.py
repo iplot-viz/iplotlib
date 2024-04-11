@@ -1,24 +1,18 @@
-import typing
-
 from iplotlib.impl.vtk import utils as vtkImplUtils
 from iplotlib.impl.vtk.tools.queryMatrix import find_root_plot
 
 from vtkmodules.vtkCommonDataModel import vtkVector2f
-from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix, vtkChart
+from vtkmodules.vtkChartsCore import vtkAxis, vtkChartMatrix
 from vtkmodules.vtkPythonContext2D import vtkPythonItem
 from vtkmodules.vtkRenderingContext2D import vtkContext2D
 
-from iplotLogging import setupLogger as sl
-logger = sl.get_logger(__name__, "INFO")
+from iplotLogging import setupLogger as Sl
+
+logger = Sl.get_logger(__name__, "INFO")
+
 
 class CrosshairCursor(object):
-    def __init__(self,
-                 horizOn=False,
-                 vertOn=True,
-                 hLineW=1,
-                 hLineCol='red',
-                 vLineW=1,
-                 vLineCol='blue'):
+    def __init__(self, horizOn=False, vertOn=True, hLineW=1, hLineCol='red', vLineW=1, vLineCol='blue'):
         self.lv = {'h': horizOn, 'v': vertOn}
         self.lw = {'h': hLineW, 'v': vLineW}
         self.lc = {'h': hLineCol, 'v': vLineCol}
@@ -34,21 +28,17 @@ class CrosshairCursor(object):
         pen = context2D.GetPen()
         brush = context2D.GetBrush()
 
-        if (self.yRange[0] < self.position[1] <
-                self.yRange[1]) and self.lv['h']:
+        if (self.yRange[0] < self.position[1] < self.yRange[1]) and self.lv['h']:
             pen.SetColor(*vtkImplUtils.get_color3ub(self.lc['h']))
             brush.SetColor(*vtkImplUtils.get_color3ub(self.lc['h']))
             pen.SetWidth(self.lw['h'])
-            context2D.DrawLine(self.xRange[0], self.position[1],
-                               self.xRange[1], self.position[1])
+            context2D.DrawLine(self.xRange[0], self.position[1], self.xRange[1], self.position[1])
 
-        if (self.xRange[0] < self.position[0] <
-                self.xRange[1]) and self.lv['v']:
+        if (self.xRange[0] < self.position[0] < self.xRange[1]) and self.lv['v']:
             pen.SetColor(*vtkImplUtils.get_color3ub(self.lc['v']))
             brush.SetColor(*vtkImplUtils.get_color3ub(self.lc['v']))
             pen.SetWidth(self.lw['v'])
-            context2D.DrawLine(self.position[0], self.yRange[0],
-                               self.position[0], self.yRange[1])
+            context2D.DrawLine(self.position[0], self.yRange[0], self.position[0], self.yRange[1])
 
         return True
 
@@ -87,7 +77,7 @@ class CrosshairCursorWidget:
         for _, item in self.cursors:
             item.SetVisible(False)
 
-    def onMove(self, mousePos: tuple):
+    def on_move(self, mousePos: tuple):
         scene = self.matrix.GetScene()
         if scene is None:
             return

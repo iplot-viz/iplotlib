@@ -5,12 +5,12 @@
 #               -Fix draw_in_main_thread for when C++ object might have been deleted. [Jaswant Sai Panchumarti]
 #               -Refactor qt classes [Jaswant Sai Panchumarti]
 #               -Port to PySide2 [Jaswant Sai Panchumarti]
-#   Jan 2022:   -Introduce custom HistoryManagement for zooming and panning with git style revision control [Jaswant Sai Panchumarti]
+#   Jan 2022:   -Introduce custom HistoryManagement for zooming and panning with git style revision control
+#                [Jaswant Sai Panchumarti]
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
-import pandas as pd
-from PySide6.QtCore import QMargins, QMetaObject, Qt, Slot, Signal
+from PySide6.QtCore import QMargins, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
 
@@ -20,13 +20,12 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
-import iplotLogging.setupLogger as ls
+import iplotLogging.setupLogger as Sl
 
-logger = ls.get_logger(__name__)
+logger = Sl.get_logger(__name__)
 
 
 class QtMatplotlibCanvas(IplotQtCanvas):
@@ -135,7 +134,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
         if event.dblclick:
-            if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT and event.inaxes is not None:
+            if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT and \
+                    event.inaxes is not None:
                 self._parser.set_focus_plot(event.inaxes)
                 self._refresh_original_ranges = False
                 self.refresh()
@@ -219,7 +219,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # commit commands from staging.
                 while len(self._staging_cmds):
                     self.commit_view_lim_cmd()
-                # push uncommited changes onto the command stack.
+                # push uncommitted changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
 
@@ -261,16 +261,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         super(QtMatplotlibCanvas, self).dropEvent(event)
         plot = self.get_plot(event)
 
-        row, col = self.get_postion(plot)
-        self.dropInfo.row=row
-        self.dropInfo.col=col
+        row, col = self.get_position(plot)
+        self.dropInfo.row = row
+        self.dropInfo.col = col
         self.dropInfo.dragged_item = event.source().dragged_item
         self.dropSignal.emit(self.dropInfo)
-        #row, col = self.get_postion(plot)
-        #new_data = pd.DataFrame([['codacuda', f"{dragged_item.key}", f'{col}.{row}']],
+        # row, col = self.get_postion(plot)
+        # new_data = pd.DataFrame([['codacuda', f"{dragged_item.key}", f'{col}.{row}']],
         #                       columns=['DS', 'Variable', 'Stack'])
-        #self.parent().parent().parent().parent().sigCfgWidget._model.append_dataframe(new_data)
-        #self.parent().parent().parent().parent().drawClicked()
+        # self.parent().parent().parent().parent().sigCfgWidget._model.append_dataframe(new_data)
+        # self.parent().parent().parent().parent().drawClicked()
         event.ignore()
 
     def get_plot(self, event):
@@ -281,7 +281,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             if axe.bbox.x0 < x < axe.bbox.x1 and height - axe.bbox.y0 > y > height - axe.bbox.y1:
                 return self._parser._impl_plot_cache_table.get_cache_item(axe).plot()
 
-    def get_postion(self, plot):
+    def get_position(self, plot):
         all_plots = self._parser.canvas.plots
         for column, col_plots in enumerate(all_plots):
             for row, row_plot in enumerate(col_plots):
