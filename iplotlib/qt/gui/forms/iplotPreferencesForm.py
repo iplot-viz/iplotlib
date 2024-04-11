@@ -8,8 +8,7 @@ An abstract widget that maps a python entity's properties to widgets in the form
 #               -Port to PySide2 [Jaswant Sai Panchumarti]
 #   Jan 2023:   -Added methods to create legend position and layout combobox [Alberto Luengo]
 
-from dataclasses import fields
-import typing
+from typing import List, Optional
 import time
 
 from PySide6.QtCore import QModelIndex, Qt, Signal, Slot
@@ -27,7 +26,11 @@ class IplotPreferencesForm(QWidget):
     onApply = Signal()
     onReset = Signal()
 
-    def __init__(self, fields: typing.List[dict] = [{}], label: str = "Preferences", parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
+    def __init__(self, fields: Optional[List[dict]] = None, label: str = "Preferences",
+                 parent: Optional[QWidget] = None,
+                 f: Qt.WindowFlags = Qt.Widget):
+        if fields is None:
+            fields = [{}]
         super().__init__(parent=parent, f=f)
 
         self.top_label = QLabel(label)
@@ -72,7 +75,7 @@ class IplotPreferencesForm(QWidget):
                 self.form.layout().addRow(label, widget)
         self.widgetMapper.toFirst()
 
-    def MTime(self):
+    def m_time(self):
         """
         Return the last modified time stamp.
         """
@@ -84,10 +87,11 @@ class IplotPreferencesForm(QWidget):
         """
         self._modifiedTime = time.time_ns()
 
-    def setSourceIndex(self, idx: QModelIndex):
+    def set_source_index(self, idx: QModelIndex):
         """
         Set the python object that will be sourced by the data widgets. 
-        The python object should be an instance of the core iplotlib Canvas class for tthe sourcing mechanism to function.
+        The python object should be an instance of the core iplotlib Canvas class for tthe sourcing mechanism to
+        function.
         The `QModelIndex` should've encapsulated a python object for the `Qt.UserRole`. 
         This encapsulation is done in :data:`~iplotlib.qt.gui.iplotQtCanvasAssembly.IplotQtCanvasAssembly.setCanvasData`
         """
@@ -113,7 +117,7 @@ class IplotPreferencesForm(QWidget):
         return widget
 
     @staticmethod
-    def create_comboBox(items):
+    def create_combo_box(items):
         widget = QComboBox()
         if isinstance(items, dict):
             for k, v in items.items():
@@ -149,40 +153,45 @@ class IplotPreferencesForm(QWidget):
         return IplotPreferencesForm.create_spinbox(min=0, max=20)
 
     @staticmethod
+    def default_ticknumber_widget():
+        return IplotPreferencesForm.create_spinbox(min=1, max=7)
+
+    @staticmethod
     def default_linestyle_widget():
-        return IplotPreferencesForm.create_comboBox({"Solid": "Solid", "Dotted": "Dotted", "Dashed": "Dashed", "None": "None"})
+        return IplotPreferencesForm.create_combo_box(
+            {"Solid": "Solid", "Dotted": "Dotted", "Dashed": "Dashed", "None": "None"})
 
     @staticmethod
     def default_marker_widget():
-        return IplotPreferencesForm.create_comboBox({"None": "None", "o": "o", "x": "x"})
+        return IplotPreferencesForm.create_combo_box({"None": "None", "o": "o", "x": "x"})
 
     @staticmethod
     def default_linepath_widget():
-        return IplotPreferencesForm.create_comboBox({"linear": "Linear", "post": "Last Value"})
+        return IplotPreferencesForm.create_combo_box({"linear": "Linear", "post": "Last Value"})
 
     @staticmethod
     def default_canvas_legend_position_widget():
-        return IplotPreferencesForm.create_comboBox({'upper right': 'Upper right', 'upper left': 'Upper left',
-                                                     'upper center': 'Upper center', 'lower right': 'Lower right',
-                                                     'lower left': 'Lower left', 'lower center': 'Lower center',
-                                                     'center right': 'Center right', 'center left': 'Center left',
-                                                     'center': 'Center'})
+        return IplotPreferencesForm.create_combo_box({'upper right': 'Upper right', 'upper left': 'Upper left',
+                                                      'upper center': 'Upper center', 'lower right': 'Lower right',
+                                                      'lower left': 'Lower left', 'lower center': 'Lower center',
+                                                      'center right': 'Center right', 'center left': 'Center left',
+                                                      'center': 'Center'})
 
     @staticmethod
     def default_plot_legend_position_widget():
-        return IplotPreferencesForm.create_comboBox({'same as canvas': 'Same as canvas',
-                                                     'upper right': 'Upper right', 'upper left': 'Upper left',
-                                                     'upper center': 'Upper center', 'lower right': 'Lower right',
-                                                     'lower left': 'Lower left', 'lower center': 'Lower center',
-                                                     'center right': 'Center right', 'center left': 'Center left',
-                                                     'center': 'Center'})
+        return IplotPreferencesForm.create_combo_box({'same as canvas': 'Same as canvas',
+                                                      'upper right': 'Upper right', 'upper left': 'Upper left',
+                                                      'upper center': 'Upper center', 'lower right': 'Lower right',
+                                                      'lower left': 'Lower left', 'lower center': 'Lower center',
+                                                      'center right': 'Center right', 'center left': 'Center left',
+                                                      'center': 'Center'})
 
     @staticmethod
     def default_canvas_legend_layout_widget():
-        return IplotPreferencesForm.create_comboBox({'vertical': 'Vertical',
-                                                     'horizontal': 'Horizontal'})
+        return IplotPreferencesForm.create_combo_box({'vertical': 'Vertical',
+                                                      'horizontal': 'Horizontal'})
 
     @staticmethod
     def default_plot_legend_layout_widget():
-        return IplotPreferencesForm.create_comboBox({'same as canvas': 'Same as canvas', 'vertical': 'Vertical',
-                                                     'horizontal': 'Horizontal'})
+        return IplotPreferencesForm.create_combo_box({'same as canvas': 'Same as canvas', 'vertical': 'Vertical',
+                                                      'horizontal': 'Horizontal'})

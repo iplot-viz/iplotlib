@@ -12,6 +12,7 @@ from PySide6.QtGui import QStandardItem
 from iplotlib.core import Canvas, Plot
 from iplotlib.qt.models.plotting.plotItem import PlotItem
 
+
 class CanvasItem(QStandardItem):
     def __init__(self, text: str, auto_name=False):
         super().__init__(text)
@@ -21,7 +22,7 @@ class CanvasItem(QStandardItem):
         super().setData(value, role=role)
         if not isinstance(value, Canvas):
             return
-        
+
         if self.auto_name and value.title:
             self.setText(value.title)
 
@@ -29,7 +30,7 @@ class CanvasItem(QStandardItem):
             column = value.plots[column_idx]
             plotColumnItem = QStandardItem(f'Column {column_idx}')
             self.appendRow(plotColumnItem)
-            
+
             if not isinstance(column, typing.Collection):
                 continue
 
@@ -42,5 +43,5 @@ class CanvasItem(QStandardItem):
 
                 if self.auto_name and plot.title:
                     plotItem.setText(plot.title)
-                
+
                 plotColumnItem.appendRow(plotItem)

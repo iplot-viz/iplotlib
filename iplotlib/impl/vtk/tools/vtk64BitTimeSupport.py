@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
-import typing
+from typing import Sequence, Any, Tuple
 from contextlib import contextmanager
+import datetime
 
 from vtkmodules.vtkCommonCore import vtkAbstractArray, vtkStringArray
 from vtkmodules.vtkCommonDataModel import vtkTable
@@ -9,8 +10,10 @@ from vtkmodules.vtkChartsCore import vtkAxis, vtkChart, vtkPlot, vtkPlotPoints
 from vtkmodules.vtkRenderingContext2D import vtkContextMapper2D
 from vtkmodules.util import numpy_support
 
-from iplotLogging import setupLogger as sl
-logger = sl.get_logger(__name__, "INFO")
+from iplotLogging import setupLogger as Sl
+
+logger = Sl.get_logger(__name__, "INFO")
+
 
 class VTK64BitTimePlotSupport:
     def __init__(self, enabled=True, precise=True):
@@ -34,24 +37,24 @@ class VTK64BitTimePlotSupport:
         """
         self._enabled = False
 
-    def precisionOn(self):
+    def precision_on(self):
         """
         Dynamically adjust plot data to accurately represent
         varying time periods. All the way upto nano seconds.
         """
         self._precise = True
 
-    def precisionOff(self):
+    def precision_off(self):
         """
         Directly plot input time series. Precise upto ___
         """
         self._precise = False
 
-    def isPlotValid(self):
+    def is_plot_valid(self):
         return isinstance(self._plot, vtkPlotPoints) and isinstance(self._table, vtkTable)
 
     @staticmethod
-    def getColumnId(table, arr: vtkAbstractArray) -> int:
+    def get_column_id(table, arr: vtkAbstractArray) -> int:
         columnId = -1
         numCols = table.GetNumberOfColumns()
         for i in range(numCols):
@@ -61,7 +64,7 @@ class VTK64BitTimePlotSupport:
         return columnId
 
     @contextmanager
-    def getPlotFromChart(self, plotId: int, chart: vtkChart):
+    def get_plot_from_chart(self, plotId: int, chart: vtkChart):
         self._plot = chart.GetPlot(plotId)
         self._table = self._plot.GetInput()
         try:
@@ -70,23 +73,18 @@ class VTK64BitTimePlotSupport:
             self._plot = None
             self._table = None
 
-    def getActiveColumnId(self, chart: vtkChart, plotId: int) -> int:
+    def get_active_column_id(self, chart: vtkChart, plotId: int) -> int:
         actColId = -1
-        with self.getPlotFromChart(plotId, chart):
-            if self.isPlotValid():
+        with self.get_plot_from_chart(plotId, chart):
+            if self.is_plot_valid():
                 data = self._plot.GetData()  # type: vtkContextMapper2D
-                arr = data.GetInputArrayToProcess(
-                    0, self._table)  # type: vtkAbstractArray
-                actColId = VTK64BitTimePlotSupport.getColumnId(
-                    self._table, arr)
+                arr = data.GetInputArrayToProcess(0, self._table)  # type: vtkAbstractArray
+                actColId = VTK64BitTimePlotSupport.get_column_id(self._table, arr)
         return actColId
 
     @staticmethod
-    def getNextBitSeqId(bitSeqId: int,
-                        numBitSequences: int,
-                        least: bool = True) -> int:
-        if (np.little_endian and least) or (not np.little_endian
-                                            and not least):
+    def get_next_bit_seq_id(bitSeqId: int, numBitSequences: int, least: bool = True) -> int:
+        if (np.little_endian and least) or (not np.little_endian and not least):
             if bitSeqId <= 0:
                 return 0
             else:
@@ -98,7 +96,7 @@ class VTK64BitTimePlotSupport:
                 return bitSeqId + 1
 
     @staticmethod
-    def normalizeToDtype(bitSequences: list, dtype=np.uint16):
+    def normalize_to_dtype(bitSequences: list, dtype=np.uint16):
         numberOfSequences = len(bitSequences)
         dtypeBitWidth = np.dtype(dtype).itemsize * 8
         dtypeMin = 0
@@ -111,9 +109,9 @@ class VTK64BitTimePlotSupport:
 
         q = start
         while True:
-            nextId = VTK64BitTimePlotSupport.getNextBitSeqId(q,
-                                                             numberOfSequences,
-                                                             least=False)
+            nextId = VTK64BitTimePlotSupport.get_next_bit_seq_id(q,
+                                                                 numberOfSequences,
+                                                                 least=False)
             seq = bitSequences[q]
             if nextId == q:
                 if seq < dtypeMin:
@@ -134,8 +132,7 @@ class VTK64BitTimePlotSupport:
             q = nextId
 
     @staticmethod
-    def getTimeStampFrom16Bits(
-            bitSequences: typing.Sequence[np.uint16]) -> int:
+    def get_time_stamp_from_16bits(bitSequences: Sequence[np.uint16]) -> int:
         if np.little_endian:
             bitSequencesIter = iter(bitSequences)
         else:
@@ -150,16 +147,15 @@ class VTK64BitTimePlotSupport:
 
         return retVal
 
-    def getXRange(self, chart: vtkChart, plotId: int) -> typing.Tuple[float]:
+    def get_x_range(self, chart: vtkChart, plotId: int) -> Tuple[float, float]:
         xr = ()
-        with self.getPlotFromChart(plotId, chart):
-            if self.isPlotValid():
+        with self.get_plot_from_chart(plotId, chart):
+            if self.is_plot_valid():
                 xAxis = self._plot.GetXAxis()  # type: vtkAxis
                 xr = xAxis.GetMinimum(), xAxis.GetMaximum()
         return xr
 
-    def getOffsetTimeValue(self, chart: vtkChart, plotId: int,
-                           columnId: int) -> int:
+    def get_offset_time_value(self, chart: vtkChart, plotId: int, columnId: int) -> int:
         """
         Determine an offset time stamp for a column Id.
         Ex:
@@ -169,17 +165,18 @@ class VTK64BitTimePlotSupport:
         full_time_stamp_value[i] = offset + values[i]
 
         Args:
-            plot (vtkPlot): plot instance
+            chart (vtkChart)
+            plotId (int): id plot
             columnId (int): a column id
 
         Returns:
             int: offset time for all values in columnId of plot's input data.
         """
         ofstTime = -1
-        bitSequences = np.zeros((4, ), dtype=np.uint16)
+        bitSequences = np.zeros((4,), dtype=np.uint16)
         bitSeqId = columnId - 2
-        with self.getPlotFromChart(plotId, chart):
-            if self.isPlotValid():
+        with self.get_plot_from_chart(plotId, chart):
+            if self.is_plot_valid():
                 for i in range(1, 4):
                     arr = self._table.GetColumn(i + 1)
                     arrName = arr.GetName()
@@ -189,24 +186,22 @@ class VTK64BitTimePlotSupport:
                         pass
                 logger.debug(f"Bit Sequence: {bitSequences}")
                 if np.little_endian:
-                    bitSequences[:bitSeqId] = [0] * (bitSeqId)
+                    bitSequences[:bitSeqId] = [0] * bitSeqId
                 else:
                     bitSequences[(bitSeqId + 1):] = [0] * (3 - bitSeqId)
-                ofstTime = VTK64BitTimePlotSupport.getTimeStampFrom16Bits(
-                    bitSequences)
+                ofstTime = VTK64BitTimePlotSupport.get_time_stamp_from_16bits(bitSequences)
         return ofstTime
 
-    def checkStepUp(self, chart: vtkChart, plotId: int) -> bool:
-        boundsOverflow = False
-        xmin, xmax = self.getXRange(chart, plotId)
+    def check_step_up(self, chart: vtkChart, plotId: int) -> bool:
+        xmin, xmax = self.get_x_range(chart, plotId)
         maxRange = (1 << 16) - 1
         boundsOverflow = np.abs(xmax - xmin) > maxRange
         return boundsOverflow
 
-    def checkStepDn(self, chart: vtkChart, plotId: int) -> bool:
+    def check_step_dn(self, chart: vtkChart, plotId: int) -> bool:
         boundsEqual = True
-        with self.getPlotFromChart(plotId, chart):
-            if self.isPlotValid():
+        with self.get_plot_from_chart(plotId, chart):
+            if self.is_plot_valid():
                 data = self._plot.GetData()  # type: vtkContextMapper2D
                 arr = data.GetInputArrayToProcess(
                     0, self._table)  # type: vtkAbstractArray
@@ -214,17 +209,17 @@ class VTK64BitTimePlotSupport:
                 boundsEqual = np.abs(tmax - tmin) < 1
         return boundsEqual
 
-    def getNewColumnId(self, chart: vtkChart, plotId: int):
-        actColId = self.getActiveColumnId(chart, plotId)
+    def get_new_column_id(self, chart: vtkChart, plotId: int):
+        actColId = self.get_active_column_id(chart, plotId)
         newColId = actColId
         actBitSeqId = actColId - 2
 
-        if self.checkStepDn(chart, plotId):
-            newColId = VTK64BitTimePlotSupport.getNextBitSeqId(actBitSeqId,
-                                                               4) + 2
+        if self.check_step_dn(chart, plotId):
+            newColId = VTK64BitTimePlotSupport.get_next_bit_seq_id(actBitSeqId,
+                                                                   4) + 2
             logger.debug(f"Stepping down {actColId}->{newColId}")
-        elif self.checkStepUp(chart, plotId):
-            newColId = (VTK64BitTimePlotSupport.getNextBitSeqId(
+        elif self.check_step_up(chart, plotId):
+            newColId = (VTK64BitTimePlotSupport.get_next_bit_seq_id(
                 actBitSeqId, 4, least=False) + 2)
             logger.debug(f"Stepping up {actColId}->{newColId}")
         else:
@@ -233,13 +228,13 @@ class VTK64BitTimePlotSupport:
 
         return newColId
 
-    def updateActiveColumnId(self, chart: vtkChart, plotId: int,
-                             newColId: int) -> bool:
+    def update_active_column_id(self, chart: vtkChart, plotId: int,
+                                newColId: int) -> bool:
         updated = False
-        actColId = self.getActiveColumnId(chart, plotId)
+        actColId = self.get_active_column_id(chart, plotId)
 
-        with self.getPlotFromChart(plotId, chart):
-            if self.isPlotValid():
+        with self.get_plot_from_chart(plotId, chart):
+            if self.is_plot_valid():
                 if actColId == newColId:
                     updated = False
                 else:
@@ -248,7 +243,7 @@ class VTK64BitTimePlotSupport:
 
                     actBitSeqId = actColId - 2
                     newBitSeqId = newColId - 2
-                    if (VTK64BitTimePlotSupport.getNextBitSeqId(
+                    if (VTK64BitTimePlotSupport.get_next_bit_seq_id(
                             actBitSeqId, 4) == newBitSeqId):
                         # stepping down
                         actArr = self._table.GetColumn(actColId)
@@ -262,7 +257,7 @@ class VTK64BitTimePlotSupport:
                     updated = True
         return updated
 
-    def selectColumn(self, chart: vtkChart, plotId: int) -> int:
+    def select_column(self, chart: vtkChart, plotId: int) -> int:
         """Select a set of 16 bits used for x-axis data.
         It will do so only when x-axis range is insufficient i.e, beyond 65535.
         """
@@ -272,50 +267,53 @@ class VTK64BitTimePlotSupport:
         newColId = 0
         while depth < maxDepth:
             depth += 1
-            newColId = self.getNewColumnId(chart, plotId)
-            if not self.updateActiveColumnId(chart, plotId, newColId):
+            newColId = self.get_new_column_id(chart, plotId)
+            if not self.update_active_column_id(chart, plotId, newColId):
                 break
 
         return newColId
 
-    def isBitSequencingEnabled(self, chart: vtkChart):
+    def is_bit_sequencing_enabled(self, chart: vtkChart):
         numPlots = chart.GetNumberOfPlots()
         bEnabled = True
         for i in range(numPlots):
-            stat = self.getActiveColumnId(chart, i) > 0
+            stat = self.get_active_column_id(chart, i) > 0
             logger.debug(
                 f"Plot {i}: Bit sequencing was {'enabled' if stat else 'disabled'}."
             )
             bEnabled &= stat
         return bEnabled
 
-    def enableBitSequencing(self, chart: vtkChart, plotId: int):
-        with self.getPlotFromChart(plotId, chart):
-            if self.isPlotValid():
+    def enable_bit_sequencing(self, chart: vtkChart, plotId: int):
+        with self.get_plot_from_chart(plotId, chart):
+            if self.is_plot_valid():
                 self._table.GetColumn(5).SetName(str(0))
-        self.updateActiveColumnId(chart, plotId, 5)
+        self.update_active_column_id(chart, plotId, 5)
 
-    def disableBitSequencing(self, chart: vtkChart, plotId: int):
-        with self.getPlotFromChart(plotId, chart):
-            if self.isPlotValid():
-                self.updateActiveColumnId(chart, plotId, 0)
+    def disable_bit_sequencing(self, chart: vtkChart, plotId: int):
+        with self.get_plot_from_chart(plotId, chart):
+            if self.is_plot_valid():
+                self.update_active_column_id(chart, plotId, 0)
 
     def resetChartXAxisRange(self, chart: vtkChart):
         numPlots = chart.GetNumberOfPlots()
         for i in range(numPlots):
-            self.resetXaxisRange(chart, i)
+            self.reset_xaxis_range(chart, i)
 
-    def resetXaxisRange(self, chart: vtkChart, plotId: int):
-        actColId = self.getActiveColumnId(chart, plotId)
-        with self.getPlotFromChart(plotId, chart):
-            if self.isPlotValid():
+    def reset_xaxis_range(self, chart: vtkChart, plotId: int):
+        actColId = self.get_active_column_id(chart, plotId)
+        with self.get_plot_from_chart(plotId, chart):
+            if self.is_plot_valid():
                 tArr = self._table.GetColumn(actColId)
                 tMin, tMax = tArr.GetRange()
                 xAxis = chart.GetAxis(vtkAxis.BOTTOM)
                 xAxis.SetMinimum(tMin)
                 xAxis.SetMaximum(tMax)
+                xAxis_top = chart.GetAxis(vtkAxis.TOP)
+                xAxis_top.SetMinimum(tMin)
+                xAxis_top.SetMaximum(tMax)
 
-    def dynamicSelectColumns(self, chart: vtkChart):
+    def dynamic_select_columns(self, chart: vtkChart):
         """Dynamically select columns (if bit sequencing was enabled)
         Args:
             chart (vtkChart): a chart contains a number of plots
@@ -324,26 +322,26 @@ class VTK64BitTimePlotSupport:
         if self._precise:
             numPlots = chart.GetNumberOfPlots()
             for i in range(numPlots):
-                colId = self.selectColumn(chart, i)
+                colId = self.select_column(chart, i)
                 if colId:
                     selectedColIds.append(colId)
         return selectedColIds
 
-    def computeOffsetValue(self, chart: vtkChart):
+    def compute_offset_value(self, chart: vtkChart):
         columnIds = []
-        bBitSeqEnabled = self.isBitSequencingEnabled(chart)
+        bBitSeqEnabled = self.is_bit_sequencing_enabled(chart)
 
         numPlots = chart.GetNumberOfPlots()
         if self._precise:
             if bBitSeqEnabled:
                 # Dynamically select a suitable column
-                columnIds.extend(self.dynamicSelectColumns(chart))
+                columnIds.extend(self.dynamic_select_columns(chart))
             else:
                 # Enable bit sequencing
                 for i in range(numPlots):
-                    self.enableBitSequencing(chart, i)
+                    self.enable_bit_sequencing(chart, i)
                     # and dynamically select columns
-                    actColId = self.selectColumn(chart, i)
+                    actColId = self.select_column(chart, i)
                     columnIds.append(actColId)
                     # self.resetXaxisRange(
                     #     chart, i)  # needed to fit axis to current column data
@@ -360,8 +358,8 @@ class VTK64BitTimePlotSupport:
             # Enforce uniform active column. Get offset time
             self._ofstTime = (1 << 63) - 1
             for i in range(numPlots):
-                self.updateActiveColumnId(chart, i, columnIds[i])
-                ofstITime = self.getOffsetTimeValue(chart, i, columnIds[i])
+                self.update_active_column_id(chart, i, columnIds[i])
+                ofstITime = self.get_offset_time_value(chart, i, columnIds[i])
                 if ofstITime >= 0:
                     self._ofstTime = min(ofstITime, self._ofstTime)
             logger.debug(f"Offset time: {pd.to_datetime(self._ofstTime)}")
@@ -369,13 +367,13 @@ class VTK64BitTimePlotSupport:
             if bBitSeqEnabled:
                 # Disable bit sequencing
                 for i in range(numPlots):
-                    self.disableBitSequencing(chart, i)
+                    self.disable_bit_sequencing(chart, i)
                     # self.resetXaxisRange(
                     #     chart, i)  # needed to fit axis to current column data
             self._ofstTime = 0
             self._activeBitSeqId = -1
 
-    def transformValue(self, value: typing.Any, inverse=False):
+    def transformValue(self, value: Any, inverse=False):
         """Build the full 64 bit integer value corresponding to input value in 
         the context of given chart
         The inverse operation would subtract the offset and return the 16-bit integer"""
@@ -385,10 +383,10 @@ class VTK64BitTimePlotSupport:
                 bitSequencesList = bitSequences.tolist()
                 bitSequencesList[self._activeBitSeqId] = int(bitSequencesList[self._activeBitSeqId] + value)
                 logger.debug(f"Pre-normalize: {bitSequencesList}")
-                VTK64BitTimePlotSupport.normalizeToDtype(bitSequencesList,
-                                                            dtype=np.uint16)
+                VTK64BitTimePlotSupport.normalize_to_dtype(bitSequencesList,
+                                                           dtype=np.uint16)
                 logger.debug(f"Post-normalize: {bitSequencesList}")
-                return VTK64BitTimePlotSupport.getTimeStampFrom16Bits(bitSequencesList)
+                return VTK64BitTimePlotSupport.get_time_stamp_from_16bits(bitSequencesList)
             elif self._precise or self._enabled:
                 try:
                     return np.int64(value)
@@ -436,9 +434,16 @@ class VTK64BitTimePlotSupport:
         xAxis.SetNumberOfTicks(6)
         xAxis.SetTickLabelAlgorithm(vtkAxis.TICK_SIMPLE)
 
-        self.computeOffsetValue(chart)
+        # Top ticks
+        xAxis_top = chart.GetAxis(vtkAxis.TOP)  # type: vtkAxis
+        xAxis_top.SetCustomTickPositions(None, None)
+        xAxis_top.SetNumberOfTicks(6)
+        xAxis_top.SetTickLabelAlgorithm(vtkAxis.TICK_SIMPLE)
+
+        self.compute_offset_value(chart)
 
         xAxis.Update()
+        xAxis_top.Update()
         tickPositionsVtkArr = xAxis.GetTickPositions()
         tickPositionsNpArr = numpy_support.vtk_to_numpy(tickPositionsVtkArr)
         tss = []
@@ -465,19 +470,19 @@ class VTK64BitTimePlotSupport:
         tickLabelFmt = "%Y-%m-%dT%H:%M:%S.%f.nano"
         if uniq_year:
             prefixFmt += "%Y-"
-            removeSuffix = "T%H:%M:%S.%f.nano"
+            removeSuffix = ":%S.%f.nano"
             if uniq_month:
                 prefixFmt += "%m-"
-                removeSuffix = ":%M:%S.%f.nano"
+                removeSuffix = ".%f.nano"
                 if uniq_day:
                     prefixFmt += "%dT"
-                    removeSuffix = ":%S.%f.nano"
+                    removeSuffix = ".nano"
                     if uniq_hour:
                         prefixFmt += "%H:"
-                        removeSuffix = ".%f.nano"
+                        removeSuffix = ".nano"
                         if uniq_minute:
                             prefixFmt += "%M:"
-                            removeSuffix = ".nano"
+                            removeSuffix = ""
                             if uniq_second:
                                 prefixFmt += "%S."
                                 removeSuffix = ""
@@ -494,14 +499,45 @@ class VTK64BitTimePlotSupport:
         tick_labels = vtkStringArray()
         for ts in tss:
             tick_label = ts.strftime(tickLabelFmt)
+            # Check if the round hour option is enabled
+            if xAxis.GetBehavior() == 1 and 'T' in tick_label:
+                # Implemented rounding only at the hour level, so the separator must be in that exact position
+                if tick_label[2] == 'T' or tick_label[5] == 'T':
+                    tick_label = self.round_hour(tick_label)
             tick_label = tick_label.replace("nano",
                                             str(ts.nanosecond).zfill(3))
             tick_labels.InsertNextValue(tick_label)
 
         xAxis.SetCustomTickPositions(tickPositionsVtkArr, tick_labels)
+        xAxis_top.SetCustomTickPositions(tickPositionsVtkArr, tick_labels)
         try:
             xAxis.SetTitle(tss[0].strftime(prefixFmt))
         except IndexError:
             logger.critical(f"There is no data for chart. Setting xAxis title to 'X Axis'")
             xAxis.SetTitle('X Axis')
         xAxis.Update()
+        xAxis_top.Update()
+
+    @staticmethod
+    def round_hour(ret):
+        parts = ret.split('T')
+        hour_str = parts[1]
+
+        if len(hour_str) == 5:
+            hour = datetime.datetime.strptime(hour_str, '%H:%M')
+        else:
+            hour = datetime.datetime.strptime(hour_str, '%H:%M:%S')
+
+        if hour.minute >= 30:
+            hour += datetime.timedelta(hours=1)
+
+        if len(hour_str) == 5:
+            hour = hour.replace(minute=0)
+            round_hour_str = hour.strftime('%H:%M')
+        else:
+            hour = hour.replace(minute=0, second=0)
+            round_hour_str = hour.strftime('%H:%M:%S')
+
+        new_ret = f"{parts[0]}T{round_hour_str}"
+
+        return new_ret

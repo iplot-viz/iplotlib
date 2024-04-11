@@ -1,17 +1,19 @@
 """
 This module is deprecated and unused.
 """
-from PySide6 import QtCore, QtGui
+from PySide6 import QtCore
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
 from iplotlib.qt.gui.iplotOverlayCanvasTool import QtOverlayCanvasTool
+
 
 class QtCanvasOverlay(QWidget):
     """
     This class represents an overlay layer that is put on plot canvas
     Additional objects such as crosshair are drawn on this overlay
     """
+
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.dependentOverlays = []
@@ -22,7 +24,7 @@ class QtCanvasOverlay(QWidget):
         self.setGeometry(0, 0, self.parent().geometry().width(), self.parent().geometry().height())
         self.setFocusPolicy(Qt.StrongFocus)
 
-    def activateTool(self, tool: QtOverlayCanvasTool):
+    def activate_tool(self, tool: QtOverlayCanvasTool):
         self.activeTool = tool
 
     def paintEvent(self, e):

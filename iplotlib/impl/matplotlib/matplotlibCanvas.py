@@ -3,7 +3,7 @@
 
 from contextlib import ExitStack
 from typing import Any, Callable, Collection, List
-import traceback
+
 import numpy as np
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick
@@ -14,9 +14,11 @@ from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.text import Annotation, Text
 from matplotlib.widgets import MultiCursor
+from matplotlib.ticker import MaxNLocator
 from pandas.plotting import register_matplotlib_converters
 
-import iplotLogging.setupLogger as sl
+import iplotLogging.setupLogger as Sl
+from iplotProcessing.core import BufferObject
 from iplotlib.core import (Axis,
                            LinearAxis,
                            RangeAxis,
@@ -27,21 +29,23 @@ from iplotlib.core import (Axis,
 from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 
-logger = sl.get_logger(__name__)
-STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post",
+logger = Sl.get_logger(__name__)
+STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "default": "steps-pre",
             "pre": "steps-pre", "steps-mid": "steps-mid", "steps-post": "steps-post", "steps-pre": "steps-pre"}
+
 
 class MatplotlibParser(BackendParserBase):
 
     def __init__(self,
-                canvas: Canvas = None,
-                tight_layout: bool = True,
-                focus_plot=None,
-                focus_plot_stack_key=None,
-                impl_flush_method: Callable = None) -> None:
+                 canvas: Canvas = None,
+                 tight_layout: bool = True,
+                 focus_plot=None,
+                 focus_plot_stack_key=None,
+                 impl_flush_method: Callable = None) -> None:
         """Initialize underlying matplotlib classes.
         """
-        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key, impl_flush_method=impl_flush_method)
+        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
+                         impl_flush_method=impl_flush_method)
 
         self.legend_size = 8
         self._cursors = []
@@ -61,109 +65,98 @@ class MatplotlibParser(BackendParserBase):
         width = kwargs.get("width") or 18.5
         height = kwargs.get("height") or 10.5
 
-        self.figure.set_size_inches(width/dpi, height/dpi)
+        self.figure.set_size_inches(width / dpi, height / dpi)
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
     def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data):
-        if not isinstance(mpl_axes, MPLAxes):
-            return
-        #logger.debug(f"mpl_line_plot : {traceback.print_stack()}")
-        lines = self._signal_impl_shape_lut.get(
-            id(signal))  # type: List[List[Line2D]]
+        lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = cache_item.plot()
         except AttributeError:
             plot = None
+
+        if signal.color is None:
+            signal.color = plot.get_next_color()
+
         style = self.get_signal_style(signal, plot)
-        step = style.pop('drawstyle', None)
-        logger.debug(f"mpl_line_plot step=: {step}")
-        if step is None:
-            step='linear'
-        style.update({'drawstyle': STEP_MAP[step.lower()]})
 
         if isinstance(lines, list):
-            line = lines[0][0]  # type: Line2D
-            line.set_xdata(x_data)
-            line.set_ydata(y_data)
-            for k, v in style.items():
-                setter = getattr(line, f"set_{k}")
-                if v is None and k != "drawstyle":
-                    continue
-                setter(v)
+            if x_data.ndim == 1 and y_data.ndim == 1:
+                line = lines[0][0]  # type: Line2D
+                line.set_xdata(x_data)
+                line.set_ydata(y_data)
+            elif x_data.ndim == 1 and y_data.ndim == 2:
+                for i, line in enumerate(lines):
+                    line[0].set_xdata(x_data)
+                    line[0].set_ydata(y_data[:, i])
             if self.canvas.streaming:
                 mpl_axes.set_ylim(min(y_data) - 0.01, max(y_data) + 0.01)
                 ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
                 mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
             self.figure.canvas.draw_idle()
+            # Not necessary, the lines has already all the style
+            # for line in lines:
+            #     for k, v in style.items():
+            #         setter = getattr(line[0], f"set_{k}")
+            #         if v is None and k != "drawstyle":
+            #             continue
+            #         setter(v)
         else:
-            logger.debug(f"mpl_line_plot step case 2=: {step}")
             params = dict(**style)
             draw_fn = mpl_axes.plot
-            ##if step is not None and step != 'None':
-              ##  params.update({'where': step})
-                ##draw_fn = mpl_axes.step
+            if x_data.ndim == 1 and y_data.ndim == 1:
+                lines = [draw_fn(x_data, y_data, **params)]
+            elif x_data.ndim == 1 and y_data.ndim == 2:
+                lines = draw_fn(x_data, y_data, **params)
+                lines = [[line] for line in lines]
 
-            lines = draw_fn(x_data, y_data, **params)
-            self._signal_impl_shape_lut.update({id(signal): [lines]})
+            self._signal_impl_shape_lut.update({id(signal): lines})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
-        if not isinstance(mpl_axes, MPLAxes):
-            return
-
-        shapes = self._signal_impl_shape_lut.get(
-            id(signal))  # type: List[List[Line2D]]
+        shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = cache_item.plot()
         except AttributeError:
             plot = None
         style = self.get_signal_style(signal, plot)
-        step = style.pop('drawstyle', None)
-        if step is None:
-            step='post'
 
         if shapes is not None:
-            shapes[0][0].set_xdata(x_data)
-            shapes[0][0].set_ydata(y1_data)
-            shapes[1][0].set_xdata(x_data)
-            shapes[1][0].set_ydata(y2_data)
-            shapes[2].remove()
-            shapes.pop()
-            style.update({'drawstyle': STEP_MAP[step.lower()]})
-            for k, v in style.items():
-                setter = getattr(shapes[0][0], f"set_{k}")
-                if v is None and k != "drawstyle":
-                    continue
-                setter(v)
-                setter = getattr(shapes[1][0], f"set_{k}")
-                setter(v)
-            area = mpl_axes.fill_between(x_data, y1_data, y2_data,
-                                         alpha=0.3,
-                                         color=shapes[1][0].get_color(),
-                                         step=STEP_MAP[step.lower()].replace('steps-',''))
-            shapes.append(area)
-            shapes[0][0].draw(mpl_axes.figure.canvas.renderer)
-            shapes[1][0].draw(mpl_axes.figure.canvas.renderer)
-            shapes[2].draw(mpl_axes.figure.canvas.renderer)
+            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
+                shapes[0][0].set_xdata(x_data)
+                shapes[0][0].set_ydata(y1_data)
+                shapes[0][1].set_xdata(x_data)
+                shapes[0][1].set_ydata(y2_data)
+                shapes[0][2].remove()
+                shapes[0][2] = mpl_axes.fill_between(x_data, y1_data, y2_data,
+                                                     alpha=0.3,
+                                                     color=shapes[0][0].get_color(),
+                                                     step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
+            self.figure.canvas.draw_idle()
+
+            # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
         else:
             params = dict(**style)
             draw_fn = mpl_axes.plot
-            #if step is not None and step != 'None':
-             #   params.update({'where': step})
-              #  draw_fn = mpl_axes.step
+            # if step is not None and step != 'None':
+            #   params.update({'where': step})
+            #  draw_fn = mpl_axes.step
 
-            line_1 = draw_fn(x_data, y1_data, **params)
-            params2 = params.copy()
-            params2.update(color=line_1[0].get_color(), label='')
-            line_2 = draw_fn(x_data, y2_data, **params2)
-            area = mpl_axes.fill_between(x_data, y1_data, y2_data,
-                                         alpha=0.3,
-                                         color=params2['color'],
-                                         step=STEP_MAP[step.lower()].replace('steps-',''))
+            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
+                line_1 = draw_fn(x_data, y1_data, **params)
+                params2 = params.copy()
+                signal.color = line_1[0].get_color()
+                params2.update(color=signal.color, label='')
+                line_2 = draw_fn(x_data, y2_data, **params2)
+                area = mpl_axes.fill_between(x_data, y1_data, y2_data,
+                                             alpha=0.3,
+                                             color=params2['color'],
+                                             step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
 
-            self._signal_impl_shape_lut.update({id(signal): [line_1, line_2, area]})
+                self._signal_impl_shape_lut.update({id(signal): [line_1 + line_2 + [area]]})
+            # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
 
     def clear(self):
         super().clear()
@@ -178,32 +171,30 @@ class MatplotlibParser(BackendParserBase):
     def _get_all_shared_axes(self, base_mpl_axes: MPLAxes):
         if not isinstance(self.canvas, Canvas):
             return []
-        if self.canvas.shared_x_axis:
-            return self.figure.axes
-        else:
-            cache_item = self._impl_plot_cache_table.get_cache_item(base_mpl_axes)
-            if not hasattr(cache_item, 'plot'):
-                return
-            base_plot = cache_item.plot()
-            if not isinstance(base_plot, Plot):
-                return
-            shared = list()
-            base_limits = self.get_plot_limits(base_plot, which='original')
-            base_begin, base_end = base_limits.axes_ranges[0].begin, base_limits.axes_ranges[0].end
 
-            if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
-                for axes in self.figure.axes:
-                    cache_item = self._impl_plot_cache_table.get_cache_item(axes)
-                    if not hasattr(cache_item, 'plot'):
-                        continue
-                    plot = cache_item.plot()
-                    if not isinstance(plot, Plot):
-                        continue
-                    limits = self.get_plot_limits(plot, which='original')
-                    begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                    if (begin, end) == (base_begin, base_end):
-                        shared.append(axes)
-            return shared
+        cache_item = self._impl_plot_cache_table.get_cache_item(base_mpl_axes)
+        if not hasattr(cache_item, 'plot'):
+            return
+        base_plot = cache_item.plot()
+        if not isinstance(base_plot, Plot):
+            return
+        shared = list()
+        base_limits = self.get_plot_limits(base_plot, which='original')
+        base_begin, base_end = base_limits.axes_ranges[0].begin, base_limits.axes_ranges[0].end
+
+        if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
+            for axes in self.figure.axes:
+                cache_item = self._impl_plot_cache_table.get_cache_item(axes)
+                if not hasattr(cache_item, 'plot'):
+                    continue
+                plot = cache_item.plot()
+                if not isinstance(plot, Plot):
+                    continue
+                limits = self.get_plot_limits(plot, which='original')
+                begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
+                if (begin, end) == (base_begin, base_end):
+                    shared.append(axes)
+        return shared
 
     def process_ipl_canvas(self, canvas: Canvas):
         """This method analyzes the iplotlib canvas data structure and maps it
@@ -217,15 +208,17 @@ class MatplotlibParser(BackendParserBase):
             self.canvas = canvas
             self.clear()
             return
-        
+
         # 1. Clear layout.
         self.clear()
 
         # 2. Allocate
         self.canvas = canvas
         if self._focus_plot is None:
+            self.canvas.focus_plot = None
             self._layout = self.figure.add_gridspec(canvas.rows, canvas.cols)
         else:
+            self.canvas.focus_plot = self._focus_plot
             self._layout = self.figure.add_gridspec(1, 1)
 
         # 3. Fill the canvas with plots.
@@ -246,12 +239,17 @@ class MatplotlibParser(BackendParserBase):
             if stop_drawing:
                 break
 
+        # Update the previous number of ticks at Canvas level
+        self.canvas.prev_tick_number = self.canvas.tick_number
+
+        # Update the previous background color at Canvas level
+        self.canvas.prev_background_color = self.canvas.background_color
+
         # 4. Update the title at the top of canvas.
         if canvas.title is not None:
             if not canvas.font_size:
                 canvas.font_size = None
-            self.figure.suptitle(
-                canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
+            self.figure.suptitle(canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
         logger.debug(f"process_ipl_plot AA: {self.canvas.step}")
@@ -259,8 +257,7 @@ class MatplotlibParser(BackendParserBase):
         if not isinstance(plot, Plot):
             return
 
-        grid_item = self._layout[row: row + plot.row_span,
-                             column: column + plot.col_span]  # type: SubplotSpec
+        grid_item = self._layout[row: row + plot.row_span, column: column + plot.col_span]  # type: SubplotSpec
 
         if not self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None:
             stack_sz = 1
@@ -268,9 +265,9 @@ class MatplotlibParser(BackendParserBase):
             stack_sz = len(plot.signals.keys())
 
         # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
-        subgrid_item = grid_item.subgridspec(
-            stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
+        subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
 
+        mpl_axes = None
         mpl_axes_prev = None
         for stack_id, key in enumerate(sorted(plot.signals.keys())):
             is_stack_plot_focused = self._focus_plot_stack_key == key
@@ -295,12 +292,24 @@ class MatplotlibParser(BackendParserBase):
 
                 # Set the plot title
                 if plot.title is not None and stack_id == 0:
-                    fc = self._pm.get_value(
-                        'font_color', self.canvas, plot) or 'black'
+                    fc = self._pm.get_value('font_color', self.canvas, plot) or 'black'
                     fs = self._pm.get_value('font_size', self.canvas, plot)
                     if not fs:
                         fs = None
                     mpl_axes.set_title(plot.title, color=fc, size=fs)
+
+                # Set the background color
+                if self.canvas.background_color != self.canvas.prev_background_color:
+                    mpl_axes.set_facecolor(self.canvas.background_color)
+                    # Refresh background color for each plot
+                    plot.background_color = self.canvas.background_color
+                elif plot.background_color is None:
+                    mpl_axes.set_facecolor(self.canvas.background_color)
+                    plot.background_color = self.canvas.background_color
+                elif plot.background_color != self.canvas.background_color:
+                    mpl_axes.set_facecolor(plot.background_color)
+                else:
+                    mpl_axes.set_facecolor(self.canvas.background_color)
 
                 # If this is a stacked plot the X axis should be visible only at the bottom
                 # plot of the stack except it is focused
@@ -369,8 +378,8 @@ class MatplotlibParser(BackendParserBase):
         if self.canvas.shared_x_axis:
             other_axes = self._get_all_shared_axes(mpl_axes)
             for other_axis in other_axes:
-                cur_x_limits =self.get_oaw_axis_limits(mpl_axes, 0)
-                other_x_limits =self.get_oaw_axis_limits(other_axis, 0)
+                cur_x_limits = self.get_oaw_axis_limits(mpl_axes, 0)
+                other_x_limits = self.get_oaw_axis_limits(other_axis, 0)
                 if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
                     self.set_oaw_axis_limits(other_axis, 0, cur_x_limits)
 
@@ -401,7 +410,7 @@ class MatplotlibParser(BackendParserBase):
                 continue
             if not ci.signals:
                 continue
- 
+
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_xranges"):
@@ -412,21 +421,24 @@ class MatplotlibParser(BackendParserBase):
 
     def process_ipl_axis(self, axis: Axis, ax_idx, plot: Plot, impl_plot: MPLAxes):
         super().process_ipl_axis(axis, ax_idx, plot, impl_plot)
-        mpl_axis = self.get_impl_axis(
-            impl_plot, ax_idx)  # type: MPLAxis
+        mpl_axis = self.get_impl_axis(impl_plot, ax_idx)  # type: MPLAxis
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
 
         if isinstance(axis, Axis):
-            fc = self._pm.get_value(
-                'font_color', self.canvas, axis, plot) or 'black'
-            fs = self._pm.get_value('font_size', self.canvas, axis, plot)
+            fc = self._pm.get_value('font_color', self.canvas, plot, axis) or 'black'
+            fs = self._pm.get_value('font_size', self.canvas, plot, axis)
 
             mpl_axis._font_color = fc
             mpl_axis._font_size = fs
             mpl_axis._label = axis.label
 
             label_props = dict(color=fc)
-            tick_props = dict(color=fc, labelcolor=fc)
+            # Set ticks on the top and right axis
+            if self.canvas.ticks_position:
+                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
+            else:
+                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
+
             if fs is not None and fs > 0:
                 label_props.update({'fontsize': fs})
                 tick_props.update({'labelsize': fs})
@@ -436,14 +448,24 @@ class MatplotlibParser(BackendParserBase):
             mpl_axis.set_tick_params(**tick_props)
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None and (axis.begin or axis.end):
-            logger.debug(
-                f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
+            logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
             self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
 
         if isinstance(axis, LinearAxis):
             if axis.is_date:
                 ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-                mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets))
+                mpl_axis.set_major_formatter(
+                    NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, round=self.canvas.round_hour))
+
+        # Configurate number of ticks and labels
+        if self.canvas.tick_number != self.canvas.prev_tick_number:
+            mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
+            # Refresh tick number for each plot
+            axis.tick_number = self.canvas.tick_number
+        elif axis.tick_number != self.canvas.tick_number:
+            mpl_axis.set_major_locator(MaxNLocator(axis.tick_number))
+        else:
+            mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
 
     @BackendParserBase.run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
@@ -459,36 +481,26 @@ class MatplotlibParser(BackendParserBase):
 
         mpl_axes = self._signal_impl_plot_lut.get(id(signal))  # type: MPLAxes
         if not isinstance(mpl_axes, MPLAxes):
-            logger.error(
-                f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
+            logger.error(f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
 
         # All good, make a data access request.
-        # logger.debug(f"\tprocessipsignal before ts_start {signal.ts_start} ts_end {signal.ts_end} status: {signal.status_info.result} ")
+        # logger.debug(f"\tprocessipsignal before ts_start {signal.ts_start} ts_end {signal.ts_end}
+        # status: {signal.status_info.result} ")
         signal_data = signal.get_data()
 
         data = self.transform_data(mpl_axes, signal_data)
-        #logger.debug(f"\tprocessipsignal data[0] {data[0]} data[1] {data[1]} ax_idx: {type(signal_data)} ")
-        if not len(data[0]) or not len(data[1]):
-            if hasattr(signal, 'ts_start') and hasattr(signal, 'ts_end'):
-                logger.debug(f"\tprocessipsignal ts_start {signal.ts_start} ts_end {signal.ts_end} status: {signal.status_info.result} ")
-                if not signal.ts_start or not signal.ts_end:
-                    ##case where we have a pulse id and no data being returned
-                    self.set_oaw_axis_limits(mpl_axes, 0, [None, None])
-                else:
-                    self.set_oaw_axis_limits(mpl_axes, 0, [signal.ts_start, signal.ts_end])
 
         if hasattr(signal, 'envelope') and signal.envelope:
             if len(data) != 3:
-                logger.error(
-                    f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data arrays (==3). {signal}")
+                logger.error(f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data"
+                             f" arrays (==3). {signal}")
                 return
-            self.do_mpl_envelope_plot(
-                signal, mpl_axes, data[0], data[1], data[2])
+            self.do_mpl_envelope_plot(signal, mpl_axes, data[0], data[1], data[2])
         else:
             if len(data) < 2:
-                logger.error(
-                    f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data arrays (<2). {signal}")
+                logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
+                             f"arrays (<2). {signal}")
                 return
             self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1])
 
@@ -500,14 +512,16 @@ class MatplotlibParser(BackendParserBase):
     def disable_tight_layout(self):
         self.figure.set_tight_layout(False)
 
-    def set_focus_plot(self, mpl_axes: MPLAxes):
+    def set_focus_plot(self, mpl_axes):
 
         def get_x_axis_range(plot):
-            if plot is not None and plot.axes is not None and len(plot.axes) > 0 and isinstance(plot.axes[0], RangeAxis):
+            if plot is not None and plot.axes is not None and len(plot.axes) > 0 and isinstance(plot.axes[0],
+                                                                                                RangeAxis):
                 return plot.axes[0].begin, plot.axes[0].end
 
         def set_x_axis_range(plot, begin, end):
-            if plot is not None and plot.axes is not None and len(plot.axes) > 0 and isinstance(plot.axes[0], RangeAxis):
+            if plot is not None and plot.axes is not None and len(plot.axes) > 0 and isinstance(plot.axes[0],
+                                                                                                RangeAxis):
                 plot.axes[0].begin = begin
                 plot.axes[0].end = end
 
@@ -518,11 +532,12 @@ class MatplotlibParser(BackendParserBase):
         else:
             plot = None
             stack_key = None
-        
+
         logger.debug(f"Focusing on plot: {id(plot)}, stack_key: {stack_key}")
-                
+
         if self._focus_plot is not None and plot is None:
-            if self.canvas.shared_x_axis and len(self._focus_plot.axes) > 0 and isinstance(self._focus_plot.axes[0], RangeAxis):
+            if self.canvas.shared_x_axis and len(self._focus_plot.axes) > 0 and isinstance(self._focus_plot.axes[0],
+                                                                                           RangeAxis):
                 begin, end = get_x_axis_range(self._focus_plot)
 
                 for columns in self.canvas.plots:
@@ -530,7 +545,9 @@ class MatplotlibParser(BackendParserBase):
                         if plot_temp != self._focus_plot:
                             logger.debug(
                                 f"Setting range on plot {id(plot_temp)} focused= {id(self._focus_plot)} begin={begin}")
-                            set_x_axis_range(plot_temp, begin, end)
+                            if plot_temp.axes[0].original_begin == self._focus_plot.axes[0].original_begin and \
+                                    plot_temp.axes[0].original_end == self._focus_plot.axes[0].original_end:
+                                set_x_axis_range(plot_temp, begin, end)
 
         self._focus_plot = plot
         self._focus_plot_stack_key = stack_key
@@ -553,8 +570,18 @@ class MatplotlibParser(BackendParserBase):
             axes = [self.figure.axes]
 
         for axes_group in axes:
-            self._cursors.append(MultiCursor2(self.figure.canvas, axes_group, x_label=self.canvas.enable_Xlabel_crosshair, y_label=self.canvas.enable_Ylabel_crosshair, val_label=self.canvas.enable_ValLabel_crosshair, color=self.canvas.crosshair_color, lw=self.canvas.crosshair_line_width, horizOn=False or self.canvas.crosshair_horizontal,
-                                              vertOn=self.canvas.crosshair_vertical, useblit=True, cache_table=self._impl_plot_cache_table))
+            if not axes_group:
+                continue
+
+            self._cursors.append(
+                MultiCursor2(self.figure.canvas, axes_group,
+                             x_label=self.canvas.enable_Xlabel_crosshair,
+                             y_label=self.canvas.enable_Ylabel_crosshair,
+                             val_label=self.canvas.enable_ValLabel_crosshair,
+                             color=self.canvas.crosshair_color, lw=self.canvas.crosshair_line_width,
+                             horizOn=False or self.canvas.crosshair_horizontal,
+                             vertOn=self.canvas.crosshair_vertical, useblit=True,
+                             cache_table=self._impl_plot_cache_table))
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
@@ -570,22 +597,20 @@ class MatplotlibParser(BackendParserBase):
         if hasattr(signal, "color"):
             style['color'] = signal.color
 
-        style['linewidth'] = self._pm.get_value(
-            'line_size', self.canvas, plot, signal=signal) or 1
-        style['linestyle'] = (self._pm.get_value(
-            'line_style', self.canvas, plot, signal=signal) or "Solid").lower()
-        style['marker'] = self._pm.get_value(
-            'marker', self.canvas, plot, signal=signal)
-        style['markersize'] = self._pm.get_value(
-            'marker_size', self.canvas, plot, signal=signal) or 0
-        style["drawstyle"] = self._pm.get_value(
-            'step', self.canvas, plot, signal=signal)
-       
+        style['linewidth'] = self._pm.get_value('line_size', self.canvas, plot, signal=signal) or 1
+        style['linestyle'] = (self._pm.get_value('line_style', self.canvas, plot, signal=signal) or "Solid").lower()
+        style['marker'] = self._pm.get_value('marker', self.canvas, plot, signal=signal)
+        style['markersize'] = self._pm.get_value('marker_size', self.canvas, plot, signal=signal) or 0
+        step = self._pm.get_value('step', self.canvas, plot, signal=signal)
+        if step is None:
+            step = 'linear'
+        style["drawstyle"] = STEP_MAP[step]
+
         return style
 
     def _redraw_in_frame_with_grid(self, a):
-        """A copy of Axes.redraw_in_frame that fixes the problem of not drawing the grid since grid is treated as a part of the axes
-        This function tries to hide all axis elements besides the grid itself before drawing"""
+        """A copy of Axes.redraw_in_frame that fixes the problem of not drawing the grid since grid is treated as a
+        part of the axes. This function tries to hide all axis elements besides the grid itself before drawing"""
         with ExitStack() as stack:
             hide_elements = []
             for axis in [a.get_xaxis(), a.get_yaxis()]:
@@ -606,14 +631,12 @@ class MatplotlibParser(BackendParserBase):
         Returns None otherwise"""
 
         if isinstance(vals, Collection) and len(vals) > 0:
-            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'int64')
-                    or (type(vals[0]) == int)
-                    or isinstance(vals[0], np.int64)) and vals[0] > 10**15:
+            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'int64') or (type(vals[0]) == int) or isinstance(
+                    vals[0], np.int64)) and vals[0] > 10 ** 15:
                 return vals[0]
         if isinstance(vals, Collection) and len(vals) > 0:
-            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'uint64')
-                    or (type(vals[0]) == int)
-                    or isinstance(vals[0], np.uint64)) and vals[0] > 10**15:
+            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'uint64') or (type(vals[0]) == int) or isinstance(
+                    vals[0], np.uint64)) and vals[0] > 10 ** 15:
                 return vals[0]
         return None
 
@@ -650,17 +673,17 @@ class MatplotlibParser(BackendParserBase):
 
     def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
         if isinstance(impl_plot, MPLAxes):
-            impl_plot.set_xlim(limits)
+            impl_plot.set_xlim(limits[0], limits[1])
 
     def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
         if isinstance(impl_plot, MPLAxes):
-            impl_plot.set_ylim(limits)
+            impl_plot.set_ylim(limits[0], limits[1])
         else:
             return None
 
     def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        case=0
+        case = 0
         if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is None:
             new_offset = self.create_offset(limits)
             if new_offset is not None:
@@ -674,12 +697,12 @@ class MatplotlibParser(BackendParserBase):
         else:
             begin = limits[0]
             end = limits[1]
-            case=1
+            case = 1
         logger.debug(
-                        f"\tLimits {begin} to to plot {end} ax_idx: {case}")
+            f"\tLimits {begin} to to plot {end} ax_idx: {case}")
         if ax_idx == 0:
             if begin == end and begin is not None:
-                begin = end-1
+                begin = end - 1
             return self.set_impl_x_axis_limits(impl_plot, (begin, end))
         elif ax_idx == 1:
             return self.set_impl_y_axis_limits(impl_plot, (begin, end))
@@ -716,7 +739,7 @@ class MatplotlibParser(BackendParserBase):
                     logger.debug(
                         f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
                     if isinstance(d, Collection):
-                        ret.append([e - ci.offsets[i] for e in d])
+                        ret.append(BufferObject([e - ci.offsets[i] for e in d]))
                     else:
                         ret.append(d - ci.offsets[i])
                 else:
@@ -727,7 +750,7 @@ class MatplotlibParser(BackendParserBase):
 def get_data_range(data, axis_idx):
     """Returns first and last value from data[axis_idx] or None"""
     if data is not None and len(data) > axis_idx and len(data[axis_idx] > 0):
-        return (data[axis_idx][0], data[axis_idx][-1])
+        return data[axis_idx][0], data[axis_idx][-1]
     return None
 
 
@@ -747,6 +770,7 @@ class MultiCursor2(MultiCursor):
                  cache_table: ImplementationPlotCacheTable = None,
                  **lineprops):
 
+        super().__init__(canvas, axes, useblit, horizOn, vertOn, **lineprops)
         self.canvas = canvas
         self.axes = axes
         self.horizOn = horizOn
@@ -802,7 +826,6 @@ class MultiCursor2(MultiCursor):
             boxstyle="round", pad=0.1, fill=True, color="green")
         value_arrow_props = dict(annotation_clip=False, clip_on=False, bbox=value_arrow_bbox_props,
                                  animated=self.useblit, color=self.text_color, fontsize=self.font_size)
-        # value_arrow_props = dict(annotation_clip=False, animated=self.useblit, color=self.text_color, fontsize=self.font_size)
 
         if self.x_label:
             for ax in axes:
@@ -829,8 +852,10 @@ class MultiCursor2(MultiCursor):
                     for signal in ci.signals:
                         xmin, xmax = ax.get_xbound()
                         ymin, ymax = ax.get_ybound()
-                        value_annotation = Annotation("", xy=(xmin + (xmax - xmin) / 2, ymin + (ymax - ymin) / 2), xycoords="data",  # xytext=(-200, 0),
-                                                      verticalalignment="top", horizontalalignment="left", **value_arrow_props)
+                        value_annotation = Annotation("", xy=(xmin + (xmax - xmin) / 2, ymin + (ymax - ymin) / 2),
+                                                      xycoords="data",  # xytext=(-200, 0),
+                                                      verticalalignment="top", horizontalalignment="left",
+                                                      **value_arrow_props)
                         value_annotation.set_visible(False)
                         value_annotation._ipl_signal = signal
                         ax.add_artist(value_annotation)
@@ -842,6 +867,10 @@ class MultiCursor2(MultiCursor):
 
     def clear(self, event):
         super().clear(event)
+        # In matplolib 3.6, for the MultiCursor object type,
+        # the way of storing certain information such as background is changed.
+        if hasattr(self, "_canvas_infos"):
+            self.background = self._canvas_infos[self.canvas]["background"]
         # self.background = None
         for arrow in self.x_arrows + self.y_arrows:
             arrow.set_visible(False)

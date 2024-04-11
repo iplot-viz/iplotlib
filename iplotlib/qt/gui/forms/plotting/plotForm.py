@@ -27,28 +27,29 @@ class PlotForm(IplotPreferencesForm):
     def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         prototype = [
             {"label": "Title", "property": "title",
-                "widget": self.create_lineedit()},
+             "widget": self.create_lineedit()},
             {"label": "Grid", "property": "grid",
-                "widget": self.create_checkbox()},
+             "widget": self.create_checkbox()},
             {"label": "Legend", "property": "legend",
-                "widget": self.create_checkbox()},
+             "widget": self.create_checkbox()},
             {"label": "Legend position", "property": "legend_position",
              "widget": self.default_plot_legend_position_widget()},
             {"label": "Legend layout", "property": "legend_layout",
              "widget": self.default_plot_legend_layout_widget()},
             {"label": "Font size", "property": "font_size",
-                "widget": self.default_fontsize_widget()},
+             "widget": self.default_fontsize_widget()},
             {"label": "Font color", "property": "font_color", "widget": ColorPicker("font_color")},
+            {"label": "Background color", "property": "background_color", "widget": ColorPicker("background_color")},
             {"label": "Line style", "property": "line_style",
-                "widget": self.default_linestyle_widget()},
+             "widget": self.default_linestyle_widget()},
             {"label": "Line size", "property": "line_size",
-                "widget": self.default_linesize_widget()},
+             "widget": self.default_linesize_widget()},
             {"label": "Marker", "property": "marker",
-                "widget": self.default_marker_widget()},
+             "widget": self.default_marker_widget()},
             {"label": "Marker size", "property": "marker_size",
-                "widget": self.default_markersize_widget()},
+             "widget": self.default_markersize_widget()},
             {"label": "Line Path", "property": "step",
-                "widget": self.default_linepath_widget()}
+             "widget": self.default_linepath_widget()}
         ]
         super().__init__(fields=prototype, label="A plot", parent=parent, f=f)
 
