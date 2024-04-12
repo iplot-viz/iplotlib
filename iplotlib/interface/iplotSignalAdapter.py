@@ -179,7 +179,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     def get_data(self):
         # 1. Populate time, data_primary, data_secondary (if needed)
         if self._do_data_access():
-        # 2. Use iplotProcessing to evaluate x_data, y_data, z_data
+            # 2. Use iplotProcessing to evaluate x_data, y_data, z_data
             self._do_data_processing()
 
         return [self.x_data, self.y_data, self.z_data]
@@ -257,12 +257,10 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             else:
                 return value
 
-        if self.pulse_nb is not None and self.ts_start == '' and self.ts_end == '':
-            self.ts_start = np_convert(ranges[0])
-            self.ts_end = np_convert(ranges[1])
-            self._access_md5sum = self.calculate_data_hash()
         self.ts_start = np_convert(ranges[0])
         self.ts_end = np_convert(ranges[1])
+        if self.pulse_nb is not None and self.ts_start == '' and self.ts_end == '':
+            self._access_md5sum = self.calculate_data_hash()
 
         for child in self.children:
             child.ts_start = self.ts_start
@@ -537,9 +535,12 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
             if self._needs_refresh():
                 if len(self.data_store[0]) and len(self.x_data) and self.x_expr != '${self}.time':
-                    idx = np.where((self.x_data >= self.ts_start) & (self.x_data <= self.ts_end))
-                    self.ts_start = self.data_store[0][idx][0]
-                    self.ts_end = self.data_store[0][idx][-1]
+                    idx1 = np.searchsorted(self.x_data, self.ts_start)
+                    idx2 = np.searchsorted(self.x_data, self.ts_end)
+                    if idx2 == len(self.x_data):
+                        idx2 -= 1
+                    self.ts_start = self.data_store[0][idx1:idx2][0]
+                    self.ts_end = self.data_store[0][idx1:idx2][-1]
 
                 self._fetch_data()
                 return True

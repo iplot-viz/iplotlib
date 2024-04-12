@@ -19,9 +19,10 @@ from functools import partial, wraps
 import numpy as np
 from queue import Empty, Queue
 import threading
-from typing import Any, Callable, Collection, Dict, List, Optional
+from typing import Any, Callable, Collection, Dict, List, Optional, Union
 import weakref
 
+from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits
@@ -400,33 +401,28 @@ class BackendParserBase(ABC):
                 for axis in axes:
                     if isinstance(axis, RangeAxis):
                         impl_plot = self._axis_impl_plot_lut.get(id(axis))
-                        if not self.set_impl_plot_limits(impl_plot, ax_idx, [ax_limits[i].begin, ax_limits[i].end]):
+                        if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
                             axis.begin = ax_limits[i].begin
                             axis.end = ax_limits[i].end
                         i += 1
             elif isinstance(axes, RangeAxis):
                 axis = axes
                 impl_plot = self._axis_impl_plot_lut.get(id(axis))
-                if not self.set_impl_plot_limits(impl_plot, ax_idx, [ax_limits[i].begin, ax_limits[i].end]):
+                if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
                     axis.begin = ax_limits[i].begin
                     axis.end = ax_limits[i].end
                 i += 1
         self.refresh_data()
 
     @staticmethod
-    def create_offset(vals):
+    def create_offset(vals: Union[List, BufferObject]) -> Union[int, np.int64, np.uint64, None]:
         """
-        Given a collection of values determine if creting offset is necessary and return it
+        Given a collection of values determine if creating offset is necessary and return it
         Returns None otherwise
         """
-        if isinstance(vals, Collection) and len(vals) > 0:
-            if ((hasattr(vals, 'dtype') and type(vals).__name__ == 'int64') or (type(vals[0]) == int) or isinstance(
-                    vals[0], np.int64)) and vals[0] > 10 ** 15:
-                return vals[0]
-        if isinstance(vals, Collection) and len(vals) > 0:
-            if ((hasattr(vals, 'dtype') and type(vals).__name__ == 'uint64') or (type(vals[0]) == int) or isinstance(
-                    vals[0], np.uint64)) and vals[0] > 10 ** 15:
-                return vals[0]
+        if (isinstance(vals, (List, BufferObject)) and len(vals) > 0 and vals[0] > 10 ** 15 and
+                isinstance(vals[0], (int, np.int64, np.uint64))):
+            return int(vals[0])
         return None
 
     def get_value(self, impl_plot: Any, ax_idx: int, data_sample):

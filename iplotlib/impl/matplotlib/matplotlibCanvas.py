@@ -451,11 +451,10 @@ class MatplotlibParser(BackendParserBase):
             logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
             self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
 
-        if isinstance(axis, LinearAxis):
-            if axis.is_date:
-                ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-                mpl_axis.set_major_formatter(
-                    NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, round=self.canvas.round_hour))
+        if isinstance(axis, LinearAxis) and axis.is_date:
+            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            mpl_axis.set_major_formatter(
+                NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, roundh=self.canvas.round_hour))
 
         # Configurate number of ticks and labels
         if self.canvas.tick_number != self.canvas.prev_tick_number:
@@ -625,21 +624,6 @@ class MatplotlibParser(BackendParserBase):
 
             a.draw(a.figure._cachedRenderer)
 
-    @staticmethod
-    def create_offset(vals):
-        """Given a collection of values determine if creting offset is necessary and return it
-        Returns None otherwise"""
-
-        if isinstance(vals, Collection) and len(vals) > 0:
-            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'int64') or (type(vals[0]) == int) or isinstance(
-                    vals[0], np.int64)) and vals[0] > 10 ** 15:
-                return vals[0]
-        if isinstance(vals, Collection) and len(vals) > 0:
-            if ((hasattr(vals, 'dtype') and vals.dtype.name == 'uint64') or (type(vals[0]) == int) or isinstance(
-                    vals[0], np.uint64)) and vals[0] > 10 ** 15:
-                return vals[0]
-        return None
-
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):
             return impl_plot.get_xaxis()
@@ -684,22 +668,17 @@ class MatplotlibParser(BackendParserBase):
     def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         case = 0
-        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is None:
-            new_offset = self.create_offset(limits)
-            if new_offset is not None:
-                ci.offsets[ax_idx] = new_offset
+        if ci.offsets[ax_idx] is None:
+            ci.offsets[ax_idx] = self.create_offset(limits)
 
-        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is not None:
-            begin = self.transform_value(
-                impl_plot, ax_idx, limits[0], inverse=True)
-            end = self.transform_value(
-                impl_plot, ax_idx, limits[1], inverse=True)
+        if ci.offsets[ax_idx] is not None:
+            begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
+            end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
         else:
             begin = limits[0]
             end = limits[1]
             case = 1
-        logger.debug(
-            f"\tLimits {begin} to to plot {end} ax_idx: {case}")
+        logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {case}")
         if ax_idx == 0:
             if begin == end and begin is not None:
                 begin = end - 1
@@ -723,21 +702,18 @@ class MatplotlibParser(BackendParserBase):
         return self._impl_plot_cache_table.transform_value(impl_plot, ax_idx, value, inverse=inverse)
 
     def transform_data(self, impl_plot: Any, data):
-        """This function post processes data if it cannot be plot with matplotlib directly.
-        Currently it transforms data if it is a large integer which can cause overflow in matplotlib"""
+        """This function post processes data if it cannot be plotted with matplotlib directly.
+        Currently, it transforms data if it is a large integer which can cause overflow in matplotlib"""
         ret = []
         if isinstance(data, Collection):
             for i, d in enumerate(data):
                 logger.debug(f"\t transform data i={i} d = {d} ")
                 ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-                if hasattr(ci, 'offsets') and ci.offsets[i] is None:
-                    new_offset = self.create_offset(d)
-                    if new_offset is not None:
-                        ci.offsets[i] = d[0]
+                if ci and ci.offsets[i] is None:
+                    ci.offsets[i] = self.create_offset(d)
 
-                if hasattr(ci, 'offsets') and ci.offsets[i] is not None:
-                    logger.debug(
-                        f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
+                if ci and ci.offsets[i] is not None:
+                    logger.debug(f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
                     if isinstance(d, Collection):
                         ret.append(BufferObject([e - ci.offsets[i] for e in d]))
                     else:
