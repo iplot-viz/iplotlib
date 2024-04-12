@@ -730,7 +730,7 @@ class MatplotlibParser(BackendParserBase):
             for i, d in enumerate(data):
                 logger.debug(f"\t transform data i={i} d = {d} ")
                 ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-                if hasattr(ci, 'offsets') and ci.offsets[i] is None:
+                if hasattr(ci, 'offsets') and ci.offsets[i] is None and i == 0:
                     new_offset = self.create_offset(d)
                     if new_offset is not None:
                         ci.offsets[i] = d[0]
