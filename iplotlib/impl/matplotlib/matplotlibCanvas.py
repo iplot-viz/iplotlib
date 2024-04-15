@@ -123,7 +123,7 @@ class MatplotlibParser(BackendParserBase):
             if isinstance(plot, PlotXY):
                 draw_fn = mpl_axes.plot
                 if x_data.ndim == 1 and y_data.ndim == 1:
-                    lines = draw_fn(x_data, y_data, **params)
+                    lines = [draw_fn(x_data, y_data, **params)]
                 elif x_data.ndim == 1 and y_data.ndim == 2:
                     lines = draw_fn(x_data, y_data, **params)
                     lines = [[line] for line in lines]
