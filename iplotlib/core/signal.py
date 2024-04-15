@@ -10,8 +10,9 @@ for when you wish to take over the data customization.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Collection
+from typing import Collection, List
 import numpy as np
+
 
 @dataclass
 class SignalStyle(ABC):
@@ -23,9 +24,9 @@ class Signal(ABC):
     """
     Main abstraction for a Signal.
     """
-    uid: str = None #: Signal uid.
-    name: str = '' #: Signal variable name.
-    label: str = None #: Signal label. This value is presented on plot legend
+    uid: str = None  #: Signal uid.
+    name: str = ''  #: Signal variable name.
+    label: str = None  #: Signal label. This value is presented on plot legend
     color: str = None
     line_style: str = None
     line_size: int = None
@@ -74,6 +75,7 @@ class ArraySignal(Signal):
     A concrete subclass to permit implementors to write their own get/set data functions.
     This class implements a generic `pick` function to select data from a sample value.
     """
+
     @abstractmethod
     def get_data(self) -> tuple:
         pass
@@ -84,25 +86,29 @@ class ArraySignal(Signal):
 
     def pick(self, sample):
         def gather(arrs, idx):
-            return [arrs[i][idx] if isinstance(arrs[i], Collection) and len(arrs[i]) > idx else None for i in range(len(arrs))]
+            return [arrs[i][idx] if isinstance(arrs[i], Collection) and len(arrs[i]) > idx else None for i in
+                    range(len(arrs))]
 
         try:
             data_arrays = self.get_data()
-            if (len(data_arrays) >= 2):
+            if len(data_arrays) >= 2:
                 data_arrays = data_arrays[:2]
             x = data_arrays[0]
-            if isinstance(x, Collection):
-                index = np.searchsorted(x, sample)
 
-                if index == len(x):
-                    index = len(x) - 1
+            if not isinstance(x, List):
+                x = list(x)
 
-                # Either return values at index or values at index-1
-                if index > 0 and abs(x[index - 1] - sample) < abs(x[index] - sample):
-                    index = index - 1
+            index = np.searchsorted(x, sample)
+            if index == len(x):
+                index = len(x) - 1
 
-                return gather(data_arrays, index)
-        except:
+            # Either return values at index or values at index-1
+            if index > 0 and abs(x[index - 1] - sample) < abs(x[index] - sample):
+                index = index - 1
+
+            return gather(data_arrays, index)
+        except Exception as e:
+            print(f"Error : {e}")
             pass
 
         return None
@@ -114,14 +120,14 @@ class SimpleSignal(ArraySignal):
     A concrete subclass that freezes the data to three numpy arrays (x, y, z).
     You can use this when you have no requirement for custom data-handling.
     """
-    x_data: np.ndarray = np.empty((0))
-    y_data: np.ndarray = np.empty((0))
-    z_data: np.ndarray = np.empty((0))
+    x_data: np.ndarray = np.empty(0)
+    y_data: np.ndarray = np.empty(0)
+    z_data: np.ndarray = np.empty(0)
     x_unit: str = ''
     y_unit: str = ''
     z_unit: str = ''
 
-    def get_data(self) -> tuple:
+    def get_data(self) -> List[np.ndarray]:
         return [self.x_data, self.y_data, self.z_data]
 
     def set_data(self, data=None):

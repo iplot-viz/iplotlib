@@ -12,14 +12,13 @@ from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
 class VTKCanvasTesting(QVTKAppTestAdapter):
 
     def setUp(self) -> None:
-
         # A 2col x 2row canvas
         self.core_canvas = Canvas(2, 2, title=os.path.basename(__file__))
 
         # A plot in top-left with 1 signal.
         signal11 = SimpleSignal(label="Signal1.1")
         signal11.set_data([np.array([0., 1., 2., 3.]),
-                          np.array([0., 1., 2., 3.])])
+                           np.array([0., 1., 2., 3.])])
         plot11 = PlotXY()
         plot11.add_signal(signal11)
         self.core_canvas.add_plot(plot11, 0)
@@ -27,7 +26,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         # A plot in bottom-left with 1 signal.
         signal12 = SimpleSignal(label="Signal1.2")
         signal12.set_data([np.array([0., 1., 2., 3.]),
-                          np.array([0., 1., 2., 3.])])
+                           np.array([0., 1., 2., 3.])])
         plot12 = PlotXY()
         plot12.add_signal(signal12)
         self.core_canvas.add_plot(plot12, 0)
@@ -35,7 +34,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         # A plot in top-right with 1 signal.
         signal21 = SimpleSignal(label="Signal2.1")
         signal21.set_data([np.array([0., 1., 2., 3.]),
-                          np.array([0., 1., 2., 3.])])
+                           np.array([0., 1., 2., 3.])])
         plot21 = PlotXY()
         plot21.add_signal(signal21)
         self.core_canvas.add_plot(plot21, 1)
@@ -43,7 +42,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         # A plot in bottom-right with 1 signal.
         signal22 = SimpleSignal(label="Signal2.2")
         signal22.set_data([np.array([0., 1., 2., 3.]),
-                          np.array([0., 1., 2., 3.])])
+                           np.array([0., 1., 2., 3.])])
         plot22 = PlotXY()
         plot22.add_signal(signal22)
         self.core_canvas.add_plot(plot22, 1)
@@ -55,7 +54,6 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
 
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
     def test_05_canvas_simple_refresh(self):
-
         self.canvas.set_canvas(self.core_canvas)
         size = self.canvas._parser.matrix.GetSize()
         self.assertEqual(size[0], 2)
@@ -63,7 +61,6 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
 
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
     def test_05_canvas_simple_visuals(self):
-
         self.canvas.set_canvas(self.core_canvas)
         self.canvas.update()
         self.canvas.show()

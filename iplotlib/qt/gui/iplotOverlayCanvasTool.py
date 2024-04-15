@@ -1,8 +1,6 @@
 """
 This module is deprecated and unused.
 """
-from abc import ABC, abstractmethod
-
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QPainter
 

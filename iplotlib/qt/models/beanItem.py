@@ -9,19 +9,21 @@ import typing
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QStandardItem
 
-BeanPrototype = {'label' : None, 'property': None, 'widget': None, 'converter': None}
+BeanPrototype = {'label': None, 'property': None, 'widget': None, 'converter': None}
 
 
 class BeanItem(QStandardItem):
     """
     This class encapsulates various roles of a BeanItem.
     """
-    ConverterRole = Qt.UserRole + 40 #: The converter function.
-    LabelRole = Qt.UserRole + 10 #: The label string used in a GUI form
-    PropertyRole = Qt.UserRole + 20 #: The python property name.
-    WidgetRole = Qt.UserRole + 30 #: The Qt widget that exposes the python object's property.
+    ConverterRole = Qt.UserRole + 40  #: The converter function.
+    LabelRole = Qt.UserRole + 10  #: The label string used in a GUI form
+    PropertyRole = Qt.UserRole + 20  #: The python property name.
+    WidgetRole = Qt.UserRole + 30  #: The Qt widget that exposes the python object's property.
 
-    def __init__(self, text: str, prototype: dict = BeanPrototype):
+    def __init__(self, text: str, prototype: dict = None):
+        if prototype is None:
+            prototype = BeanPrototype
         super().__init__(text)
 
         self._data = {BeanItem.ConverterRole: prototype.get('converter'),

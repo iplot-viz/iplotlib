@@ -47,7 +47,7 @@ class Canvas(ABC):
 
     line_style: str = None  #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
     # default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent
-    # points should be canvas impementation dependent
+    # points should be canvas implementation dependent
     line_size: int = None
 
     #: default marker type to display. If set a marker is drawn at every point of the data sample.
@@ -67,7 +67,7 @@ class Canvas(ABC):
     legend: bool = True  #: a boolean that suggests the visibility of a plot legend box.
     legend_position: str = 'upper right'  #: indicate the location of the plot legend
     legend_layout: str = 'vertical'  #: indicate the layout of the plot legend
-    grid: bool = False #: a boolean that suggests the visibility of a plot grid
+    grid: bool = False  #: a boolean that suggests the visibility of a plot grid
     ticks_position: bool = False
 
     #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
@@ -217,7 +217,7 @@ class Canvas(ABC):
                         plot.merge(old_plot)
 
         # Gather all old signals into a map with uid as key
-        def computeSignalUniqKey(computed_signal: Signal):
+        def compute_signal_uniqkey(computed_signal: Signal):
             # Consider signal is same if it has the same row uid, name
             signal_key = computed_signal.uid + ";" + computed_signal.name
             return signal_key
@@ -228,7 +228,7 @@ class Canvas(ABC):
                 if old_plot:
                     for old_signals in old_plot.signals.values():
                         for old_signal in old_signals:
-                            key = computeSignalUniqKey(old_signal)
+                            key = compute_signal_uniqkey(old_signal)
                             map_old_signals[key] = old_signal
 
         # Merge signals at canvas level to handle move between plots
@@ -237,7 +237,7 @@ class Canvas(ABC):
                 if plot:
                     for signals in plot.signals.values():
                         for signal in signals:
-                            key = computeSignalUniqKey(signal)
+                            key = compute_signal_uniqkey(signal)
                             if key in map_old_signals:
                                 signal.merge(map_old_signals[key])
 
@@ -246,7 +246,7 @@ class Canvas(ABC):
         focus_plot = self.focus_plot
         for c, column in enumerate(self.plots):
             for r, row in enumerate(column):
-                if not focus_plot or row==focus_plot:
+                if row and (not focus_plot or row == focus_plot):
                     for p, plot in enumerate(row.signals.values()):
                         for s, pl_signal in enumerate(plot):
                             col_name = f"plot{r + 1}.{c + 1}"

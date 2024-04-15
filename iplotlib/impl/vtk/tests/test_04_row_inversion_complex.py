@@ -21,18 +21,19 @@ class VTKParserTesting(unittest.TestCase):
         return super().setUp()
 
     def test_04_row_inversion_complex(self):
-        
+
         valid_internal_row_ids = [4, 2, 0]
 
         for c, column in enumerate(self.vtk_parser.canvas.plots):
             r = 0
             test_internal_row_ids = []
-            
+
             for plot in column:
                 test_internal_row_ids.append(self.vtk_parser.get_internal_row_id(r, plot))
                 r += plot.row_span
 
             self.assertListEqual(test_internal_row_ids, valid_internal_row_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

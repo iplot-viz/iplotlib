@@ -2,12 +2,10 @@ from PySide6 import QtCore
 from PySide6.QtCore import QPoint, QPointF, Qt, QRect, Signal
 from PySide6.QtGui import QPainter, QPen, QColor
 
-
 from iplotlib.qt.gui.iplotOverlayCanvasTool import QtOverlayCanvasTool
 
 
 class QtOverlayCrosshairTool(QtOverlayCanvasTool):
-
     crosshairMoved = Signal(QPointF)
     crosshairLeave = Signal()
 
@@ -36,8 +34,10 @@ class QtOverlayCrosshairTool(QtOverlayCanvasTool):
                 if self.graph_screen_bounds:
                     min_x, min_y, max_x, max_y = self.graph_screen_bounds
                 if self.vertical and min_x <= screen_pos.x() <= max_x:
-                    painter.drawLine(screen_pos.x(), painter.viewport().height()-min_y, screen_pos.x(), painter.viewport().height()-max_y)
-                if self.horizontal and (painter.viewport().height()-max_y) <= screen_pos.y() <= (painter.viewport().height()-min_y):
+                    painter.drawLine(screen_pos.x(), painter.viewport().height() - min_y, screen_pos.x(),
+                                     painter.viewport().height() - max_y)
+                if self.horizontal and (painter.viewport().height() - max_y) <= screen_pos.y() <= (
+                        painter.viewport().height() - min_y):
                     painter.drawLine(min_x, screen_pos.y(), max_x, screen_pos.y())
 
         if self.graph_pos is not None:
@@ -49,7 +49,9 @@ class QtOverlayCrosshairTool(QtOverlayCanvasTool):
             painter.fillRect(x_rect, self.tooltip_background)
             painter.drawText(x_rect, Qt.AlignLeft | Qt.AlignTop, x)
 
-            y_rect = painter.boundingRect(QRect(self.tooltip_rect.x(), self.tooltip_rect.y()+2+x_rect.height(), 10, 10), Qt.AlignLeft | Qt.AlignTop, y)
+            y_rect = painter.boundingRect(
+                QRect(self.tooltip_rect.x(), self.tooltip_rect.y() + 2 + x_rect.height(), 10, 10),
+                Qt.AlignLeft | Qt.AlignTop, y)
             painter.fillRect(y_rect, self.tooltip_background)
             painter.drawText(y_rect, Qt.AlignLeft | Qt.AlignTop, y)
 

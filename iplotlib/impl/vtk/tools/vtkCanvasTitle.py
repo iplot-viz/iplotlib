@@ -1,6 +1,7 @@
 from vtkmodules.vtkRenderingCore import vtkTextProperty
 from vtkmodules.vtkRenderingContext2D import vtkContext2D
 
+
 class CanvasTitleItem(object):
     def __init__(self, title: str):
         self.title = title
@@ -13,7 +14,6 @@ class CanvasTitleItem(object):
         return True
 
     def Paint(self, vtkSelf, painter: vtkContext2D):
-
         painter.ApplyTextProp(self.appearance)
         bds = [0., 0., 0., 0.]  # xmin, ymin, width, height
         painter.ComputeStringBounds(self.title, bds)

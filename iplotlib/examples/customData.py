@@ -6,8 +6,8 @@ import os
 import numpy as np
 from iplotlib.core import SimpleSignal, Canvas, PlotXY
 
-def plot():
 
+def plot():
     # 1-D plot of Rosenbrock function @ y=2
     x = np.linspace(-1, 1, 1000)
     y = (1 - x ** 2) + 100 * (2 - x ** 2) ** 2
