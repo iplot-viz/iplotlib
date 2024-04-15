@@ -709,7 +709,7 @@ class MatplotlibParser(BackendParserBase):
             for i, d in enumerate(data):
                 logger.debug(f"\t transform data i={i} d = {d} ")
                 ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-                if ci and ci.offsets[i] is None:
+                if ci and ci.offsets[i] is None and i == 0:
                     ci.offsets[i] = self.create_offset(d)
 
                 if ci and ci.offsets[i] is not None:
