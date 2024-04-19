@@ -3,4 +3,5 @@ Infrastructure for writting tests with a full blown Qt Application involving int
 """
 
 from .qAppTestAdapter import QAppTestAdapter
+
 __all__ = ['QAppTestAdapter']

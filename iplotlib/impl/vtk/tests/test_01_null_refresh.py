@@ -2,6 +2,7 @@ import unittest
 from iplotlib.core.canvas import Canvas
 from iplotlib.impl.vtk.vtkCanvas import VTKParser
 
+
 class VTKParserTesting(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -14,6 +15,7 @@ class VTKParserTesting(unittest.TestCase):
         size = self.vtk_parser.matrix.GetSize()
         self.assertEqual(size[0], 0)
         self.assertEqual(size[1], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

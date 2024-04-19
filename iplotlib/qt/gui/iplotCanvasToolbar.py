@@ -20,9 +20,9 @@ from PySide6.QtGui import QAction, QActionGroup
 from iplotlib.core.canvas import Canvas
 from iplotlib.qt.utils.icon_loader import create_icon
 
-from iplotLogging import setupLogger as sl
+from iplotLogging import setupLogger as Sl
 
-logger = sl.get_logger(__name__)
+logger = Sl.get_logger(__name__)
 
 
 class IplotQtCanvasToolbar(QToolBar):
@@ -49,8 +49,7 @@ class IplotQtCanvasToolbar(QToolBar):
             tool_action = QAction(tool_name[3:], parent=self)
             tool_action.setCheckable(True)
             tool_action.setActionGroup(self._actions)
-            tool_action.triggered.connect(
-                partial(self.toolActivated.emit, tool_name))
+            tool_action.triggered.connect(partial(self.toolActivated.emit, tool_name))
             self.addAction(tool_action)
 
         self.addSeparator()

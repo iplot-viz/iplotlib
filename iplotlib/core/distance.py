@@ -7,10 +7,12 @@ distance between two points in a plot.
 
 import pandas as pd
 
+
 class DistanceCalculator:
     """
     A datetime aware distance calculator.
     """
+
     def __init__(self) -> None:
         self.p1 = []
         self.p2 = []
@@ -28,7 +30,7 @@ class DistanceCalculator:
         self.stack_key1 = None
         self.stack_key2 = None
         self._dx_is_datetime = False
-    
+
     def set_dx_is_datetime(self, val: bool):
         """
         Enforce datetime semantics for x values.
@@ -51,7 +53,7 @@ class DistanceCalculator:
         self.plot2 = plot
         self.stack_key2 = stack_key
 
-    def is_valid(self):
+    def is_valid(self) -> bool:
         return self.plot1 == self.plot2 and self.stack_key1 == self.stack_key2 and any(self.p1) and any(self.p2)
 
     def dist(self):
@@ -59,7 +61,7 @@ class DistanceCalculator:
         Calculate the distance.
         """
         if self.is_valid():
-            # See https://jira.iter.org/browse/IDV-260?focusedCommentId=1261136&page=com.atlassian.jira.plugin.system.issuetabpanels%3Acomment-tabpanel#comment-1261136
+            # See https://jira.iter.org/browse/IDV-260
             if self._dx_is_datetime:
                 dx = pd.Timestamp(self.p2[0], unit='ns') - pd.Timestamp(self.p1[0], unit='ns')
                 dx_str = f"{dx.components.days}D" if dx.components.days else ""

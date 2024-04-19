@@ -18,15 +18,16 @@ from PySide6.QtWidgets import QComboBox
 from iplotlib.qt.models.beanItem import BeanItem, BeanPrototype
 from iplotlib.qt.utils.conversions import ConversionHelper
 
-from iplotLogging import setupLogger as sl
+from iplotLogging import setupLogger as Sl
 
-logger = sl.get_logger(__name__, 'INFO')
+logger = Sl.get_logger(__name__, 'INFO')
+
 
 class BeanItemModel(QStandardItemModel):
     """
     An implementation of QStandardItemModel that binds indexes to object properties
     """
-    PyObjectRole = Qt.UserRole + 50 #: This role is used to bind this model to a python object.
+    PyObjectRole = Qt.UserRole + 50  #: This role is used to bind this model to a python object.
 
     def __init__(self, parent: typing.Optional[QObject] = ...):
         super().__init__(parent=parent)

@@ -19,6 +19,7 @@ rtheaders=REMOTE_USER:$USERNAME,User-Agent:python_client
 rtauth=None
 """
 
+
 def plot():
     da = DataAccess()
     start_time = "2020-11-01T17:42:24"
@@ -34,8 +35,8 @@ def plot():
 
     AccessHelper.da = da
     s = IplotSignalAdapter(
-        data_source='codacuda', 
-        name='UTIL-HV-S22-BUS1:TOTAL_POWER', 
+        data_source='codacuda',
+        name='UTIL-HV-S22-BUS1:TOTAL_POWER',
         ts_start=start_time,
         ts_end=end_time,
         processing_enabled=False
@@ -43,7 +44,7 @@ def plot():
 
     # Setup the graphics objects for plotting.
     c = Canvas(rows=3, title=os.path.basename(__file__).replace('.py', ''))
-    p = PlotXY(axes = [LinearAxis(is_date=True), LinearAxis()])
+    p = PlotXY(axes=[LinearAxis(is_date=True), LinearAxis()])
     p.add_signal(s)
     c.add_plot(p)
 

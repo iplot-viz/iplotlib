@@ -6,8 +6,10 @@
 #              -Extract data-access code into fetch_data method. [Jaswant Sai Panchumarti]
 #              -Apply processing right after data access in fetch_data [Jaswant Sai Panchumarti]
 #              -Teach AccessHelper to explore ProcessingSignal objects. [Jaswant Sai Panchumarti]
-#              -Rename AccessHelper.get_data -> AccessHelper._fetch_data (no longer returns data) [Jaswant Sai Panchumarti]
-#              -Translate iplotDataAccess.DataObj into ProcessingSignal in AccessHelper._fetch_data [Jaswant Sai Panchumarti]
+#              -Rename AccessHelper.get_data -> AccessHelper._fetch_data (no longer returns data)
+#              [Jaswant Sai Panchumarti]
+#              -Translate iplotDataAccess.DataObj into ProcessingSignal in AccessHelper._fetch_data
+#              [Jaswant Sai Panchumarti]
 #  Oct 2021:   Changes by Jaswant
 #              - All data requests are done in blocking fashion.
 #              - Added ParserHelper.
@@ -19,7 +21,8 @@
 #              - Added StatusInfo to IplotSignalAdapter
 #              - Parse given time as isoformat datetime only if it is a non-empty string
 #  Dec 2021:   Changes by Jaswant
-#              - If the number of child signals is > 1, then align them onto a common grid before evaluating an expression.
+#              - If the number of child signals is > 1, then align them onto a common grid before evaluating an
+#              expression.
 #              - The alignment modifies the data_store. After evaluation, restore the original buffers.
 #  Feb 2023:   Changes by Alberto Luengo
 #              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
@@ -39,12 +42,11 @@ from iplotProcessing.math.pre_processing.grid_mixing import align
 from iplotProcessing.tools.parsers import Parser
 from iplotProcessing.tools import hash_code
 
-import iplotLogging.setupLogger as sl
+from iplotLogging import setupLogger
 
-logger = sl.get_logger(__name__)
+logger = setupLogger.get_logger(__name__)
 
-IplotSignalAdapterT = typing.TypeVar(
-    'IplotSignalAdapterT', bound='IplotSignalAdapter')
+IplotSignalAdapterT = typing.TypeVar('IplotSignalAdapterT', bound='IplotSignalAdapter')
 
 
 class DataAccessError(Exception):
@@ -69,9 +71,10 @@ class Stage:
 class StatusInfo:
     msg: str = ''
     num_points: int = 0
-    result: Result = Result.READY
+    result: str = Result.READY
     sep = '|'
-    stage: Stage = Stage.INIT
+    stage: str = Stage.INIT
+    inf: int = 0
 
     def reset(self):
         self.msg = ''
@@ -79,18 +82,19 @@ class StatusInfo:
         self.result = Result.READY
         self.stage = Stage.INIT
         self.sep = '|'
+        self.inf = 0
 
     def __str__(self) -> str:
-        if self.result == Result.BUSY:
-            return self.result + self.sep + self.stage
-        elif self.result == Result.INVALID:
+        if self.result == Result.BUSY or self.result == Result.INVALID:
             return self.result + self.sep + self.stage
         elif self.result == Result.FAIL:
-            return self.stage + self.sep + f'{self.num_points}' + ' points'
+            return f"{self.stage}{self.sep}{self.num_points} points" + \
+                (f"{self.sep} {self.inf} infinities" if self.inf > 0 else "")
         elif self.result == Result.READY:
             return self.result
         elif self.result == Result.SUCCESS:
-            return self.result + self.sep + f'{self.num_points}' + ' points'
+            return f"{self.result}{self.sep}{self.num_points} points" + \
+                (f"{self.sep} {self.inf} infinities" if self.inf > 0 else "")
 
 
 @dataclass
@@ -106,8 +110,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     alias: str = ''
 
     pulse_nb: int = None
-    ts_start: int = None
-    ts_end: int = None
+    ts_start: str = ''
+    ts_end: str = ''
     ts_relative: bool = False
     envelope: bool = False
     isDownsampled: bool = False
@@ -132,12 +136,10 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
         # 1.1 Initialize access parameters
         if iplotStrUtils.is_non_empty(self.ts_start):
-            self.ts_start = np.datetime64(
-                self.ts_start, 'ns').astype('int64').item()
+            self.ts_start = np.datetime64(self.ts_start, 'ns').astype('int64').item()
 
         if iplotStrUtils.is_non_empty(self.ts_end):
-            self.ts_end = np.datetime64(
-                self.ts_end, 'ns').astype('int64').item()
+            self.ts_end = np.datetime64(self.ts_end, 'ns').astype('int64').item()
 
         self.ts_relative = iplotStrUtils.is_non_empty(self.pulse_nb)
         self._local_env = dict()
@@ -176,9 +178,9 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
     def get_data(self):
         # 1. Populate time, data_primary, data_secondary (if needed)
-        self._do_data_access()
-        # 2. Use iplotProcessing to evaluate x_data, y_data, z_data
-        self._do_data_processing()
+        if self._do_data_access():
+            # 2. Use iplotProcessing to evaluate x_data, y_data, z_data
+            self._do_data_processing()
 
         return [self.x_data, self.y_data, self.z_data]
 
@@ -191,16 +193,14 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         :rtype: NoneType
         """
         if data is None:
-            super().set_data() # as of now this does nothing.
+            super().set_data()  # as of now this does nothing.
 
         self._finalize_xyz_data(data)
 
-        # Pure processing, in that case, emulate a successful data access
-        if not self.data_access_enabled:
-            self.data_store[0] = self.x_data
-            self.data_store[1] = self.y_data
-            self.data_store[2] = self.z_data
-            self.set_da_success()
+        self.data_store[0] = self.x_data
+        self.data_store[1] = self.y_data
+        self.data_store[2] = self.z_data
+        self.set_da_success()
 
     @staticmethod
     def acquire_shape(source: BufferObject, target: BufferObject) -> BufferObject:
@@ -210,7 +210,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         :type source: BufferObject
         :param target: This object will dictate the shape of `source`
         :type target: BufferObject
-        :return: The new modifed `source` object.
+        :return: The new modified `source` object.
         :rtype: BufferObject
         """
         if np.isscalar(source):
@@ -223,7 +223,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             else:
                 return source
         else:
-            return source # TODO: Modify ndims
+            return source  # CHECK: Modify ndims
 
     def compute(self, **kwargs) -> dict:
         data_arrays = dict()
@@ -232,7 +232,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             try:
                 logger.debug(" in compute key={} expr={}".format(key, expr))
                 data_arrays.update({key: ParserHelper.evaluate(self, expr)})
-            except:
+            except Exception as e:
+                logger.error(f"Error {e}")
                 continue
         return data_arrays
 
@@ -255,12 +256,11 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                     return value.astype('int').item()
             else:
                 return value
-        if self.pulse_nb is not None and self.ts_start == '' and self.ts_end == '':
-            self.ts_start = np_convert(ranges[0])
-            self.ts_end = np_convert(ranges[1])
-            self._access_md5sum = self.calculate_data_hash()
+
         self.ts_start = np_convert(ranges[0])
         self.ts_end = np_convert(ranges[1])
+        if self.pulse_nb is not None and self.ts_start == '' and self.ts_end == '':
+            self._access_md5sum = self.calculate_data_hash()
 
         for child in self.children:
             child.ts_start = self.ts_start
@@ -275,6 +275,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info.stage = Stage.DA
         self.status_info.result = Result.SUCCESS
         self.status_info.num_points = len(self.data_store[0])
+        self.status_info.inf = int(np.sum(np.isinf(self.data_store[1])))
 
     def set_da_fail(self, msg: str = ''):
         self.status_info.reset()
@@ -288,6 +289,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         self.status_info.reset()
         self.status_info.stage = Stage.PROC
         self.status_info.num_points = len(self.x_data)
+        self.status_info.inf = int(np.sum(np.isinf(self.y_data)))
         self.status_info.result = Result.SUCCESS
 
     def set_proc_fail(self, msg: str = ''):
@@ -320,7 +322,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         # eg: foo/bar[0]/baz-1
         # The second case cannot have children, it does not need special consideration.
 
-        # The first case would result in len(children) > 0. We find them (if they are pre-defined aliases) or create them.
+        # The first case would result in len(children) > 0. We find them (if they are pre-defined aliases) or create
+        # them.
         try:
             p = Parser().set_expression(expression)
         except InvalidExpression as e:
@@ -339,7 +342,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
             if isinstance(value, IplotSignalAdapter):
                 # This is an aliased signal.
-                if self.data_access_enabled and iplotStrUtils.is_non_empty(self.data_source) and self.data_source != value.data_source:
+                if self.data_access_enabled and iplotStrUtils.is_non_empty(
+                        self.data_source) and self.data_source != value.data_source:
                     self.status_info.reset()
                     self.status_info.msg = f"Data source conflict {self.data_source} != {value.data_source}."
                     self.status_info.result = Result.INVALID
@@ -421,7 +425,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                             setattr(self, name, data[i].view(BufferObject))
                         except IndexError:
                             break
-                        logger.debug("[UDA len_data={} name={}  i={} len_data_i={}] ".format(len(data), name, i, len(data[i])))
+                        logger.debug(
+                            "[UDA len_data={} name={}  i={} len_data_i={}] ".format(len(data), name, i, len(data[i])))
         # 2. Fix x-y shape mismatch.
         self.y_data = self.acquire_shape(self.y_data, self.x_data)
 
@@ -439,7 +444,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         # Note: In this case, `self.name` is an expression, so prior to applying x,y,z we evaluate `self.name`
         if len(self.children):
             vm = dict(self._local_env)
-            vm.update(ParserHelper.env) # makes aliases accessible to parser
+            vm.update(ParserHelper.env)  # makes aliases accessible to parser
 
             # 2.1 Ensure all child signals have their time, data vectors (if DA enabled)
             children_data = defaultdict(list)
@@ -453,7 +458,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
             # 2.2 Align all signals onto a common grid.
             if len(self.children) > 1:
-                align(self.children) #,mode=self.alignment_mode, kind=self.interpolation_kind)
+                align(self.children)  # ,mode=self.alignment_mode, kind=self.interpolation_kind)
 
             # 2.2 Evaluate self.name. It is an expression combining multiple other signals.
             try:
@@ -484,7 +489,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         # self.compute evaluates expressions (IDV-333)
         data_arrays = self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
         self._finalize_xyz_data([data_arrays.get('x'), data_arrays.get('y'), data_arrays.get('z')])
-        #logger.debug("[UDA x={} y={} z={} ] ".format(len(data_arrays.get('x')),len(data_arrays.get('y')),len(data_arrays.get('z'))))
+        # logger.debug("[UDA x={} y={} z={} ] ".format(len(data_arrays.get('x')),len(data_arrays.get('y')),
+        # len(data_arrays.get('z'))))
 
         # 4. Set ts_start and ts_end to avoid hash mismatch
         # if len(data_arrays.get('x')) > 0:
@@ -510,7 +516,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 if child._needs_refresh():
                     child._fetch_data()
                 if child.status_info.result == Result.FAIL:
-                    self.set_da_fail(msg=child.status_info.msg) # get exact reason for failure from child.
+                    self.set_da_fail(msg=child.status_info.msg)  # get exact reason for failure from child.
                     break
             else:  # Fell through, all children succeded
                 self.set_da_success()
@@ -521,20 +527,34 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     def _do_data_access(self):
         # Skip if we are invalid.
         if self.status_info.result == Result.INVALID:
-            return
+            return False
 
         # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
         nonempty_name = iplotStrUtils.is_non_empty(self.name)
         if nonempty_name and self.data_access_enabled:
+
             if self._needs_refresh():
+                if len(self.data_store[0]) and len(self.x_data) and self.x_expr != '${self}.time':
+                    idx1 = np.searchsorted(self.x_data, self.ts_start)
+                    idx2 = np.searchsorted(self.x_data, self.ts_end)
+                    if idx2 == len(self.x_data):
+                        idx2 -= 1
+                    self.ts_start = self.data_store[0][idx1:idx2][0]
+                    self.ts_end = self.data_store[0][idx1:idx2][-1]
+
                 self._fetch_data()
+                return True
             elif self.status_info.stage == Stage.PROC:
                 self.set_da_success()
+                return False
         else:
             # 1. either name is empty, trivial (no data access, so emulate a success DA)
             # or 
             # 2.data_access_enabled = False. Assume that user called set_data(...), so, emulate a success DA
-            self.set_da_success()
+            if self.status_info.stage == Stage.INIT:
+                self.set_da_success()
+                return True
+            return False
 
     def _do_data_processing(self):
         # Skip if we are invalid.
@@ -551,14 +571,17 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             return False
 
         target_md5sum = self.calculate_data_hash()
-        logger.debug(f"old={self._access_md5sum}, new={target_md5sum} downsampled={self.isDownsampled} and id={id(self)}")
+        logger.debug(
+            f"old={self._access_md5sum}, new={target_md5sum} downsampled={self.isDownsampled} and id={id(self)}")
         if self._access_md5sum is None:
             self._access_md5sum = target_md5sum
             return True
         elif self._access_md5sum != target_md5sum:
             self._access_md5sum = target_md5sum
 
-            if AccessHelper.num_samples_override or self.isDownsampled==True:
+            if AccessHelper.num_samples_override or self.isDownsampled:
+                return True
+            elif self.x_expr != "${self}.time":
                 return True
             elif self._contained_bounds():
                 return False
@@ -600,7 +623,7 @@ class AccessHelper:
 
     @staticmethod
     def construct_da_params(signal: IplotSignalAdapter):
-        return dict(dataSName=signal.data_source,
+        return dict(data_s_name=signal.data_source,
                     varname=signal.name,
                     tsS=AccessHelper.uda_ts(signal, signal.ts_start),
                     tsE=AccessHelper.uda_ts(signal, signal.ts_end),
@@ -612,7 +635,7 @@ class AccessHelper:
 
     @staticmethod
     def uda_ts(signal: IplotSignalAdapter, value):
-        """Formats values as relative/absolute timestapms for UDA request or pretty print string
+        """Formats values as relative/absolute timestamps for UDA request or pretty print string
             Logic is to return integer if not relative time, else return float.
             if given value is an empty string or n alphabetic character or NoneType, just return None
         """
@@ -631,11 +654,10 @@ class AccessHelper:
             if value is not None:
                 if type(value) == np.datetime64:
                     return value
-                if (type(value) == int or type(value) == float) and value > 10**15:
+                if (type(value) == int or type(value) == float) and value > 10 ** 15:
                     return np.datetime64(value, 'ns')
-        except:
-            logger.error(
-                f"Unable to convert value {value} to string timestamp")
+        except Exception as e:
+            logger.error(f"Error {e}: Unable to convert value {value} to string timestamp")
 
         return value
 
@@ -705,8 +727,10 @@ class AccessHelper:
         :param signal: the signal instance
         :type signal: IplotSignalAdapter
         """
-        logger.debug("[UDA {}] Get data: {} ts_start={} ts_end={} pulse_nb={} nbsamples={} relative={}".format(AccessHelper.query_no, signal.name, self.str_ts(signal, signal.ts_start), self.str_ts(signal, signal.ts_end),
-                                                                                                               signal.pulse_nb, AccessHelper.num_samples if AccessHelper.num_samples_override else -1, signal.ts_relative))
+        logger.debug("[UDA {}] Get data: {} ts_start={} ts_end={} pulse_nb={} nbsamples={} relative={}".format(
+            AccessHelper.query_no, signal.name, self.str_ts(signal, signal.ts_start),
+            self.str_ts(signal, signal.ts_end),
+            signal.pulse_nb, AccessHelper.num_samples if AccessHelper.num_samples_override else -1, signal.ts_relative))
         AccessHelper.query_no += 1
         AccessHelper._submit_fetch(signal)
 
@@ -719,11 +743,11 @@ class AccessHelper:
         tRelative = da_params.get('tsFormat') == 'relative'
         # indicate if the signal was downsampled
         ds = False
-        result = dict(alias_map={},
-                      d0=[],
-                      d1=[],
-                      d2=[],
-                      d3=[],
+        result = dict(alias_map=dict(),
+                      d0=np.zeros(0),
+                      d1=np.zeros(0),
+                      d2=np.zeros(0),
+                      d3=np.zeros(0),
                       d0_unit='',
                       d1_unit='',
                       d2_unit='',
@@ -738,21 +762,22 @@ class AccessHelper:
 
             if envelope:
                 da_params.update({'nbp': AccessHelper.num_samples})
-                (d_env) = AccessHelper.da.getEnvelope(**da_params)
+                (d_env) = AccessHelper.da.get_envelope(**da_params)
                 if d_env.errcode < 0:
                     if d_env.errcode < 0:
-                        message = f"ErrCode: {d_env.errcode} | getEnvelope (minimum) failed for -1 and {AccessHelper.num_samples} samples. {da_params}"
+                        message = f"ErrCode: {d_env.errcode} | getEnvelope (minimum) failed for -1 and" \
+                                  f" {AccessHelper.num_samples} samples. {da_params}"
                         raise DataAccessError(message)
 
                 xdata = np_nvl(d_env.xdata if d_env else None) if tRelative else np_nvl(
                     d_env.xdata if d_env else None)
 
                 result['alias_map'] = {
-                        'time': {'idx': 0, 'independent': True},
-                        'dmin': {'idx': 1},
-                        'dmax': {'idx': 2},
-                        'davg': {'idx': 3}
-                    }
+                    'time': {'idx': 0, 'independent': True},
+                    'dmin': {'idx': 1},
+                    'dmax': {'idx': 2},
+                    'davg': {'idx': 3}
+                }
                 result['d0'] = np_nvl(xdata)
                 result['d1'] = np_nvl(d_env.ydata_min if d_env else None)
                 result['d2'] = np_nvl(d_env.ydata_max if d_env else None)
@@ -762,14 +787,15 @@ class AccessHelper:
                 result['d2_unit'] = d_env.yunit if d_env else ''
                 result['d3_unit'] = d_env.yunit if d_env else ''
                 result['isds'] = True
-                logger.debug("[UDA ] nbsMIN={} nbsMAX={}".format(len(d_env.ydata_min),len(d_env.ydata_max)))
+                logger.debug("[UDA ] nbsMIN={} nbsMAX={}".format(len(d_env.ydata_min), len(d_env.ydata_max)))
 
             else:
-                raw = AccessHelper.da.getData(**da_params)
+                raw = AccessHelper.da.get_data(**da_params)
                 if raw.errcode < 0:
-                    if raw.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval, use decimation or read data by chunks.':
+                    if raw.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval,' \
+                                      ' use decimation or read data by chunks.':
                         da_params.update({'nbp': AccessHelper.num_samples})
-                        raw = AccessHelper.da.getData(**da_params)
+                        raw = AccessHelper.da.get_data(**da_params)
                         ds = True
                     # if raw.errcode < 0: # try with fallback no. of points.
                     #     da_params.update({'nbp': AccessHelper.num_samples})
@@ -782,18 +808,16 @@ class AccessHelper:
                 xdata = np_nvl(raw.xdata) if tRelative else np_nvl(raw.xdata).astype('int64')
 
                 if len(xdata) > 0:
-                    logger.debug(
-                        f"\tUDA samples: {len(xdata)} params={da_params}")
-                    logger.debug(
-                        f"\tX range: d_min={xdata[0]} d_max={xdata[-1]} delta={xdata[-1]-xdata[0]} type={xdata.dtype}")
+                    logger.debug(f"\tUDA samples: {len(xdata)} params={da_params}")
+                    logger.debug(f"\tX range: d_min={xdata[0]} d_max={xdata[-1]} delta={xdata[-1] - xdata[0]}"
+                                 f" type={xdata.dtype}")
                 else:
-                    logger.info(
-                        f"\tUDA samples: {len(xdata)} params={da_params}")
+                    logger.info(f"\tUDA samples: {len(xdata)} params={da_params}")
 
                 result['alias_map'] = {
-                        'time': {'idx': 0, 'independent': True},
-                        'data': {'idx': 1}
-                    }
+                    'time': {'idx': 0, 'independent': True},
+                    'data': {'idx': 1}
+                }
                 result['d0'] = xdata
                 result['d1'] = np_nvl(raw.ydata)
                 result['d2'] = np.empty(0).astype('double')
@@ -907,12 +931,19 @@ class ParserHelper:
             dependencies = list()
             for var_name in signal.depends_on:
                 tmp_local_env[var_name] = copy.deepcopy(local_env[var_name])
-                if not (var_name == 'self' and len(tmp_local_env[var_name].data_store[0]) == 0):
+                tmp_local_env[var_name].ts_start = signal.ts_start
+                tmp_local_env[var_name].ts_end = signal.ts_end
+                if var_name != "self":
+                    tmp_local_env[var_name].get_data()
+                if var_name != 'self' or len(tmp_local_env[var_name].data_store[0]) != 0:
                     dependencies.append(tmp_local_env[var_name])
             align(dependencies)
+            signal.set_data(tmp_local_env['self'].data_store)
         else:
             tmp_local_env = local_env
 
+        p.clear_expr()
+        p.set_expression(expression)
         p.substitute_var(tmp_local_env)
         p.eval_expr()
         if p.has_time_units:

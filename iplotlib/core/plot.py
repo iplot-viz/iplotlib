@@ -22,8 +22,8 @@ class Plot(ABC):
     Main abstraction of a Plot
     """
 
-    row_span: int = 1  #: no. of rows of canvas grid that this plot will span
-    col_span: int = 1  #: no. of columns of canvas grid that this plot will span
+    row_span: int = 1  #: nº of rows of canvas grid that this plot will span
+    col_span: int = 1  #: nº of columns of canvas grid that this plot will span
 
     title: str = None  #: a plot title text, will be shown above the plot
 
@@ -127,9 +127,11 @@ class PlotXY(Plot):
     line_size: int = None  #: set the line size of all signals.
     marker: str = None  #: set the marker shape of all signals.
     marker_size: int = None  #: set the marker size of all signals.
-    step: str = None  #: indicate if the step function of the data must be plotted for all signals. Ex: 'steps-post', 'steps-mid', 'steps-pre', 'None'
-    hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires special handling
-    dec_samples: int = None  #: DEPRECATED No. of samplesfor each signal. Forwarded to data-access module.
+    step: str = None  #: indicate if the step function of the data must be plotted for all signals.Ex: 'steps-post',
+    # 'steps-mid', 'steps-pre', 'None'
+    hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires
+    # special handling
+    dec_samples: int = None  #: DEPRECATED Nº of samples for each signal. Forwarded to data-access module.
 
     _color_cycle = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
                     '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',

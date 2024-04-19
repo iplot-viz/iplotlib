@@ -3,15 +3,14 @@ import datetime
 from matplotlib.ticker import ScalarFormatter
 import pandas
 
-from iplotlib.core.impl_base import ImplementationPlotCacheTable
-import iplotLogging.setupLogger as ls
+import iplotLogging.setupLogger as Sl
 
+logger = Sl.get_logger(__name__)
 
-logger = ls.get_logger(__name__)
 
 class NanosecondDateFormatter(ScalarFormatter):
     """Date axis formatter that takes into account ns offset if it is defined on this formatter axis
-    Additionaly it formats date as common_part + postfix and includes nanosecond precision if data is given as int64"""
+    Additionally it formats date as common_part + postfix and includes nanosecond precision if data is given as int64"""
 
     """Date segment names constants"""
     YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, MILISECOND, MICROSECOND, NANOSECOND = range(0, 9)
@@ -25,44 +24,42 @@ class NanosecondDateFormatter(ScalarFormatter):
     """Formats for each date segment"""
     formats = ["{:4d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:03d}", "{:03d}", "{:03d}"]
 
-    def __init__(self, ax_idx: int, label_segments=4, postfix_end=True, postfix_start=False, offset_lut: list=None, round=False):
+    def __init__(self, ax_idx: int, label_segments=4, postfix_end=True, postfix_start=False, offset_lut: list = None,
+                 roundh=False):
         super().__init__()
         self.postfix_end = postfix_end
-        self.posfix_start = postfix_start
+        self.postfix_start = postfix_start
         self.label_segments = label_segments
         self.offset_str = "N/A"
-        self.cut_start = -1
+        self.cut_start = 0
         self._offset_lut = offset_lut
         self._ax_idx = ax_idx
-        self._round = round
+        self._round = roundh
 
     @property
-    def offsetns(self):
+    def offset_ns(self):
         if not self._offset_lut:
             return 0
         if len(self._offset_lut) > self._ax_idx and self._offset_lut[self._ax_idx] is not None:
             return self._offset_lut[self._ax_idx]
         return 0
 
-    def set_locs(self, locs):
-        if locs is not None and len(locs) > 0:
-            if (self.offsetns):
-                self.cut_start = self.lcp(self.offsetns + int(locs[0]), self.offsetns + int(locs[-1]))
-            else:
-                self.cut_start = self.lcp(self.offsetns + locs[0], self.offsetns + locs[-1])
+    def set_locs(self, locs) -> None:
+        if locs is None or len(locs) == 0:
+            return
 
-            if self.cut_start is None:
-                self.cut_start = 0
-            self.offset_str = 'UTC:' + self.date_fmt(self.offsetns + locs[0], self.YEAR, self.cut_start,
-                                            postfix_end=self.postfix_end, postfix_start=self.posfix_start)
+        self.cut_start = self.lcp(self.offset_ns + int(locs[0]), self.offset_ns + int(locs[-1]))
+
+        self.offset_str = 'UTC:' + self.date_fmt(self.offset_ns + locs[0], self.YEAR, self.cut_start,
+                                                 postfix_end=self.postfix_end, postfix_start=self.postfix_start)
 
         super().set_locs(locs)
 
     def __call__(self, x, pos=None):
-        return self.date_fmt(int(self.offsetns) + int(x), self.cut_start + 1, self.cut_start + self.label_segments)
+        return self.date_fmt(int(self.offset_ns) + int(x), self.cut_start + 1, self.cut_start + self.label_segments)
 
     def format_data_short(self, value):
-        return self.date_fmt(int(self.offsetns) + int(value), self.cut_start + 1, self.cut_start + self.label_segments)
+        return self.date_fmt(int(self.offset_ns) + int(value), self.cut_start + 1, self.cut_start + self.label_segments)
 
     def format_data(self, value):
         return super().format_data(value)
@@ -134,4 +131,4 @@ class NanosecondDateFormatter(ScalarFormatter):
             if val_s != val_e:
                 return i - 1
 
-        return None
+        return 0

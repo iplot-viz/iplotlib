@@ -13,6 +13,7 @@ from iplotlib.core import Axis, Plot
 from iplotlib.qt.models.plotting.axisItem import AxisItem
 from iplotlib.qt.models.plotting.signalItem import SignalItem
 
+
 class PlotItem(QStandardItem):
     AXIS_NAMES = ['x', 'y', 'z']
 
@@ -22,7 +23,7 @@ class PlotItem(QStandardItem):
 
     def setData(self, value: typing.Any, role: int = Qt.UserRole):
         super().setData(value, role=role)
-        
+
         if not isinstance(value, Plot):
             return
 
@@ -53,7 +54,7 @@ class PlotItem(QStandardItem):
                 name = f'Axis {self.AXIS_NAMES[ax_id]}'
                 axisObject = ax
                 axisPlan.update({name: axisObject})
-        
+
         for name, axisObject in axisPlan.items():
             axisItem = AxisItem(name, self.auto_name)
             axisItem.setData(axisObject, Qt.UserRole)
