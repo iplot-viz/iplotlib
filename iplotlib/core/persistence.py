@@ -73,11 +73,14 @@ class JSONExporter:
         if isinstance(d, List):
             return [self.dataclass_from_dict(e) for e in d]
 
-        try:
-            field_types = {f.name: f.type for f in dataclasses.fields(klass)}
-            return klass(**{f: self.dataclass_from_dict(d[f], field_types[f]) for f in d})
-        except Exception as e:
-            print(f"Error: {e}")
+        if dataclasses.is_dataclass(klass):
+            try:
+                field_types = {f.name: f.type for f in dataclasses.fields(klass)}
+                return klass(**{f: self.dataclass_from_dict(d[f], field_types[f]) for f in d})
+            except Exception as e:
+                print(f"Error: {e}")
+                return d
+        else:
             return d
 
 
