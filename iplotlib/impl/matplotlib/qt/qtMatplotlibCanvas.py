@@ -149,6 +149,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def _mpl_mouse_press_handler(self, event: MouseEvent):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
+
+        # If the mouse is over the legend it ignores it
+        if event.inaxes.get_legend().contains(event)[0]:
+            return
+
         if event.dblclick:
             if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT and \
                     event.inaxes is not None:
