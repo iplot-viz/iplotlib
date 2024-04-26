@@ -534,7 +534,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         if nonempty_name and self.data_access_enabled:
 
             if self._needs_refresh():
-                if len(self.data_store[0]) and len(self.x_data) and self.x_expr != '${self}.time':
+                if len(self.data_store[0]) and len(self.x_data) and (
+                        self.x_expr != '${self}.time' or len(self.children)):
                     idx1 = np.searchsorted(self.x_data, self.ts_start)
                     idx2 = np.searchsorted(self.x_data, self.ts_end)
                     if idx2 == len(self.x_data):
@@ -582,6 +583,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             if AccessHelper.num_samples_override or self.isDownsampled:
                 return True
             elif self.x_expr != "${self}.time":
+                return True
+            elif len(self.children):
                 return True
             elif self._contained_bounds():
                 return False
