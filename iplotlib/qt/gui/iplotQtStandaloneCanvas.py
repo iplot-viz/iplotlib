@@ -129,7 +129,7 @@ def proxy_main():
     """
     global args
     AccessHelper.num_samples_override = args.use_fallback_samples
-    canvas_app = QStandaloneCanvas(args.impl, use_toolbar=args.toolbar)
+    canvas_app = QStandaloneCanvas(args.impl, use_toolbar=True)
     canvas_app.prepare()
 
     for script in pkgutil.walk_packages(iplotExamples.__path__, iplotExamples.__name__ + '.'):
