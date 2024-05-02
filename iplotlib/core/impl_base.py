@@ -297,6 +297,24 @@ class BackendParserBase(ABC):
             range_axis.original_end = range_axis.end
         logger.debug(f"Axis update: impl_plot={id(impl_plot)} range_axis={id(range_axis)} ax_idx={ax_idx} {range_axis}")
 
+    def update_range_axis_process(self, limits, range_axis: RangeAxis, signal, which='current'):
+        """
+        Comment ...
+        """
+        idx1 = np.searchsorted(signal.x_data, limits[0])
+        idx2 = np.searchsorted(signal.x_data, limits[1])
+        if idx2 == len(signal.x_data):
+            idx2 -= 1
+
+        limits[0] = signal.data_store[0][idx1:idx2][0]
+        limits[1] = signal.data_store[0][idx1:idx2][-1]
+
+        if which == 'current':
+            range_axis.begin_process = limits[0]
+            range_axis.end_process = limits[1]
+
+        return limits
+
     def update_multi_range_axis(self, range_axes: Collection[RangeAxis], ax_idx: int, impl_plot: Any):
         """
         Updates RangeAxis instances begin and end to mpl_axis limits. Works also on stacked axes
@@ -379,12 +397,13 @@ class BackendParserBase(ABC):
             if isinstance(axes, Collection):
                 for axis in axes:
                     if isinstance(axis, RangeAxis):
-                        begin, end = axis.get_limits(which)
-                        plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
+                        begin, end, trans_begin, trans_end = axis.get_limits(which)
+                        plot_lims.axes_ranges.append(
+                            IplAxisLimits(begin, end, weakref.ref(axis), trans_begin, trans_end))
             elif isinstance(axes, RangeAxis):
                 axis = axes  # singular name is easier to read for single axis
-                begin, end = axis.get_limits(which)
-                plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
+                begin, end, trans_begin, trans_end = axis.get_limits(which)
+                plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis), trans_begin, trans_end))
         return plot_lims
 
     def set_plot_limits(self, limits: IplPlotViewLimits):
@@ -405,12 +424,20 @@ class BackendParserBase(ABC):
                             axis.begin = ax_limits[i].begin
                             axis.end = ax_limits[i].end
                         i += 1
+                        self.canvas.undo = False
             elif isinstance(axes, RangeAxis):
                 axis = axes
                 impl_plot = self._axis_impl_plot_lut.get(id(axis))
-                if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
-                    axis.begin = ax_limits[i].begin
-                    axis.end = ax_limits[i].end
+                if ax_limits[i].begin_process != None:
+                    if not self.set_impl_plot_limits(impl_plot, ax_idx,
+                                                     (ax_limits[i].begin, ax_limits[i].end, ax_limits[i].begin_process,
+                                                      ax_limits[i].end_process)):
+                        axis.begin = ax_limits[i].begin
+                        axis.end = ax_limits[i].end
+                else:
+                    if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
+                        axis.begin = ax_limits[i].begin
+                        axis.end = ax_limits[i].end
                 i += 1
         self.refresh_data()
 

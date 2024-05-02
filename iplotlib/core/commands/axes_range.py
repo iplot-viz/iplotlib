@@ -37,6 +37,7 @@ class IplotAxesRangeCmd(IplotCommand):
         """
         super().undo()
         for limits in self.old_lim:
+            self._parser.canvas.undo = True
             self._parser.set_plot_limits(limits)
 
     def __str__(self):

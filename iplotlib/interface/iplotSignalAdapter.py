@@ -534,15 +534,6 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         if nonempty_name and self.data_access_enabled:
 
             if self._needs_refresh():
-                if len(self.data_store[0]) and len(self.x_data) and (
-                        self.x_expr != '${self}.time' or len(self.children)):
-                    idx1 = np.searchsorted(self.x_data, self.ts_start)
-                    idx2 = np.searchsorted(self.x_data, self.ts_end)
-                    if idx2 == len(self.x_data):
-                        idx2 -= 1
-                    self.ts_start = self.data_store[0][idx1:idx2][0]
-                    self.ts_end = self.data_store[0][idx1:idx2][-1]
-
                 self._fetch_data()
                 return True
             elif self.status_info.stage == Stage.PROC:

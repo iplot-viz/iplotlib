@@ -414,6 +414,8 @@ class MatplotlibParser(BackendParserBase):
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_xranges"):
+                    if signal.x_expr != '${self}.time' and not self.canvas.undo:
+                        ranges[0] = self.update_range_axis_process(ranges[0], ci.plot().axes[0], signal)
                     signal.set_xranges([ranges[0][0], ranges[0][1]])
                     logger.debug(f"callback update {ranges[0][0]} axis range to {ranges[0][1]}")
             if ci not in self._stale_citems:

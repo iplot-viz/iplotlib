@@ -15,6 +15,8 @@ class IplAxisLimits:
     begin: Any = None  #: the begin value.
     end: Any = None  #: the end value.
     axes_ref: ref = None  #: a weak reference to the core iplotlib axis object.
+    begin_process: Any = None
+    end_process: Any = None
 
 
 @dataclass
