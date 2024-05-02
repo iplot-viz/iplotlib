@@ -53,6 +53,7 @@ class MatplotlibParser(BackendParserBase):
         register_matplotlib_converters()
         self.figure = Figure()
         self._impl_plot_ranges_hash = dict()
+        self.undo_helper = UndoHelper()
 
         if tight_layout:
             self.enable_tight_layout()
@@ -165,6 +166,8 @@ class MatplotlibParser(BackendParserBase):
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, MPLAxes):
             return False
+        if len(limits) > 2:
+            self.undo_helper.set_limits(limits[2], limits[3])
         self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
         return True
 
@@ -416,6 +419,13 @@ class MatplotlibParser(BackendParserBase):
                 if hasattr(signal, "set_xranges"):
                     if signal.x_expr != '${self}.time' and not self.canvas.undo:
                         ranges[0] = self.update_range_axis_process(ranges[0], ci.plot().axes[0], signal)
+                    else:
+                        # Check is not None
+                        # Estaremos en UNDO
+                        if signal.x_expr != '${self}.time' and self.undo_helper.get_limits_begin() is not None:
+                            ranges[0][0] = self.undo_helper.get_limits_begin()
+                            ranges[0][1] = self.undo_helper.get_limits_end()
+                            self.update_undo_process(ranges[0], ci.plot().axes[0])
                     signal.set_xranges([ranges[0][0], ranges[0][1]])
                     logger.debug(f"callback update {ranges[0][0]} axis range to {ranges[0][1]}")
             if ci not in self._stale_citems:
@@ -969,3 +979,19 @@ class MultiCursor2(MultiCursor):
             self.canvas.blit()
         else:
             self.canvas.draw_idle()
+
+
+class UndoHelper:
+    def __init__(self, begin_process=None, end_process=None):
+        self.begin_process = begin_process
+        self.end_process = end_process
+
+    def set_limits(self, begin, end):
+        self.begin_process = begin
+        self.end_process = end
+
+    def get_limits_begin(self):
+        return self.begin_process
+
+    def get_limits_end(self):
+        return self.end_process

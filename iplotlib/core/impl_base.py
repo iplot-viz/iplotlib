@@ -315,6 +315,14 @@ class BackendParserBase(ABC):
 
         return limits
 
+    def update_undo_process(self, limits, range_axis: RangeAxis, which='current'):
+        """
+        Comment ...
+        """
+        if which == 'current':
+            range_axis.begin_process = limits[0]
+            range_axis.end_process = limits[1]
+
     def update_multi_range_axis(self, range_axes: Collection[RangeAxis], ax_idx: int, impl_plot: Any):
         """
         Updates RangeAxis instances begin and end to mpl_axis limits. Works also on stacked axes
