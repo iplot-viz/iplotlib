@@ -9,11 +9,12 @@ from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick
 from matplotlib.axis import Axis as MPLAxis
 from matplotlib.backend_bases import FigureCanvasBase
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.text import Annotation, Text
-from matplotlib.widgets import MultiCursor
+from matplotlib.widgets import Widget
 from matplotlib.ticker import MaxNLocator
 from pandas.plotting import register_matplotlib_converters
 
@@ -71,7 +72,7 @@ class MatplotlibParser(BackendParserBase):
         self.figure.savefig(filename)
 
     def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data):
-        lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = cache_item.plot()
@@ -83,13 +84,13 @@ class MatplotlibParser(BackendParserBase):
 
         style = self.get_signal_style(signal, plot)
 
-        if isinstance(lines, list):
+        if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
-                line = lines[0][0]  # type: Line2D
+                line = plot_lines[0][0]
                 line.set_xdata(x_data)
                 line.set_ydata(y_data)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                for i, line in enumerate(lines):
+                for i, line in enumerate(plot_lines):
                     line[0].set_xdata(x_data)
                     line[0].set_ydata(y_data[:, i])
             if self.canvas.streaming:
@@ -108,17 +109,18 @@ class MatplotlibParser(BackendParserBase):
             params = dict(**style)
             draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
-                lines = [draw_fn(x_data, y_data, **params)]
+                plot_lines = [draw_fn(x_data, y_data, **params)]
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 lines = draw_fn(x_data, y_data, **params)
-                lines = [[line] for line in lines]
-                for i,line in enumerate(lines):
+                plot_lines = [[line] for line in lines]
+                for i, line in enumerate(plot_lines):
                     line[0].set_label(f"{signal.label}[{i}]")
-            for new, old in zip(lines,signal.lines):
+
+            for new, old in zip(plot_lines, signal.lines):
                 for n, o in zip(new, old):
                     n.set_visible(o.get_visible())
-            signal.lines = lines
-            self._signal_impl_shape_lut.update({id(signal): lines})
+            signal.lines = plot_lines
+            self._signal_impl_shape_lut.update({id(signal): plot_lines})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
         shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
@@ -384,8 +386,6 @@ class MatplotlibParser(BackendParserBase):
                             legend_lines[ix_legend].set_alpha(alpha)
                             ix_legend += 1
 
-
-
         # Observe the axis limit change events
         if not self.canvas.streaming:
             for axes in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
@@ -524,9 +524,7 @@ class MatplotlibParser(BackendParserBase):
                 logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
                              f"arrays (<2). {signal}")
                 return
-            if len(data[0]) == 0 or len(data[1]) == 0:
-                logger.warning(f"Requested to draw line for sig({id(signal)}), but it does not have data {signal}")
-                return
+
             self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1])
 
         self.update_axis_labels_with_units(mpl_axes, signal)
@@ -599,14 +597,16 @@ class MatplotlibParser(BackendParserBase):
                 continue
 
             self._cursors.append(
-                MultiCursor2(self.figure.canvas, axes_group,
-                             x_label=self.canvas.enable_Xlabel_crosshair,
-                             y_label=self.canvas.enable_Ylabel_crosshair,
-                             val_label=self.canvas.enable_ValLabel_crosshair,
-                             color=self.canvas.crosshair_color, lw=self.canvas.crosshair_line_width,
-                             horizOn=False or self.canvas.crosshair_horizontal,
-                             vertOn=self.canvas.crosshair_vertical, useblit=True,
-                             cache_table=self._impl_plot_cache_table))
+                IplotMultiCursor(self.figure.canvas, axes_group,
+                                 x_label=self.canvas.enable_Xlabel_crosshair,
+                                 y_label=self.canvas.enable_Ylabel_crosshair,
+                                 val_label=self.canvas.enable_ValLabel_crosshair,
+                                 color=self.canvas.crosshair_color,
+                                 lw=self.canvas.crosshair_line_width,
+                                 horiz_on=False or self.canvas.crosshair_horizontal,
+                                 vert_on=self.canvas.crosshair_vertical,
+                                 use_blit=True,
+                                 cache_table=self._impl_plot_cache_table))
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
@@ -756,27 +756,59 @@ def get_data_range(data, axis_idx):
     return None
 
 
-class MultiCursor2(MultiCursor):
+class IplotMultiCursor(Widget):
+    """
+    Provide a vertical (default) and/or horizontal line cursor shared between
+    multiple axes.
 
-    def __init__(self, canvas: FigureCanvasBase,
-                 axes: MPLAxes,
+    For the cursor to remain responsive you must keep a reference to it.
+
+    Parameters
+    ----------
+    canvas : `matplotlib.backend_bases.FigureCanvasQTAgg`
+        The FigureCanvas that contains all the axes.
+
+    axes : list of `matplotlib.axes.Axes`
+        The `~.axes.Axes` to attach the cursor to.
+
+    use_blit : bool, default: True
+        Use blitting for faster drawing if supported by the backend.
+
+    horiz_on : bool, default: False
+        Whether to draw the horizontal line.
+
+    vert_on: bool, default: True
+        Whether to draw the vertical line.
+
+    Other Parameters
+    ----------------
+    **line_props
+        `.Line2D` properties that control the appearance of the lines.
+        See also `~.Axes.axhline`.
+
+    Examples
+    --------
+    See :doc:`/gallery/widgets/multicursor`.
+    """
+
+    def __init__(self, canvas: FigureCanvasQTAgg,
+                 axes: List[MPLAxes],
                  x_label: bool = True,
                  y_label: bool = True,
                  val_label: bool = True,
-                 useblit: bool = True,
-                 horizOn=False,
-                 vertOn=True,
+                 use_blit: bool = True,
+                 horiz_on: bool = False,
+                 vert_on: bool = True,
                  val_tolerance: float = 0.05,
                  text_color: str = "white",
                  font_size: int = 8,
                  cache_table: ImplementationPlotCacheTable = None,
-                 **lineprops):
+                 **line_props):
 
-        super().__init__(canvas, axes, useblit, horizOn, vertOn, **lineprops)
         self.canvas = canvas
         self.axes = axes
-        self.horizOn = horizOn
-        self.vertOn = vertOn
+        self.horiz_on = horiz_on
+        self.vert_on = vert_on
         self.x_label = x_label
         self.y_label = y_label
         self.value_label = val_label
@@ -786,63 +818,61 @@ class MultiCursor2(MultiCursor):
         # Tolerance for showing label with value on signal in %
         self.val_tolerance = val_tolerance
 
-        xmin, xmax = axes[-1].get_xlim()
-        ymin, ymax = axes[-1].get_ylim()
-        xmid = 0.5 * (xmin + xmax)
-        ymid = 0.5 * (ymin + ymax)
+        x_min, x_max = axes[-1].get_xlim()
+        y_min, y_max = axes[-1].get_ylim()
+        x_mid = 0.5 * (x_min + x_max)
+        y_mid = 0.5 * (y_min + y_max)
 
         self.visible = True
-        self.useblit = useblit and self.canvas.supports_blit
+        self.use_blit = use_blit and self.canvas.supports_blit
         self.background = None
-        self.needclear = False
+        self.need_clear = False
 
-        if self.useblit:
-            lineprops['animated'] = True
+        if self.use_blit:
+            line_props['animated'] = True
 
         self.x_arrows = []
         self.y_arrows = []
         self.value_annotations = []
-        self.vlines = []
+        self.v_lines = []
 
-        if vertOn:
+        if vert_on:
             for ax in axes:
-                ymin, ymax = ax.get_ybound()
-                line = Line2D([xmid, xmid], [ymin, ymax], **lineprops)
+                y_min, y_max = ax.get_ybound()
+                line = Line2D([x_mid, x_mid], [y_min, y_max], **line_props)
                 ax.add_artist(line)
-                self.vlines.append(line)
+                self.v_lines.append(line)
 
-        self.hlines = []
-        if horizOn:
+        self.h_lines = []
+        if horiz_on:
             for ax in axes:
-                xmin, xmax = ax.get_xbound()
-                line = Line2D([xmin, xmax], [ymid, ymid], **lineprops)
+                x_min, x_max = ax.get_xbound()
+                line = Line2D([x_min, x_max], [y_mid, y_mid], **line_props)
                 ax.add_artist(line)
-                self.hlines.append(line)
+                self.h_lines.append(line)
 
-        axis_arrow_bbox_props = dict(
-            boxstyle="round", pad=0.1, fill=True, color=lineprops["color"])
+        axis_arrow_bbox_props = dict(boxstyle="round", pad=0.1, fill=True, color=line_props["color"])
         axis_arrow_props = dict(annotation_clip=False, clip_on=False, bbox=axis_arrow_bbox_props,
-                                animated=self.useblit, color=self.text_color, fontsize=self.font_size)
+                                animated=self.use_blit, color=self.text_color, fontsize=self.font_size)
 
-        value_arrow_bbox_props = dict(
-            boxstyle="round", pad=0.1, fill=True, color="green")
+        value_arrow_bbox_props = dict(boxstyle="round", pad=0.1, fill=True, color="green")
         value_arrow_props = dict(annotation_clip=False, clip_on=False, bbox=value_arrow_bbox_props,
-                                 animated=self.useblit, color=self.text_color, fontsize=self.font_size)
+                                 animated=self.use_blit, color=self.text_color, fontsize=self.font_size)
 
         if self.x_label:
             for ax in axes:
-                xmin, xmax = ax.get_xbound()
-                ymin, ymax = ax.get_ybound()
-                x_arrow = Annotation("", (xmin + (xmax - xmin) / 2, ymin),
+                x_min, x_max = ax.get_xbound()
+                y_min, y_max = ax.get_ybound()
+                x_arrow = Annotation("", (x_min + (x_max - x_min) / 2, y_min),
                                      verticalalignment="top", horizontalalignment="center", **axis_arrow_props)
                 ax.add_artist(x_arrow)
                 self.x_arrows.append(x_arrow)
 
         if self.y_label:
             for ax in axes:
-                ymin, ymax = ax.get_ybound()
-                xmin, xmax = ax.get_xbound()
-                y_arrow = Annotation("", (xmin, ymin + (ymax - ymin) / 2),
+                y_min, y_max = ax.get_ybound()
+                x_min, x_max = ax.get_xbound()
+                y_arrow = Annotation("", (x_min, y_min + (y_max - y_min) / 2),
                                      verticalalignment="center", horizontalalignment="right", **axis_arrow_props)
                 ax.add_artist(y_arrow)
                 self.y_arrows.append(y_arrow)
@@ -852,26 +882,36 @@ class MultiCursor2(MultiCursor):
                 ci = self._cache_table.get_cache_item(ax)
                 if hasattr(ci, "signals") and ci.signals is not None:
                     for signal in ci.signals:
-                        xmin, xmax = ax.get_xbound()
-                        ymin, ymax = ax.get_ybound()
+                        x_min, x_max = ax.get_xbound()
+                        y_min, y_max = ax.get_ybound()
 
                         for line in signal().lines:
-                                value_annotation = Annotation("", xy=(xmin + (xmax - xmin) / 2, ymin + (ymax - ymin) / 2),
-                                                              xycoords="data",  # xytext=(-200, 0),
-                                                              verticalalignment="top", horizontalalignment="left",
-                                                              **value_arrow_props)
-                                value_annotation.set_visible(False)
-                                value_annotation.line = line
-                                ax.add_artist(value_annotation)
-                                self.value_annotations.append(value_annotation)
+                            value_annotation = Annotation("",
+                                                          xy=(x_min + (x_max - x_min) / 2, y_min + (y_max - y_min) / 2),
+                                                          xycoords="data",  # xytext=(-200, 0),
+                                                          verticalalignment="top", horizontalalignment="left",
+                                                          **value_arrow_props)
+                            value_annotation.line = line
+                            ax.add_artist(value_annotation)
+                            self.value_annotations.append(value_annotation)
 
         # Needs to be done for blitting to work. As it saves current background
         self.clear(None)
-        self.connect()
+        """Connect events."""
+        self._cidmotion = self.canvas.mpl_connect('motion_notify_event', self.on_move)
+        self._ciddraw = self.canvas.mpl_connect('draw_event', self.clear)
 
     def clear(self, event):
-        super().clear(event)
-        # In matplolib 3.6, for the MultiCursor object type,
+        """Clear the cursor."""
+        if self.ignore(event):
+            return
+        if self.use_blit:
+            self.background = (
+                self.canvas.copy_from_bbox(self.canvas.figure.bbox))
+        for line in self.v_lines + self.h_lines:
+            line.set_visible(False)
+
+        # In matplotlib 3.6, for the MultiCursor object type,
         # the way of storing certain information such as background is changed.
         if hasattr(self, "_canvas_infos"):
             self.background = self._canvas_infos[self.canvas]["background"]
@@ -889,13 +929,13 @@ class MultiCursor2(MultiCursor):
         for annotation in self.value_annotations:
             annotation.set_visible(False)
 
-        for line in self.vlines + self.hlines:
+        for line in self.v_lines + self.h_lines:
             line.set_visible(False)
 
         self._update()
         self.disconnect()
 
-    def onmove(self, event):
+    def on_move(self, event):
         def get_values_from_line(lines, x_value):
             if len(lines) == 1:
                 x, y = lines[0].get_xdata(), lines[0].get_ydata()
@@ -917,23 +957,23 @@ class MultiCursor2(MultiCursor):
             return
         if not self.canvas.widgetlock.available(self):
             return
-        self.needclear = True
+        self.need_clear = True
         if not self.visible:
             return
-        if self.vertOn:
-            for line in self.vlines:
+        if self.vert_on:
+            for line in self.v_lines:
                 line.set_xdata(event.xdata)
                 line.set_visible(self.visible)
 
-        if self.horizOn:
-            for line in self.hlines:
+        if self.horiz_on:
+            for line in self.h_lines:
                 line.set_ydata(event.ydata)
                 line.set_visible(self.visible)
 
         if self.x_label:
             for arrow, ax in zip(self.x_arrows, self.axes):
-                xmin, xmax = ax.get_xbound()
-                if xmin < event.xdata < xmax and ax.get_xaxis().get_visible():
+                x_min, x_max = ax.get_xbound()
+                if x_min < event.xdata < x_max and ax.get_xaxis().get_visible():
                     arrow.set_position((event.xdata, arrow.get_position()[1]))
                     arrow.set_text(ax.format_xdata(event.xdata))
                     arrow.set_visible(self.visible)
@@ -942,8 +982,8 @@ class MultiCursor2(MultiCursor):
 
         if self.y_label:
             for arrow, ax in zip(self.y_arrows, self.axes):
-                ymin, ymax = ax.get_ybound()
-                if ymin < event.ydata < ymax and ax.get_yaxis().get_visible():
+                y_min, y_max = ax.get_ybound()
+                if y_min < event.ydata < y_max and ax.get_yaxis().get_visible():
                     arrow.set_position((arrow.get_position()[0], event.ydata))
                     arrow.set_text(ax.format_ydata(event.ydata))
                     arrow.set_visible(self.visible)
@@ -958,39 +998,33 @@ class MultiCursor2(MultiCursor):
                     if line is not None and line[0].get_visible():
                         ax = annotation.axes
 
-                        xvalue = self._cache_table.transform_value(ax, 0, event.xdata)
-                        values = get_values_from_line(line,xvalue)
+                        xvalue = event.xdata
+                        values = get_values_from_line(line, xvalue)
                         logger.debug(F"Found {values} for xvalue: {xvalue}")
-                        if values is not None:
-                            dx = abs(xvalue - values[0])
-                            xmin, xmax = ax.get_xbound()
-                            if dx < (xmax - xmin) * self.val_tolerance:
-                                pos_x = self._cache_table.transform_value(ax, 0, values[0], True)
-                                pos_y = self._cache_table.transform_value(ax, 1, values[1], True)
-                                annotation.set_position((pos_x, pos_y))
-                                annotation.set_text(ax.format_ydata(values[1]))
-                            else:
-                                annotation.set_visible(False)
+                        dx = abs(xvalue - values[0])
+                        x_min, x_max = ax.get_xbound()
+                        if dx < (x_max - x_min) * self.val_tolerance:
+                            annotation.set_position(values)
+                            annotation.set_text(ax.format_ydata(values[1]))
                         else:
                             annotation.set_visible(False)
                     else:
                         annotation.set_visible(False)
                 else:
                     annotation.set_visible(False)
-
         self._update()
 
     def _update(self):
-        if self.useblit:
+        if self.use_blit:
             if self.background is not None:
                 self.canvas.restore_region(self.background)
 
-            if self.vertOn:
-                for ax, line in zip(self.axes, self.vlines):
+            if self.vert_on:
+                for ax, line in zip(self.axes, self.v_lines):
                     ax.draw_artist(line)
 
-            if self.horizOn:
-                for ax, line in zip(self.axes, self.hlines):
+            if self.horiz_on:
+                for ax, line in zip(self.axes, self.h_lines):
                     ax.draw_artist(line)
 
             if self.x_label:
@@ -1007,3 +1041,8 @@ class MultiCursor2(MultiCursor):
             self.canvas.blit()
         else:
             self.canvas.draw_idle()
+
+    def disconnect(self):
+        """Disconnect events."""
+        self.canvas.mpl_disconnect(self._cidmotion)
+        self.canvas.mpl_disconnect(self._ciddraw)
