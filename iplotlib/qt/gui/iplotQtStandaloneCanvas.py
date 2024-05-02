@@ -129,6 +129,7 @@ def proxy_main():
     """
     global args
     AccessHelper.num_samples_override = args.use_fallback_samples
+    # Change parameter 'use_toolbar' to False to not show the toolbar
     canvas_app = QStandaloneCanvas(args.impl, use_toolbar=True)
     canvas_app.prepare()
 
