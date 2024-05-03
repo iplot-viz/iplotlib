@@ -297,7 +297,6 @@ class BackendParserBase(ABC):
             range_axis.original_end = range_axis.end
         logger.debug(f"Axis update: impl_plot={id(impl_plot)} range_axis={id(range_axis)} ax_idx={ax_idx} {range_axis}")
 
-    @staticmethod
     def update_range_axis_process(self, limits, range_axis: RangeAxis, signal, which='current'):
         """
         The corresponding transformation of the limits is carried out. For this, the function ‘np.searchsorted’ is used
@@ -321,7 +320,6 @@ class BackendParserBase(ABC):
 
         return limits
 
-    @staticmethod
     def update_undo_process(self, limits, range_axis: RangeAxis, which='current'):
         """
         Update the begin_process and end_process parameters of the corresponding RangeAxis.
