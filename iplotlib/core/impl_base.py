@@ -297,14 +297,20 @@ class BackendParserBase(ABC):
             range_axis.original_end = range_axis.end
         logger.debug(f"Axis update: impl_plot={id(impl_plot)} range_axis={id(range_axis)} ax_idx={ax_idx} {range_axis}")
 
+    @staticmethod
     def update_range_axis_process(self, limits, range_axis: RangeAxis, signal, which='current'):
         """
-        Comment ...
+        The corresponding transformation of the limits is carried out. For this, the function ‘np.searchsorted’ is used
+        and then the limits are adjusted so that all the necessary values are included. In addition, the begin_process
+        and end_process parameters of the corresponding RangeAxis are updated.
         """
         idx1 = np.searchsorted(signal.x_data, limits[0])
         idx2 = np.searchsorted(signal.x_data, limits[1])
-        if idx2 == len(signal.x_data):
-            idx2 -= 1
+
+        if idx1 != 0:
+            idx1 -= 1
+        if idx2 != len(signal.x_data):
+            idx2 += 1
 
         limits[0] = signal.data_store[0][idx1:idx2][0]
         limits[1] = signal.data_store[0][idx1:idx2][-1]
@@ -315,9 +321,10 @@ class BackendParserBase(ABC):
 
         return limits
 
+    @staticmethod
     def update_undo_process(self, limits, range_axis: RangeAxis, which='current'):
         """
-        Comment ...
+        Update the begin_process and end_process parameters of the corresponding RangeAxis.
         """
         if which == 'current':
             range_axis.begin_process = limits[0]
