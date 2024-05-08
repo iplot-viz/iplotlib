@@ -253,7 +253,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 if isinstance(value, np.float64):
                     return value.astype('float').item()
                 else:
-                    return value.astype('int').item()
+                    return value.astype('int64').item()
             else:
                 return value
 

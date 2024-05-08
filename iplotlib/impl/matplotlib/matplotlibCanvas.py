@@ -424,9 +424,9 @@ class MatplotlibParser(BackendParserBase):
                             ranges[0] = self.update_range_axis_process(ranges[0], ci.plot().axes[0], signal)
                     else:
                         # UNDO case for processed signals
-                        if signal.x_expr != '${self}.time' and self.undo_helper.get_limits_begin() is not None:
-                            ranges[0][0] = self.undo_helper.get_limits_begin()
-                            ranges[0][1] = self.undo_helper.get_limits_end()
+                        if signal.x_expr != '${self}.time' and self.undo_helper.begin_process is not None:
+                            ranges[0][0] = self.undo_helper.begin_process
+                            ranges[0][1] = self.undo_helper.end_process
                             self.update_undo_process(ranges[0], ci.plot().axes[0])
                     signal.set_xranges([ranges[0][0], ranges[0][1]])
                     logger.debug(f"callback update {ranges[0][0]} axis range to {ranges[0][1]}")
@@ -992,9 +992,3 @@ class UndoHelper:
     def set_limits(self, begin, end):
         self.begin_process = begin
         self.end_process = end
-
-    def get_limits_begin(self):
-        return self.begin_process
-
-    def get_limits_end(self):
-        return self.end_process
