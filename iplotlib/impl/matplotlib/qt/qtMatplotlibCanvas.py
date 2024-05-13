@@ -151,7 +151,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._debug_log_event(event, "Mouse pressed")
 
         # If the mouse is over the legend it ignores it
-        if event.inaxes.get_legend().contains(event)[0]:
+        if event.inaxes and event.inaxes.get_legend() and event.inaxes.get_legend().contains(event)[0]:
             return
 
         if event.dblclick:
