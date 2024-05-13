@@ -29,7 +29,7 @@ def plot():
     with tempfile.NamedTemporaryFile(mode='w+') as fp:
         fp.write(dscfg)
         fp.seek(0)
-        os.environ.update({'DATASOURCESCONF': os.path.abspath(fp.name)})
+        os.environ.update({'IPLOT_SOURCES_CONFIG': os.path.abspath(fp.name)})
         if da.load_config(fp.name):
             AccessHelper.da = da
             s = IplotSignalAdapter(
