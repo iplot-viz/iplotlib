@@ -233,7 +233,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 logger.debug(" in compute key={} expr={}".format(key, expr))
                 data_arrays.update({key: ParserHelper.evaluate(self, expr)})
             except Exception as e:
-                logger.error(f"Error {e}")
+                logger.error(f"Error {e} in {expr}")
                 continue
         return data_arrays
 

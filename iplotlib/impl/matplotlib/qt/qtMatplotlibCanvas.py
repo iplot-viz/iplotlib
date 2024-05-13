@@ -56,6 +56,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_renderer.mpl_connect('draw_event', self._mpl_draw_finish)
         self._mpl_renderer.mpl_connect('button_press_event', self._mpl_mouse_press_handler)
         self._mpl_renderer.mpl_connect('button_release_event', self._mpl_mouse_release_handler)
+        self._mpl_renderer.mpl_connect('pick_event', self.on_pick_legend)
 
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
@@ -89,21 +90,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if self._mpl_toolbar:
             self._mpl_toolbar.mode = _Mode.NONE
             self._parser.deactivate_cursor()
-
+        else:
+            return
         if self._mmode is None:
             return
 
-        if not self._mpl_toolbar:
-            return
-
-        if mode == Canvas.MOUSE_MODE_CROSSHAIR:
+        if mode == Canvas.MOUSE_MODE_SELECT:
+            self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
+        elif mode == Canvas.MOUSE_MODE_CROSSHAIR:
             self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
             self._parser.activate_cursor()
         elif mode == Canvas.MOUSE_MODE_PAN:
-            self._parser.deactivate_cursor()
             self._mpl_toolbar.pan()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
-            self._parser.deactivate_cursor()
             self._mpl_toolbar.zoom()
 
     def undo(self):
@@ -130,9 +129,31 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._draw_call_counter += 1
         self._debug_log_event(event, f"Draw call {self._draw_call_counter}")
 
+    def on_pick_legend(self, event):
+        # On the pick event, find the original line corresponding to the legend
+        # proxy line, and toggle its visibility.
+        legend_line = event.artist
+
+        ax_lines,signal = self._parser.map_legend_to_ax[legend_line]
+        visible = True
+        for ax_line in ax_lines:
+            visible = not ax_line.get_visible()
+            ax_line.set_visible(visible)
+
+        # signal.lines = ax_lines
+        # Change the alpha on the line in the legend, so we can see what lines
+        # have been toggled.
+        legend_line.set_alpha(1.0 if visible else 0.2)
+        self._parser.figure.canvas.draw()
+
     def _mpl_mouse_press_handler(self, event: MouseEvent):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
+
+        # If the mouse is over the legend it ignores it
+        if event.inaxes.get_legend().contains(event)[0]:
+            return
+
         if event.dblclick:
             if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT and \
                     event.inaxes is not None:

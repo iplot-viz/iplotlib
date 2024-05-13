@@ -27,7 +27,7 @@ class Plot(ABC):
 
     title: str = None  #: a plot title text, will be shown above the plot
 
-    axes: List[Union[Axis, Collection[Axis]]] = None  #: the plot axes.
+    axes: List[Union[Axis, List[Axis]]] = None  #: the plot axes.
     signals: Dict[int, List[Signal]] = None  #: the signals drawn in this plot
     _type: str = None
 
