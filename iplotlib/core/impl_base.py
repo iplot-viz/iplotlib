@@ -311,6 +311,10 @@ class BackendParserBase(ABC):
         if idx2 != len(signal.x_data):
             idx2 += 1
 
+        # Check that signal has data
+        if len(signal.data_store[0]) == 0:
+            return limits
+
         limits[0] = signal.data_store[0][idx1:idx2][0]
         limits[1] = signal.data_store[0][idx1:idx2][-1]
 
