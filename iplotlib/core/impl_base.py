@@ -399,7 +399,7 @@ class BackendParserBase(ABC):
 
         for signal_limit in limits.signals_ranges:
             signal = signal_limit.signal_ref()
-            signal.set_xranges([signal_limit.get_limits()])
+            signal.set_xranges(signal_limit.get_limits())
 
         for ax_idx, axes in enumerate(plot.axes):
             if isinstance(axes, Collection):
