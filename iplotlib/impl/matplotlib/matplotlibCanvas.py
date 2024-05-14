@@ -4,6 +4,7 @@
 from contextlib import ExitStack
 from typing import Any, Callable, Collection, List
 
+import numpy as np
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick
 from matplotlib.axis import Axis as MPLAxis
@@ -23,6 +24,7 @@ from iplotlib.core import (Axis,
                            BackendParserBase,
                            Plot,
                            Signal)
+from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
@@ -51,7 +53,6 @@ class MatplotlibParser(BackendParserBase):
         register_matplotlib_converters()
         self.figure = Figure()
         self._impl_plot_ranges_hash = dict()
-        self.undo_helper = UndoHelper()
 
         if tight_layout:
             self.enable_tight_layout()
@@ -174,8 +175,6 @@ class MatplotlibParser(BackendParserBase):
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, MPLAxes):
             return False
-        if len(limits) > 2:
-            self.undo_helper.set_limits(limits[2], limits[3])
         self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
         return True
 
@@ -396,7 +395,6 @@ class MatplotlibParser(BackendParserBase):
     def _axis_update_callback(self, mpl_axes):
 
         affected_axes = mpl_axes.get_shared_x_axes().get_siblings(mpl_axes)
-
         if self.canvas.shared_x_axis:
             other_axes = self._get_all_shared_axes(mpl_axes)
             for other_axis in other_axes:
@@ -413,45 +411,48 @@ class MatplotlibParser(BackendParserBase):
                 continue
 
             self._impl_plot_ranges_hash[id(a)] = ranges_hash
-            ranges = []
 
             ci = self._impl_plot_cache_table.get_cache_item(a)
             if not hasattr(ci, 'plot'):
                 continue
             if not isinstance(ci.plot(), Plot):
                 continue
+            ranges = []
 
             for ax_idx, ax in enumerate(ci.plot().axes):
                 if isinstance(ax, Collection):
-                    ranges.append(self.update_multi_range_axis(ax, ax_idx, a))
+                    self.update_multi_range_axis(ax, ax_idx, a)
                 elif isinstance(ax, RangeAxis):
                     self.update_range_axis(ax, ax_idx, a)
-                    ranges.append([ax.begin, ax.end])
-
+                    ranges = ax.get_limits()
+            if ci not in self._stale_citems:
+                self._stale_citems.append(ci)
+            if self.canvas.undo:
+                continue
             if not hasattr(ci, 'signals'):
                 continue
             if not ci.signals:
                 continue
-
-            cont = 0
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_xranges"):
-                    # Draw and Zoom case for processed signals
-                    if signal.x_expr != '${self}.time' and not self.canvas.undo:
-                        if cont == 0:
-                            ranges[0] = self.update_range_axis_process(ranges[0], ci.plot().axes[0], signal)
+                    if signal.x_expr != '${self}.time':
+                        idx1 = np.searchsorted(signal.x_data, ranges[0])
+                        idx2 = np.searchsorted(signal.x_data, ranges[1])
+
+                        if idx1 != 0:
+                            idx1 -= 1
+                        if idx2 != len(signal.x_data):
+                            idx2 += 1
+
+                        signal_begin = signal.data_store[0][idx1:idx2][0]
+                        signal_end = signal.data_store[0][idx1:idx2][-1]
+
+                        signal.set_xranges([signal_begin, signal_end])
                     else:
-                        # UNDO case for processed signals
-                        if signal.x_expr != '${self}.time' and self.undo_helper.begin_process is not None:
-                            ranges[0][0] = self.undo_helper.begin_process
-                            ranges[0][1] = self.undo_helper.end_process
-                            self.update_undo_process(ranges[0], ci.plot().axes[0])
-                    signal.set_xranges([ranges[0][0], ranges[0][1]])
-                    logger.debug(f"callback update {ranges[0][0]} axis range to {ranges[0][1]}")
-                cont += 1
-            if ci not in self._stale_citems:
-                self._stale_citems.append(ci)
+                        signal.set_xranges(ranges)
+
+                    logger.debug(f"callback update {ranges[0]} axis range to {ranges[1]}")
 
     def process_ipl_axis(self, axis: Axis, ax_idx, plot: Plot, impl_plot: MPLAxes):
         super().process_ipl_axis(axis, ax_idx, plot, impl_plot)
@@ -481,7 +482,7 @@ class MatplotlibParser(BackendParserBase):
 
             mpl_axis.set_tick_params(**tick_props)
 
-        if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None and (axis.begin or axis.end):
+        if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
             logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
             self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
 
@@ -535,7 +536,6 @@ class MatplotlibParser(BackendParserBase):
                 logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
                              f"arrays (<2). {signal}")
                 return
-
             self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1])
 
         self.update_axis_labels_with_units(mpl_axes, signal)
@@ -702,28 +702,25 @@ class MatplotlibParser(BackendParserBase):
         else:
             return None
 
-    def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
+    def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits) -> None:
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        case = 0
         if ci.offsets[ax_idx] is None:
             ci.offsets[ax_idx] = self.create_offset(limits)
 
         if ci.offsets[ax_idx] is not None:
             begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
             end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
+            logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 0")
         else:
             begin = limits[0]
             end = limits[1]
-            case = 1
-        logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {case}")
+            logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 1")
         if ax_idx == 0:
             if begin == end and begin is not None:
                 begin = end - 1
-            return self.set_impl_x_axis_limits(impl_plot, (begin, end))
+            self.set_impl_x_axis_limits(impl_plot, (begin, end))
         elif ax_idx == 1:
-            return self.set_impl_y_axis_limits(impl_plot, (begin, end))
-        else:
-            return None
+            self.set_impl_y_axis_limits(impl_plot, (begin, end))
 
     def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
         """Implementations should set the x axis label text"""
@@ -765,13 +762,3 @@ def get_data_range(data, axis_idx):
     if data is not None and len(data) > axis_idx and len(data[axis_idx] > 0):
         return data[axis_idx][0], data[axis_idx][-1]
     return None
-
-
-class UndoHelper:
-    def __init__(self, begin_process=None, end_process=None):
-        self.begin_process = begin_process
-        self.end_process = end_process
-
-    def set_limits(self, begin, end):
-        self.begin_process = begin
-        self.end_process = end

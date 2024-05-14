@@ -56,8 +56,6 @@ class RangeAxis(Axis):
     original_end: any = None
     begin: any = None
     end: any = None
-    begin_process: any = None
-    end_process: any = None
 
     def get_limits(self, which: str = 'current') -> tuple:
         """
@@ -69,9 +67,19 @@ class RangeAxis(Axis):
         :rtype: tuple
         """
         if which == 'current':
-            return self.begin, self.end, self.begin_process, self.end_process
-        else:  # which == 'original'
-            return self.original_begin, self.original_end, self.begin_process, self.end_process
+            return self.begin, self.end
+        elif which == 'original':
+            return self.original_begin, self.original_end
+        else:
+            return None, None
+
+    def set_limits(self, begin, end, which: str = 'current'):
+        if which == 'current':
+            self.begin = begin
+            self.end = end
+        elif which == 'original':
+            self.original_begin = begin
+            self.original_end = end
 
     def reset_preferences(self):
         """

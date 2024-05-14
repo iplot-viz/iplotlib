@@ -25,7 +25,7 @@ import weakref
 from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits
+from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits
 from iplotlib.core.plot import Plot
 from iplotlib.core.signal import Signal
 import iplotLogging.setupLogger as Sl
@@ -289,48 +289,8 @@ class BackendParserBase(ABC):
         if not isinstance(range_axis, RangeAxis) or impl_plot is None:
             return
         limits = self.get_oaw_axis_limits(impl_plot, ax_idx)
-        if which == 'current':
-            range_axis.begin = limits[0]
-            range_axis.end = limits[1]
-        else:  # which == 'original'
-            range_axis.original_begin = range_axis.begin
-            range_axis.original_end = range_axis.end
+        range_axis.set_limits(*limits, which)
         logger.debug(f"Axis update: impl_plot={id(impl_plot)} range_axis={id(range_axis)} ax_idx={ax_idx} {range_axis}")
-
-    def update_range_axis_process(self, limits, range_axis: RangeAxis, signal, which='current'):
-        """
-        The corresponding transformation of the limits is carried out. For this, the function ‘np.searchsorted’ is used
-        and then the limits are adjusted so that all the necessary values are included. In addition, the begin_process
-        and end_process parameters of the corresponding RangeAxis are updated.
-        """
-        idx1 = np.searchsorted(signal.x_data, limits[0])
-        idx2 = np.searchsorted(signal.x_data, limits[1])
-
-        if idx1 != 0:
-            idx1 -= 1
-        if idx2 != len(signal.x_data):
-            idx2 += 1
-
-        # Check that signal has data
-        if len(signal.data_store[0]) == 0:
-            return limits
-
-        limits[0] = signal.data_store[0][idx1:idx2][0]
-        limits[1] = signal.data_store[0][idx1:idx2][-1]
-
-        if which == 'current':
-            range_axis.begin_process = limits[0]
-            range_axis.end_process = limits[1]
-
-        return limits
-
-    def update_undo_process(self, limits, range_axis: RangeAxis, which='current'):
-        """
-        Update the begin_process and end_process parameters of the corresponding RangeAxis.
-        """
-        if which == 'current':
-            range_axis.begin_process = limits[0]
-            range_axis.end_process = limits[1]
 
     def update_multi_range_axis(self, range_axes: Collection[RangeAxis], ax_idx: int, impl_plot: Any):
         """
@@ -410,17 +370,21 @@ class BackendParserBase(ABC):
         if not isinstance(self.canvas, Canvas) or not isinstance(plot, Plot):
             return None
         plot_lims = IplPlotViewLimits(plot_ref=weakref.ref(plot))
+        for plot_signals in plot.signals.values():
+            for sig in plot_signals:
+                plot_lims.signals_ranges.append(IplSignalLimits(sig.ts_start, sig.ts_end, weakref.ref(sig)))
         for axes in plot.axes:
             if isinstance(axes, Collection):
                 for axis in axes:
-                    if isinstance(axis, RangeAxis):
-                        begin, end, trans_begin, trans_end = axis.get_limits(which)
-                        plot_lims.axes_ranges.append(
-                            IplAxisLimits(begin, end, weakref.ref(axis), trans_begin, trans_end))
+                    if not isinstance(axis, RangeAxis):
+                        continue
+                    begin, end = axis.get_limits(which)
+                    plot_lims.axes_ranges.append(
+                        IplAxisLimits(begin, end, weakref.ref(axis)))
             elif isinstance(axes, RangeAxis):
                 axis = axes  # singular name is easier to read for single axis
-                begin, end, trans_begin, trans_end = axis.get_limits(which)
-                plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis), trans_begin, trans_end))
+                begin, end = axis.get_limits(which)
+                plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
         return plot_lims
 
     def set_plot_limits(self, limits: IplPlotViewLimits):
@@ -432,30 +396,26 @@ class BackendParserBase(ABC):
         i = 0
         plot = limits.plot_ref()
         ax_limits = limits.axes_ranges
+
+        for signal_limit in limits.signals_ranges:
+            signal = signal_limit.signal_ref()
+            signal.set_xranges([signal_limit.get_limits()])
+
         for ax_idx, axes in enumerate(plot.axes):
             if isinstance(axes, Collection):
                 for axis in axes:
                     if isinstance(axis, RangeAxis):
                         impl_plot = self._axis_impl_plot_lut.get(id(axis))
                         if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
-                            axis.begin = ax_limits[i].begin
-                            axis.end = ax_limits[i].end
+                            axis.set_limits(*ax_limits[i].get_limits())
                         i += 1
-                        self.canvas.undo = False
             elif isinstance(axes, RangeAxis):
                 axis = axes
                 impl_plot = self._axis_impl_plot_lut.get(id(axis))
-                if ax_limits[i].begin_process != None:
-                    if not self.set_impl_plot_limits(impl_plot, ax_idx,
-                                                     (ax_limits[i].begin, ax_limits[i].end, ax_limits[i].begin_process,
-                                                      ax_limits[i].end_process)):
-                        axis.begin = ax_limits[i].begin
-                        axis.end = ax_limits[i].end
-                else:
-                    if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
-                        axis.begin = ax_limits[i].begin
-                        axis.end = ax_limits[i].end
+                if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
+                    axis.set_limits(*ax_limits[i].get_limits())
                 i += 1
+        self.canvas.undo = False
         self.refresh_data()
 
     @staticmethod
