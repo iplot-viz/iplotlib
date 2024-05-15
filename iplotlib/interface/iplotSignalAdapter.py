@@ -914,27 +914,24 @@ class ParserHelper:
         # Realign the signals on which it depends if necessary
         needs_realign = False
         dependencies = list()
+        tmp_local_env = dict()
         for var_name in signal.depends_on:
-            dependencies.append(local_env[var_name])
+            tmp_local_env[var_name] = copy.copy(local_env[var_name])
+            tmp_local_env[var_name].ts_start = signal.ts_start
+            tmp_local_env[var_name].ts_end = signal.ts_end
+            if var_name != "self":
+                tmp_local_env[var_name].get_data()
+            if var_name != 'self' or len(tmp_local_env[var_name].data_store[0]) != 0:
+                dependencies.append(tmp_local_env[var_name])
+
         for sig1, sig2 in zip(dependencies[:-1], dependencies[1:]):
-            if not (sig1.data_store[0].shape == sig2.data_store[0].shape):
+            if not np.array_equal(sig1.data_store[0], sig2.data_store[0]):
                 needs_realign = True
+                break
 
         if needs_realign:
-            tmp_local_env = dict()
-            dependencies = list()
-            for var_name in signal.depends_on:
-                tmp_local_env[var_name] = local_env[var_name]
-                tmp_local_env[var_name].ts_start = signal.ts_start
-                tmp_local_env[var_name].ts_end = signal.ts_end
-                if var_name != "self":
-                    tmp_local_env[var_name].get_data()
-                if var_name != 'self' or len(tmp_local_env[var_name].data_store[0]) != 0:
-                    dependencies.append(tmp_local_env[var_name])
             align(dependencies)
             signal.set_data(tmp_local_env['self'].data_store)
-        else:
-            tmp_local_env = local_env
 
         p.clear_expr()
         p.set_expression(expression)
