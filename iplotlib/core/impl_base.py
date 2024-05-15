@@ -415,7 +415,6 @@ class BackendParserBase(ABC):
                 if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
                     axis.set_limits(*ax_limits[i].get_limits())
                 i += 1
-        self.canvas.undo = False
         self.refresh_data()
 
     @staticmethod

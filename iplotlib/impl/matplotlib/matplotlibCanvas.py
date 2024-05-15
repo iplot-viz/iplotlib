@@ -395,7 +395,7 @@ class MatplotlibParser(BackendParserBase):
     def _axis_update_callback(self, mpl_axes):
 
         affected_axes = mpl_axes.get_shared_x_axes().get_siblings(mpl_axes)
-        if self.canvas.shared_x_axis and not self.canvas.undo:
+        if self.canvas.shared_x_axis and not self.canvas.undo_redo:
             other_axes = self._get_all_shared_axes(mpl_axes)
             for other_axis in other_axes:
                 cur_x_limits = self.get_oaw_axis_limits(mpl_axes, 0)
@@ -427,7 +427,7 @@ class MatplotlibParser(BackendParserBase):
                     ranges = ax.get_limits()
             if ci not in self._stale_citems:
                 self._stale_citems.append(ci)
-            if self.canvas.undo:
+            if self.canvas.undo_redo:
                 continue
             if not hasattr(ci, 'signals'):
                 continue

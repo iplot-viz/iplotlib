@@ -28,17 +28,21 @@ class IplotAxesRangeCmd(IplotCommand):
         Redo the command. All plots are restored to their new limits.
         """
         super().__call__()
+        self._parser.canvas.undo_redo = True
         for limits in self.new_lim:
             self._parser.set_plot_limits(limits)
+
+        self._parser.canvas.undo_redo = False
 
     def undo(self):
         """
         Undo the command. All plots are restored to their old limits.
         """
         super().undo()
+        self._parser.canvas.undo_redo = True
         for limits in self.old_lim:
-            self._parser.canvas.undo = True
             self._parser.set_plot_limits(limits)
+        self._parser.canvas.undo_redo = False
 
     def __str__(self):
         """

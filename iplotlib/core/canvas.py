@@ -99,7 +99,7 @@ class Canvas(ABC):
 
     _type: str = None
 
-    undo: bool = False
+    undo_redo: bool = False
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
