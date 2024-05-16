@@ -62,7 +62,7 @@ class IplotQtMainWindow(QMainWindow):
             [self.canvasStack.widget(i).set_mouse_mode(tool_name) for i in range(self.canvasStack.count())])
         self.canvasStack.canvasAdded.connect(self.on_canvas_add)
         self.canvasStack.currentChanged.connect(lambda idx: self.check_history(self.canvasStack.widget(idx)))
-        self.toolBar.redrawAction.triggered.connect(self.reDraw)
+        #self.toolBar.redrawAction.triggered.connect(self.reDraw)
         self.toolBar.detachAction.triggered.connect(self.detach)
         self.toolBar.configureAction.triggered.connect(
             lambda:
