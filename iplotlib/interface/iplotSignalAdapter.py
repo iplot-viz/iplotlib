@@ -916,7 +916,7 @@ class ParserHelper:
         dependencies = list()
         tmp_local_env = dict()
         for var_name in signal.depends_on:
-            tmp_local_env[var_name] = copy.copy(local_env[var_name])
+            tmp_local_env[var_name] = local_env[var_name]
             tmp_local_env[var_name].ts_start = signal.ts_start
             tmp_local_env[var_name].ts_end = signal.ts_end
             if var_name != "self":
