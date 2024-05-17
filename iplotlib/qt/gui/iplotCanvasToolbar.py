@@ -70,7 +70,7 @@ class IplotQtCanvasToolbar(QToolBar):
 
         # Draw..
         self.redrawAction = QAction(create_icon('rotate180'), '&Redraw', self)
-        self.addAction(self.redrawAction)
+        #self.addAction(self.redrawAction)
 
         # Configuration..
         self.configureAction = QAction(create_icon('options', 'svg'), '&Preferences')
