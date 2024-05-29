@@ -29,8 +29,8 @@ from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
 logger = setupLogger.get_logger(__name__)
-STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "default": "steps-pre",
-            "pre": "steps-pre", "steps-mid": "steps-mid", "steps-post": "steps-post", "steps-pre": "steps-pre"}
+STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
+            "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre":"pre"}
 
 
 class MatplotlibParser(BackendParserBase):
@@ -139,7 +139,7 @@ class MatplotlibParser(BackendParserBase):
                 shapes[0][2] = mpl_axes.fill_between(x_data, y1_data, y2_data,
                                                      alpha=0.3,
                                                      color=shapes[0][0].get_color(),
-                                                     step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
+                                                     step=STEP_MAP[style['drawstyle']])
             self.figure.canvas.draw_idle()
 
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
@@ -159,7 +159,7 @@ class MatplotlibParser(BackendParserBase):
                 area = mpl_axes.fill_between(x_data, y1_data, y2_data,
                                              alpha=0.3,
                                              color=params2['color'],
-                                             step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
+                                             step=STEP_MAP[style['drawstyle']])
                 lines = [line_1 + line_2 + [area]]
                 for new, old in zip(lines, signal.lines):
                     for n, o in zip(new, old):
