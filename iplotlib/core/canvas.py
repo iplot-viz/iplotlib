@@ -45,6 +45,8 @@ class Canvas(ABC):
 
     round_hour: bool = False
 
+    log_scale: bool = False  # a boolean that represents the log scale
+
     line_style: str = None  #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
     # default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent
     # points should be canvas implementation dependent
@@ -159,6 +161,7 @@ class Canvas(ABC):
         """
         self.font_size = Canvas.font_size
         self.shared_x_axis = Canvas.shared_x_axis
+        self.log_scale = Canvas.log_scale
         self.grid = Canvas.grid
         self.legend = Canvas.legend
         self.legend_position = Canvas.legend_position
@@ -186,6 +189,7 @@ class Canvas(ABC):
         self.title = old_canvas.title
         self.font_size = old_canvas.font_size
         self.shared_x_axis = old_canvas.shared_x_axis
+        self.log_scale = old_canvas.log_scale
         self.grid = old_canvas.grid
         self.legend = old_canvas.legend
         self.legend_position = old_canvas.legend_position

@@ -6,7 +6,7 @@ from typing import Any, Callable, Collection, List
 
 import numpy as np
 from matplotlib.axes import Axes as MPLAxes
-from matplotlib.axis import Tick
+from matplotlib.axis import Tick, YAxis
 from matplotlib.axis import Axis as MPLAxis
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
@@ -436,7 +436,7 @@ class MatplotlibParser(BackendParserBase):
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_xranges"):
-                    if signal.x_expr != '${self}.time':
+                    if signal.x_expr != '${self}.time' and len(signal.data_store[0]):
                         idx1 = np.searchsorted(signal.x_data, ranges[0])
                         idx2 = np.searchsorted(signal.x_data, ranges[1])
 
@@ -460,6 +460,12 @@ class MatplotlibParser(BackendParserBase):
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
 
         if isinstance(axis, Axis):
+
+            if isinstance(mpl_axis, YAxis):
+                log_scale = self._pm.get_value('log_scale', self.canvas, plot)
+                if log_scale:
+                    mpl_axis.axes.set_yscale('log')
+
             fc = self._pm.get_value('font_color', self.canvas, plot, axis) or 'black'
             fs = self._pm.get_value('font_size', self.canvas, plot, axis)
 
