@@ -12,7 +12,7 @@ from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.text import Text
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, LogLocator
 from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
@@ -465,6 +465,10 @@ class MatplotlibParser(BackendParserBase):
                 log_scale = self._pm.get_value('log_scale', self.canvas, plot)
                 if log_scale:
                     mpl_axis.axes.set_yscale('log')
+
+                    # Format for minor ticks
+                    y_minor = LogLocator(base=10, subs='all')
+                    mpl_axis.set_minor_locator(y_minor)
 
             fc = self._pm.get_value('font_color', self.canvas, plot, axis) or 'black'
             fs = self._pm.get_value('font_size', self.canvas, plot, axis)
