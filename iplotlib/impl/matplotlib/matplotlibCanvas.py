@@ -470,6 +470,9 @@ class MatplotlibParser(BackendParserBase):
                     y_minor = LogLocator(base=10, subs='all')
                     mpl_axis.set_minor_locator(y_minor)
 
+                    show_grid = self._pm.get_value('grid', self.canvas, plot)
+                    mpl_axis.grid(show_grid, which='minor', linestyle='-')
+
             fc = self._pm.get_value('font_color', self.canvas, plot, axis) or 'black'
             fs = self._pm.get_value('font_size', self.canvas, plot, axis)
 
