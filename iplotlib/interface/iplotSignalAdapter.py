@@ -574,7 +574,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             if AccessHelper.num_samples_override or self.isDownsampled:
                 return True
             elif self.x_expr != "${self}.time":
-                return True
+                x_data_incremental = all(self.x_data[i + 1] - self.x_data[i] > 0 for i in range(len(self.x_data) - 1))
+                return x_data_incremental
             elif len(self.children):
                 return True
             elif self._contained_bounds():
