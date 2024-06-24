@@ -21,7 +21,7 @@ default=true
 """
 
 
-def plot():
+def get_canvas():
     da = DataAccess()
     start_time = "2024-03-19T17:42:24"
     end_time = "2024-03-26T17:42:24"

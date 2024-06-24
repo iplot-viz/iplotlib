@@ -137,8 +137,8 @@ def proxy_main():
         module = importlib.import_module(script.name)
         if hasattr(module, 'skip'):
             continue
-        if hasattr(module, 'plot'):
-            canvas_app.add_canvas(module.plot())
+        if hasattr(module, 'get_canvas'):
+            canvas_app.add_canvas(module.get_canvas())
     canvas_app.show()
     return canvas_app.run()
 

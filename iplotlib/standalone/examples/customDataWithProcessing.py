@@ -12,7 +12,7 @@ def func(x):
     return np.sin(10 * np.arcsin(1.) * x) * np.linspace(np.min(x), np.max(x), x.size)
 
 
-def plot():
+def get_canvas():
     x = np.linspace(-1, 1, 1000)
 
     # Basic processing of signals with similar data dimensions and data bounds

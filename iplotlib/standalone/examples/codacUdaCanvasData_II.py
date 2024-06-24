@@ -8,7 +8,7 @@ from iplotlib.interface import IplotSignalAdapter, StatusInfo
 import json
 
 
-def plot():
+def get_canvas():
     module_dir = os.path.dirname(__file__)
     json_file_path = os.path.join(module_dir + '_json', 'simple_data.json')
 

@@ -20,7 +20,7 @@ default=true
 """
 
 
-def plot():
+def get_canvas():
     da = DataAccess()
 
     with tempfile.NamedTemporaryFile(mode='w+') as fp:
