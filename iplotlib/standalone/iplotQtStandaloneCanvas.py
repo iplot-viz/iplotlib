@@ -20,7 +20,7 @@ from PySide6.QtGui import (QGuiApplication, QKeySequence,
                            QAction, QActionGroup)
 
 from iplotlib.core import Canvas
-from iplotlib import examples as iplotExamples
+from iplotlib.standalone import examples as iplotExamples
 from iplotlib.interface.iplotSignalAdapter import AccessHelper
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.gui.iplotQtMainWindow import IplotQtMainWindow
