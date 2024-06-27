@@ -119,7 +119,7 @@ class IplotQtCanvas(QWidget):
                                 if isinstance(axis, RangeAxis):
                                     impl_plot = self._parser._axis_impl_plot_lut.get(id(axis))
                                     self._parser.update_range_axis(axis, ax_idx, impl_plot, which='original')
-                        elif isinstance(axes, RangeAxis):
+                        elif isinstance(axes, RangeAxis) and not (axes.original_begin and axes.original_end):
                             axis = axes
                             impl_plot = self._parser._axis_impl_plot_lut.get(id(axis))
                             self._parser.update_range_axis(axis, ax_idx, impl_plot, which='original')

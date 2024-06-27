@@ -30,7 +30,7 @@ from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
 logger = setupLogger.get_logger(__name__)
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
-            "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre":"pre"}
+            "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
 
 
 class MatplotlibParser(BackendParserBase):
@@ -339,6 +339,7 @@ class MatplotlibParser(BackendParserBase):
                 # Show the grid if enabled
                 show_grid = self._pm.get_value('grid', self.canvas, plot)
                 mpl_axes.grid(show_grid)
+                axis_process = None
 
                 # Update properties of the plot axes
                 for ax_idx in range(len(plot.axes)):
@@ -347,11 +348,18 @@ class MatplotlibParser(BackendParserBase):
                         self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
                     else:
                         axis = plot.axes[ax_idx]
+                        axis_process = plot.axes[ax_idx]
                         self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
 
                 for signal in signals:
                     self._signal_impl_plot_lut.update({id(signal): mpl_axes})
                     self.process_ipl_signal(signal)
+
+                # Set limits for process signals
+                if not (
+                        axis_process.original_begin and axis_process.original_end and axis_process.begin and axis_process.end):
+                    self.update_range_axis(axis_process, 0, mpl_axes, which='current')
+                    self.update_range_axis(axis_process, 0, mpl_axes, which='original')
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value('legend', self.canvas, plot)
@@ -436,7 +444,7 @@ class MatplotlibParser(BackendParserBase):
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_xranges"):
-                    if signal.x_expr != '${self}.time':
+                    if signal.x_expr != '${self}.time' and len(signal.data_store[0]):
                         idx1 = np.searchsorted(signal.x_data, ranges[0])
                         idx2 = np.searchsorted(signal.x_data, ranges[1])
 
