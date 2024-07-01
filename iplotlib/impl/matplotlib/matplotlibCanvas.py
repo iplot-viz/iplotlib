@@ -356,8 +356,8 @@ class MatplotlibParser(BackendParserBase):
                     self.process_ipl_signal(signal)
 
                 # Set limits for process signals
-                if not (
-                        axis_process.original_begin and axis_process.original_end and axis_process.begin and axis_process.end):
+                if isinstance(axis_process, RangeAxis) and not (axis_process.original_begin and axis_process.begin
+                                                                and axis_process.original_end and axis_process.end):
                     self.update_range_axis(axis_process, 0, mpl_axes, which='current')
                     self.update_range_axis(axis_process, 0, mpl_axes, which='original')
 
