@@ -339,27 +339,25 @@ class MatplotlibParser(BackendParserBase):
                 # Show the grid if enabled
                 show_grid = self._pm.get_value('grid', self.canvas, plot)
                 mpl_axes.grid(show_grid)
-                axis_process = None
+                x_axis = None
 
                 # Update properties of the plot axes
                 for ax_idx in range(len(plot.axes)):
                     if isinstance(plot.axes[ax_idx], Collection):
-                        axis = plot.axes[ax_idx][stack_id]
-                        self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
+                        y_axis = plot.axes[ax_idx][stack_id]
+                        self.process_ipl_axis(y_axis, ax_idx, plot, mpl_axes)
                     else:
-                        axis = plot.axes[ax_idx]
-                        axis_process = plot.axes[ax_idx]
-                        self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
+                        x_axis = plot.axes[ax_idx]
+                        self.process_ipl_axis(x_axis, ax_idx, plot, mpl_axes)
 
                 for signal in signals:
                     self._signal_impl_plot_lut.update({id(signal): mpl_axes})
                     self.process_ipl_signal(signal)
 
-                # Set limits for process signals
-                if isinstance(axis_process, RangeAxis) and not (axis_process.original_begin and axis_process.begin
-                                                                and axis_process.original_end and axis_process.end):
-                    self.update_range_axis(axis_process, 0, mpl_axes, which='current')
-                    self.update_range_axis(axis_process, 0, mpl_axes, which='original')
+                # Set limits for processed signals
+                if isinstance(x_axis, RangeAxis) and x_axis.begin is None and x_axis.end is None:
+                    self.update_range_axis(x_axis, 0, mpl_axes, which='current')
+                    self.update_range_axis(x_axis, 0, mpl_axes, which='original')
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value('legend', self.canvas, plot)
