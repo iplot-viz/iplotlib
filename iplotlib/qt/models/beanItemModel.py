@@ -56,7 +56,7 @@ class BeanItemModel(QStandardItemModel):
                 return None
         else:
             value = getattr(self._pyObject, property_name, None)
-            return str(value) if value else None
+            return str(value) if value is not None else None
 
     def setData(self, index: QModelIndex, value: typing.Any, role: int = Qt.UserRole) -> bool:
         logger.debug(f"Index: {index}, role: {role}, value: {value}")
