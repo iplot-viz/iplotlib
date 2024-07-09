@@ -109,6 +109,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     data_source: str = ''
     alias: str = ''
 
+    stream_valid: bool = True
     pulse_nb: int = None
     ts_start: str = ''
     ts_end: str = ''
