@@ -26,13 +26,9 @@ class CanvasStreamer:
             for plot in col:
                 if plot:
                     for (stack_id, signals) in plot.signals.items():
-                        if len(signals) > 1:
-                            for signal in signals:
-                                if signal.stream_valid:
-                                    all_signals += [signal]
-                        else:
-                            if signals[0].stream_valid:
-                                all_signals += signals
+                        for signal in signals:
+                            if signal.stream_valid:
+                                all_signals.append(signal)
 
         signals = {}
         for s in all_signals:
