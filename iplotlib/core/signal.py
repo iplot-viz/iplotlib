@@ -9,7 +9,7 @@ for when you wish to take over the data customization.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Collection, List
 import numpy as np
 
@@ -121,9 +121,9 @@ class SimpleSignal(ArraySignal):
     A concrete subclass that freezes the data to three numpy arrays (x, y, z).
     You can use this when you have no requirement for custom data-handling.
     """
-    x_data: np.ndarray = np.empty(0)
-    y_data: np.ndarray = np.empty(0)
-    z_data: np.ndarray = np.empty(0)
+    x_data: np.ndarray = field(default_factory=lambda: np.empty(0))
+    y_data: np.ndarray = field(default_factory=lambda: np.empty(0))
+    z_data: np.ndarray = field(default_factory=lambda: np.empty(0))
     x_unit: str = ''
     y_unit: str = ''
     z_unit: str = ''
