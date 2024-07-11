@@ -233,7 +233,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 logger.debug(" in compute key={} expr={}".format(key, expr))
                 data_arrays.update({key: ParserHelper.evaluate(self, expr)})
             except Exception as e:
-                logger.error(f"Error {e}")
+                logger.error(f"Error {e} in {expr}")
                 continue
         return data_arrays
 
@@ -253,7 +253,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 if isinstance(value, np.float64):
                     return value.astype('float').item()
                 else:
-                    return value.astype('int').item()
+                    return value.astype('int64').item()
             else:
                 return value
 
@@ -534,14 +534,6 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         if nonempty_name and self.data_access_enabled:
 
             if self._needs_refresh():
-                if len(self.data_store[0]) and len(self.x_data) and self.x_expr != '${self}.time':
-                    idx1 = np.searchsorted(self.x_data, self.ts_start)
-                    idx2 = np.searchsorted(self.x_data, self.ts_end)
-                    if idx2 == len(self.x_data):
-                        idx2 -= 1
-                    self.ts_start = self.data_store[0][idx1:idx2][0]
-                    self.ts_end = self.data_store[0][idx1:idx2][-1]
-
                 self._fetch_data()
                 return True
             elif self.status_info.stage == Stage.PROC:
@@ -582,6 +574,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             if AccessHelper.num_samples_override or self.isDownsampled:
                 return True
             elif self.x_expr != "${self}.time":
+                return True
+            elif len(self.children):
                 return True
             elif self._contained_bounds():
                 return False
@@ -920,27 +914,24 @@ class ParserHelper:
         # Realign the signals on which it depends if necessary
         needs_realign = False
         dependencies = list()
+        tmp_local_env = dict()
         for var_name in signal.depends_on:
-            dependencies.append(local_env[var_name])
+            tmp_local_env[var_name] = local_env[var_name]
+            tmp_local_env[var_name].ts_start = signal.ts_start
+            tmp_local_env[var_name].ts_end = signal.ts_end
+            if var_name != "self":
+                tmp_local_env[var_name].get_data()
+            if var_name != 'self' or len(tmp_local_env[var_name].data_store[0]) != 0:
+                dependencies.append(tmp_local_env[var_name])
+
         for sig1, sig2 in zip(dependencies[:-1], dependencies[1:]):
-            if not (sig1.data_store[0].shape == sig2.data_store[0].shape):
+            if not np.array_equal(sig1.data_store[0], sig2.data_store[0]):
                 needs_realign = True
+                break
 
         if needs_realign:
-            tmp_local_env = dict()
-            dependencies = list()
-            for var_name in signal.depends_on:
-                tmp_local_env[var_name] = copy.deepcopy(local_env[var_name])
-                tmp_local_env[var_name].ts_start = signal.ts_start
-                tmp_local_env[var_name].ts_end = signal.ts_end
-                if var_name != "self":
-                    tmp_local_env[var_name].get_data()
-                if var_name != 'self' or len(tmp_local_env[var_name].data_store[0]) != 0:
-                    dependencies.append(tmp_local_env[var_name])
             align(dependencies)
             signal.set_data(tmp_local_env['self'].data_store)
-        else:
-            tmp_local_env = local_env
 
         p.clear_expr()
         p.set_expression(expression)

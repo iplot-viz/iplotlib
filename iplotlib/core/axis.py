@@ -68,8 +68,18 @@ class RangeAxis(Axis):
         """
         if which == 'current':
             return self.begin, self.end
-        else:  # which == 'original'
+        elif which == 'original':
             return self.original_begin, self.original_end
+        else:
+            return None, None
+
+    def set_limits(self, begin, end, which: str = 'current'):
+        if which == 'current':
+            self.begin = begin
+            self.end = end
+        elif which == 'original':
+            self.original_begin = begin
+            self.original_end = end
 
     def reset_preferences(self):
         """
