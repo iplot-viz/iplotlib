@@ -339,10 +339,6 @@ class MatplotlibParser(BackendParserBase):
                 show_grid = self._pm.get_value('grid', self.canvas, plot)
                 mpl_axes.grid(show_grid)
 
-                for signal in signals:
-                    self._signal_impl_plot_lut.update({id(signal): mpl_axes})
-                    self.process_ipl_signal(signal)
-
                 # Update properties of the plot axes
                 for ax_idx in range(len(plot.axes)):
                     if isinstance(plot.axes[ax_idx], Collection):
@@ -351,6 +347,10 @@ class MatplotlibParser(BackendParserBase):
                     else:
                         axis = plot.axes[ax_idx]
                         self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
+
+                for signal in signals:
+                    self._signal_impl_plot_lut.update({id(signal): mpl_axes})
+                    self.process_ipl_signal(signal)
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value('legend', self.canvas, plot)
