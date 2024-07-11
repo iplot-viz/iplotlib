@@ -23,6 +23,7 @@ class Axis:
     font_size: int = None  # font size applies both for axis label and axis tick labels.
     font_color: str = '#000000'  # color applies to an axis label and axis tick labels.
     tick_number: int = 7  #: number of ticks and labels to be shown in a XAxis
+    autoscale: bool = False
 
     _type: str = None
 
@@ -40,11 +41,13 @@ class Axis:
         self.font_size = Axis.font_size
         self.font_color = Axis.font_color
         self.tick_number = Axis.tick_number
+        self.autoscale = Axis.autoscale
 
     def merge(self, old_axis: 'Axis'):
         self.font_size = old_axis.font_size
         self.font_color = old_axis.font_color
         self.tick_number = old_axis.tick_number
+        self.autoscale = old_axis.autoscale
 
 
 @dataclass

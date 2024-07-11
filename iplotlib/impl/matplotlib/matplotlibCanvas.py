@@ -29,8 +29,8 @@ from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
 logger = setupLogger.get_logger(__name__)
-STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "default": "steps-pre",
-            "pre": "steps-pre", "steps-mid": "steps-mid", "steps-post": "steps-post", "steps-pre": "steps-pre"}
+STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
+            "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
 
 
 class MatplotlibParser(BackendParserBase):
@@ -139,7 +139,7 @@ class MatplotlibParser(BackendParserBase):
                 shapes[0][2] = mpl_axes.fill_between(x_data, y1_data, y2_data,
                                                      alpha=0.3,
                                                      color=shapes[0][0].get_color(),
-                                                     step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
+                                                     step=STEP_MAP[style['drawstyle']])
             self.figure.canvas.draw_idle()
 
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
@@ -159,7 +159,7 @@ class MatplotlibParser(BackendParserBase):
                 area = mpl_axes.fill_between(x_data, y1_data, y2_data,
                                              alpha=0.3,
                                              color=params2['color'],
-                                             step=STEP_MAP[style['drawstyle']].replace('steps-', ''))
+                                             step=STEP_MAP[style['drawstyle']])
                 lines = [line_1 + line_2 + [area]]
                 for new, old in zip(lines, signal.lines):
                     for n, o in zip(new, old):
@@ -290,8 +290,7 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     row_id = stack_id
 
-                mpl_axes = self.figure.add_subplot(
-                    subgrid_item[row_id, 0], sharex=mpl_axes_prev)
+                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0], sharex=mpl_axes_prev)
                 mpl_axes_prev = mpl_axes
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
                 # Keep references to iplotlib instances for ease of access in callbacks.
@@ -395,10 +394,8 @@ class MatplotlibParser(BackendParserBase):
         # Observe the axis limit change events
         if not self.canvas.streaming:
             for axes in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
-                axes.callbacks.connect(
-                    'xlim_changed', self._axis_update_callback)
-                axes.callbacks.connect(
-                    'ylim_changed', self._axis_update_callback)
+                axes.callbacks.connect('xlim_changed', self._axis_update_callback)
+                # axes.callbacks.connect('ylim_changed', self._axis_update_callback)
 
     def _axis_update_callback(self, mpl_axes):
 
@@ -444,7 +441,7 @@ class MatplotlibParser(BackendParserBase):
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_xranges"):
-                    if signal.x_expr != '${self}.time' and len(signal.data_store[0]):
+                    if signal.x_expr != '${self}.time' and len(signal.data_store[0]) > 0 and len(signal.x_data) > 0:
                         idx1 = np.searchsorted(signal.x_data, ranges[0])
                         idx2 = np.searchsorted(signal.x_data, ranges[1])
 
@@ -500,9 +497,12 @@ class MatplotlibParser(BackendParserBase):
             mpl_axis.set_tick_params(**tick_props)
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
-            logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
-            self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
-
+            # autoscale = self._pm.get_value('autoscale', axis)
+            if axis.autoscale and ax_idx == 1:
+                self.autoscale_y_axis(impl_plot)
+            else:
+                logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
+                self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
         if isinstance(axis, LinearAxis) and axis.is_date:
             ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
             mpl_axis.set_major_formatter(
@@ -556,6 +556,37 @@ class MatplotlibParser(BackendParserBase):
             self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1])
 
         self.update_axis_labels_with_units(mpl_axes, signal)
+
+    def autoscale_y_axis(self, impl_plot, margin=0.1):
+        """This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
+        ax -- a matplotlib axes object
+        margin -- the fraction of the total height of the y-data to pad the upper and lower ylims"""
+
+        def get_bottom_top(x_line):
+            xd = x_line.get_xdata()
+            yd = x_line.get_ydata()
+            lo, hi = impl_plot.get_xlim()
+            y_displayed = yd[((xd > lo) & (xd < hi))]
+            if len(y_displayed) > 0:
+                h = np.max(y_displayed) - np.min(y_displayed)
+                min_bot = np.min(y_displayed) - margin * h
+                max_top = np.max(y_displayed) + margin * h
+            else:
+                min_bot = 0
+                max_top = 1
+            return min_bot, max_top
+
+        lines = impl_plot.get_lines()
+        bot, top = np.inf, -np.inf
+
+        for line in lines:
+            new_bot, new_top = get_bottom_top(line)
+            if new_bot < bot:
+                bot = new_bot
+            if new_top > top:
+                top = new_top
+
+        self.set_oaw_axis_limits(impl_plot, 1, (bot, top))
 
     def enable_tight_layout(self):
         self.figure.set_tight_layout(True)
@@ -740,11 +771,11 @@ class MatplotlibParser(BackendParserBase):
             self.set_impl_y_axis_limits(impl_plot, (begin, end))
 
     def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
-        """Implementations should set the x axis label text"""
+        """Implementations should set the x_axis label text"""
         self.get_impl_x_axis(impl_plot).set_label_text(text)
 
     def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
-        """Implementations should set the y axis label text"""
+        """Implementations should set the y_axis label text"""
         self.get_impl_y_axis(impl_plot).set_label_text(text)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):

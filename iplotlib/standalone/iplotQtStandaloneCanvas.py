@@ -20,7 +20,7 @@ from PySide6.QtGui import (QGuiApplication, QKeySequence,
                            QAction, QActionGroup)
 
 from iplotlib.core import Canvas
-from iplotlib import examples as iplotExamples
+from iplotlib.standalone import examples as iplotExamples
 from iplotlib.interface.iplotSignalAdapter import AccessHelper
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.gui.iplotQtMainWindow import IplotQtMainWindow
@@ -129,15 +129,16 @@ def proxy_main():
     """
     global args
     AccessHelper.num_samples_override = args.use_fallback_samples
-    canvas_app = QStandaloneCanvas(args.impl, use_toolbar=args.toolbar)
+    # Change parameter 'use_toolbar' to False to not show the toolbar
+    canvas_app = QStandaloneCanvas(args.impl, use_toolbar=True)
     canvas_app.prepare()
 
     for script in pkgutil.walk_packages(iplotExamples.__path__, iplotExamples.__name__ + '.'):
         module = importlib.import_module(script.name)
         if hasattr(module, 'skip'):
             continue
-        if hasattr(module, 'plot'):
-            canvas_app.add_canvas(module.plot())
+        if hasattr(module, 'get_canvas'):
+            canvas_app.add_canvas(module.get_canvas())
     canvas_app.show()
     return canvas_app.run()
 
