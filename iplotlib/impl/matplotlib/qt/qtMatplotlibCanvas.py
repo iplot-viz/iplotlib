@@ -10,6 +10,8 @@
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
+from collections import defaultdict
+
 from PySide6.QtCore import QMargins, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
@@ -38,6 +40,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
+
+        self.info_shared_x_dialog = False
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
@@ -80,6 +84,38 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self.render()
         super().set_canvas(canvas)
 
+        # Check if plots share time axis
+        ranges = []
+        plot_stack = []
+
+        if canvas.shared_x_axis:
+            if not self.info_shared_x_dialog:
+                self.info_shared_x_dialog = True
+                for row_idx, col in enumerate(canvas.plots, start=1):
+                    for col_idx, plot in enumerate(col, start=1):
+                        axis = plot.axes[0]
+                        ranges.append((axis.original_begin, axis.original_end))
+                        plot_stack.append(f"{col_idx}.{row_idx}")
+
+                dict_ranges = defaultdict(list)
+                for idx, uniq_range in enumerate(ranges):
+                    dict_ranges[uniq_range].append(plot_stack[idx])
+
+                # If there is more than one element in the dictionary it means that there is more than one time
+                # range
+                if len(dict_ranges) > 1:
+                    box = QMessageBox()
+                    box.setIcon(QMessageBox.Information)
+                    message = "There are plots with different time range:\n"
+                    for i, stacks in enumerate(dict_ranges.values(), start=1):
+                        plots_str = ", ".join(stacks)
+                        message += f"Time range {i}: Plots {plots_str}\n"
+
+                    box.setText(message)
+                    box.exec_()
+        else:
+            self.info_shared_x_dialog = False
+
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
         return self._parser.canvas
@@ -115,6 +151,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def unfocus_plot(self):
         self._parser.set_focus_plot(None)
+        self.info_shared_x_dialog = False
 
     def drop_history(self):
         return self._parser.drop_history()
@@ -134,7 +171,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # proxy line, and toggle its visibility.
         legend_line = event.artist
 
-        ax_lines,signal = self._parser.map_legend_to_ax[legend_line]
+        ax_lines, signal = self._parser.map_legend_to_ax[legend_line]
         visible = True
         for ax_line in ax_lines:
             visible = not ax_line.get_visible()
