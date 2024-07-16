@@ -585,8 +585,8 @@ class MatplotlibParser(BackendParserBase):
                 bot = new_bot
             if new_top > top:
                 top = new_top
-
-        self.set_oaw_axis_limits(impl_plot, 1, (bot, top))
+        if lines:
+            self.set_oaw_axis_limits(impl_plot, 1, (bot, top))
 
     def enable_tight_layout(self):
         self.figure.set_tight_layout(True)
