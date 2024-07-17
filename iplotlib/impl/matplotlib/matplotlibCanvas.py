@@ -92,8 +92,16 @@ class MatplotlibParser(BackendParserBase):
                     line[0].set_xdata(x_data)
                     line[0].set_ydata(y_data[:, i])
             if self.canvas.streaming:
-                mpl_axes.set_ylim(min(y_data) - 0.01, max(y_data) + 0.01)
                 ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
+                all_y_data = []
+                for signal in plot.signals[cache_item.stack_key]:
+                    if signal.lines[0][0].get_visible():
+                        for x_temp, y_temp in zip(signal.x_data, signal.y_data):
+                            if max(signal.x_data) - ax_window <= x_temp <= max(signal.x_data):
+                                all_y_data.append(y_temp)
+                if all_y_data:
+                    diff = (max(all_y_data) - min(all_y_data)) / 15
+                    mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
                 mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
             self.figure.canvas.draw_idle()
             # Not necessary, the lines has already all the style
@@ -339,10 +347,6 @@ class MatplotlibParser(BackendParserBase):
                 show_grid = self._pm.get_value('grid', self.canvas, plot)
                 mpl_axes.grid(show_grid)
 
-                for signal in signals:
-                    self._signal_impl_plot_lut.update({id(signal): mpl_axes})
-                    self.process_ipl_signal(signal)
-
                 # Update properties of the plot axes
                 for ax_idx in range(len(plot.axes)):
                     if isinstance(plot.axes[ax_idx], Collection):
@@ -351,6 +355,10 @@ class MatplotlibParser(BackendParserBase):
                     else:
                         axis = plot.axes[ax_idx]
                         self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
+
+                for signal in signals:
+                    self._signal_impl_plot_lut.update({id(signal): mpl_axes})
+                    self.process_ipl_signal(signal)
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value('legend', self.canvas, plot)
