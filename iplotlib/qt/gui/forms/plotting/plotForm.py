@@ -28,6 +28,8 @@ class PlotForm(IplotPreferencesForm):
         prototype = [
             {"label": "Title", "property": "title",
              "widget": self.create_lineedit()},
+            {"label": "Log scale", "property": "log_scale",
+             "widget": self.create_checkbox()},
             {"label": "Grid", "property": "grid",
              "widget": self.create_checkbox()},
             {"label": "Legend", "property": "legend",

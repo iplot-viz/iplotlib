@@ -6,13 +6,13 @@ from typing import Any, Callable, Collection, List
 
 import numpy as np
 from matplotlib.axes import Axes as MPLAxes
-from matplotlib.axis import Tick
+from matplotlib.axis import Tick, YAxis
 from matplotlib.axis import Axis as MPLAxis
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.text import Text
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, LogLocator
 from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
@@ -345,7 +345,15 @@ class MatplotlibParser(BackendParserBase):
 
                 # Show the grid if enabled
                 show_grid = self._pm.get_value('grid', self.canvas, plot)
-                mpl_axes.grid(show_grid)
+                log_scale = self._pm.get_value('log_scale', self.canvas, plot)
+
+                if show_grid:
+                    if log_scale:
+                        mpl_axes.grid(show_grid, which='both')
+                    else:
+                        mpl_axes.grid(show_grid, which='major')
+                else:
+                    mpl_axes.grid(show_grid, which='both')
 
                 # Update properties of the plot axes
                 for ax_idx in range(len(plot.axes)):
@@ -465,6 +473,15 @@ class MatplotlibParser(BackendParserBase):
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
 
         if isinstance(axis, Axis):
+
+            if isinstance(mpl_axis, YAxis):
+                log_scale = self._pm.get_value('log_scale', self.canvas, plot)
+                if log_scale:
+                    mpl_axis.axes.set_yscale('log')
+                    # Format for minor ticks
+                    y_minor = LogLocator(base=10, subs=(1.0,))
+                    mpl_axis.set_minor_locator(y_minor)
+
             fc = self._pm.get_value('font_color', self.canvas, plot, axis) or 'black'
             fs = self._pm.get_value('font_size', self.canvas, plot, axis)
 
