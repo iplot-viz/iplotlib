@@ -442,7 +442,7 @@ class MatplotlibParser(BackendParserBase):
             for signal_ref in ci.signals:
                 signal = signal_ref()
                 if hasattr(signal, "set_xranges"):
-                    if signal.x_expr != '${self}.time' and len(signal.data_store[0]):
+                    if signal.x_expr != '${self}.time' and len(signal.data_store[0]) > 0 and len(signal.x_data) > 0:
                         idx1 = np.searchsorted(signal.x_data, ranges[0])
                         idx2 = np.searchsorted(signal.x_data, ranges[1])
 
