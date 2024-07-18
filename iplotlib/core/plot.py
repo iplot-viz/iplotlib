@@ -122,6 +122,7 @@ class PlotXY(Plot):
     A concrete Plot class specialized for 2D plottling.
     """
 
+    log_scale: bool = None  # indicate the log scale
     grid: bool = None  #: indicate if the grid must be drawn
     line_style: str = None  #: set the line style of all signals.
     line_size: int = None  #: set the line size of all signals.
@@ -152,6 +153,7 @@ class PlotXY(Plot):
         return color_signal
 
     def reset_preferences(self):
+        self.log_scale = PlotXY.log_scale
         self.grid = PlotXY.grid
         self.line_style = PlotXY.line_style
         self.line_size = PlotXY.line_size
@@ -161,6 +163,7 @@ class PlotXY(Plot):
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotXY'):
+        self.log_scale = old_plot.log_scale
         self.grid = old_plot.grid
         self.line_style = old_plot.line_style
         self.line_size = old_plot.line_size

@@ -8,7 +8,7 @@ from iplotlib.interface import IplotSignalAdapter
 from iplotlib.core import Canvas, PlotXY
 
 
-def plot():
+def get_canvas():
     s1 = IplotSignalAdapter(data_source='codacuda',
                             name='UTIL-SYSM-COM-4503-UT:SRV3602-NRBPS',
                             alias='36nrp',

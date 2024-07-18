@@ -13,6 +13,8 @@ class ConversionHelper:
         if isinstance(value, type_func):
             return value
         if isinstance(value, str):
+            if value == '':
+                value = '0'
             return type_func(value)
         if type(value).__module__ == 'numpy':
             return type_func(value.item())

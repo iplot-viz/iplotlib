@@ -34,6 +34,8 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.create_checkbox()},
             {"label": "Round hours", "property": "round_hour",
              "widget": self.create_checkbox()},
+            {"label": "Log scale", "property": "log_scale",
+             "widget": self.create_checkbox()},
             {"label": "Grid", "property": "grid",
              "widget": self.create_checkbox()},
             {"label": "Show all ticks", "property": "ticks_position",

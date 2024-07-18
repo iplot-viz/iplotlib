@@ -9,7 +9,7 @@ from iplotlib.core import SimpleSignal, Canvas, PlotXY
 import time
 
 
-def plot():
+def get_canvas():
     ts = time.time_ns()
     te = ts + 8 * 32
     xs = np.arange(ts, te, 8, dtype=np.int64)

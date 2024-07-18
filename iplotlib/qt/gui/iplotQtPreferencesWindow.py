@@ -49,6 +49,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         self.treeView.setHeaderHidden(True)
         self.treeView.setModel(canvasAssembly)
         self.treeView.selectionModel().selectionChanged.connect(self.on_item_selected)
+        canvasAssembly.rowsInserted.connect(self.treeView.expandAll)
         self._applyTime = time.time_ns()
 
         self._forms = {
@@ -130,6 +131,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         self.treeView.selectionModel().clearSelection()
         # Select model using the specified command
         self.treeView.selectionModel().select(self.treeView.model().index(0, 0), QItemSelectionModel.Select)
+        self.treeView.expandAll()
         return super().showEvent(event)
 
     def manual_reset(self, idx: int):

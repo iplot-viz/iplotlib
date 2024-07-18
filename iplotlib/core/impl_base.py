@@ -172,7 +172,21 @@ class BackendParserBase(ABC):
             signals = ci.signals
             for signal_ref in signals:
                 self.process_ipl_signal(signal_ref())
+            plot = ci.plot()
+            mpl_axes = self._plot_impl_plot_lut[id(ci.plot())][0]
+            for stack_id, key in enumerate(sorted(plot.signals.keys())):
+                for ax_idx in range(len(plot.axes)):
+                    if isinstance(plot.axes[ax_idx], Collection):
+                        axis = plot.axes[ax_idx][stack_id]
+                        self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
+                    else:
+                        axis = plot.axes[ax_idx]
+                        self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
         self.unstale_cache_items()
+
+    @abstractmethod
+    def autoscale_y_axis(self, impl_plot):
+        pass
 
     @abstractmethod
     def export_image(self, filename: str, **kwargs):
