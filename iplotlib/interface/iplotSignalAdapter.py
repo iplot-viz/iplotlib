@@ -120,6 +120,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     y_expr: str = '${self}.data_store[1]'  # Changed by IDV-333
     z_expr: str = '${self}.data_store[2]'  # Changed by IDV-333
 
+    extremities: bool = False
+
     plot_type: str = ''
 
     children: typing.List[IplotSignalAdapterT] = field(default_factory=list)
