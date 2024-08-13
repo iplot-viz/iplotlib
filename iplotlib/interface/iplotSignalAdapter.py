@@ -893,7 +893,7 @@ class ParserHelper:
         p = Parser()
         p.inject(Parser.get_member_list(type(signal)))
         p.inject(signal.alias_map)
-        p.set_expression(expression)
+        p.set_expression(expression, True)
         if not p.is_valid:
             raise InvalidExpression(f"expression: {expression} is invalid!")
 
@@ -909,7 +909,7 @@ class ParserHelper:
                 logger.debug(f"expression: {expression}")
 
         p.clear_expr()
-        p.set_expression(expression)
+        p.set_expression(expression, True)
         if not p.is_valid:
             raise InvalidExpression(f"expression: {expression} is invalid!")
 
@@ -936,7 +936,7 @@ class ParserHelper:
             signal.set_data(tmp_local_env['self'].data_store)
 
         p.clear_expr()
-        p.set_expression(expression)
+        p.set_expression(expression, True)
         p.substitute_var(tmp_local_env)
         p.eval_expr()
         if p.has_time_units:
