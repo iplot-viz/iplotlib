@@ -25,9 +25,8 @@ from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
                            BackendParserBase,
-                           Plot, PlotXY, PlotContour, 
+                           Plot, PlotXYWithSlider, PlotContourWithSlider,
                            Signal)
-from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
@@ -86,7 +85,6 @@ class MatplotlibParser(BackendParserBase):
             signal.color = plot.get_next_color()
 
         style = self.get_signal_style(signal, plot)
-
 
         # if isinstance(lines, list):
         #     if isinstance(plot, PlotXY):
@@ -173,10 +171,7 @@ class MatplotlibParser(BackendParserBase):
         #                              levels=contour_levels)]
         #         mpl_axes.set_aspect('equal', adjustable='box')
 
-
         if isinstance(plot_lines, list):
-            if isinstance(plot, PlotXY):
-                if isinstance(plot, PlotXYWithSlider):
             if x_data.ndim == 1 and y_data.ndim == 1:
                 line = plot_lines[0][0]
                 line.set_xdata(x_data)
@@ -382,7 +377,7 @@ class MatplotlibParser(BackendParserBase):
         subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
         if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
             # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
-            subgrid_item = grid_item.subgridspec(stack_sz+1, 1, hspace=0, height_ratios=heights)
+            subgrid_item = grid_item.subgridspec(stack_sz + 1, 1, hspace=0, height_ratios=heights)
             sub_subgrid_item = subgrid_item[0, 0].subgridspec(1, 2, hspace=0, width_ratios=[0.9, 0.15])
             # Add Slider
             slider_ax = self.figure.add_subplot(sub_subgrid_item[0, 0])
