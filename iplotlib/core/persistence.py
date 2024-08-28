@@ -6,7 +6,6 @@ import dataclasses
 import json
 from json import JSONEncoder
 from typing import Dict, List
-import uuid
 
 import numpy as np
 
@@ -30,13 +29,15 @@ class JSONExporter:
     def from_dict(self, inp_dict):
         return self.dataclass_from_dict(inp_dict)
 
-    def to_json(self, obj):
+    @staticmethod
+    def to_json(obj):
         return json.dumps(obj, cls=DataclassNumpyJSONEncoder, indent=4)
 
     def from_json(self, string):
         return self.from_dict(json.loads(string))
 
-    def make_compatible(self, d, klass):
+    @staticmethod
+    def make_compatible(d, klass):
         from iplotlib.core.signal import Signal
         if issubclass(klass, Signal):
             try:
@@ -62,7 +63,6 @@ class JSONExporter:
             type_alias = self.TYPE_ALIASES.get(kls)
             return create_klass(kls) if type_alias is None else create_klass(type_alias)
 
-
         if isinstance(d, Dict):
             if d.get("_type") is not None:
                 klass = create_klass_using_aliases(d.get("_type"))
@@ -73,10 +73,14 @@ class JSONExporter:
         if isinstance(d, List):
             return [self.dataclass_from_dict(e) for e in d]
 
-        try:
-            field_types = {f.name: f.type for f in dataclasses.fields(klass)}
-            return klass(**{f: self.dataclass_from_dict(d[f], field_types[f]) for f in d})
-        except:
+        if dataclasses.is_dataclass(klass):
+            try:
+                field_types = {f.name: f.type for f in dataclasses.fields(klass)}
+                return klass(**{f: self.dataclass_from_dict(d[f], field_types[f]) for f in d if f in field_types})
+            except Exception as e:
+                print(f"Error: {e}")
+                return d
+        else:
             return d
 
 

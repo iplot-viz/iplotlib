@@ -5,8 +5,7 @@ from iplotlib.qt.gui.iplotOverlayCanvasTool import QtOverlayCanvasTool
 
 
 class QtOverlayPanTool(QtOverlayCanvasTool):
-
-    panAction = Signal(float,float,float,float)
+    panAction = Signal(float, float, float, float)
 
     def __init__(self):
         super().__init__()
@@ -22,8 +21,10 @@ class QtOverlayPanTool(QtOverlayCanvasTool):
                 pos = QPointF(*widget._gnuplot_canvas.to_graph(event.localPos().x(), event.localPos().y()))
                 delta = self.move_start - pos
                 bounds = widget._gnuplot_canvas.plot_range
-                widget._gnuplot_canvas.set_bounds(bounds[0]+delta.x(), bounds[1]+delta.y(), bounds[2]+delta.x(), bounds[3]+delta.y(), replot=True)
-                self.panAction.emit(bounds[0]+delta.x(), bounds[1]+delta.y(), bounds[2]+delta.x(), bounds[3]+delta.y())
+                widget._gnuplot_canvas.set_bounds(bounds[0] + delta.x(), bounds[1] + delta.y(), bounds[2] + delta.x(),
+                                                  bounds[3] + delta.y(), replot=True)
+                self.panAction.emit(bounds[0] + delta.x(), bounds[1] + delta.y(), bounds[2] + delta.x(),
+                                    bounds[3] + delta.y())
             return True
 
         elif event.type() == QtCore.QEvent.Enter:

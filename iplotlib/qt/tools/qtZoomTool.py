@@ -20,12 +20,13 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
             if self.graph_bounds:
                 x1 = self.__limit(x1, self.graph_bounds[0], self.graph_bounds[2])
                 x2 = self.__limit(x2, self.graph_bounds[0], self.graph_bounds[2])
-                y1 = self.__limit(y1, painter.viewport().height()-self.graph_bounds[3], painter.viewport().height()-self.graph_bounds[1])
-                y2 = self.__limit(y2, painter.viewport().height()-self.graph_bounds[3], painter.viewport().height()-self.graph_bounds[1])
+                y1 = self.__limit(y1, painter.viewport().height() - self.graph_bounds[3],
+                                  painter.viewport().height() - self.graph_bounds[1])
+                y2 = self.__limit(y2, painter.viewport().height() - self.graph_bounds[3],
+                                  painter.viewport().height() - self.graph_bounds[1])
 
-            painter.fillRect(x1, y1, x2-x1, y2-y1, QBrush(QColor(255, 0, 255, 64)))
-            painter.drawRect(x1, y1, x2-x1, y2-y1)
-
+            painter.fillRect(x1, y1, x2 - x1, y2 - y1, QBrush(QColor(255, 0, 255, 64)))
+            painter.drawRect(x1, y1, x2 - x1, y2 - y1)
 
     def process_event(self, widget, event):
 
@@ -68,15 +69,13 @@ class QtOverlayZoomTool(QtOverlayCanvasTool):
     def __distance(self, start: QPoint, end: QPoint) -> float:
         if start is None or end is None:
             return 0
-        return sqrt((start.x()-end.x())**2 + (start.y()-end.y())**2)
+        return sqrt((start.x() - end.x()) ** 2 + (start.y() - end.y()) ** 2)
 
     def __do_zoom(self, widget, start: QPoint, end: QPoint):
         if hasattr(widget, "_gnuplot_canvas"):
             gs = widget._gnuplot_canvas.to_graph(start.x(), start.y())
             ge = widget._gnuplot_canvas.to_graph(end.x(), end.y())
             widget._gnuplot_canvas.set_bounds(gs[0], gs[1], ge[0], ge[1], replot=True, save_history=True)
-
-
 
     def __limit(self, val, lo, hi):
         if val < lo:

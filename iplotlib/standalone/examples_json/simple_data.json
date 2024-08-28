@@ -1,0 +1,64 @@
+{
+  "rows": 4,
+  "cols": 1,
+  "grid": true,
+  "plots": [
+    [
+      {
+        "row_span": 1,
+        "col_span": 1,
+        "axes": [
+          {
+            "_type": "iplotlib.core.axis.LinearAxis",
+            "original_begin": 1713195380000000000,
+            "original_end": 1713800180000000000,
+            "begin": 1713195380000000000,
+            "end": 1713800180000000000,
+            "is_date": true,
+            "window": null,
+            "follow": false
+          },
+          [
+            {
+              "_type": "iplotlib.core.axis.LinearAxis",
+              "original_begin": 651.3888916015627,
+              "original_end": 783.7962890625003,
+              "begin": 651.3888916015627,
+              "end": 783.7962890625003,
+              "is_date": false,
+              "window": null,
+              "follow": false
+            }
+          ]
+        ],
+        "signals": {
+          "1": [
+            {
+              "uid": "1836c2f5-dcdc-48ee-8558-a2db9e09a2c9",
+              "name": "CWS-SCSU-HR00:ML0004-LT-XI",
+              "color": "#1f77b4",
+              "hi_precision_data": false,
+              "plot_type": "PlotXY",
+              "_type": "iplotlib.interface.iplotSignalAdapter.IplotSignalAdapter",
+              "data_source": "codacuda",
+              "ts_start": 1713195380000000000,
+              "ts_end": 1713800180000000000,
+              "ts_relative": false,
+              "isDownsampled": true,
+              "status_info": {
+                "msg": "",
+                "num_points": 1931,
+                "result": "Success",
+                "stage": "Data-Access",
+                "inf": 0
+              }
+            }
+          ]
+        },
+        "_type": "iplotlib.core.plot.PlotXY"
+      }
+    ]
+  ],
+  "streaming": false,
+  "_type": "iplotlib.core.canvas.Canvas"
+}

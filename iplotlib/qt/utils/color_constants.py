@@ -132,7 +132,6 @@ DEEPSKYBLUE2 = RGB(0, 178, 238)
 DEEPSKYBLUE3 = RGB(0, 154, 205)
 DEEPSKYBLUE4 = RGB(0, 104, 139)
 DIMGRAY = RGB(105, 105, 105)
-DIMGRAY = RGB(105, 105, 105)
 DODGERBLUE1 = RGB(30, 144, 255)
 DODGERBLUE2 = RGB(28, 134, 238)
 DODGERBLUE3 = RGB(24, 116, 205)
@@ -271,7 +270,6 @@ HOTPINK1 = RGB(255, 110, 180)
 HOTPINK2 = RGB(238, 106, 167)
 HOTPINK3 = RGB(205, 96, 144)
 HOTPINK4 = RGB(139, 58, 98)
-INDIANRED = RGB(176, 23, 31)
 INDIANRED = RGB(205, 92, 92)
 INDIANRED1 = RGB(255, 106, 106)
 INDIANRED2 = RGB(238, 99, 99)
@@ -560,7 +558,6 @@ WHEAT3 = RGB(205, 186, 150)
 WHEAT4 = RGB(139, 126, 102)
 WHITE = RGB(255, 255, 255)
 WHITESMOKE = RGB(245, 245, 245)
-WHITESMOKE = RGB(245, 245, 245)
 YELLOW1 = RGB(255, 255, 0)
 YELLOW2 = RGB(238, 238, 0)
 YELLOW3 = RGB(205, 205, 0)
@@ -687,7 +684,6 @@ colors['deepskyblue1'] = DEEPSKYBLUE1
 colors['deepskyblue2'] = DEEPSKYBLUE2
 colors['deepskyblue3'] = DEEPSKYBLUE3
 colors['deepskyblue4'] = DEEPSKYBLUE4
-colors['dimgray'] = DIMGRAY
 colors['dimgray'] = DIMGRAY
 colors['dodgerblue1'] = DODGERBLUE1
 colors['dodgerblue2'] = DODGERBLUE2
@@ -827,7 +823,6 @@ colors['hotpink1'] = HOTPINK1
 colors['hotpink2'] = HOTPINK2
 colors['hotpink3'] = HOTPINK3
 colors['hotpink4'] = HOTPINK4
-colors['indianred'] = INDIANRED
 colors['indianred'] = INDIANRED
 colors['indianred1'] = INDIANRED1
 colors['indianred2'] = INDIANRED2
@@ -1117,15 +1112,15 @@ colors['wheat3'] = WHEAT3
 colors['wheat4'] = WHEAT4
 colors['white'] = WHITE
 colors['whitesmoke'] = WHITESMOKE
-colors['whitesmoke'] = WHITESMOKE
 colors['yellow1'] = YELLOW1
 colors['yellow2'] = YELLOW2
 colors['yellow3'] = YELLOW3
 colors['yellow4'] = YELLOW4
 colors = OrderedDict(sorted(colors.items(), key=lambda t: t[0]))
 
+
 def name_to_hex(colorName):
-    if not colorName in colors:
+    if colorName not in colors:
         return "#000000"
     else:
         return colors[colorName].hex_format()

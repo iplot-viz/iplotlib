@@ -11,24 +11,23 @@ A standalone iplotlib Qt Canvas. It is useful to test preferences-window, toolba
 
 from functools import partial
 import importlib
-import os
 import pkgutil
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import  QApplication
-from PySide6.QtGui import (QGuiApplication, QKeySequence, 
-        QAction, QActionGroup)
+from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import (QGuiApplication, QKeySequence,
+                           QAction, QActionGroup)
 
 from iplotlib.core import Canvas
-from iplotlib import examples as iplotExamples
+from iplotlib.standalone import examples as iplotExamples
 from iplotlib.interface.iplotSignalAdapter import AccessHelper
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.gui.iplotQtMainWindow import IplotQtMainWindow
 
-import iplotLogging.setupLogger as ls
+import iplotLogging.setupLogger as Sl
 
-logger = ls.get_logger(__name__)
+logger = Sl.get_logger(__name__)
 
 
 class QStandaloneCanvas:
@@ -82,23 +81,18 @@ class QStandaloneCanvas:
         Add the given abstract iplotlib canvas to the main window.
         """
         if not self.main_window:
-            logger.warning(
-                "Not yet. Please prepare the Qt application. Call 'prepare'")
+            logger.warning("Not yet. Please prepare the Qt application. Call 'prepare'")
             return
 
-        qt_canvas = IplotQtCanvasFactory.new(
-            self.impl_name, parent=self.main_window, canvas=canvas)
+        qt_canvas = IplotQtCanvasFactory.new(self.impl_name, parent=self.main_window, canvas=canvas)
         canvasIdx = self.main_window.canvasStack.count()
         self.main_window.canvasStack.addWidget(qt_canvas)
 
-        act = QAction(str(canvasIdx + 1).zfill(2) + '-' +
-                      canvas.title, self.main_window)
+        act = QAction(str(canvasIdx + 1).zfill(2) + '-' + canvas.title, self.main_window)
         act.setCheckable(True)
-        act.triggered.connect(
-            partial(self.main_window.canvasStack.setCurrentIndex, canvasIdx))
+        act.triggered.connect(partial(self.main_window.canvasStack.setCurrentIndex, canvasIdx))
         self.canvasActionGroup.addAction(act)
         self.selectMenu.addAction(act)
-
 
     def show(self):
         """
@@ -108,13 +102,13 @@ class QStandaloneCanvas:
         """
         if self.app is None:
             self.prepare()
-        
+
         # select the first canvas
         firstAct = self.canvasActionGroup.actions()[0]
         firstAct.trigger()
         self.main_window.resize(1920, 1080)
         self.main_window.show()
-    
+
     def run(self) -> int:
         """
         Show the main window and run the event loop.
@@ -125,7 +119,9 @@ class QStandaloneCanvas:
         logger.warning('The main thread is now blocked. You can no longer add canvases.')
         return self.app.exec_()
 
+
 args = None
+
 
 def proxy_main():
     """
@@ -133,17 +129,19 @@ def proxy_main():
     """
     global args
     AccessHelper.num_samples_override = args.use_fallback_samples
-    canvas_app = QStandaloneCanvas(args.impl, use_toolbar=args.toolbar)
+    # Change parameter 'use_toolbar' to False to not show the toolbar
+    canvas_app = QStandaloneCanvas(args.impl, use_toolbar=True)
     canvas_app.prepare()
 
-    for script in  pkgutil.walk_packages(iplotExamples.__path__, iplotExamples.__name__ + '.'):
+    for script in pkgutil.walk_packages(iplotExamples.__path__, iplotExamples.__name__ + '.'):
         module = importlib.import_module(script.name)
         if hasattr(module, 'skip'):
             continue
-        if hasattr(module, 'plot'):
-            canvas_app.add_canvas(module.plot())
+        if hasattr(module, 'get_canvas'):
+            canvas_app.add_canvas(module.get_canvas())
     canvas_app.show()
     return canvas_app.run()
+
 
 def main():
     """
@@ -169,6 +167,7 @@ def main():
         s.sort_stats("time").print_stats(10)
     else:
         sys.exit(proxy_main())
+
 
 if __name__ == '__main__':
     main()

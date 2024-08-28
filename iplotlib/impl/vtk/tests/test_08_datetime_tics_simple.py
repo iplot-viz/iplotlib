@@ -64,7 +64,6 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
 
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
     def test_08_datetime_tics_simple_visuals(self):
-
         self.canvas.set_canvas(self.core_canvas)
         self.canvas.update()
         self.canvas.show()

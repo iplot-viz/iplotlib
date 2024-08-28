@@ -2,9 +2,10 @@ import time
 from functools import partial
 from threading import Thread
 
-import iplotLogging.setupLogger as ls
+import iplotLogging.setupLogger as Sl
 
-logger = ls.get_logger(__name__)
+logger = Sl.get_logger(__name__)
+
 
 # CWS-SCSU-0000:CU510{1,2,3,4}-TT-XI, CTRL-SYSM-CUB-4505-61:CU000{1,2,3}-HTH-TT,BUIL-B36-VA-RT-RT1:CL0001-TT02-STATE
 # CTRL-SYSM-CUB-4505-61:CU0001-HTH-TT
@@ -25,7 +26,9 @@ class CanvasStreamer:
             for plot in col:
                 if plot:
                     for (stack_id, signals) in plot.signals.items():
-                        all_signals += signals
+                        for signal in signals:
+                            if signal.stream_valid:
+                                all_signals.append(signal)
 
         signals = {}
         for s in all_signals:
@@ -51,14 +54,15 @@ class CanvasStreamer:
         self.collectors.append(collect_thread)
 
     def stream_thread(self, ds, varnames, callback):
-        logger.info(F"STREAM START vars={varnames} ds={ds} startSubscription={self.da.startSubscription}")
-        streaming_thread = Thread(name="receiver", target=self.da.startSubscription, args=(ds,), kwargs={'params': varnames}, daemon=True)
+        logger.info(F"STREAM START vars={varnames} ds={ds} startSubscription={self.da.start_subscription}")
+        streaming_thread = Thread(name="receiver", target=self.da.start_subscription, args=(ds,),
+                                  kwargs={'params': varnames}, daemon=True)
         streaming_thread.start()
         self.streamers.append(streaming_thread)
 
         while not self.stop_flag:
             for varname in varnames:
-                dobj = self.da.getNextData(ds, varname)
+                dobj = self.da.get_next_data(ds, varname)
 
                 if dobj is not None and dobj.xdata is not None and len(dobj.xdata) > 0 and callback is not None:
                     callback(varname, dobj)
@@ -67,7 +71,7 @@ class CanvasStreamer:
         logger.info("Issuing stop subscription...")
 
         # self.da.stopSubscription(ds)
-        stopping_thread = Thread(name="stopper", target=self.da.stopSubscription, args=(ds,))
+        stopping_thread = Thread(name="stopper", target=self.da.stop_subscription, args=(ds,))
         stopping_thread.start()
 
     def stop(self):
@@ -83,17 +87,17 @@ class CanvasStreamer:
         for signal in signals_by_name:
             if hasattr(signal, 'inject_external'):
                 result = dict(alias_map={
-                            'time': {'idx': 0, 'independent': True},
-                            'data': {'idx': 1}
-                            },
-                          d0=dobj.xdata,
-                          d1=dobj.ydata,
-                          d2=[],
-                          d3=[],
-                          d0_unit=dobj.xunit,
-                          d1_unit=dobj.yunit,
-                          d2_unit='',
-                          d3_unit='')
+                    'time': {'idx': 0, 'independent': True},
+                    'data': {'idx': 1}
+                },
+                    d0=dobj.xdata,
+                    d1=dobj.ydata,
+                    d2=[],
+                    d3=[],
+                    d0_unit=dobj.xunit,
+                    d1_unit=dobj.yunit,
+                    d2_unit='',
+                    d3_unit='')
                 signal.inject_external(append=True, **result)
                 logger.info(f"Updated {varname} with {len(dobj.xdata)} new samples")
                 callback(signal)

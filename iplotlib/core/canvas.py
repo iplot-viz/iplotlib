@@ -45,9 +45,11 @@ class Canvas(ABC):
 
     round_hour: bool = False
 
+    log_scale: bool = False  # a boolean that represents the log scale
+
     line_style: str = None  #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
     # default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent
-    # points should be canvas impementation dependent
+    # points should be canvas implementation dependent
     line_size: int = None
 
     #: default marker type to display. If set a marker is drawn at every point of the data sample.
@@ -67,7 +69,7 @@ class Canvas(ABC):
     legend: bool = True  #: a boolean that suggests the visibility of a plot legend box.
     legend_position: str = 'upper right'  #: indicate the location of the plot legend
     legend_layout: str = 'vertical'  #: indicate the layout of the plot legend
-    grid: bool = False #: a boolean that suggests the visibility of a plot grid
+    grid: bool = False  #: a boolean that suggests the visibility of a plot grid
     ticks_position: bool = False
 
     #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
@@ -77,6 +79,7 @@ class Canvas(ABC):
     enable_ValLabel_crosshair: bool = True
 
     plots: List[List[Union[Plot, None]]] = None  #: A 22-level nested list of plots.
+    focus_plot: Plot = None
 
     crosshair_enabled: bool = False  #: visibility of crosshair.
     crosshair_color: str = "red"  #: color of the crosshair cursor lines.
@@ -97,6 +100,8 @@ class Canvas(ABC):
     auto_refresh: int = 0
 
     _type: str = None
+
+    undo_redo: bool = False
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -156,6 +161,7 @@ class Canvas(ABC):
         """
         self.font_size = Canvas.font_size
         self.shared_x_axis = Canvas.shared_x_axis
+        self.log_scale = Canvas.log_scale
         self.grid = Canvas.grid
         self.legend = Canvas.legend
         self.legend_position = Canvas.legend_position
@@ -174,6 +180,7 @@ class Canvas(ABC):
         self.marker_size = Canvas.marker_size
         self.step = Canvas.step
         self.full_mode_all_stack = Canvas.full_mode_all_stack
+        self.focus_plot = Canvas.focus_plot
 
     def merge(self, old_canvas: 'Canvas'):
         """
@@ -182,6 +189,7 @@ class Canvas(ABC):
         self.title = old_canvas.title
         self.font_size = old_canvas.font_size
         self.shared_x_axis = old_canvas.shared_x_axis
+        self.log_scale = old_canvas.log_scale
         self.grid = old_canvas.grid
         self.legend = old_canvas.legend
         self.legend_position = old_canvas.legend_position
@@ -200,6 +208,7 @@ class Canvas(ABC):
         self.marker_size = old_canvas.marker_size
         self.step = old_canvas.step
         self.full_mode_all_stack = old_canvas.full_mode_all_stack
+        self.focus_plot = old_canvas.focus_plot
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
@@ -210,7 +219,7 @@ class Canvas(ABC):
                         plot.merge(old_plot)
 
         # Gather all old signals into a map with uid as key
-        def computeSignalUniqKey(computed_signal: Signal):
+        def compute_signal_uniqkey(computed_signal: Signal):
             # Consider signal is same if it has the same row uid, name
             signal_key = computed_signal.uid + ";" + computed_signal.name
             return signal_key
@@ -221,7 +230,7 @@ class Canvas(ABC):
                 if old_plot:
                     for old_signals in old_plot.signals.values():
                         for old_signal in old_signals:
-                            key = computeSignalUniqKey(old_signal)
+                            key = compute_signal_uniqkey(old_signal)
                             map_old_signals[key] = old_signal
 
         # Merge signals at canvas level to handle move between plots
@@ -230,38 +239,52 @@ class Canvas(ABC):
                 if plot:
                     for signals in plot.signals.values():
                         for signal in signals:
-                            key = computeSignalUniqKey(signal)
+                            key = compute_signal_uniqkey(signal)
                             if key in map_old_signals:
                                 signal.merge(map_old_signals[key])
 
     def get_signals_as_csv(self):
         x = pd.DataFrame()
+        focus_plot = self.focus_plot
         for c, column in enumerate(self.plots):
             for r, row in enumerate(column):
-                for p, plot in enumerate(row.signals.values()):
-                    for s, pl_signal in enumerate(plot):
-                        col_name = f"plot{r + 1}.{c + 1}"
-                        if len(row.signals) > 1:
-                            col_name += f".{p + 1}"
-                        if pl_signal.alias:
-                            col_name += f"_{pl_signal.alias}"
-                        else:
-                            col_name += f"_{pl_signal.name}"
+                if row and (not focus_plot or row == focus_plot):
+                    for p, plot in enumerate(row.signals.values()):
+                        for s, pl_signal in enumerate(plot):
+                            col_name = f"plot{r + 1}.{c + 1}"
+                            if len(row.signals) > 1:
+                                col_name += f".{p + 1}"
+                            if pl_signal.alias:
+                                col_name += f"_{pl_signal.alias}"
+                            else:
+                                col_name += f"_{pl_signal.name}"
 
-                        timestamps = [pd.Timestamp(value) for value in pl_signal.x_data]
-                        format_ts = [ts.strftime("%Y-%m-%dT%H:%M:%S.%f") + "{:03d}".format(ts.nanosecond) + "Z"
-                                     for ts in timestamps]
-                        if pl_signal.envelope:
-                            result = []
-                            for i in range(len(pl_signal.y_data)):
-                                min_values = pl_signal.y_data[i]
-                                max_values = pl_signal.z_data[i]
-                                avg_values = pl_signal.data_store[3][i]
-                                result.append(f"({min_values};{avg_values};{max_values})")
-                            x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
-                            x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
-                        else:
+                            # Refresh limits
+                            mask = (pl_signal.x_data >= pl_signal.ts_start) & (pl_signal.x_data <= pl_signal.ts_end)
+                            pl_signal.x_data = pl_signal.x_data[mask]
+                            pl_signal.y_data = pl_signal.y_data[mask]
 
-                            x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
-                            x[f"{col_name}.data"] = pd.Series(pl_signal.y_data, name=f"{col_name}.data")
+                            # Check min and max dates
+                            if pl_signal.x_data.size > 0 and bool(min(pl_signal.x_data) > (1 << 53) and
+                                                                  max(pl_signal.x_data) < pd.Timestamp.max.value):
+
+                                timestamps = [pd.Timestamp(value) for value in pl_signal.x_data]
+                                format_ts = [ts.strftime("%Y-%m-%dT%H:%M:%S.%f") + "{:03d}".format(ts.nanosecond) + "Z"
+                                             for ts in timestamps]
+                            else:
+                                format_ts = pl_signal.x_data
+
+                            if pl_signal.envelope:
+                                result = []
+                                for i in range(len(pl_signal.y_data)):
+                                    min_values = pl_signal.y_data[i]
+                                    max_values = pl_signal.z_data[i]
+                                    avg_values = pl_signal.data_store[3][i]
+                                    result.append(f"({min_values};{avg_values};{max_values})")
+                                x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
+                                x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
+                            else:
+
+                                x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
+                                x[f"{col_name}.data"] = pd.Series(pl_signal.y_data, name=f"{col_name}.data")
         return x.to_csv(index=False)

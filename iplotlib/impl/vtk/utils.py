@@ -2,7 +2,7 @@ import datetime
 import numpy as np
 import os
 import shutil
-import typing
+from typing import Tuple, Union, Any
 
 from vtkmodules.vtkCommonDataModel import vtkColor4d, vtkColor3d, vtkColor4ub, vtkColor3ub, vtkImageData
 from vtkmodules.vtkCommonColor import vtkNamedColors
@@ -11,19 +11,21 @@ from vtkmodules.vtkIOImage import vtkPNGReader, vtkJPEGReader, vtkPNGWriter, vtk
 from vtkmodules.vtkRenderingCore import vtkRenderWindow, vtkWindowToImageFilter
 
 import logging
+
 logger = logging.getLogger(__name__)
 vtkColors = vtkNamedColors()
 
 
-def get_color4d(color: str) -> typing.Tuple[float]:
-    """See [VTKNamedColorPatches](https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
+def get_color4d(color: str) -> Union[Tuple[float], Tuple[float, float, float, float]]:
+    """See [VTKNamedColorPatches]
+    (https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
     for valid color names
 
     Args:
         color (str): a valid color name
 
     Returns:
-        typing.Tuple[float]: r, g, b, a (0. ... 1.)
+        Tuple[float]: r, g, b, a (0. ... 1.)
     """
     if color[0] == "#" and len(color) == 7:
         color += "FF"
@@ -32,17 +34,19 @@ def get_color4d(color: str) -> typing.Tuple[float]:
         return tuple(int(color[i:i + 2], 16) / 255 for i in range(1, 9, 2))
     c4d = vtkColor4d()
     vtkColors.GetColor(color, c4d)
-    return (c4d.GetRed(), c4d.GetGreen(), c4d.GetBlue(), c4d.GetAlpha())
+    return c4d.GetRed(), c4d.GetGreen(), c4d.GetBlue(), c4d.GetAlpha()
 
-def get_color4ub(color: str) -> typing.Tuple[int]:
-    """See [VTKNamedColorPatches](https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
+
+def get_color4ub(color: str) -> Union[Tuple[int], Tuple[int, int, int, int]]:
+    """See [VTKNamedColorPatches]
+    (https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
     for valid color names
 
     Args:
         color (str): a valid color name
 
     Returns:
-        typing.Tuple[int]: r, g, b, a (0 ... 255)
+        Tuple[int]: r, g, b, a (0 ... 255)
     """
     if color[0] == "#" and len(color) == 7:
         color += "FF"
@@ -51,44 +55,49 @@ def get_color4ub(color: str) -> typing.Tuple[int]:
         return tuple(int(color[i:i + 2], 16) for i in range(1, 9, 2))
     c4ub = vtkColor4ub()
     vtkColors.GetColor(color, c4ub)
-    return (c4ub.GetRed(), c4ub.GetGreen(), c4ub.GetBlue(), c4ub.GetAlpha())
+    return c4ub.GetRed(), c4ub.GetGreen(), c4ub.GetBlue(), c4ub.GetAlpha()
 
-def get_color3d(color: str) -> typing.Tuple[float]:
-    """See [VTKNamedColorPatches](https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
+
+def get_color3d(color: str) -> Union[Tuple[float], Tuple[float, float, float]]:
+    """See [VTKNamedColorPatches]
+    (https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
     for valid color names
 
     Args:
         color (str): a valid color name
 
     Returns:
-        typing.Tuple[float]: r, g, b (0. ... 1.)
+        Tuple[float]: r, g, b (0. ... 1.)
     """
     if color[0] == "#" and len(color) == 7:
         # Convert hex string to RGBA
         return tuple(int(color[i:i + 2], 16) / 255 for i in range(1, 7, 2))
     c3d = vtkColor3d()
     vtkColors.GetColor(color, c3d)
-    return (c3d.GetRed(), c3d.GetGreen(), c3d.GetBlue())
+    return c3d.GetRed(), c3d.GetGreen(), c3d.GetBlue()
 
-def get_color3ub(color: str) -> typing.Tuple[int]:
-    """See [VTKNamedColorPatches](https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
+
+def get_color3ub(color: str) -> Union[Tuple[int], Tuple[int, int, int]]:
+    """See [VTKNamedColorPatches]
+    (https://htmlpreview.github.io/?https://github.com/Kitware/vtk-examples/blob/gh-pages/VTKNamedColorPatches.html)
     for valid color names
 
     Args:
         color (str): a valid color name
 
     Returns:
-        typing.Tuple[int]: r, g, b (0 ... 255)
+        Tuple[int]: r, g, b (0 ... 255)
     """
     if color[0] == "#" and len(color) == 7:
         # Convert hex string to RGBA
         return tuple(int(color[i:i + 2], 16) for i in range(1, 7, 2))
     c3ub = vtkColor3ub()
     vtkColors.GetColor(color, c3ub)
-    return (c3ub.GetRed(), c3ub.GetGreen(), c3ub.GetBlue())
+    return c3ub.GetRed(), c3ub.GetGreen(), c3ub.GetBlue()
+
 
 def read_image(fname: str) -> vtkImageData:
-
+    reader = None
     if fname.endswith("png"):
         reader = vtkPNGReader()
     elif fname.endswith("jpg") or fname.endswith("jpeg"):
@@ -100,7 +109,6 @@ def read_image(fname: str) -> vtkImageData:
 
 
 def write_image(fname: str, image: vtkImageData):
-
     if fname.endswith("png"):
         writer = vtkPNGWriter()
     elif fname.endswith("jpg") or fname.endswith("jpeg"):
@@ -117,7 +125,6 @@ def write_image(fname: str, image: vtkImageData):
 
 
 def screenshot(renWin: vtkRenderWindow, fname: str = None):
-
     screenshot_impl = vtkWindowToImageFilter()
     screenshot_impl.SetInput(renWin)
     screenshot_impl.Modified()
@@ -129,7 +136,7 @@ def screenshot(renWin: vtkRenderWindow, fname: str = None):
     write_image(fname, screenshot_impl.GetOutput())
 
 
-def compare_images(valid: vtkImageData, test: vtkImageData) -> float:
+def compare_images(valid: vtkImageData, test: vtkImageData) -> Tuple[float, Any]:
     comparator = vtkImageDifference()
     comparator.SetInputData(test)
     comparator.SetImageData(valid)
@@ -137,11 +144,11 @@ def compare_images(valid: vtkImageData, test: vtkImageData) -> float:
     return comparator.GetThresholdedError(), comparator.GetOutput()
 
 
-def regression_test(valid_image_abs_path: str, renWin: vtkRenderWindow, threshold = 0.15) -> bool:
+def regression_test(valid_image_abs_path: str, renWin: vtkRenderWindow, threshold=0.15) -> bool:
     valid_image_name = os.path.basename(valid_image_abs_path)
     test_image_name = valid_image_name.replace("valid", "test")
     diff_image_name = valid_image_name.replace("valid", "diff")
-    
+
     baseline_dir = os.path.dirname(valid_image_abs_path)
     tests_dir = os.path.dirname(baseline_dir)
 

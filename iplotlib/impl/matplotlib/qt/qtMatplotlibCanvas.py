@@ -5,12 +5,14 @@
 #               -Fix draw_in_main_thread for when C++ object might have been deleted. [Jaswant Sai Panchumarti]
 #               -Refactor qt classes [Jaswant Sai Panchumarti]
 #               -Port to PySide2 [Jaswant Sai Panchumarti]
-#   Jan 2022:   -Introduce custom HistoryManagement for zooming and panning with git style revision control [Jaswant Sai Panchumarti]
+#   Jan 2022:   -Introduce custom HistoryManagement for zooming and panning with git style revision control
+#                [Jaswant Sai Panchumarti]
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
-import pandas as pd
-from PySide6.QtCore import QMargins, QMetaObject, Qt, Slot, Signal
+from collections import defaultdict
+
+from PySide6.QtCore import QMargins, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
 from iplotlib.core.plot import PlotContour, PlotContourWithSlider
@@ -21,13 +23,12 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
-import iplotLogging.setupLogger as ls
+import iplotLogging.setupLogger as Sl
 
-logger = ls.get_logger(__name__)
+logger = Sl.get_logger(__name__)
 
 
 class QtMatplotlibCanvas(IplotQtCanvas):
@@ -40,6 +41,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
+
+        self.info_shared_x_dialog = False
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
@@ -58,6 +61,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_renderer.mpl_connect('draw_event', self._mpl_draw_finish)
         self._mpl_renderer.mpl_connect('button_press_event', self._mpl_mouse_press_handler)
         self._mpl_renderer.mpl_connect('button_release_event', self._mpl_mouse_release_handler)
+        self._mpl_renderer.mpl_connect('pick_event', self.on_pick_legend)
 
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
@@ -81,6 +85,38 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self.render()
         super().set_canvas(canvas)
 
+        # Check if plots share time axis
+        ranges = []
+        plot_stack = []
+
+        if canvas.shared_x_axis:
+            if not self.info_shared_x_dialog:
+                self.info_shared_x_dialog = True
+                for row_idx, col in enumerate(canvas.plots, start=1):
+                    for col_idx, plot in enumerate(col, start=1):
+                        axis = plot.axes[0]
+                        ranges.append((axis.original_begin, axis.original_end))
+                        plot_stack.append(f"{col_idx}.{row_idx}")
+
+                dict_ranges = defaultdict(list)
+                for idx, uniq_range in enumerate(ranges):
+                    dict_ranges[uniq_range].append(plot_stack[idx])
+
+                # If there is more than one element in the dictionary it means that there is more than one time
+                # range
+                if len(dict_ranges) > 1:
+                    box = QMessageBox()
+                    box.setIcon(QMessageBox.Information)
+                    message = "There are plots with different time range:\n"
+                    for i, stacks in enumerate(dict_ranges.values(), start=1):
+                        plots_str = ", ".join(stacks)
+                        message += f"Time range {i}: Plots {plots_str}\n"
+
+                    box.setText(message)
+                    box.exec_()
+        else:
+            self.info_shared_x_dialog = False
+
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
         return self._parser.canvas
@@ -91,21 +127,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if self._mpl_toolbar:
             self._mpl_toolbar.mode = _Mode.NONE
             self._parser.deactivate_cursor()
-
+        else:
+            return
         if self._mmode is None:
             return
 
-        if not self._mpl_toolbar:
-            return
-
-        if mode == Canvas.MOUSE_MODE_CROSSHAIR:
+        if mode == Canvas.MOUSE_MODE_SELECT:
+            self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
+        elif mode == Canvas.MOUSE_MODE_CROSSHAIR:
             self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
             self._parser.activate_cursor()
         elif mode == Canvas.MOUSE_MODE_PAN:
-            self._parser.deactivate_cursor()
             self._mpl_toolbar.pan()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
-            self._parser.deactivate_cursor()
             self._mpl_toolbar.zoom()
 
     def undo(self):
@@ -118,6 +152,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def unfocus_plot(self):
         self._parser.set_focus_plot(None)
+        self.info_shared_x_dialog = False
 
     def drop_history(self):
         return self._parser.drop_history()
@@ -132,11 +167,34 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._draw_call_counter += 1
         self._debug_log_event(event, f"Draw call {self._draw_call_counter}")
 
+    def on_pick_legend(self, event):
+        # On the pick event, find the original line corresponding to the legend
+        # proxy line, and toggle its visibility.
+        legend_line = event.artist
+
+        ax_lines, signal = self._parser.map_legend_to_ax[legend_line]
+        visible = True
+        for ax_line in ax_lines:
+            visible = not ax_line.get_visible()
+            ax_line.set_visible(visible)
+
+        # signal.lines = ax_lines
+        # Change the alpha on the line in the legend, so we can see what lines
+        # have been toggled.
+        legend_line.set_alpha(1.0 if visible else 0.2)
+        self._parser.figure.canvas.draw()
+
     def _mpl_mouse_press_handler(self, event: MouseEvent):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
+
+        # If the mouse is over the legend it ignores it
+        if event.inaxes and event.inaxes.get_legend() and event.inaxes.get_legend().contains(event)[0]:
+            return
+
         if event.dblclick:
-            if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT and event.inaxes is not None:
+            if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT and \
+                    event.inaxes is not None:
                 self._parser.set_focus_plot(event.inaxes)
                 self._refresh_original_ranges = False
                 self.refresh()
@@ -226,7 +284,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # commit commands from staging.
                 while len(self._staging_cmds):
                     self.commit_view_lim_cmd()
-                # push uncommited changes onto the command stack.
+                # push uncommitted changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
             if event.inaxes is None:
@@ -279,16 +337,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         super(QtMatplotlibCanvas, self).dropEvent(event)
         plot = self.get_plot(event)
 
-        row, col = self.get_postion(plot)
-        self.dropInfo.row=row
-        self.dropInfo.col=col
+        row, col = self.get_position(plot)
+        self.dropInfo.row = row
+        self.dropInfo.col = col
         self.dropInfo.dragged_item = event.source().dragged_item
         self.dropSignal.emit(self.dropInfo)
-        #row, col = self.get_postion(plot)
-        #new_data = pd.DataFrame([['codacuda', f"{dragged_item.key}", f'{col}.{row}']],
+        # row, col = self.get_postion(plot)
+        # new_data = pd.DataFrame([['codacuda', f"{dragged_item.key}", f'{col}.{row}']],
         #                       columns=['DS', 'Variable', 'Stack'])
-        #self.parent().parent().parent().parent().sigCfgWidget._model.append_dataframe(new_data)
-        #self.parent().parent().parent().parent().drawClicked()
+        # self.parent().parent().parent().parent().sigCfgWidget._model.append_dataframe(new_data)
+        # self.parent().parent().parent().parent().drawClicked()
         event.ignore()
 
     def get_plot(self, event):
@@ -299,7 +357,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             if axe.bbox.x0 < x < axe.bbox.x1 and height - axe.bbox.y0 > y > height - axe.bbox.y1:
                 return self._parser._impl_plot_cache_table.get_cache_item(axe).plot()
 
-    def get_postion(self, plot):
+    def get_position(self, plot):
         all_plots = self._parser.canvas.plots
         for column, col_plots in enumerate(all_plots):
             for row, row_plot in enumerate(col_plots):

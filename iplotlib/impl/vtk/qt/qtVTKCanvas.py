@@ -7,7 +7,7 @@
 
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QWidget
 from PySide6.QtGui import QResizeEvent, QShowEvent
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
@@ -17,7 +17,6 @@ from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 # Maintain consistent qt api across vtk and iplotlib
 import vtkmodules.qt
-vtkmodules.qt.PyQtImpl = 'PySide6'
 
 # vtk requirements
 from vtkmodules.vtkCommonDataModel import vtkVector2f
@@ -26,9 +25,11 @@ from vtkmodules.vtkCommonCore import vtkCommand
 from vtkmodules.vtkChartsCore import vtkChart, vtkAxis
 
 # iplot utilities
-from iplotLogging import setupLogger as sl
+from iplotLogging import setupLogger as Sl
 
-logger = sl.get_logger(__name__)
+vtkmodules.qt.PyQtImpl = 'PySide6'
+
+logger = Sl.get_logger(__name__)
 
 try:
     assert (PyQtImpl == 'PySide6')
@@ -46,6 +47,7 @@ class IplotQVTKRwi(QVTKRenderWindowInteractor):
     :param QVTKRenderWindowInteractor: [description]
     :type QVTKRenderWindowInteractor: [type]
     """
+
     def __init__(self, parent=None, **kw):
         super().__init__(parent=parent, **kw)
 
@@ -165,7 +167,7 @@ class QtVTKCanvas(IplotQtCanvas):
         mousePos = obj.GetEventPosition()
         # self._debug_log_event(ev, f"{mousePos}") # silenced for easy debugging
         if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
-            self._parser.crosshair.onMove(mousePos)
+            self._parser.crosshair.on_move(mousePos)
         self._vtk_renderer.Render()
 
     def _vtk_mouse_press_handler(self, obj, ev):
@@ -242,6 +244,7 @@ class QtVTKCanvas(IplotQtCanvas):
                     is_date = False
                 impl_axis = self._parser.get_impl_axis(chart, 0)  # type: vtkAxis
                 shift, scale = impl_axis.GetShift(), impl_axis.GetScalingFactor()
+                x = 0
                 if is_date:
                     x = (int(pos[0] / scale) - int(shift))
                 elif not is_date:
@@ -274,7 +277,7 @@ class QtVTKCanvas(IplotQtCanvas):
                 # commit commands from staging.
                 while len(self._staging_cmds):
                     self.commit_view_lim_cmd()
-                # push uncommited changes onto the command stack.
+                # push uncommitted changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
             self.render()
@@ -287,5 +290,5 @@ class QtVTKCanvas(IplotQtCanvas):
     def get_vtk_renderer(self) -> QVTKRenderWindowInteractor:
         return self._vtk_renderer
 
-    def _debug_log_event(self, event: vtkCommand, msg: str):
+    def _debug_log_event(self, event, msg: str):
         logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")

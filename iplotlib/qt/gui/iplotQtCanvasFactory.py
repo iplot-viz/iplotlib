@@ -6,17 +6,21 @@ A factory class for Qt GUI with iplotlib is implemented in this module.
 
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
-import iplotLogging.setupLogger as ls
+import iplotLogging.setupLogger as Sl
 
-logger = ls.get_logger(__name__)
+logger = Sl.get_logger(__name__)
+
 
 class InvalidBackend(Exception):
     pass
+
 
 class IplotQtCanvasFactory:
     """
     A factory class that returns an appropriate backend subclass of IplotQtCanvas.
     """
+
+    @staticmethod
     def new(backend: str, *args, **kwargs) -> IplotQtCanvas:
         """
         The backend can be any one of "matplotlib", "mpl", "mplot", "mplib" for matplotlib.
