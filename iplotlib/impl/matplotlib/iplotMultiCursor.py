@@ -94,7 +94,7 @@ class IplotMultiCursor(Widget):
         if vert_on:
             for ax in axes:
                 y_min, y_max = ax.get_ybound()
-                line = Line2D([x_mid, x_mid], [y_min, y_max], **line_props)
+                line = Line2D([x_mid, x_mid], [y_min, y_max], **line_props, label="CrossY")
                 ax.add_artist(line)
                 self.v_lines.append(line)
 
@@ -102,7 +102,7 @@ class IplotMultiCursor(Widget):
         if horiz_on:
             for ax in axes:
                 x_min, x_max = ax.get_xbound()
-                line = Line2D([x_min, x_max], [y_mid, y_mid], **line_props)
+                line = Line2D([x_min, x_max], [y_mid, y_mid], **line_props, label="CrossX")
                 ax.add_artist(line)
                 self.h_lines.append(line)
 
