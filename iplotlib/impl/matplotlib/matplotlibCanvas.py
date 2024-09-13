@@ -591,6 +591,7 @@ class MatplotlibParser(BackendParserBase):
             return min_bot, max_top
 
         lines = impl_plot.get_lines()
+        lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY"]]
         bot, top = np.inf, -np.inf
 
         for line in lines:
