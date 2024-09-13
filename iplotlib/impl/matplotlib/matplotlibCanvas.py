@@ -638,7 +638,7 @@ class MatplotlibParser(BackendParserBase):
 
                 for columns in self.canvas.plots:
                     for plot_temp in columns:
-                        if plot_temp != self._focus_plot:
+                        if plot_temp and plot_temp != self._focus_plot:  # Avoid None plots
                             logger.debug(
                                 f"Setting range on plot {id(plot_temp)} focused= {id(self._focus_plot)} begin={begin}")
                             if plot_temp.axes[0].original_begin == self._focus_plot.axes[0].original_begin and \
