@@ -1228,3 +1228,6 @@ class VTKParser(BackendParserBase):
     @staticmethod
     def rgb_to_hex(rgb):
         return "#{:02X}{:02X}{:02X}".format(rgb[0], rgb[1], rgb[2])
+
+    def autoscale_y_axis(self, impl_plot, margin=0.1):
+        pass
