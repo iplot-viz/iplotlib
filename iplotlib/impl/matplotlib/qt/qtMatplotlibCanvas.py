@@ -93,9 +93,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 self.info_shared_x_dialog = True
                 for row_idx, col in enumerate(canvas.plots, start=1):
                     for col_idx, plot in enumerate(col, start=1):
-                        axis = plot.axes[0]
-                        ranges.append((axis.original_begin, axis.original_end))
-                        plot_stack.append(f"{col_idx}.{row_idx}")
+                        if plot:
+                            axis = plot.axes[0]
+                            ranges.append((axis.original_begin, axis.original_end))
+                            plot_stack.append(f"{col_idx}.{row_idx}")
 
                 dict_ranges = defaultdict(list)
                 for idx, uniq_range in enumerate(ranges):
