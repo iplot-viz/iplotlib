@@ -15,7 +15,7 @@ from PySide6.QtCore import QItemSelectionModel, QModelIndex, Qt
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtGui import QShowEvent, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter,
-                               QStackedWidget, QTreeView, QWidget)
+                               QStackedWidget, QTreeView, QWidget, QScrollArea)
 
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas
@@ -71,9 +71,13 @@ class IplotQtPreferencesWindow(QMainWindow):
         index = list(self._forms.keys()).index(Canvas)
         self.formsStack.setCurrentIndex(index)
 
+        self.scrollArea = QScrollArea(self)
+        self.scrollArea.setWidgetResizable(True)
+        self.scrollArea.setWidget(self.formsStack)
+
         self.splitter = QSplitter(self)
         self.splitter.addWidget(self.treeView)
-        self.splitter.addWidget(self.formsStack)
+        self.splitter.addWidget(self.scrollArea)
         self.splitter.setStretchFactor(1, 2)
         self.setCentralWidget(self.splitter)
         self.resize(800, 400)
