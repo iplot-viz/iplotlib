@@ -33,7 +33,7 @@ import os
 import typing
 
 from iplotlib.core.signal import ArraySignal
-from iplotlib.interface.utils import string_classifier as iplotStrUtils
+from iplotlib.interface.utils import string_classifier
 from iplotProcessing.common.errors import InvalidExpression
 from iplotProcessing.core import BufferObject
 from iplotProcessing.core import Signal as ProcessingSignal
@@ -137,13 +137,13 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
         ProcessingSignal.__init__(self)
 
         # 1.1 Initialize access parameters
-        if iplotStrUtils.is_non_empty(self.ts_start):
+        if string_classifier.is_non_empty(self.ts_start):
             self.ts_start = np.datetime64(self.ts_start, 'ns').astype('int64').item()
 
-        if iplotStrUtils.is_non_empty(self.ts_end):
+        if string_classifier.is_non_empty(self.ts_end):
             self.ts_end = np.datetime64(self.ts_end, 'ns').astype('int64').item()
 
-        self.ts_relative = iplotStrUtils.is_non_empty(self.pulse_nb)
+        self.ts_relative = string_classifier.is_non_empty(self.pulse_nb)
         self._local_env = dict()
 
         # 1.2. Initialize attributes that will not be dataclass fields.
@@ -169,7 +169,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             return
         else:
             # Add a reference to our alias.
-            if iplotStrUtils.is_non_empty(self.alias):
+            if string_classifier.is_non_empty(self.alias):
                 ParserHelper.env.update({self.alias: self})
 
             # Indicate readiness.
@@ -344,7 +344,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
 
             if isinstance(value, IplotSignalAdapter):
                 # This is an aliased signal.
-                if self.data_access_enabled and iplotStrUtils.is_non_empty(
+                if self.data_access_enabled and string_classifier.is_non_empty(
                         self.data_source) and self.data_source != value.data_source:
                     self.status_info.reset()
                     self.status_info.msg = f"Data source conflict {self.data_source} != {value.data_source}."
@@ -354,7 +354,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 self.children.append(value)
             else:
                 # This is a new/pre-defined signal.
-                if self.data_access_enabled and iplotStrUtils.is_empty(self.data_source):
+                if self.data_access_enabled and string_classifier.is_empty(self.data_source):
                     self.status_info.reset()
                     self.status_info.msg = "Data source unspecified."
                     self.status_info.result = Result.INVALID
@@ -387,19 +387,19 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     def _init_label(self):
         # 1. From name
         if self.label is None:
-            if iplotStrUtils.is_non_empty(self.name):
+            if string_classifier.is_non_empty(self.name):
                 self.label = self.name
             else:
                 self.label = ''
 
         # 2. Alias overrides name for the label (appears in legend box)
-        if iplotStrUtils.is_non_empty(self.alias):
+        if string_classifier.is_non_empty(self.alias):
             self.label = self.alias
 
         # 3. Shows the pulse number in the label (appears in legend box).
         if self.pulse_nb is not None:
             pulse_as_string = str(self.pulse_nb)
-            if iplotStrUtils.is_non_empty(pulse_as_string):
+            if string_classifier.is_non_empty(pulse_as_string):
                 if self.label.find(pulse_as_string) < 0:
                     self.label += ':' + pulse_as_string
 
@@ -531,7 +531,7 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
             return False
 
         # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
-        nonempty_name = iplotStrUtils.is_non_empty(self.name)
+        nonempty_name = string_classifier.is_non_empty(self.name)
         if nonempty_name and self.data_access_enabled:
 
             if self._needs_refresh():
@@ -646,12 +646,12 @@ class AccessHelper:
             return None
 
     @staticmethod
-    def str_ts(signal: IplotSignalAdapter, value):
+    def str_ts(value):
         try:
             if value is not None:
-                if type(value) == np.datetime64:
+                if isinstance(value, np.datetime64):
                     return value
-                if (type(value) == int or type(value) == float) and value > 10 ** 15:
+                if isinstance(value, (int, float)) and value > 10 ** 15:
                     return np.datetime64(value, 'ns')
         except Exception as e:
             logger.error(f"Error {e}: Unable to convert value {value} to string timestamp")
@@ -725,8 +725,8 @@ class AccessHelper:
         :type signal: IplotSignalAdapter
         """
         logger.debug(f"[UDA {AccessHelper.query_no}] Get data: {signal.name} "
-                     f"ts_start={self.str_ts(signal, signal.ts_start)} "
-                     f"ts_end={self.str_ts(signal, signal.ts_end)} "
+                     f"ts_start={self.str_ts(signal.ts_start)} "
+                     f"ts_end={self.str_ts(signal.ts_end)} "
                      f"pulse_nb={ signal.pulse_nb} "
                      f"nbsamples={AccessHelper.num_samples if AccessHelper.num_samples_override else -1} "
                      f"relative={signal.ts_relative}")
