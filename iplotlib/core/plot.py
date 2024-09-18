@@ -34,7 +34,7 @@ class Plot(ABC):
     font_size: int = None  #: the font size of the plot title text
     font_color: str = '#000000'  #: the font color of the plot title text
     background_color: str = '#FFFFFF'
-    tick_number: int = 7
+    tick_number: int = None
     legend: bool = None  #: indicate if the plot legend must be shown
     legend_position: str = 'same as canvas'  #: indicate the location of the plot legend
     legend_layout: str = 'same as canvas'  #: indicate the layout of the plot legend

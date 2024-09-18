@@ -523,14 +523,8 @@ class MatplotlibParser(BackendParserBase):
                 NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, roundh=self.canvas.round_hour))
 
         # Configurate number of ticks and labels
-        if self.canvas.tick_number != self.canvas.prev_tick_number:
-            mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
-            # Refresh tick number for each plot
-            axis.tick_number = self.canvas.tick_number
-        elif axis.tick_number != self.canvas.tick_number:
-            mpl_axis.set_major_locator(MaxNLocator(axis.tick_number))
-        else:
-            mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
+        tick_number = self._pm.get_value("tick_number", self.canvas, axis)
+        mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
     @BackendParserBase.run_in_one_thread
     def process_ipl_signal(self, signal: Signal):

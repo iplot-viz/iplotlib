@@ -22,7 +22,7 @@ class Axis:
     label: str = None  #: a text to be shown next to an axis.
     font_size: int = None  # font size applies both for axis label and axis tick labels.
     font_color: str = '#000000'  # color applies to an axis label and axis tick labels.
-    tick_number: int = 7  #: number of ticks and labels to be shown in a XAxis
+    tick_number: int = None  #: number of ticks and labels to be shown in a XAxis
     autoscale: bool = False
 
     _type: str = None
