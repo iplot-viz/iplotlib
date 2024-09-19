@@ -24,7 +24,6 @@ from iplotlib.core import (Axis,
                            BackendParserBase,
                            Plot,
                            Signal)
-from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
@@ -75,6 +74,7 @@ class MatplotlibParser(BackendParserBase):
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = cache_item.plot()
         except AttributeError:
+            cache_item = None
             plot = None
 
         if signal.color is None:
@@ -523,14 +523,8 @@ class MatplotlibParser(BackendParserBase):
                 NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, roundh=self.canvas.round_hour))
 
         # Configurate number of ticks and labels
-        if self.canvas.tick_number != self.canvas.prev_tick_number:
-            mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
-            # Refresh tick number for each plot
-            axis.tick_number = self.canvas.tick_number
-        elif axis.tick_number != self.canvas.tick_number:
-            mpl_axis.set_major_locator(MaxNLocator(axis.tick_number))
-        else:
-            mpl_axis.set_major_locator(MaxNLocator(self.canvas.tick_number))
+        tick_number = self._pm.get_value("tick_number", self.canvas, axis)
+        mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
     @BackendParserBase.run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
@@ -604,23 +598,23 @@ class MatplotlibParser(BackendParserBase):
             self.set_oaw_axis_limits(impl_plot, 1, (bot, top))
 
     def enable_tight_layout(self):
-        self.figure.set_tight_layout(True)
+        self.figure.set_tight_layout("True")
 
     def disable_tight_layout(self):
-        self.figure.set_tight_layout(False)
+        self.figure.set_tight_layout("")
 
     def set_focus_plot(self, mpl_axes):
 
-        def get_x_axis_range(plot):
-            if plot is not None and plot.axes is not None and len(plot.axes) > 0 and isinstance(plot.axes[0],
-                                                                                                RangeAxis):
-                return plot.axes[0].begin, plot.axes[0].end
+        def get_x_axis_range(focus_plot):
+            if focus_plot is not None and focus_plot.axes is not None and len(focus_plot.axes) > 0 and \
+                    isinstance(focus_plot.axes[0], RangeAxis):
+                return focus_plot.axes[0].begin, focus_plot.axes[0].end
 
-        def set_x_axis_range(plot, begin, end):
-            if plot is not None and plot.axes is not None and len(plot.axes) > 0 and isinstance(plot.axes[0],
-                                                                                                RangeAxis):
-                plot.axes[0].begin = begin
-                plot.axes[0].end = end
+        def set_x_axis_range(focus_plot, x_begin, x_end):
+            if focus_plot is not None and focus_plot.axes is not None and len(focus_plot.axes) > 0 and \
+                    isinstance(focus_plot.axes[0], RangeAxis):
+                focus_plot.axes[0].begin = x_begin
+                focus_plot.axes[0].end = x_end
 
         if isinstance(mpl_axes, MPLAxes):
             ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
@@ -748,11 +742,13 @@ class MatplotlibParser(BackendParserBase):
         else:
             return None
 
-    def get_oaw_axis_limits(self, impl_plot: Any, ax_idx: int):
+    def get_oaw_axis_limits(self, impl_plot, ax_idx: int):
         """Offset-aware version of implementation's get_x_limit, get_y_limit"""
         begin, end = (None, None)
-        if 0 <= ax_idx <= 1:
-            begin, end = [self.get_impl_x_axis_limits, self.get_impl_y_axis_limits][ax_idx](impl_plot)
+        if ax_idx == 0:
+            begin, end = self.get_impl_x_axis_limits(impl_plot)
+        elif ax_idx == 1:
+            begin, end = self.get_impl_y_axis_limits(impl_plot)
         return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
 
     def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
