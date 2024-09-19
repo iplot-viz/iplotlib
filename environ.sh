@@ -38,16 +38,15 @@ fi
 echo "Configuration: $config"
 
 # Graphical User Interface backend
-try module load PySide6/6.2.3-GCCcore-10.2.0
-# Testing/Coverage requirements
-try module load coverage/5.5-GCCcore-10.2.0 
+try module load PySide6/6.6.2-GCCcore-13.2.0
+# For test coverage:
+try module load coverage/7.4.4-GCCcore-13.2.0
 
 case $config in
     "prod")
-      try module load iplotLogging/0.3.0-GCCcore-10.2.0
+      try module load iplotLogging
       ;;
     "dev" )
-      try module load cachetools/4.2.1-GCCcore-10.2.0
       ;;
     * )
       echo "Unknown configuration $config"
@@ -59,11 +58,11 @@ case $toolchain in
     # Other IDV components
     case $config in
         "dev")
-          try module load UDA-CCS/6.3-foss-2020b
+          try module load m-uda-client/7.2.0-gfbf-2023b #module load UDA-CCS/6.3-foss-2020b
           ;;
         "prod")
-          try module load iplotProcessing/0.5.0-foss-2020b
-          try module load iplotDataAccess/0.5.0-foss-2020b
+          try module load iplotProcessing
+          try module load iplotDataAccess
           ;;
         * ) 
           echo "Unknown configuration $config"
@@ -71,19 +70,19 @@ case $toolchain in
     esac
 
     # Graphics backend requirements
-    try module load matplotlib/3.5.1-foss-2020b
-    try module load VTK/9.1.0-foss-2020b
+    try module load matplotlib/3.8.2-gfbf-2023b
+    try module load VTK/9.3.0-foss-2023b
     ;;
 
   "intel")
     # Other IDV components
     case $config in
         "dev")
-          try module load UDA-CCS/6.3-intel-2020b
+          try module load m-uda-client/7.2.0-gfbf-2023b #UDA-CCS/6.3-intel-2020b
           ;;
         "prod")
-          try module load iplotProcessing/0.5.0-intel-2020b
-          try module load iplotDataAccess/0.5.0-intel-2020b
+          try module load iplotProcessing
+          try module load iplotDataAccess
           ;;
         * ) 
           echo "Unknown configuration $config"
@@ -91,8 +90,8 @@ case $toolchain in
     esac
 
     # Graphics backend requirements
-    try module load matplotlib/3.5.1-intel-2020b
-    try module load VTK/9.1.0-intel-2020b
+    try module load matplotlib/3.8.2-iimkl-2023b
+    try module load VTK/9.3.0-intel-2023b
     ;;
    *)
     echo "Unknown toolchain $toolchain"
