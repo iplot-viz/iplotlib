@@ -216,12 +216,12 @@ class IplotMultiCursor(Widget):
         self.need_clear = True
         if self.vert_on:
             for line in self.v_lines:
-                line.set_xdata(event.xdata)
+                line.set_xdata([event.xdata])
                 line.set_visible(True)
 
         if self.horiz_on:
             for line in self.h_lines:
-                line.set_ydata(event.ydata)
+                line.set_ydata([event.ydata])
                 line.set_visible(True)
 
         if self.x_label:
