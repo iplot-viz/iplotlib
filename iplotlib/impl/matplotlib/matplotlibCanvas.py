@@ -808,9 +808,9 @@ class MatplotlibParser(BackendParserBase):
                 if ci and ci.offsets[i] is not None:
                     logger.debug(f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
                     if isinstance(d, Collection):
-                        ret.append(BufferObject([e - ci.offsets[i] for e in d]))
+                        ret.append(BufferObject([np.int64(e) - ci.offsets[i] for e in d]))
                     else:
-                        ret.append(d - ci.offsets[i])
+                        ret.append(np.int64(d) - ci.offsets[i])
                 else:
                     ret.append(d)
         return ret
