@@ -257,9 +257,6 @@ class MatplotlibParser(BackendParserBase):
             if stop_drawing:
                 break
 
-        # Update the previous number of ticks at Canvas level
-        self.canvas.prev_tick_number = self.canvas.tick_number
-
         # Update the previous background color at Canvas level
         self.canvas.prev_background_color = self.canvas.background_color
 

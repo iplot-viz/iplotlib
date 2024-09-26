@@ -353,9 +353,6 @@ class VTKParser(BackendParserBase):
                 if stop_drawing:
                     break
 
-        # Update the previous number of ticks at Canvas level.
-        self.canvas.prev_tick_number = self.canvas.tick_number
-
         # Update the previous background color at Canvas level
         self.canvas.prev_background_color = self.canvas.background_color
 
@@ -517,12 +514,8 @@ class VTKParser(BackendParserBase):
             impl_plot.GetAxis(vtkAxis.RIGHT).AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
 
         # Configurate the number of ticks and labels
-        if self.canvas.tick_number != self.canvas.prev_tick_number:
-            vtk_axis.SetNumberOfTicks(self.canvas.tick_number)
-            # Refresh tick number for each plot
-            axis.tick_number = self.canvas.tick_number
-        elif axis.tick_number != self.canvas.tick_number:
-            vtk_axis.SetNumberOfTicks(axis.tick_number)
+        tick_number = self._pm.get_value("tick_number", self.canvas, axis)
+        vtk_axis.SetNumberOfTicks(tick_number)
 
     def _refresh_shared_x_axis(self):
         size = self.matrix.GetSize()

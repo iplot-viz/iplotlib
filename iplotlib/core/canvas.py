@@ -41,7 +41,6 @@ class Canvas(ABC):
     # previous background color used to keep consistency between Canvas and Plot preferences
     prev_background_color = '#FFFFFF'
     tick_number: int = 7  # default number of ticks for each plot
-    prev_tick_number = 7
 
     round_hour: bool = False
 
@@ -173,7 +172,6 @@ class Canvas(ABC):
         self.font_color = Canvas.font_color
         self.background_color = Canvas.background_color
         self.tick_number = Canvas.tick_number
-        self.prev_tick_number = Canvas.prev_tick_number
         self.line_style = Canvas.line_style
         self.line_size = Canvas.line_size
         self.marker = Canvas.marker
@@ -201,7 +199,6 @@ class Canvas(ABC):
         self.font_color = old_canvas.font_color
         self.background_color = old_canvas.background_color
         self.tick_number = old_canvas.tick_number
-        self.prev_tick_number = old_canvas.prev_tick_number
         self.line_style = old_canvas.line_style
         self.line_size = old_canvas.line_size
         self.marker = old_canvas.marker
