@@ -95,9 +95,10 @@ class MatplotlibParser(BackendParserBase):
                 ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
                 all_y_data = []
                 for signal in plot.signals[cache_item.stack_key]:
-                    if signal.lines[0][0].get_visible():
+                    if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
+                        max_x_data = signal.x_data.max()[0]
                         for x_temp, y_temp in zip(signal.x_data, signal.y_data):
-                            if max(signal.x_data) - ax_window <= x_temp <= max(signal.x_data):
+                            if max_x_data - ax_window <= x_temp <= max_x_data:
                                 all_y_data.append(y_temp)
                 if all_y_data:
                     diff = (max(all_y_data) - min(all_y_data)) / 15
