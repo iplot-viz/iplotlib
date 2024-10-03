@@ -99,5 +99,5 @@ class CanvasStreamer:
                     d2_unit='',
                     d3_unit='')
                 signal.inject_external(append=True, **result)
-                logger.info(f"Updated {varname} with {len(dobj.xdata)} new samples")
+                logger.debug(f"Updated {varname} with {len(dobj.xdata)} new samples")
                 callback(signal)
