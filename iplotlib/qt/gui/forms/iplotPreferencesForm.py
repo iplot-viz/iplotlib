@@ -13,7 +13,7 @@ import time
 
 from PySide6.QtCore import QModelIndex, Qt, Signal, Slot
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDataWidgetMapper, QLabel, QLineEdit,
-                               QFormLayout, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
+                               QFormLayout, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget, QScrollArea)
 
 from iplotlib.qt.models import BeanItem, BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
@@ -28,14 +28,13 @@ class IplotPreferencesForm(QWidget):
 
     def __init__(self, fields: Optional[List[dict]] = None, label: str = "Preferences",
                  parent: Optional[QWidget] = None,
-                 f: Qt.WindowFlags = Qt.Widget):
+                 f: Qt.WindowType = Qt.WindowType.Widget):
         if fields is None:
             fields = [{}]
         super().__init__(parent=parent, f=f)
 
         self.top_label = QLabel(label)
-        self.top_label.setSizePolicy(QSizePolicy(
-            QSizePolicy.MinimumExpanding, QSizePolicy.Maximum))
+        self.top_label.setSizePolicy(QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum))
 
         self.form = QWidget()
         self.form.setLayout(QFormLayout())
@@ -48,8 +47,12 @@ class IplotPreferencesForm(QWidget):
 
         vlayout = QVBoxLayout()
         self.setLayout(vlayout)
+
+        self.scrollArea = QScrollArea(self)
+        self.scrollArea.setWidgetResizable(True)
+        self.scrollArea.setWidget(self.form)
         self.layout().addWidget(self.top_label)
-        self.layout().addWidget(self.form)
+        self.layout().addWidget(self.scrollArea)
         self.layout().addWidget(self.applyButton)
         # self.layout().addWidget(self.resetButton)
 
@@ -95,9 +98,9 @@ class IplotPreferencesForm(QWidget):
         The `QModelIndex` should've encapsulated a python object for the `Qt.UserRole`. 
         This encapsulation is done in :data:`~iplotlib.qt.gui.iplotQtCanvasAssembly.IplotQtCanvasAssembly.setCanvasData`
         """
-        pyObject = idx.data(Qt.UserRole)
+        py_object = idx.data(Qt.ItemDataRole.UserRole)
         self.widgetModel.setData(
-            QModelIndex(), pyObject, BeanItemModel.PyObjectRole)
+            QModelIndex(), py_object, BeanItemModel.PyObjectRole)
         self.widgetMapper.toFirst()
 
     @Slot()

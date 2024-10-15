@@ -40,16 +40,16 @@ class IplotQtPreferencesWindow(QMainWindow):
     onReset = QtSignal()
     canvasSelected = QtSignal(int)
 
-    def __init__(self, canvasAssembly: QStandardItemModel = None, parent: typing.Optional[QWidget] = None,
-                 flags: Qt.WindowFlags = Qt.WindowFlags()):
+    def __init__(self, canvas_assembly: QStandardItemModel = None, parent: typing.Optional[QWidget] = None,
+                 flags: Qt.WindowType = Qt.WindowType.Widget):
 
         super().__init__(parent=parent, flags=flags)
-
+        self.setWindowTitle("Preferences")
         self.treeView = QTreeView(self)
         self.treeView.setHeaderHidden(True)
-        self.treeView.setModel(canvasAssembly)
+        self.treeView.setModel(canvas_assembly)
         self.treeView.selectionModel().selectionChanged.connect(self.on_item_selected)
-        canvasAssembly.rowsInserted.connect(self.treeView.expandAll)
+        canvas_assembly.rowsInserted.connect(self.treeView.expandAll)
         self._applyTime = time.time_ns()
 
         self._forms = {
@@ -102,15 +102,15 @@ class IplotQtPreferencesWindow(QMainWindow):
     def on_item_selected(self, item: QStandardItem):
         if len(item.indexes()) > 0:
             for model_idx in item.indexes():
-                data = model_idx.data(Qt.UserRole)
+                data = model_idx.data(Qt.ItemDataRole.UserRole)
                 try:
                     if isinstance(data, Canvas):
                         t = Canvas
                     else:
                         t = type(data)
                     index = list(self._forms.keys()).index(t)
-                    canvasItemIdx = self._get_canvas_item_idx(model_idx)
-                    self.canvasSelected.emit(canvasItemIdx.row())
+                    canvas_item_idx = self._get_canvas_item_idx(model_idx)
+                    self.canvasSelected.emit(canvas_item_idx.row())
                 except ValueError:
                     logger.warning(f"Canvas assembly violated: An item with an unregistered class {type(data)}")
                     continue
@@ -139,7 +139,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         return super().showEvent(event)
 
     def manual_reset(self, idx: int):
-        canvas = self.treeView.model().item(idx, 0).data(Qt.UserRole)
+        canvas = self.treeView.model().item(idx, 0).data(Qt.ItemDataRole.UserRole)
         if not isinstance(canvas, Canvas):
             return
 
