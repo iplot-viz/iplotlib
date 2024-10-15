@@ -68,7 +68,7 @@ class Canvas(ABC):
     legend: bool = True  #: a boolean that suggests the visibility of a plot legend box.
     legend_position: str = 'upper right'  #: indicate the location of the plot legend
     legend_layout: str = 'vertical'  #: indicate the layout of the plot legend
-    grid: bool = False  #: a boolean that suggests the visibility of a plot grid
+    grid: bool = True  #: a boolean that suggests the visibility of a plot grid
     ticks_position: bool = False
 
     #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
@@ -158,10 +158,15 @@ class Canvas(ABC):
         """
         Reset the preferences to default values.
         """
+        self.title = Canvas.title
         self.font_size = Canvas.font_size
         self.shared_x_axis = Canvas.shared_x_axis
+        self.round_hour = Canvas.round_hour
         self.log_scale = Canvas.log_scale
         self.grid = Canvas.grid
+        self.ticks_position = Canvas.ticks_position
+        self.tick_number = Canvas.tick_number
+        self.background_color = Canvas.background_color
         self.legend = Canvas.legend
         self.legend_position = Canvas.legend_position
         self.legend_layout = Canvas.legend_layout
@@ -170,8 +175,6 @@ class Canvas(ABC):
         self.enable_ValLabel_crosshair = Canvas.enable_ValLabel_crosshair
         self.crosshair_color = Canvas.crosshair_color
         self.font_color = Canvas.font_color
-        self.background_color = Canvas.background_color
-        self.tick_number = Canvas.tick_number
         self.line_style = Canvas.line_style
         self.line_size = Canvas.line_size
         self.marker = Canvas.marker
@@ -187,8 +190,12 @@ class Canvas(ABC):
         self.title = old_canvas.title
         self.font_size = old_canvas.font_size
         self.shared_x_axis = old_canvas.shared_x_axis
+        self.round_hour = old_canvas.round_hour
         self.log_scale = old_canvas.log_scale
         self.grid = old_canvas.grid
+        self.ticks_position = old_canvas.ticks_position
+        self.tick_number = old_canvas.tick_number
+        self.background_color = old_canvas.background_color
         self.legend = old_canvas.legend
         self.legend_position = old_canvas.legend_position
         self.legend_layout = old_canvas.legend_layout
@@ -197,8 +204,6 @@ class Canvas(ABC):
         self.enable_ValLabel_crosshair = old_canvas.enable_ValLabel_crosshair
         self.crosshair_color = old_canvas.crosshair_color
         self.font_color = old_canvas.font_color
-        self.background_color = old_canvas.background_color
-        self.tick_number = old_canvas.tick_number
         self.line_style = old_canvas.line_style
         self.line_size = old_canvas.line_size
         self.marker = old_canvas.marker
