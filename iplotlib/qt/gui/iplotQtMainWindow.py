@@ -42,14 +42,14 @@ class IplotQtMainWindow(QMainWindow):
             self.canvasStack.model(), parent=self, flags=flags)
         self.prefWindow.canvasSelected.connect(self.canvasStack.setCurrentIndex)
         self.prefWindow.onApply.connect(self.updateCanvasPreferences)
-        self.prefWindow.onReset.connect(self.updateCanvasPreferences)
+        self.prefWindow.onReset.connect(self.reset_prefs)
 
         self.addToolBar(self.toolBar)
         self.setCentralWidget(self.canvasStack)
         self.wireConnections()
 
-        self._floatingWindow = QMainWindow(parent=self, flags=Qt.CustomizeWindowHint |
-                                                              Qt.WindowTitleHint | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        self._floatingWindow = QMainWindow(parent=self, flags=Qt.CustomizeWindowHint | Qt.WindowTitleHint |
+                                                              Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
         self._floatingWinMargins = QMargins()
         self._floatingWindow.layout().setContentsMargins(self._floatingWinMargins)
         self._floatingWindow.hide()
@@ -132,7 +132,14 @@ class IplotQtMainWindow(QMainWindow):
         w = self.canvasStack.currentWidget()
         with w.view_retainer():
             w.refresh()
+        self.prefWindow.set_canvas_from_preferences()
         self.prefWindow.post_applied()
+
+    def reset_prefs(self):
+        idx = self.canvasStack.currentIndex()
+        self.prefWindow.reset_prefs(idx)
+        # self.prefWindow.formsStack.currentWidget().widgetMapper.revert()
+        self.prefWindow.update()
 
     def reDraw(self):
         """

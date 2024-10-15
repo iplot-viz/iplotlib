@@ -10,6 +10,7 @@ A window to configure the visual preferences for iplotlib.
 
 import time
 import typing
+import copy
 
 from PySide6.QtCore import QItemSelectionModel, QModelIndex, Qt
 from PySide6.QtCore import Signal as QtSignal
@@ -40,17 +41,18 @@ class IplotQtPreferencesWindow(QMainWindow):
     onReset = QtSignal()
     canvasSelected = QtSignal(int)
 
-    def __init__(self, canvasAssembly: QStandardItemModel = None, parent: typing.Optional[QWidget] = None,
-                 flags: Qt.WindowFlags = Qt.WindowFlags()):
+    def __init__(self, canvas_assembly: QStandardItemModel = None, parent: typing.Optional[QWidget] = None,
+                 flags: Qt.WindowType = Qt.WindowType.Widget):
 
         super().__init__(parent=parent, flags=flags)
-
+        self.setWindowTitle("Preferences")
         self.treeView = QTreeView(self)
         self.treeView.setHeaderHidden(True)
-        self.treeView.setModel(canvasAssembly)
+        self.treeView.setModel(canvas_assembly)
         self.treeView.selectionModel().selectionChanged.connect(self.on_item_selected)
-        canvasAssembly.rowsInserted.connect(self.treeView.expandAll)
+        canvas_assembly.rowsInserted.connect(self.treeView.expandAll)
         self._applyTime = time.time_ns()
+        self.current_canvas = None
 
         self._forms = {
             Canvas: CanvasForm(self),
@@ -92,6 +94,11 @@ class IplotQtPreferencesWindow(QMainWindow):
     def post_applied(self):
         self._applyTime = time.time_ns()
 
+    def set_canvas_from_preferences(self):
+        # Get the current canvas in order to preserve the preferences if these are reset
+        original_canvas = self.treeView.model().item(0, 0).data(Qt.UserRole)
+        self.current_canvas = copy.deepcopy(original_canvas)
+
     def get_collective_m_time(self):
         val = 0
         for form in self._forms.values():
@@ -102,15 +109,15 @@ class IplotQtPreferencesWindow(QMainWindow):
     def on_item_selected(self, item: QStandardItem):
         if len(item.indexes()) > 0:
             for model_idx in item.indexes():
-                data = model_idx.data(Qt.UserRole)
+                data = model_idx.data(Qt.ItemDataRole.UserRole)
                 try:
                     if isinstance(data, Canvas):
                         t = Canvas
                     else:
                         t = type(data)
                     index = list(self._forms.keys()).index(t)
-                    canvasItemIdx = self._get_canvas_item_idx(model_idx)
-                    self.canvasSelected.emit(canvasItemIdx.row())
+                    canvas_item_idx = self._get_canvas_item_idx(model_idx)
+                    self.canvasSelected.emit(canvas_item_idx.row())
                 except ValueError:
                     logger.warning(f"Canvas assembly violated: An item with an unregistered class {type(data)}")
                     continue
@@ -122,7 +129,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         if QApplication.focusWidget():
             QApplication.focusWidget().clearFocus()
         if self._applyTime < self.get_collective_m_time():
-            self.onApply.emit()
+            self.onReset.emit()
 
     def setModel(self, model: QStandardItemModel):
         self.treeView.setModel(model)
@@ -136,10 +143,17 @@ class IplotQtPreferencesWindow(QMainWindow):
         # Select model using the specified command
         self.treeView.selectionModel().select(self.treeView.model().index(0, 0), QItemSelectionModel.Select)
         self.treeView.expandAll()
+        self.set_canvas_from_preferences()
         return super().showEvent(event)
 
-    def manual_reset(self, idx: int):
+    def reset_prefs(self, idx: int):
         canvas = self.treeView.model().item(idx, 0).data(Qt.UserRole)
+        if not isinstance(canvas, Canvas):
+            return
+        canvas.merge(self.current_canvas)
+
+    def manual_reset(self, idx: int):
+        canvas = self.treeView.model().item(idx, 0).data(Qt.ItemDataRole.UserRole)
         if not isinstance(canvas, Canvas):
             return
 
