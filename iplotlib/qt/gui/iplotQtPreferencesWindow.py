@@ -44,6 +44,7 @@ class IplotQtPreferencesWindow(QMainWindow):
                  flags: Qt.WindowFlags = Qt.WindowFlags()):
 
         super().__init__(parent=parent, flags=flags)
+        self.setWindowTitle("Preferences")
 
         self.treeView = QTreeView(self)
         self.treeView.setHeaderHidden(True)
