@@ -71,13 +71,13 @@ class CanvasForm(IplotPreferencesForm):
         super().__init__(fields=prototype, label="Canvas", parent=parent, f=f)
 
     @Slot()
-    def resetPrefs(self):
-        pyObject = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+    def reset_prefs(self):
+        py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
 
-        if isinstance(pyObject, Canvas):
-            pyObject.reset_preferences()
+        if isinstance(py_object, Canvas):
+            py_object.reset_preferences()
         else:
             return
 
         self.widgetMapper.revert()
-        super().resetPrefs()
+        super().reset_prefs()
