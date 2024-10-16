@@ -138,7 +138,7 @@ class IplotQtMainWindow(QMainWindow):
     def reset_prefs(self):
         idx = self.canvasStack.currentIndex()
         self.prefWindow.reset_prefs(idx)
-        # self.prefWindow.formsStack.currentWidget().widgetMapper.revert()
+        self.prefWindow.formsStack.currentWidget().widgetMapper.revert()
         self.prefWindow.update()
 
     def re_draw(self):
