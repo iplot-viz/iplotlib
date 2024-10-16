@@ -48,8 +48,11 @@ class IplotQtMainWindow(QMainWindow):
         self.setCentralWidget(self.canvasStack)
         self.wireConnections()
 
-        self._floatingWindow = QMainWindow(parent=self, flags=Qt.CustomizeWindowHint |
-                                                              Qt.WindowTitleHint | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        self._floatingWindow = QMainWindow(parent=self,
+                                           flags=(Qt.WindowType.CustomizeWindowHint
+                                                  | Qt.WindowType.WindowTitleHint
+                                                  | Qt.WindowType.WindowMaximizeButtonHint
+                                                  | Qt.WindowType.WindowMinimizeButtonHint))
         self._floatingWinMargins = QMargins()
         self._floatingWindow.layout().setContentsMargins(self._floatingWinMargins)
         self._floatingWindow.hide()
@@ -66,8 +69,7 @@ class IplotQtMainWindow(QMainWindow):
         self.toolBar.detachAction.triggered.connect(self.detach)
         self.toolBar.configureAction.triggered.connect(
             lambda:
-            [self.prefWindow.setWindowTitle(self.windowTitle()),
-             self.prefWindow.show(),
+            [self.prefWindow.show(),
              self.prefWindow.raise_(),
              self.prefWindow.activateWindow()])
 
@@ -75,7 +77,7 @@ class IplotQtMainWindow(QMainWindow):
         w = self.canvasStack.currentWidget()
         if not w:
             return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         w.undo()
         QApplication.restoreOverrideCursor()
         self.check_history(w)
@@ -84,7 +86,7 @@ class IplotQtMainWindow(QMainWindow):
         w = self.canvasStack.currentWidget()
         if not w:
             return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         w.redo()
         QApplication.restoreOverrideCursor()
         self.check_history(w)
@@ -93,7 +95,7 @@ class IplotQtMainWindow(QMainWindow):
         w = self.canvasStack.currentWidget()
         if not w:
             return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         w.drop_history()
         QApplication.restoreOverrideCursor()
         self.check_history(w)
@@ -154,18 +156,18 @@ class IplotQtMainWindow(QMainWindow):
         """
         if self.toolBar.detachAction.text() == 'Detach':
             # we detach now.
-            tbArea = self.toolBarArea(self.toolBar)
+            tb_area = self.toolBarArea(self.toolBar)
             self._floatingWindow.setCentralWidget(self.canvasStack)
-            self._floatingWindow.addToolBar(tbArea, self.toolBar)
+            self._floatingWindow.addToolBar(tb_area, self.toolBar)
             self._floatingWindow.setWindowTitle(self.windowTitle())
             self._floatingWindow.show()
             self.toolBar.detachAction.setText('Reattach')
         elif self.toolBar.detachAction.text() == 'Reattach':
             # we attach now.
             self.toolBar.detachAction.setText('Detach')
-            tbArea = self._floatingWindow.toolBarArea(self.toolBar)
+            tb_area = self._floatingWindow.toolBarArea(self.toolBar)
             self.setCentralWidget(self.canvasStack)
-            self.addToolBar(tbArea, self.toolBar)
+            self.addToolBar(tb_area, self.toolBar)
             self._floatingWindow.hide()
 
     def showEvent(self, event: QShowEvent):
