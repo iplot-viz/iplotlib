@@ -41,12 +41,12 @@ class IplotQtMainWindow(QMainWindow):
         self.prefWindow = IplotQtPreferencesWindow(
             self.canvasStack.model(), parent=self, flags=flags)
         self.prefWindow.canvasSelected.connect(self.canvasStack.setCurrentIndex)
-        self.prefWindow.onApply.connect(self.updateCanvasPreferences)
+        self.prefWindow.onApply.connect(self.update_canvas_preferences)
         self.prefWindow.onReset.connect(self.reset_prefs)
 
         self.addToolBar(self.toolBar)
         self.setCentralWidget(self.canvasStack)
-        self.wireConnections()
+        self.wire_connections()
 
         self._floatingWindow = QMainWindow(parent=self, flags=Qt.CustomizeWindowHint | Qt.WindowTitleHint |
                                                               Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
@@ -54,7 +54,7 @@ class IplotQtMainWindow(QMainWindow):
         self._floatingWindow.layout().setContentsMargins(self._floatingWinMargins)
         self._floatingWindow.hide()
 
-    def wireConnections(self):
+    def wire_connections(self):
         self.toolBar.undoAction.triggered.connect(self.undo)
         self.toolBar.redoAction.triggered.connect(self.redo)
         self.toolBar.toolActivated.connect(
@@ -62,7 +62,7 @@ class IplotQtMainWindow(QMainWindow):
             [self.canvasStack.widget(i).set_mouse_mode(tool_name) for i in range(self.canvasStack.count())])
         self.canvasStack.canvasAdded.connect(self.on_canvas_add)
         self.canvasStack.currentChanged.connect(lambda idx: self.check_history(self.canvasStack.widget(idx)))
-        self.toolBar.redrawAction.triggered.connect(self.reDraw)
+        self.toolBar.redrawAction.triggered.connect(self.re_draw)
         self.toolBar.detachAction.triggered.connect(self.detach)
         self.toolBar.configureAction.triggered.connect(
             lambda:
@@ -128,7 +128,7 @@ class IplotQtMainWindow(QMainWindow):
         self.check_history(w)
         self.toolBar.undoAction.setText(f"Undo {cmd.name}")
 
-    def updateCanvasPreferences(self):
+    def update_canvas_preferences(self):
         w = self.canvasStack.currentWidget()
         with w.view_retainer():
             w.refresh()
@@ -141,7 +141,7 @@ class IplotQtMainWindow(QMainWindow):
         # self.prefWindow.formsStack.currentWidget().widgetMapper.revert()
         self.prefWindow.update()
 
-    def reDraw(self):
+    def re_draw(self):
         """
         Manually reset the preferences and draw the canvas object.
         The preferences forms shall reflect the current state of the canvas object.
@@ -161,18 +161,18 @@ class IplotQtMainWindow(QMainWindow):
         """
         if self.toolBar.detachAction.text() == 'Detach':
             # we detach now.
-            tbArea = self.toolBarArea(self.toolBar)
+            tb_area = self.toolBarArea(self.toolBar)
             self._floatingWindow.setCentralWidget(self.canvasStack)
-            self._floatingWindow.addToolBar(tbArea, self.toolBar)
+            self._floatingWindow.addToolBar(tb_area, self.toolBar)
             self._floatingWindow.setWindowTitle(self.windowTitle())
             self._floatingWindow.show()
             self.toolBar.detachAction.setText('Reattach')
         elif self.toolBar.detachAction.text() == 'Reattach':
             # we attach now.
             self.toolBar.detachAction.setText('Detach')
-            tbArea = self._floatingWindow.toolBarArea(self.toolBar)
+            tb_area = self._floatingWindow.toolBarArea(self.toolBar)
             self.setCentralWidget(self.canvasStack)
-            self.addToolBar(tbArea, self.toolBar)
+            self.addToolBar(tb_area, self.toolBar)
             self._floatingWindow.hide()
 
     def showEvent(self, event: QShowEvent):
