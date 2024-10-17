@@ -38,13 +38,13 @@ class AxisForm(IplotPreferencesForm):
         super().__init__(fields=prototype, label="An axis", parent=parent, f=f)
 
     @Slot()
-    def resetPrefs(self):
-        pyObject = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+    def reset_prefs(self):
+        py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
 
-        if isinstance(pyObject, Axis):
-            pyObject.reset_preferences()
+        if isinstance(py_object, Axis):
+            py_object.reset_preferences()
         else:
             return
 
         self.widgetMapper.revert()
-        super().resetPrefs()
+        super().reset_prefs()

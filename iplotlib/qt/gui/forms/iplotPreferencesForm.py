@@ -42,7 +42,7 @@ class IplotPreferencesForm(QWidget):
         self.applyButton = QPushButton("Apply")
         self.applyButton.pressed.connect(self.onApply.emit)
         self.resetButton = QPushButton("Reset")
-        self.resetButton.pressed.connect(self.resetPrefs)
+        self.resetButton.pressed.connect(self.reset_prefs)
         self._modifiedTime = time.time_ns()
 
         vlayout = QVBoxLayout()
@@ -92,10 +92,10 @@ class IplotPreferencesForm(QWidget):
 
     def set_source_index(self, idx: QModelIndex):
         """
-        Set the python object that will be sourced by the data widgets. 
+        Set the python object that will be sourced by the data widgets.
         The python object should be an instance of the core iplotlib Canvas class for tthe sourcing mechanism to
         function.
-        The `QModelIndex` should've encapsulated a python object for the `Qt.UserRole`. 
+        The `QModelIndex` should've encapsulated a python object for the `Qt.UserRole`.
         This encapsulation is done in :data:`~iplotlib.qt.gui.iplotQtCanvasAssembly.IplotQtCanvasAssembly.setCanvasData`
         """
         py_object = idx.data(Qt.ItemDataRole.UserRole)
@@ -104,7 +104,7 @@ class IplotPreferencesForm(QWidget):
         self.widgetMapper.toFirst()
 
     @Slot()
-    def resetPrefs(self):
+    def reset_prefs(self):
         """
         Derived instances will implement the reset functionality.
         """

@@ -10,6 +10,7 @@ A window to configure the visual preferences for iplotlib.
 
 import time
 import typing
+import copy
 
 from PySide6.QtCore import QItemSelectionModel, QModelIndex, Qt
 from PySide6.QtCore import Signal as QtSignal
@@ -51,6 +52,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         self.treeView.selectionModel().selectionChanged.connect(self.on_item_selected)
         canvas_assembly.rowsInserted.connect(self.treeView.expandAll)
         self._applyTime = time.time_ns()
+        self.current_canvas = None
 
         self._forms = {
             Canvas: CanvasForm(self),
@@ -92,6 +94,11 @@ class IplotQtPreferencesWindow(QMainWindow):
     def post_applied(self):
         self._applyTime = time.time_ns()
 
+    def set_canvas_from_preferences(self):
+        # Get the current canvas in order to preserve the preferences if these are reset
+        original_canvas = self.treeView.model().item(0, 0).data(Qt.UserRole)
+        self.current_canvas = copy.deepcopy(original_canvas)
+
     def get_collective_m_time(self):
         val = 0
         for form in self._forms.values():
@@ -122,7 +129,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         if QApplication.focusWidget():
             QApplication.focusWidget().clearFocus()
         if self._applyTime < self.get_collective_m_time():
-            self.onApply.emit()
+            self.onReset.emit()
 
     def setModel(self, model: QStandardItemModel):
         self.treeView.setModel(model)
@@ -136,7 +143,14 @@ class IplotQtPreferencesWindow(QMainWindow):
         # Select model using the specified command
         self.treeView.selectionModel().select(self.treeView.model().index(0, 0), QItemSelectionModel.Select)
         self.treeView.expandAll()
+        self.set_canvas_from_preferences()
         return super().showEvent(event)
+
+    def reset_prefs(self, idx: int):
+        canvas = self.treeView.model().item(idx, 0).data(Qt.UserRole)
+        if not isinstance(canvas, Canvas):
+            return
+        canvas.merge(self.current_canvas)
 
     def manual_reset(self, idx: int):
         canvas = self.treeView.model().item(idx, 0).data(Qt.ItemDataRole.UserRole)

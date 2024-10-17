@@ -142,7 +142,7 @@ class PlotXY(Plot):
     def __post_init__(self):
         super().__post_init__()
         if self.axes is None:
-            self.axes = [LinearAxis(), LinearAxis()]
+            self.axes = [LinearAxis(), [LinearAxis()]]
         self._color_index = 0
 
     def get_next_color(self):
