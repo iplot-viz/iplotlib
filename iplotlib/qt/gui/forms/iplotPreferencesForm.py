@@ -110,7 +110,7 @@ class IplotPreferencesForm(QWidget):
     @staticmethod
     def create_spinbox(**params):
         widget = QSpinBox()
-        # Override the wheelEvent() method using a lambda function to ignore mouse wheel events
+        # Override the wheelEvent method using a lambda function to ignore mouse wheel events
         widget.wheelEvent = lambda event: event.ignore()
         if params.get("min"):
             widget.setMinimum(params.get("min"))
@@ -121,7 +121,7 @@ class IplotPreferencesForm(QWidget):
     @staticmethod
     def create_combo_box(items):
         widget = QComboBox()
-        # Override the wheelEvent() method using a lambda function to ignore mouse wheel events
+        # Override the wheelEvent method using a lambda function to ignore mouse wheel events
         widget.wheelEvent = lambda event: event.ignore()
         if isinstance(items, dict):
             for k, v in items.items():
