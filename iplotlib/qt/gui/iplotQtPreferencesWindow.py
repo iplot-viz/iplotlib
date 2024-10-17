@@ -14,8 +14,8 @@ import typing
 from PySide6.QtCore import QItemSelectionModel, QModelIndex, Qt
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtGui import QShowEvent, QStandardItem, QStandardItemModel
-from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter,
-                               QStackedWidget, QTreeView, QWidget, QScrollArea)
+from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter, QStackedWidget, QTreeView, QWidget,
+                               QScrollArea)
 
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas

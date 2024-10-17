@@ -12,8 +12,8 @@ from typing import List, Optional
 import time
 
 from PySide6.QtCore import QModelIndex, Qt, Signal, Slot
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDataWidgetMapper, QLabel, QLineEdit,
-                               QFormLayout, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget, QScrollArea)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDataWidgetMapper, QLabel, QLineEdit, QFormLayout, QPushButton,
+                               QSizePolicy, QSpinBox, QVBoxLayout, QWidget, QScrollArea)
 
 from iplotlib.qt.models import BeanItem, BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
