@@ -13,7 +13,7 @@ import typing
 from PySide6.QtCore import QModelIndex, Qt, Slot
 from PySide6.QtWidgets import QWidget
 
-from iplotlib.core.plot import Plot, PlotXY
+from iplotlib.core.plot import Plot
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
 from iplotlib.qt.models.beanItemModel import BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
@@ -56,13 +56,13 @@ class PlotForm(IplotPreferencesForm):
         super().__init__(fields=prototype, label="A plot", parent=parent, f=f)
 
     @Slot()
-    def resetPrefs(self):
-        pyObject = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+    def reset_prefs(self):
+        py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
 
-        if isinstance(pyObject, Plot):
-            pyObject.reset_preferences()
+        if isinstance(py_object, Plot):
+            py_object.reset_preferences()
         else:
             return
 
         self.widgetMapper.revert()
-        super().resetPrefs()
+        super().reset_prefs()

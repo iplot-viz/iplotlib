@@ -42,13 +42,13 @@ class SignalForm(IplotPreferencesForm):
         super().__init__(fields=prototype, label="A signal", parent=parent, f=f)
 
     @Slot()
-    def resetPrefs(self):
-        pyObject = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+    def reset_prefs(self):
+        py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
 
-        if isinstance(pyObject, Signal):
-            pyObject.reset_preferences()
+        if isinstance(py_object, Signal):
+            py_object.reset_preferences()
         else:
             return
 
         self.widgetMapper.revert()
-        super().resetPrefs()
+        super().reset_prefs()

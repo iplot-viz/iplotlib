@@ -62,7 +62,7 @@ class TestPropertyManager(unittest.TestCase):
         self.canvas.add_plot(plot)
 
         for ax in plot.axes:
-            f = partial(self.pm.get_value, canvas=self.canvas, plot=plot, axis=ax)
+            f = partial(self.pm.get_value, canvas=self.canvas, plot=plot, axis=ax[0] if isinstance(ax, list) else ax)
             self.assertEqual(f("font_color"), self.canvas.font_color)
             self.assertEqual(f("font_size"), self.canvas.font_size)
 
