@@ -123,6 +123,8 @@ class IplotQtPreferencesWindow(QMainWindow):
                     continue
                 self.formsStack.setCurrentIndex(index)
                 if isinstance(self.formsStack.currentWidget(), IplotPreferencesForm):
+                    # Set top label
+                    self.formsStack.currentWidget().top_label.setText(model_idx.data())
                     self.formsStack.currentWidget().set_source_index(model_idx)
 
     def closeEvent(self, event):
