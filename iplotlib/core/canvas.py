@@ -262,7 +262,13 @@ class Canvas(ABC):
                                 col_name += f"_{pl_signal.name}"
 
                             # Refresh limits
-                            mask = (pl_signal.x_data >= pl_signal.ts_start) & (pl_signal.x_data <= pl_signal.ts_end)
+                            # Now when using pulses, if no start time or end time are specified, the default is set to
+                            # 0 and None respectively. For that reason, it is necessary to check the ts_end of the
+                            # different signals and create the mask depending on the circumstances.
+                            if pl_signal.ts_end is None:
+                                mask = pl_signal.x_data >= pl_signal.ts_start
+                            else:
+                                mask = (pl_signal.x_data >= pl_signal.ts_start) & (pl_signal.x_data <= pl_signal.ts_end)
                             pl_signal.x_data = pl_signal.x_data[mask]
                             pl_signal.y_data = pl_signal.y_data[mask]
 
