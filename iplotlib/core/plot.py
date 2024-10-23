@@ -85,10 +85,20 @@ class Plot(ABC):
 
 @dataclass
 class PlotContour(Plot):
-    pass
+    grid: bool = None  #: indicate if the grid must be drawn
+    contour_levels: int = None  #: set the number of levels for the plot.
+    contour_filled: bool = False  #: set if the plot is filled or not.
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.axes is None:
+            self.axes = [LinearAxis(), LinearAxis()]
 
     def reset_preferences(self):
         super().reset_preferences()
+        self.contour_levels = PlotContour.contour_levels
+        self.contour_filled = PlotContour.contour_filled
+        self.grid = PlotContour.grid
 
     def merge(self, old_plot: 'PlotContour'):
         super().merge(old_plot)
@@ -132,7 +142,7 @@ class PlotXY(Plot):
     # 'steps-mid', 'steps-pre', 'None'
     hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires
     # special handling
-    dec_samples: int = None  #: DEPRECATED Nº of samples for each signal. Forwarded to data-access module.
+    dec_samples: int = None  # DEPRECATED Nº of samples for each signal. Forwarded to data-access module.
 
     _color_cycle = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
                     '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',

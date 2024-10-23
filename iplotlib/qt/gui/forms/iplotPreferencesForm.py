@@ -160,6 +160,10 @@ class IplotPreferencesForm(QWidget):
         return IplotPreferencesForm.create_spinbox(min=0, max=20)
 
     @staticmethod
+    def default_spinbox_widget(min_value: int = 0, max_value: int = 100):
+        return IplotPreferencesForm.create_spinbox(min=min_value, max_value=max_value)
+
+    @staticmethod
     def default_ticknumber_widget():
         return IplotPreferencesForm.create_spinbox(min=1, max=7)
 
