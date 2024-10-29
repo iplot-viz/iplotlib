@@ -23,8 +23,8 @@ class CanvasItem(QStandardItem):
         if not isinstance(value, Canvas):
             return
 
-        if self.auto_name and value.title:
-            self.setText(value.title)
+        if self.auto_name and value.canvas_title:
+            self.setText(value.canvas_title)
 
         for column_idx in range(len(value.plots)):
             column = value.plots[column_idx]

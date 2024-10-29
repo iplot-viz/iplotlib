@@ -26,7 +26,7 @@ class CanvasForm(IplotPreferencesForm):
 
     def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         prototype = [
-            {"label": "Title", "property": "title",
+            {"label": "Title", "property": "canvas_title",
              "widget": self.create_lineedit()},
             {"label": "Font size", "property": "font_size",
              "widget": self.default_fontsize_widget()},
@@ -49,11 +49,11 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.default_canvas_legend_position_widget()},
             {"label": "Legend layout", "property": "legend_layout",
              "widget": self.default_canvas_legend_layout_widget()},
-            {"label": "Enable Crosshair X-label", "property": "enable_Xlabel_crosshair",
+            {"label": "Enable Crosshair X-label", "property": "enable_x_label_crosshair",
              "widget": self.create_checkbox()},
-            {"label": "Enable Crosshair Y-label", "property": "enable_Ylabel_crosshair",
+            {"label": "Enable Crosshair Y-label", "property": "enable_y_label_crosshair",
              "widget": self.create_checkbox()},
-            {"label": "Enable Crosshair Val-label", "property": "enable_ValLabel_crosshair",
+            {"label": "Enable Crosshair Val-label", "property": "enable_val_label_crosshair",
              "widget": self.create_checkbox()},
             {"label": "Crosshair color", "property": "crosshair_color", "widget": ColorPicker("crosshair_color")},
             {"label": "Font color", "property": "font_color", "widget": ColorPicker("font_color")},

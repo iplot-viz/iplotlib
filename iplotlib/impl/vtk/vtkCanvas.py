@@ -46,7 +46,7 @@ STEP_MAP = {"linear": "none", "mid": "steps-mid", "post": "steps-post",
 
 LEGEND_POS_MAP = {'upper right': (vtkChartLegend.TOP, vtkChartLegend.RIGHT),
                   'upper left': (vtkChartLegend.TOP, vtkChartLegend.LEFT),
-                  'uper center': (vtkChartLegend.TOP, vtkChartLegend.CENTER),
+                  'upper center': (vtkChartLegend.TOP, vtkChartLegend.CENTER),
                   'lower right': (vtkChartLegend.BOTTOM, vtkChartLegend.RIGHT),
                   'lower left': (vtkChartLegend.BOTTOM, vtkChartLegend.LEFT),
                   'lower center': (vtkChartLegend.BOTTOM, vtkChartLegend.CENTER),
@@ -483,9 +483,9 @@ class VTKParser(BackendParserBase):
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
 
         if isinstance(axis, Axis):
-            vtk_axis._label = axis.label
-            if axis.label is not None:
-                vtk_axis.SetTitle(axis.label)
+            vtk_axis._label = axis.axis_label
+            if axis.axis_label is not None:
+                vtk_axis.SetTitle(axis.axis_label)
 
             appearance = vtk_axis.GetTitleProperties()  # type: vtkTextProperty
             fc = self._pm.get_value('font_color', self.canvas, plot, axis)

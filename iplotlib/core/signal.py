@@ -22,21 +22,54 @@ class SignalStyle(ABC):
 @dataclass
 class Signal(ABC):
     """
-    Main abstraction for a Signal.
+    Main abstraction for a Signal
+
+    Attributes
+    ----------
+    uid : str
+        Signal uid
+    name : str
+        Signal variable name
+    label : str
+        Signal label. This value is presented on plot legend
+    color : str
+        signal color
+    line_style : str
+        Style of the line used for plotting. Supported types: 'Solid', 'Dashed', 'Dotted'
+    line_size : int
+        Thickness of the signal line
+    marker : str
+        default marker type to display. If set a marker is drawn at every point of the data sample. Markers and lines
+        can be drawn together and are not mutually exclusive. Supported types: 'x','o', None, default: None
+        (no markers are drawn)
+    marker_size : int
+        default marker size. Whether it is mapped to pixels or DPI independent points should be canvas implementation
+        dependent
+    step : str
+        default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
+    hi_precision_data: bool = None
+        description [...]
+    plot_type: str = ''
+        description [...]
+    _type: str = None
+        type of the signal
+    lines = []
+        description [...]
     """
-    uid: str = None  #: Signal uid.
-    name: str = ''  #: Signal variable name.
-    label: str = None  #: Signal label. This value is presented on plot legend
+
+    uid: str = None
+    name: str = ''
+    label: str = None
     color: str = None
-    line_style: str = None
-    line_size: int = None
+    line_style: str = 'Solid'
+    line_size: int = 1
     marker: str = None
     marker_size: int = None
-    step: str = None
+    step: str = "linear"
     hi_precision_data: bool = None
     plot_type: str = ''
-    _type: str = None
     lines = []
+    _type: str = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__

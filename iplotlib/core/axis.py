@@ -17,14 +17,28 @@ from dataclasses import dataclass
 class Axis:
     """
     Main abstraction of an axis
+
+    Attributes
+    ----------
+    axis_label : str
+        a text to be shown next to an axis
+    font_size : int
+        font size applies both for axis label and axis tick labels
+    font_color : str
+        color applies to an axis label and axis tick labels
+    tick_number : int
+        number of ticks and labels to be shown in the axis
+    autoscale : bool
+        enables automatic scaling of the axis range to fit displayed data if set to True
+    _type : str
+        type of the axis
     """
 
-    label: str = None  #: a text to be shown next to an axis.
-    font_size: int = None  # font size applies both for axis label and axis tick labels.
-    font_color: str = '#000000'  # color applies to an axis label and axis tick labels.
-    tick_number: int = None  #: number of ticks and labels to be shown in a XAxis
+    axis_label: str = None
+    font_size: int = 10
+    font_color: str = '#000000'
+    tick_number: int = 7
     autoscale: bool = False
-
     _type: str = None
 
     def __post_init__(self):
@@ -38,14 +52,14 @@ class Axis:
         """
         Reset font size and font color
         """
-        self.label = Axis.label
+        self.axis_label = Axis.axis_label
         self.font_size = Axis.font_size
         self.font_color = Axis.font_color
         self.tick_number = Axis.tick_number
         self.autoscale = Axis.autoscale
 
     def merge(self, old_axis: 'Axis'):
-        self.label = old_axis.label
+        self.axis_label = old_axis.axis_label
         self.font_size = old_axis.font_size
         self.font_color = old_axis.font_color
         self.tick_number = old_axis.tick_number
@@ -98,11 +112,19 @@ class RangeAxis(Axis):
 @dataclass
 class LinearAxis(RangeAxis):
     """
-    A specialized range axis to deal with date time properties.
+    A specialized range axis to deal with date time properties
+
+    Attributes
+    ----------
+    is_date : bool
+        suggests that axis should be formatted as date instead of number
+    window : float
+        Implies that instead of using (begin,end) to specify axis range the range is specified by (end-window,end)
+    follow : bool
+        If true plot 'follows' the data which means it is refreshed when new data arrives and range is automatically
+        changed to show new data
     """
 
-    is_date: bool = False  #: suggests that axis should be formatted as date instead of number
-    window: float = None  #: Implies that instead of using (begin,end) to specify axis range the range is specified by
-    # (end-window,end)
-    follow: bool = False  #: If true plot 'follows' the data which means it is refreshed when new data arrives and range
-    # is automatically changed to show new data
+    is_date: bool = False
+    window: float = None
+    follow: bool = False

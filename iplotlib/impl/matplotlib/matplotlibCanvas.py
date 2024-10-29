@@ -259,13 +259,13 @@ class MatplotlibParser(BackendParserBase):
                 break
 
         # Update the previous background color at Canvas level
-        self.canvas.prev_background_color = self.canvas.background_color
+        # self.canvas.prev_background_color = self.canvas.background_color
 
         # 4. Update the title at the top of canvas.
-        if canvas.title is not None:
+        if canvas.canvas_title is not None:
             if not canvas.font_size:
                 canvas.font_size = None
-            self.figure.suptitle(canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
+            self.figure.suptitle(canvas.canvas_title, size=canvas.font_size, color=self.canvas.font_color or 'black')
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
         logger.debug(f"process_ipl_plot AA: {self.canvas.step}")
@@ -314,17 +314,7 @@ class MatplotlibParser(BackendParserBase):
                     mpl_axes.set_title(plot.title, color=fc, size=fs)
 
                 # Set the background color
-                if self.canvas.background_color != self.canvas.prev_background_color:
-                    mpl_axes.set_facecolor(self.canvas.background_color)
-                    # Refresh background color for each plot
-                    plot.background_color = self.canvas.background_color
-                elif plot.background_color is None:
-                    mpl_axes.set_facecolor(self.canvas.background_color)
-                    plot.background_color = self.canvas.background_color
-                elif plot.background_color != self.canvas.background_color:
-                    mpl_axes.set_facecolor(plot.background_color)
-                else:
-                    mpl_axes.set_facecolor(self.canvas.background_color)
+                mpl_axes.set_facecolor(plot.background_color)
 
                 # If this is a stacked plot the X axis should be visible only at the bottom
                 # plot of the stack except it is focused
@@ -491,7 +481,7 @@ class MatplotlibParser(BackendParserBase):
 
             mpl_axis._font_color = fc
             mpl_axis._font_size = fs
-            mpl_axis._label = axis.label
+            mpl_axis._label = axis.axis_label
 
             label_props = dict(color=fc)
             # Set ticks on the top and right axis
@@ -503,8 +493,8 @@ class MatplotlibParser(BackendParserBase):
             if fs is not None and fs > 0:
                 label_props.update({'fontsize': fs})
                 tick_props.update({'labelsize': fs})
-            if axis.label is not None:
-                mpl_axis.set_label_text(axis.label, **label_props)
+            if axis.axis_label is not None:
+                mpl_axis.set_label_text(axis.axis_label, **label_props)
 
             mpl_axis.set_tick_params(**tick_props)
 
@@ -664,9 +654,9 @@ class MatplotlibParser(BackendParserBase):
 
             self._cursors.append(
                 IplotMultiCursor(self.figure.canvas, axes_group,
-                                 x_label=self.canvas.enable_Xlabel_crosshair,
-                                 y_label=self.canvas.enable_Ylabel_crosshair,
-                                 val_label=self.canvas.enable_ValLabel_crosshair,
+                                 x_label=self.canvas.enable_x_label_crosshair,
+                                 y_label=self.canvas.enable_y_label_crosshair,
+                                 val_label=self.canvas.enable_val_label_crosshair,
                                  color=self.canvas.crosshair_color,
                                  lw=self.canvas.crosshair_line_width,
                                  horiz_on=False or self.canvas.crosshair_horizontal,

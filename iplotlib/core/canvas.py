@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import List, Union, Dict
 
 from iplotlib.core.persistence import JSONExporter
-from iplotlib.core.plot import Plot
+from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.core.signal import Signal
 import pandas as pd
 
@@ -19,6 +19,72 @@ import pandas as pd
 class Canvas(ABC):
     """
     This class exposes visual properties of a canvas.
+
+    Attributes
+    ----------
+    MOUSE_MODE_SELECT : str
+        Defines the mouse mode for selecting elements in the canvas
+    MOUSE_MODE_CROSSHAIR : str
+       Defines the mouse mode that activates the crosshair cursor
+    MOUSE_MODE_PAN : str
+        Sets the mouse mode for panning
+    MOUSE_MODE_ZOOM : str
+        Sets the mouse mode for zooming
+    MOUSE_MODE_DIST : str
+        Activates distance measurement mode for calculating distances on the canvas.
+    rows : int
+        Number of rows in the grid. If specified the space for this nuber of rows should be reserved when rendering
+        canvas since some plots can be empty
+    cols : int
+        Number of columns in the grid. If specified the space for this number of columns should be reserved when
+        rendering canvas since some plots may be empty
+    canvas_title : str
+        It is shown above the canvas grid centered horizontally
+    round_hour : bool
+        Rounds timestamps to the nearest hour if set to True
+    hi_precision_data : bool
+        a boolean that suggests the data is sensitive to round off errors and requires special handling
+    dec_samples : int
+        the default no. of samples for a data access fetch call.
+    ticks_position : bool
+        a boolean that indicates if the plot has to show all the ticks in all the axis (top and right included)
+    mouse_mode : str
+        the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
+    enable_x_label_crosshair : bool
+        description [...]
+    enable_y_label_crosshair : bool
+        description [...]
+    enable_val_label_crosshair : bool
+        description [...]
+    plots : List[List[Union[Plot, None]]]
+        A 22-level nested list of plots.
+    focus_plot : Plot
+        description [...]
+    crosshair_enabled : bool
+        visibility of crosshair
+    crosshair_color : str
+        color of the crosshair cursor lines
+    crosshair_line_width : int
+        width of the crosshair cursor lines
+    crosshair_horizontal : bool
+        visibility of the horizontal line
+    crosshair_vertical : bool
+        description [...]
+    crosshair_per_plot : bool
+        description [...]
+    streaming : bool
+        description [...]
+    shared_x_axis : bool
+        description [...]
+    full_mode_all_stack : bool
+        Indicates that when we switch to full mode for a stacked plot we should put entire stacked plot in full mode or
+        only one of the subplots
+    auto_refresh : int
+        Auto redraw canvas every X seconds
+    _type : str
+        type of the canvas
+    _attribute_hierarchy : dict
+        description [...]
     """
 
     MOUSE_MODE_SELECT = "MM_SELECT"
@@ -26,81 +92,37 @@ class Canvas(ABC):
     MOUSE_MODE_PAN = 'MM_PAN'
     MOUSE_MODE_ZOOM = 'MM_ZOOM'
     MOUSE_MODE_DIST = 'MM_DIST'
-
-    #: Number of rows in the grid. If specified the space for this nuber of rows should be reserved
-    # when rendering canvas since some plots can be empty
     rows: int = 1
-    #: Number of columns in the grid. If specified the space for this number of columns should be reserved
-    # when rendering canvas since some plots may be empty
     cols: int = 1
-    title: str = None  #: Canvas title - should be shown above the canvas grid centered horizontally
-
-    font_size: int = None  #: default font size that will be cascaded across plots and axes of this canvas.
-    font_color: str = '#000000'  #: default font color that will be cascaded across plots and axes of this canvas.
-    background_color: str = '#FFFFFF'  # default background color will be white for each plot
-    # previous background color used to keep consistency between Canvas and Plot preferences
-    prev_background_color = '#FFFFFF'
-    tick_number: int = 7  # default number of ticks for each plot
-
-    round_hour: bool = False
-
-    log_scale: bool = False  # a boolean that represents the log scale
-
-    line_style: str = None  #: default value for line plots - 'solid','dashed','dotted' defaults to 'solid'.
-    # default line thickness for drawing line plots. Whether it is mapped to pixels or DPI independent
-    # points should be canvas implementation dependent
-    line_size: int = None
-
-    #: default marker type to display. If set a marker is drawn at every point of the data sample.
-    # Markers and lines can be drawn together and are not mutually exclusive.
-    # Supported types: 'x','o', None, default: None (no markers are drawn)
-    marker: str = None
-    #: default marker size. Whether it is mapped to pixels or DPI independent points should
-    # be canvas implementation dependent
-    marker_size: int = None
-
-    step: str = None  # default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
-
-    #: a boolean that suggests the data is sensitive to round off errors and requires special handling
+    canvas_title: str = None
+    round_hour: bool = False  # Check if it was decided to set the attribute in this Canvas Level
     hi_precision_data: bool = False
-    dec_samples: int = 1000  #: the default no. of samples for a data access fetch call.
-
-    legend: bool = True  #: a boolean that suggests the visibility of a plot legend box.
-    legend_position: str = 'upper right'  #: indicate the location of the plot legend
-    legend_layout: str = 'vertical'  #: indicate the layout of the plot legend
-    grid: bool = True  #: a boolean that suggests the visibility of a plot grid
-    ticks_position: bool = False
-
-    #: the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
+    dec_samples: int = 1000
+    ticks_position: bool = False  # Check if it was decided to set the attribute in this Canvas Level
     mouse_mode: str = MOUSE_MODE_SELECT
-    enable_Xlabel_crosshair: bool = True
-    enable_Ylabel_crosshair: bool = True
-    enable_ValLabel_crosshair: bool = True
-
-    plots: List[List[Union[Plot, None]]] = None  #: A 22-level nested list of plots.
+    enable_x_label_crosshair: bool = True
+    enable_y_label_crosshair: bool = True
+    enable_val_label_crosshair: bool = True
+    plots: List[List[Union[Plot, None]]] = None
     focus_plot: Plot = None
-
-    crosshair_enabled: bool = False  #: visibility of crosshair.
-    crosshair_color: str = "red"  #: color of the crosshair cursor lines.
-    crosshair_line_width: int = 1  # width of the crosshair cursor lines.
-    crosshair_horizontal: bool = True  # visibility of the hori
+    crosshair_enabled: bool = False
+    crosshair_color: str = "red"
+    crosshair_line_width: int = 1
+    crosshair_horizontal: bool = True
     crosshair_vertical: bool = True
     crosshair_per_plot: bool = False
-
     streaming: bool = False
     shared_x_axis: bool = False
-    autoscale: bool = True
-
-    """Indicates that when we switch to full mode for a stacked plot we should put entire 
-    stacked plot in full mode or only one of the subplots"""
     full_mode_all_stack: bool = True
-
-    """Auto redraw canvas every X seconds"""
     auto_refresh: int = 0
-
-    _type: str = None
-
     undo_redo: bool = False
+    _type: str = None
+    _attribute_hierarchy = PlotXY().__dict__
+
+    def __new__(cls, *args, **kwargs):
+        instance = super().__new__(cls)
+        instance.__dict__.update(cls._attribute_hierarchy)
+        return instance
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -154,32 +176,25 @@ class Canvas(ABC):
         """
         pass
 
+    def __setattr__(self, key, value):
+        super().__setattr__(key, value)
+        if key in self._attribute_hierarchy.keys() and self.plots:
+            for column in self.plots:
+                for plot in column:
+                    if plot is not None:
+                        setattr(plot, key, value)
+
     def reset_preferences(self):
         """
         Reset the preferences to default values.
         """
-        self.title = Canvas.title
-        self.font_size = Canvas.font_size
         self.shared_x_axis = Canvas.shared_x_axis
         self.round_hour = Canvas.round_hour
-        self.log_scale = Canvas.log_scale
-        self.grid = Canvas.grid
         self.ticks_position = Canvas.ticks_position
-        self.tick_number = Canvas.tick_number
-        self.background_color = Canvas.background_color
-        self.legend = Canvas.legend
-        self.legend_position = Canvas.legend_position
-        self.legend_layout = Canvas.legend_layout
-        self.enable_Xlabel_crosshair = Canvas.enable_Xlabel_crosshair
-        self.enable_Ylabel_crosshair = Canvas.enable_Ylabel_crosshair
-        self.enable_ValLabel_crosshair = Canvas.enable_ValLabel_crosshair
+        self.enable_x_label_crosshair = Canvas.enable_x_label_crosshair
+        self.enable_y_label_crosshair = Canvas.enable_y_label_crosshair
+        self.enable_val_label_crosshair = Canvas.enable_val_label_crosshair
         self.crosshair_color = Canvas.crosshair_color
-        self.font_color = Canvas.font_color
-        self.line_style = Canvas.line_style
-        self.line_size = Canvas.line_size
-        self.marker = Canvas.marker
-        self.marker_size = Canvas.marker_size
-        self.step = Canvas.step
         self.full_mode_all_stack = Canvas.full_mode_all_stack
         self.focus_plot = Canvas.focus_plot
 
@@ -187,28 +202,16 @@ class Canvas(ABC):
         """
         Reset the preferences to default values.
         """
-        self.title = old_canvas.title
-        self.font_size = old_canvas.font_size
+        for attr in self._attribute_hierarchy.keys():
+            super().__setattr__(attr, getattr(old_canvas, attr))
+        self.canvas_title = old_canvas.canvas_title
         self.shared_x_axis = old_canvas.shared_x_axis
         self.round_hour = old_canvas.round_hour
-        self.log_scale = old_canvas.log_scale
-        self.grid = old_canvas.grid
         self.ticks_position = old_canvas.ticks_position
-        self.tick_number = old_canvas.tick_number
-        self.background_color = old_canvas.background_color
-        self.legend = old_canvas.legend
-        self.legend_position = old_canvas.legend_position
-        self.legend_layout = old_canvas.legend_layout
-        self.enable_Xlabel_crosshair = old_canvas.enable_Xlabel_crosshair
-        self.enable_Ylabel_crosshair = old_canvas.enable_Ylabel_crosshair
-        self.enable_ValLabel_crosshair = old_canvas.enable_ValLabel_crosshair
+        self.enable_x_label_crosshair = old_canvas.enable_x_label_crosshair
+        self.enable_y_label_crosshair = old_canvas.enable_y_label_crosshair
+        self.enable_val_label_crosshair = old_canvas.enable_val_label_crosshair
         self.crosshair_color = old_canvas.crosshair_color
-        self.font_color = old_canvas.font_color
-        self.line_style = old_canvas.line_style
-        self.line_size = old_canvas.line_size
-        self.marker = old_canvas.marker
-        self.marker_size = old_canvas.marker_size
-        self.step = old_canvas.step
         self.full_mode_all_stack = old_canvas.full_mode_all_stack
         self.focus_plot = old_canvas.focus_plot
 

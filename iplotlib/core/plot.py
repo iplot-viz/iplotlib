@@ -13,31 +13,47 @@ from dataclasses import dataclass
 from typing import Dict, List, Collection, Union
 
 from iplotlib.core.axis import Axis, LinearAxis
-from iplotlib.core.signal import Signal
+from iplotlib.core.signal import Signal, SimpleSignal
 
 
 @dataclass
 class Plot(ABC):
     """
     Main abstraction of a Plot
+
+    Attributes
+    ----------
+    row_span : int
+        nº of rows of canvas grid that this plot will span '!"·
+    col_span : int
+        nº of columns of canvas grid that this plot will span
+    title : str
+        a plot title text, will be shown above the plot
+    axes : List[Union[Axis, List[Axis]]]
+        the plot axes
+    signals : Dict[int, List[Signal]]
+        the signals drawn in this plot
+    background_color : str
+        indicate background color of the plot
+    legend : bool
+        indicate if the plot legend must be shown
+    legend_position : str
+        indicate the location of the plot legend
+    legend_layout : str
+        indicate the layout of the plot legend
+    _type : str
+        type of the plot
     """
-
-    row_span: int = 1  #: nº of rows of canvas grid that this plot will span
-    col_span: int = 1  #: nº of columns of canvas grid that this plot will span
-
-    title: str = None  #: a plot title text, will be shown above the plot
-
-    axes: List[Union[Axis, List[Axis]]] = None  #: the plot axes.
-    signals: Dict[int, List[Signal]] = None  #: the signals drawn in this plot
-    _type: str = None
-
-    font_size: int = None  #: the font size of the plot title text
-    font_color: str = '#000000'  #: the font color of the plot title text
+    row_span: int = 1
+    col_span: int = 1
+    title: str = None
+    axes: List[Union[Axis, List[Axis]]] = None
+    signals: Dict[int, List[Signal]] = None
     background_color: str = '#FFFFFF'
-    tick_number: int = None
-    legend: bool = None  #: indicate if the plot legend must be shown
-    legend_position: str = 'same as canvas'  #: indicate the location of the plot legend
-    legend_layout: str = 'same as canvas'  #: indicate the layout of the plot legend
+    legend: bool = True
+    legend_position: str = 'upper right'
+    legend_layout: str = 'vertical'
+    _type: str = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -53,20 +69,14 @@ class Plot(ABC):
         self.legend = Plot.legend
         self.legend_position = Plot.legend_position
         self.legend_layout = Plot.legend_layout
-        self.font_size = Plot.font_size
-        self.font_color = Plot.font_color
         self.background_color = Plot.background_color
-        self.tick_number = Plot.tick_number
 
     def merge(self, old_plot: 'Plot'):
         self.title = old_plot.title
         self.legend = old_plot.legend
         self.legend_position = old_plot.legend_position
         self.legend_layout = old_plot.legend_layout
-        self.font_size = old_plot.font_size
-        self.font_color = old_plot.font_color
         self.background_color = old_plot.background_color
-        self.tick_number = old_plot.tick_number
 
         for idxAxis, axis in enumerate(self.axes):
             if axis and idxAxis < len(old_plot.axes):
@@ -120,24 +130,45 @@ class PlotImage(Plot):
 class PlotXY(Plot):
     """
     A concrete Plot class specialized for 2D plottling.
+
+    Attributes
+    ----------
+    log_scale : bool
+        A boolean that represents the log scale
+    grid : bool
+        indicate if the grid must be drawn
+    hi_precision_data : bool
+        indicate whether the data is sensitive to round off errors and requires special handling
+    dec_samples : int
+        DEPRECATED Nº of samples for each signal. Forwarded to data-access module
+    _color_cycle : List[str]
+        A list of colors for cycling through plot lines, ensuring variety in signal colors
+    _color_index : int
+        Current index within the color cycle for assigning a new color
+    _attribute_hierarchy_signal : dict
+        description [...]
+    _attribute_hierarchy_axis : dict
+        description [...]
+    _attribute_hierarchy_plot : dict
+        description [...]
     """
 
-    log_scale: bool = None  # indicate the log scale
-    grid: bool = None  #: indicate if the grid must be drawn
-    line_style: str = None  #: set the line style of all signals.
-    line_size: int = None  #: set the line size of all signals.
-    marker: str = None  #: set the marker shape of all signals.
-    marker_size: int = None  #: set the marker size of all signals.
-    step: str = None  #: indicate if the step function of the data must be plotted for all signals.Ex: 'steps-post',
-    # 'steps-mid', 'steps-pre', 'None'
-    hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires
-    # special handling
-    dec_samples: int = None  #: DEPRECATED Nº of samples for each signal. Forwarded to data-access module.
-
+    log_scale: bool = False
+    grid: bool = True
     _color_cycle = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
                     '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',
                     '#e6ff33', '#8a2be2', '#000080', '#cc6600']
     _color_index: int = None
+    _attribute_hierarchy_signal = SimpleSignal().__dict__
+    _attribute_hierarchy_axis = LinearAxis().__dict__
+    _attribute_hierarchy_plot = {}
+    _attribute_hierarchy_plot.update(_attribute_hierarchy_signal)
+    _attribute_hierarchy_plot.update(_attribute_hierarchy_axis)
+
+    def __new__(cls, *args, **kwargs):
+        instance = super().__new__(cls)
+        instance.__dict__.update(cls._attribute_hierarchy_plot)
+        return instance
 
     def __post_init__(self):
         super().__post_init__()
@@ -155,20 +186,26 @@ class PlotXY(Plot):
     def reset_preferences(self):
         self.log_scale = PlotXY.log_scale
         self.grid = PlotXY.grid
-        self.line_style = PlotXY.line_style
-        self.line_size = PlotXY.line_size
-        self.marker = PlotXY.marker
-        self.marker_size = PlotXY.marker_size
-        self.step = PlotXY.step
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotXY'):
+        for attr in self._attribute_hierarchy_plot.keys():
+            super().__setattr__(attr, getattr(old_plot, attr))
         self.log_scale = old_plot.log_scale
         self.grid = old_plot.grid
-        self.line_style = old_plot.line_style
-        self.line_size = old_plot.line_size
-        self.marker = old_plot.marker
-        self.marker_size = old_plot.marker_size
-        self.step = old_plot.step
         self._color_index = old_plot._color_index
         super().merge(old_plot)
+
+    def __setattr__(self, key, value):
+        super().__setattr__(key, value)
+        if key in self._attribute_hierarchy_signal.keys() and self.signals:
+            for signal_list in self.signals.values():
+                for signal in signal_list:
+                    setattr(signal, key, value)
+        elif key in self._attribute_hierarchy_axis.keys() and self.axes:
+            for idxAxis, axis in enumerate(self.axes):
+                if isinstance(axis, Collection):
+                    for idxSubAxis, subAxis in enumerate(axis):
+                        setattr(subAxis, key, value)
+                else:
+                    setattr(axis, key, value)
