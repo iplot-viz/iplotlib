@@ -38,14 +38,10 @@ class Canvas(ABC):
     cols : int
         Number of columns in the grid. If specified the space for this number of columns should be reserved when
         rendering canvas since some plots may be empty
-    canvas_title : str
+    title : str
         It is shown above the canvas grid centered horizontally
     round_hour : bool
         Rounds timestamps to the nearest hour if set to True
-    hi_precision_data : bool
-        a boolean that suggests the data is sensitive to round off errors and requires special handling
-    dec_samples : int
-        the default no. of samples for a data access fetch call.
     ticks_position : bool
         a boolean that indicates if the plot has to show all the ticks in all the axis (top and right included)
     mouse_mode : str
@@ -94,11 +90,9 @@ class Canvas(ABC):
     MOUSE_MODE_DIST = 'MM_DIST'
     rows: int = 1
     cols: int = 1
-    canvas_title: str = None
-    round_hour: bool = False  # Check if it was decided to set the attribute in this Canvas Level
-    hi_precision_data: bool = False
-    dec_samples: int = 1000
-    ticks_position: bool = False  # Check if it was decided to set the attribute in this Canvas Level
+    title: str = None
+    round_hour: bool = False
+    ticks_position: bool = False
     mouse_mode: str = MOUSE_MODE_SELECT
     enable_x_label_crosshair: bool = True
     enable_y_label_crosshair: bool = True
@@ -117,7 +111,7 @@ class Canvas(ABC):
     auto_refresh: int = 0
     undo_redo: bool = False
     _type: str = None
-    _attribute_hierarchy = PlotXY().__dict__
+    _attribute_hierarchy = PlotXY().attrs_propagated
 
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls)
@@ -204,7 +198,7 @@ class Canvas(ABC):
         """
         for attr in self._attribute_hierarchy.keys():
             super().__setattr__(attr, getattr(old_canvas, attr))
-        self.canvas_title = old_canvas.canvas_title
+        self.title = old_canvas.title
         self.shared_x_axis = old_canvas.shared_x_axis
         self.round_hour = old_canvas.round_hour
         self.ticks_position = old_canvas.ticks_position

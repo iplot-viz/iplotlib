@@ -20,7 +20,7 @@ class Axis:
 
     Attributes
     ----------
-    axis_label : str
+    label : str
         a text to be shown next to an axis
     font_size : int
         font size applies both for axis label and axis tick labels
@@ -32,17 +32,22 @@ class Axis:
         enables automatic scaling of the axis range to fit displayed data if set to True
     _type : str
         type of the axis
+    attrs_propagated : dict
+        used for attribute propagation
     """
 
-    axis_label: str = None
+    label: str = None
     font_size: int = 10
     font_color: str = '#000000'
     tick_number: int = 7
     autoscale: bool = False
     _type: str = None
+    attrs_propagated = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
+        self.attrs_propagated = {k: v for k, v in self.__dict__.items() if
+                                 k in ["font_size", "font_color", "tick_number"]}
 
     @staticmethod
     def ticks():
@@ -52,14 +57,14 @@ class Axis:
         """
         Reset font size and font color
         """
-        self.axis_label = Axis.axis_label
+        self.label = Axis.label
         self.font_size = Axis.font_size
         self.font_color = Axis.font_color
         self.tick_number = Axis.tick_number
         self.autoscale = Axis.autoscale
 
     def merge(self, old_axis: 'Axis'):
-        self.axis_label = old_axis.axis_label
+        self.label = old_axis.label
         self.font_size = old_axis.font_size
         self.font_color = old_axis.font_color
         self.tick_number = old_axis.tick_number

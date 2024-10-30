@@ -26,7 +26,7 @@ class CanvasForm(IplotPreferencesForm):
 
     def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         prototype = [
-            {"label": "Title", "property": "canvas_title",
+            {"label": "Title", "property": "title",
              "widget": self.create_lineedit()},
             {"label": "Font size", "property": "font_size",
              "widget": self.default_fontsize_widget()},

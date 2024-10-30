@@ -259,10 +259,10 @@ class MatplotlibParser(BackendParserBase):
                 break
 
         # 4. Update the title at the top of canvas.
-        if canvas.canvas_title is not None:
+        if canvas.title is not None:
             if not canvas.font_size:
                 canvas.font_size = None
-            self.figure.suptitle(canvas.canvas_title, size=canvas.font_size, color=self.canvas.font_color or 'black')
+            self.figure.suptitle(canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
         logger.debug(f"process_ipl_plot AA: {self.canvas.step}")
@@ -478,7 +478,7 @@ class MatplotlibParser(BackendParserBase):
 
             mpl_axis._font_color = fc
             mpl_axis._font_size = fs
-            mpl_axis._label = axis.axis_label
+            mpl_axis._label = axis.label
 
             label_props = dict(color=fc)
             # Set ticks on the top and right axis
@@ -490,8 +490,8 @@ class MatplotlibParser(BackendParserBase):
             if fs is not None and fs > 0:
                 label_props.update({'fontsize': fs})
                 tick_props.update({'labelsize': fs})
-            if axis.axis_label is not None:
-                mpl_axis.set_label_text(axis.axis_label, **label_props)
+            if axis.label is not None:
+                mpl_axis.set_label_text(axis.label, **label_props)
 
             mpl_axis.set_tick_params(**tick_props)
 

@@ -88,7 +88,7 @@ class QStandaloneCanvas:
         canvasIdx = self.main_window.canvasStack.count()
         self.main_window.canvasStack.addWidget(qt_canvas)
 
-        act = QAction(str(canvasIdx + 1).zfill(2) + '-' + canvas.canvas_title, self.main_window)
+        act = QAction(str(canvasIdx + 1).zfill(2) + '-' + canvas.title, self.main_window)
         act.setCheckable(True)
         act.triggered.connect(partial(self.main_window.canvasStack.setCurrentIndex, canvasIdx))
         self.canvasActionGroup.addAction(act)

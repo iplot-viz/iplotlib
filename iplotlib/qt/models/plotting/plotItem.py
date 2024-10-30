@@ -58,6 +58,6 @@ class PlotItem(QStandardItem):
         for name, axisObject in axisPlan.items():
             axisItem = AxisItem(name, self.auto_name)
             axisItem.setData(axisObject, Qt.UserRole)
-            if self.auto_name and axisObject.axis_label:
-                axisItem.setText(axisObject.axis_label)
+            if self.auto_name and axisObject.label:
+                axisItem.setText(axisObject.label)
             self.appendRow(axisItem)

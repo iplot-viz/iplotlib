@@ -354,7 +354,7 @@ class VTKParser(BackendParserBase):
                     break
 
         # 4. Update the title at the top of canvas.
-        self._refresh_canvas_title(canvas.canvas_title, canvas.font_color or '#000000')
+        self._refresh_canvas_title(canvas.title, canvas.font_color or '#000000')
         self._refresh_shared_x_axis()
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
@@ -479,9 +479,9 @@ class VTKParser(BackendParserBase):
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
 
         if isinstance(axis, Axis):
-            vtk_axis._label = axis.axis_label
-            if axis.axis_label is not None:
-                vtk_axis.SetTitle(axis.axis_label)
+            vtk_axis._label = axis.label
+            if axis.label is not None:
+                vtk_axis.SetTitle(axis.label)
 
             appearance = vtk_axis.GetTitleProperties()  # type: vtkTextProperty
             fc = self._pm.get_value('font_color', self.canvas, plot, axis)

@@ -47,14 +47,16 @@ class Signal(ABC):
         dependent
     step : str
         default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
-    hi_precision_data: bool = None
-        indicate whether the data is sensitive to round off errors and requires special handling
+    hi_precision_data : bool
+        indicate whether the data is sensitive to round off errors and requires special handling. Keep for VTK
     plot_type : str
         indicates the type of plot for the signal
-    _type: str = None
+    _type : str
         type of the signal
     lines = []
         collection of line elements associated with the signal
+    attrs_propagated : dict
+        used for attribute propagation
     """
 
     uid: str = None
@@ -64,15 +66,18 @@ class Signal(ABC):
     line_style: str = 'Solid'
     line_size: int = 1
     marker: str = None
-    marker_size: int = None
+    marker_size: int = 0
     step: str = "linear"
     hi_precision_data: bool = None
     plot_type: str = ''
     lines = []
     _type: str = None
+    attrs_propagated = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
+        self.attrs_propagated = {k: v for k, v in self.__dict__.items() if
+                                 k in ["line_style", "line_size", "marker", "marker_size", "step"]}
 
     @abstractmethod
     def get_data(self) -> tuple:

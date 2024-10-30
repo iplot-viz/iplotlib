@@ -142,12 +142,12 @@ class PlotXY(Plot):
         A list of colors for cycling through plot lines, ensuring variety in signal colors
     _color_index : int
         Current index within the color cycle for assigning a new color
+    attrs_propagated : dict
+        contains all hierarchical attributes, combining signal and axis properties
     _attribute_hierarchy_signal : dict
         inherited attributes specific to signal properties
     _attribute_hierarchy_axis : dict
         inherited attributes specific to axis properties
-    _attribute_hierarchy_plot : dict
-        contains all hierarchical attributes, combining signal and axis properties
     """
 
     log_scale: bool = False
@@ -155,23 +155,29 @@ class PlotXY(Plot):
     _color_cycle = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
                     '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',
                     '#e6ff33', '#8a2be2', '#000080', '#cc6600']
-    _color_index: int = None
-    _attribute_hierarchy_signal = SimpleSignal().__dict__
-    _attribute_hierarchy_axis = LinearAxis().__dict__
-    _attribute_hierarchy_plot = {}
-    _attribute_hierarchy_plot.update(_attribute_hierarchy_signal)
-    _attribute_hierarchy_plot.update(_attribute_hierarchy_axis)
+    _color_index: int = 0
+    attrs_propagated = None
+    _attribute_hierarchy_signal = SimpleSignal().attrs_propagated
+    _attribute_hierarchy_axis = LinearAxis().attrs_propagated
 
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls)
-        instance.__dict__.update(cls._attribute_hierarchy_plot)
+        instance.__dict__.update(cls._attribute_hierarchy_signal)
+        instance.__dict__.update(cls._attribute_hierarchy_axis)
         return instance
 
     def __post_init__(self):
         super().__post_init__()
         if self.axes is None:
             self.axes = [LinearAxis(), [LinearAxis()]]
-        self._color_index = 0
+
+        combined_attrs = {**vars(super(type(self), self)), **self.__dict__}
+
+        self.attrs_propagated = {k: v for k, v in combined_attrs.items() if
+                                 k in ["background_color", "legend", "legend_position", "legend_layout", "log_scale",
+                                       "grid"]}
+        self.attrs_propagated.update(self._attribute_hierarchy_signal)
+        self.attrs_propagated.update(self._attribute_hierarchy_axis)
 
     def get_next_color(self):
         position = self._color_index % len(self._color_cycle)
@@ -186,7 +192,7 @@ class PlotXY(Plot):
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotXY'):
-        for attr in self._attribute_hierarchy_plot.keys():
+        for attr in self.attrs_propagated.keys():
             super().__setattr__(attr, getattr(old_plot, attr))
         self.log_scale = old_plot.log_scale
         self.grid = old_plot.grid
