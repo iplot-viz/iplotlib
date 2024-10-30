@@ -48,13 +48,13 @@ class Signal(ABC):
     step : str
         default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
     hi_precision_data: bool = None
-        description [...]
-    plot_type: str = ''
-        description [...]
+        indicate whether the data is sensitive to round off errors and requires special handling
+    plot_type : str
+        indicates the type of plot for the signal
     _type: str = None
         type of the signal
     lines = []
-        description [...]
+        collection of line elements associated with the signal
     """
 
     uid: str = None
@@ -153,7 +153,23 @@ class SimpleSignal(ArraySignal):
     """
     A concrete subclass that freezes the data to three numpy arrays (x, y, z).
     You can use this when you have no requirement for custom data-handling.
+
+    Attributes
+    ----------
+    x_data : np.ndarray
+        array containing x-axis data points
+    y_data : np.ndarray
+        array containing y-axis data points
+    z_data : np.ndarray
+        array containing z-axis data points
+    x_unit : str
+        unit of measurement for x-axis data
+    y_unit : str
+        unit of measurement for y-axis data
+    z_unit : str
+        unit of measurement for z-axis data
     """
+
     x_data: np.ndarray = field(default_factory=lambda: np.empty(0))
     y_data: np.ndarray = field(default_factory=lambda: np.empty(0))
     z_data: np.ndarray = field(default_factory=lambda: np.empty(0))

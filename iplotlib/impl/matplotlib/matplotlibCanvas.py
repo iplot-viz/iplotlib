@@ -258,9 +258,6 @@ class MatplotlibParser(BackendParserBase):
             if stop_drawing:
                 break
 
-        # Update the previous background color at Canvas level
-        # self.canvas.prev_background_color = self.canvas.background_color
-
         # 4. Update the title at the top of canvas.
         if canvas.canvas_title is not None:
             if not canvas.font_size:

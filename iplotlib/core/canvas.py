@@ -51,15 +51,15 @@ class Canvas(ABC):
     mouse_mode : str
         the default mouse mode - 'select', 'zoom', 'pan', 'crosshair', defaults to 'select'
     enable_x_label_crosshair : bool
-        description [...]
+        Shows a crosshair-aligned label for the x-axis if True
     enable_y_label_crosshair : bool
-        description [...]
+        Shows a crosshair-aligned label for the y-axis if True
     enable_val_label_crosshair : bool
-        description [...]
+        Displays a label with the data value at the crosshair position if True
     plots : List[List[Union[Plot, None]]]
         A 22-level nested list of plots.
     focus_plot : Plot
-        description [...]
+        The plot currently focused
     crosshair_enabled : bool
         visibility of crosshair
     crosshair_color : str
@@ -67,15 +67,15 @@ class Canvas(ABC):
     crosshair_line_width : int
         width of the crosshair cursor lines
     crosshair_horizontal : bool
-        visibility of the horizontal line
+        visibility of the horizontal line in the crosshair
     crosshair_vertical : bool
-        description [...]
+        visibility of the vertical line in the crosshair
     crosshair_per_plot : bool
-        description [...]
+        Crosshair for each plot in the canvas
     streaming : bool
-        description [...]
+        Enables real-time streaming updates to the canvas when True
     shared_x_axis : bool
-        description [...]
+        When True, all plots share a common x-axis for synchronized display
     full_mode_all_stack : bool
         Indicates that when we switch to full mode for a stacked plot we should put entire stacked plot in full mode or
         only one of the subplots
@@ -84,7 +84,7 @@ class Canvas(ABC):
     _type : str
         type of the canvas
     _attribute_hierarchy : dict
-        description [...]
+         inherited attributes specific to plot properties
     """
 
     MOUSE_MODE_SELECT = "MM_SELECT"

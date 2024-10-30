@@ -44,6 +44,7 @@ class Plot(ABC):
     _type : str
         type of the plot
     """
+
     row_span: int = 1
     col_span: int = 1
     title: str = None
@@ -129,7 +130,7 @@ class PlotImage(Plot):
 @dataclass
 class PlotXY(Plot):
     """
-    A concrete Plot class specialized for 2D plottling.
+    A concrete Plot class specialized for 2D plotting
 
     Attributes
     ----------
@@ -137,20 +138,16 @@ class PlotXY(Plot):
         A boolean that represents the log scale
     grid : bool
         indicate if the grid must be drawn
-    hi_precision_data : bool
-        indicate whether the data is sensitive to round off errors and requires special handling
-    dec_samples : int
-        DEPRECATED Nº of samples for each signal. Forwarded to data-access module
     _color_cycle : List[str]
         A list of colors for cycling through plot lines, ensuring variety in signal colors
     _color_index : int
         Current index within the color cycle for assigning a new color
     _attribute_hierarchy_signal : dict
-        description [...]
+        inherited attributes specific to signal properties
     _attribute_hierarchy_axis : dict
-        description [...]
+        inherited attributes specific to axis properties
     _attribute_hierarchy_plot : dict
-        description [...]
+        contains all hierarchical attributes, combining signal and axis properties
     """
 
     log_scale: bool = False

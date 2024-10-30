@@ -70,7 +70,19 @@ class Axis:
 class RangeAxis(Axis):
     """
     Expose `begin`, `end` properties of an axis.
+
+    Attributes
+    ----------
+    original_begin : any
+        The initial starting value of the axis range
+    original_end : any
+        The initial ending value of the axis range
+    begin : any
+        The current starting value of the axis range, can be adjusted dynamically if the axis is not autoscaled
+    end : any
+        The current ending value of the axis range, can be adjusted dynamically if the axis is not autoscaled
     """
+
     original_begin: any = None
     original_end: any = None
     begin: any = None

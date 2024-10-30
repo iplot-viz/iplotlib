@@ -353,11 +353,8 @@ class VTKParser(BackendParserBase):
                 if stop_drawing:
                     break
 
-        # Update the previous background color at Canvas level
-        self.canvas.prev_background_color = self.canvas.background_color
-
         # 4. Update the title at the top of canvas.
-        self._refresh_canvas_title(canvas.title, canvas.font_color or '#000000')
+        self._refresh_canvas_title(canvas.canvas_title, canvas.font_color or '#000000')
         self._refresh_shared_x_axis()
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
@@ -473,7 +470,6 @@ class VTKParser(BackendParserBase):
         self._refresh_plot_title(plot)
         self._refresh_legend(plot)
         self._refresh_background_color(plot)
-
         # translate PlotXY properties to chart
         self._refresh_grid(plot)
 
@@ -823,22 +819,14 @@ class VTKParser(BackendParserBase):
                     appearance.SetFontSize(fs)
 
     def _refresh_background_color(self, plot: Plot):
-        """Update plot background color
+        """
+        Update plot background color
         """
         for i, chart in enumerate(self._plot_impl_plot_lut[id(plot)]):
-            if self.canvas.background_color != self.canvas.prev_background_color:
-                rgb_color = self.hex_to_rgb(self.canvas.background_color)
-                # Refresh background color for each plot
-                plot.background_color = self.canvas.background_color
-            elif plot.background_color != self.canvas.background_color:
-                rgb_color = self.hex_to_rgb(plot.background_color)
-            else:
-                rgb_color = self.hex_to_rgb(self.canvas.background_color)
-
+            rgb_color = self.hex_to_rgb(plot.background_color)
             # Set the background color using vtkBrush
             background_brush = vtk.vtkBrush()
             background_brush.SetColorF(rgb_color)
-
             chart.SetBackgroundBrush(background_brush)
 
     @staticmethod
