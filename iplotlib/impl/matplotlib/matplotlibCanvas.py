@@ -388,7 +388,10 @@ class MatplotlibParser(BackendParserBase):
                     ncols = 1 if plot_leg_layout == 'vertical' else len(signals)
 
                     legend_props = dict(size=self.legend_size)
-                    leg = mpl_axes.legend(prop=legend_props, loc=plot_leg_position, ncol=ncols)
+                    line_label = mpl_axes.get_lines()[0].get_label()
+                    line_label_formatted = line_label.replace("$", r"\$")
+                    leg = mpl_axes.legend([line_label_formatted], prop=legend_props,
+                                          loc=plot_leg_position, ncol=ncols)
                     if self.figure.get_tight_layout():
                         leg.set_in_layout(False)
 
