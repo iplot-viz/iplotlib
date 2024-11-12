@@ -23,7 +23,11 @@ from iplotlib.core import (Axis,
                            Canvas,
                            BackendParserBase,
                            Plot,
-                           Signal)
+                           PlotXY,
+                           PlotContour,
+                           Signal,
+                           SignalXY,
+                           SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
@@ -33,7 +37,6 @@ STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre"
 
 
 class MatplotlibParser(BackendParserBase):
-
     def __init__(self,
                  canvas: Canvas = None,
                  tight_layout: bool = True,
@@ -68,7 +71,8 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
-    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data):
+    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, data):
+        # will have to review this type
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
@@ -77,9 +81,18 @@ class MatplotlibParser(BackendParserBase):
             cache_item = None
             plot = None
 
+        if isinstance(signal, SignalXY):
+            plot_lines = self.do_mpl_line_plot_xy(signal, mpl_axes, plot, cache_item, data[0], data[1], plot_lines)
+        elif isinstance(signal, SignalContour):
+            plot_lines = self.do_mpl_line_plot_contour(mpl_axes, plot, data[0], data[1], data[2], plot_lines)
+
+        self._signal_impl_shape_lut.update({id(signal): plot_lines})
+
+    def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data,
+                            plot_lines):
+        # Review to implement directly in PlotXY class
         if signal.color is None:
             signal.color = plot.get_next_color()
-
         style = self.get_signal_style(signal, plot)
 
         if isinstance(plot_lines, list):
@@ -105,13 +118,6 @@ class MatplotlibParser(BackendParserBase):
                     mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
                 mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
             self.figure.canvas.draw_idle()
-            # Not necessary, the lines has already all the style
-            # for line in lines:
-            #     for k, v in style.items():
-            #         setter = getattr(line[0], f"set_{k}")
-            #         if v is None and k != "drawstyle":
-            #             continue
-            #         setter(v)
         else:
             params = dict(**style)
             draw_fn = mpl_axes.plot
@@ -127,7 +133,35 @@ class MatplotlibParser(BackendParserBase):
                 for n, o in zip(new, old):
                     n.set_visible(o.get_visible())
             signal.lines = plot_lines
-            self._signal_impl_shape_lut.update({id(signal): plot_lines})
+
+        return plot_lines
+
+    def do_mpl_line_plot_contour(self, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data, z_data, plot_lines):
+        if isinstance(plot_lines, list):
+            for tp in plot_lines[0].collections:
+                tp.remove()
+            contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
+            contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
+            if contour_filled:
+                draw_fn = mpl_axes.contourf
+            else:
+                draw_fn = mpl_axes.contour
+            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                plot_lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
+            mpl_axes.set_aspect('equal', adjustable='box')
+            self.figure.canvas.draw_idle()
+        else:
+            contour_filled = self._pm.get_value('contour_filled', plot)  # Will change with the new properties system
+            contour_levels = self._pm.get_value('contour_levels', plot)  # Will change with the new properties system
+            if contour_filled:
+                draw_fn = mpl_axes.contourf
+            else:
+                draw_fn = mpl_axes.contour
+            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                plot_lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
+            mpl_axes.set_aspect('equal', adjustable='box')
+
+        return plot_lines
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
         shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
@@ -559,7 +593,7 @@ class MatplotlibParser(BackendParserBase):
                 logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
                              f"arrays (<2). {signal}")
                 return
-            self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1])
+            self.do_mpl_line_plot(signal, mpl_axes, data)
 
         self.update_axis_labels_with_units(mpl_axes, signal)
 

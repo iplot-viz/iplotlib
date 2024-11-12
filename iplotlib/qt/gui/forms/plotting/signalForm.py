@@ -12,15 +12,15 @@ import typing
 from PySide6.QtCore import QModelIndex, Qt, Slot
 from PySide6.QtWidgets import QWidget
 
-from iplotlib.core.signal import Signal
+from iplotlib.core.signal import SignalXY, SignalContour
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
 from iplotlib.qt.models.beanItemModel import BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
 
 
-class SignalForm(IplotPreferencesForm):
+class SignalXYForm(IplotPreferencesForm):
     """
-    Map the properties of a Signal object to the widgets in a GUI form.
+    Map the properties of a SignalXY object to the widgets in a GUI form.
     """
 
     def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
@@ -45,7 +45,36 @@ class SignalForm(IplotPreferencesForm):
     def reset_prefs(self):
         py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
 
-        if isinstance(py_object, Signal):
+        if isinstance(py_object, SignalXY):
+            py_object.reset_preferences()
+        else:
+            return
+
+        self.widgetMapper.revert()
+        super().reset_prefs()
+
+
+class SignalContourForm(IplotPreferencesForm):
+    """
+    Map the properties of a SignalContour object to the widgets in a GUI form.
+    """
+
+    def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
+        prototype = [
+            {"label": "Label", "property": "label",
+             "widget": self.create_lineedit()},
+            {"label": "Varname", "property": "varname",
+             "widget": self.create_lineedit(readonly=True)},
+            {"label": "Color map", "property": "color", "widget": ColorPicker("color_map")},
+            {"label": "Levels", "property": "levels", "widget": self.default_contour_levels_widget()},
+            {"label": "Filled", "property": "filled", "widget": self.create_checkbox()}]
+        super().__init__(fields=prototype, label="A signal", parent=parent, f=f)
+
+    @Slot()
+    def reset_prefs(self):
+        py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+
+        if isinstance(py_object, SignalContour):
             py_object.reset_preferences()
         else:
             return
