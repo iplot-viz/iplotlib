@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis
 from matplotlib.axis import Axis as MPLAxis
+from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
@@ -68,82 +69,98 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
-    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data, z_data):
+    def do_mpl_line_xy(self, signal: Signal, plot: PlotXY, cache_item, mpl_axes: MPLAxes, data: List[BufferObject]):
+        x_data, y_data = data[0], data[1]
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+        if isinstance(plot_lines, list):
+            if signal.color is None:
+                signal.color = plot.get_next_color()
+            if x_data.ndim == 1 and y_data.ndim == 1:
+                line = plot_lines[0][0]
+                line.set_xdata(x_data)
+                line.set_ydata(y_data)
+            elif x_data.ndim == 1 and y_data.ndim == 2:
+                for i, line in enumerate(plot_lines):
+                    line[0].set_xdata(x_data)
+                    line[0].set_ydata(y_data[:, i])
+
+            # TODO put this out in a method only for streaming
+            if self.canvas.streaming:
+                ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
+                all_y_data = []
+                for signal in plot.signals[cache_item.stack_key]:
+                    if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
+                        max_x_data = signal.x_data.max()[0]
+                        for x_temp, y_temp in zip(signal.x_data, signal.y_data):
+                            if max_x_data - ax_window <= x_temp <= max_x_data:
+                                all_y_data.append(y_temp)
+                if all_y_data:
+                    diff = (max(all_y_data) - min(all_y_data)) / 15
+                    mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
+                mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
+        else:
+            style = self.get_signal_style(signal, plot)
+            params = dict(**style)
+            draw_fn = mpl_axes.plot
+            if x_data.ndim == 1 and y_data.ndim == 1:
+                plot_lines = [draw_fn(x_data, y_data, **params)]
+            elif x_data.ndim == 1 and y_data.ndim == 2:
+                lines = draw_fn(x_data, y_data, **params)
+                plot_lines = [[line] for line in lines]
+                for i, line in enumerate(plot_lines):
+                    line[0].set_label(f"{signal.label}[{i}]")
+
+            for new, old in zip(plot_lines, signal.lines):
+                for n, o in zip(new, old):
+                    n.set_visible(o.get_visible())
+            signal.lines = plot_lines
+        return plot_lines
+
+    def do_mpl_line_contour(self, signal: Signal, plot: PlotContour, mpl_axes: MPLAxes,
+                            data: List[BufferObject]) -> QuadContourSet:
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
+        x_data, y_data, z_data = data[0], data[1], data[2]
+        if isinstance(plot_lines, QuadContourSet):
+            for tp in plot_lines.collections:
+                tp.remove()
+            contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
+            contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
+            if contour_filled:
+                draw_fn = mpl_axes.contourf
+            else:
+                draw_fn = mpl_axes.contour
+            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels)
+            mpl_axes.set_aspect('equal', adjustable='box')
+            self.figure.canvas.draw_idle()
+
+        else:
+            contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
+            contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
+            if contour_filled:
+                draw_fn = mpl_axes.contourf
+            else:
+                draw_fn = mpl_axes.contour
+            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels)
+            mpl_axes.set_aspect('equal', adjustable='box')
+
+        return plot_lines
+
+    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, data):
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = cache_item.plot()
         except AttributeError:
-            cache_item = None
-            plot = None
+            logger.warning(f"CacheItem not found for axes {mpl_axes}")
+            return
 
-        if signal.color is None:
-            signal.color = plot.get_next_color()
+        plot_lines = None
+        if isinstance(plot, PlotXY):
+            plot_lines = self.do_mpl_line_xy(signal, plot, cache_item, mpl_axes, data)
+        elif isinstance(plot, PlotContour):
+            plot_lines = self.do_mpl_line_contour(signal, plot, mpl_axes, data)
 
-        style = self.get_signal_style(signal, plot)
-
-        if isinstance(plot_lines, list):
-            if isinstance(plot, PlotXY):
-                if x_data.ndim == 1 and y_data.ndim == 1:
-                    line = plot_lines[0][0]
-                    line.set_xdata(x_data)
-                    line.set_ydata(y_data)
-                elif x_data.ndim == 1 and y_data.ndim == 2:
-                    for i, line in enumerate(plot_lines):
-                        line[0].set_xdata(x_data)
-                        line[0].set_ydata(y_data[:, i])
-                if self.canvas.streaming:
-                    ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
-                    all_y_data = []
-                    for signal in plot.signals[cache_item.stack_key]:
-                        if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
-                            max_x_data = signal.x_data.max()[0]
-                            for x_temp, y_temp in zip(signal.x_data, signal.y_data):
-                                if max_x_data - ax_window <= x_temp <= max_x_data:
-                                    all_y_data.append(y_temp)
-                    if all_y_data:
-                        diff = (max(all_y_data) - min(all_y_data)) / 15
-                        mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
-                    mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
-            else:
-                for tp in plot_lines[0].collections:
-                    tp.remove()
-                contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
-                contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
-                if contour_filled:
-                    draw_fn = mpl_axes.contourf
-                else:
-                    draw_fn = mpl_axes.contour
-                if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                    lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
-                mpl_axes.set_aspect('equal', adjustable='box')
-            self.figure.canvas.draw_idle()
-        else:
-            params = dict(**style)
-            if isinstance(plot, PlotXY):
-                draw_fn = mpl_axes.plot
-                if x_data.ndim == 1 and y_data.ndim == 1:
-                    plot_lines = [draw_fn(x_data, y_data, **params)]
-                elif x_data.ndim == 1 and y_data.ndim == 2:
-                    lines = draw_fn(x_data, y_data, **params)
-                    plot_lines = [[line] for line in lines]
-                    for i, line in enumerate(plot_lines):
-                        line[0].set_label(f"{signal.label}[{i}]")
-
-                for new, old in zip(plot_lines, signal.lines):
-                    for n, o in zip(new, old):
-                        n.set_visible(o.get_visible())
-                signal.lines = plot_lines
-            elif isinstance(plot, PlotContour):
-                contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
-                contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
-                if contour_filled:
-                    draw_fn = mpl_axes.contourf
-                else:
-                    draw_fn = mpl_axes.contour
-                if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                    lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
-                mpl_axes.set_aspect('equal', adjustable='box')
         self._signal_impl_shape_lut.update({id(signal): plot_lines})
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
@@ -283,6 +300,12 @@ class MatplotlibParser(BackendParserBase):
             if not canvas.font_size:
                 canvas.font_size = None
             self.figure.suptitle(canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
+
+    def process_ipl_plot_xy(self):
+        pass
+
+    def process_ipl_plot_contour(self):
+        pass
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
         logger.debug(f"process_ipl_plot AA: {self.canvas.step}")
@@ -576,7 +599,7 @@ class MatplotlibParser(BackendParserBase):
                 logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
                              f"arrays (<2). {signal}")
                 return
-            self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1], data[2])
+            self.do_mpl_line_plot(signal, mpl_axes, data)
 
         self.update_axis_labels_with_units(mpl_axes, signal)
 
