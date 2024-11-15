@@ -129,9 +129,9 @@ class MatplotlibParser(BackendParserBase):
                 for i, line in enumerate(plot_lines):
                     line[0].set_label(f"{signal.label}[{i}]")
 
-            for new, old in zip(plot_lines, signal.lines):
-                for n, o in zip(new, old):
-                    n.set_visible(o.get_visible())
+        for new, old in zip(plot_lines, signal.lines):
+            for n, o in zip(new, old):
+                n.set_visible(o.get_visible())
             signal.lines = plot_lines
 
         return plot_lines
@@ -732,23 +732,6 @@ class MatplotlibParser(BackendParserBase):
         style["drawstyle"] = STEP_MAP[step]
 
         return style
-
-    def _redraw_in_frame_with_grid(self, a):
-        """A copy of Axes.redraw_in_frame that fixes the problem of not drawing the grid since grid is treated as a
-        part of the axes. This function tries to hide all axis elements besides the grid itself before drawing"""
-        with ExitStack() as stack:
-            hide_elements = []
-            for axis in [a.get_xaxis(), a.get_yaxis()]:
-                hide_elements += [e for e in axis.get_children()
-                                  if not (isinstance(e, Tick))]
-                hide_elements += [a for e in axis.get_children() if isinstance(e, Tick)
-                                  for a in e.get_children() if isinstance(a, Text)]
-
-            for artist in [a.title, a._right_title, *hide_elements]:
-                stack.callback(artist.set_visible, artist.get_visible())
-                artist.set_visible(False)
-
-            a.draw(a.figure._cachedRenderer)
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):
