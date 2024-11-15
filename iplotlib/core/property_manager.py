@@ -30,25 +30,22 @@ class PropertyManager:
 
     @staticmethod
     def _get_canvas_attr(attr_name: str, canvas: Canvas):
-        if getattr(canvas, attr_name) is not None:
-            return getattr(canvas, attr_name)
-        else:
-            return None
+        return getattr(canvas, attr_name, None)
 
     def _get_plot_attr(self, attr_name: str, canvas: Canvas, plot: Plot):
-        if getattr(plot, attr_name) is not None:
+        if getattr(plot, attr_name, None) is not None:
             return getattr(plot, attr_name)
         else:
             return self._get_canvas_attr(attr_name, canvas)
 
     def _get_axis_attr(self, attr_name: str, canvas: Canvas, plot: Plot, axis: Axis):
-        if getattr(axis, attr_name) is not None:
+        if getattr(axis, attr_name, None) is not None:
             return getattr(axis, attr_name)
         else:
             return self._get_plot_attr(attr_name, canvas, plot)
 
     def _get_signal_attr(self, attr_name: str, canvas: Canvas, plot: Plot, signal: Signal):
-        if getattr(signal, attr_name) is not None:
+        if getattr(signal, attr_name, None) is not None:
             return getattr(signal, attr_name)
         else:
             return self._get_plot_attr(attr_name, canvas, plot)
