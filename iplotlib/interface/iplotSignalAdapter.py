@@ -571,6 +571,8 @@ class IplotSignalAdapter(ProcessingSignal):
                 return x_data_incremental
             elif len(self.children):
                 return True
+            elif self.plot_type == 'PlotContour':
+                return False
             elif self._contained_bounds():
                 return False
             else:

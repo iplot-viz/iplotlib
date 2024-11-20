@@ -13,13 +13,13 @@ import typing
 from PySide6.QtCore import QModelIndex, Qt, Slot
 from PySide6.QtWidgets import QWidget
 
-from iplotlib.core.plot import Plot
+from iplotlib.core.plot import PlotXY, PlotContour
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
 from iplotlib.qt.models.beanItemModel import BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
 
 
-class PlotForm(IplotPreferencesForm):
+class PlotXYForm(IplotPreferencesForm):
     """
     Map the properties of a Plot object to the widgets in a GUI form.
     """
@@ -59,7 +59,46 @@ class PlotForm(IplotPreferencesForm):
     def reset_prefs(self):
         py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
 
-        if isinstance(py_object, Plot):
+        if isinstance(py_object, PlotXY):
+            py_object.reset_preferences()
+        else:
+            return
+
+        self.widgetMapper.revert()
+        super().reset_prefs()
+
+
+class PlotContourForm(IplotPreferencesForm):
+    """
+    Map the properties of a Plot object to the widgets in a GUI form.
+    """
+
+    def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
+        prototype = [
+            {"label": "Title", "property": "title",
+             "widget": self.create_lineedit()},
+            {"label": "Grid", "property": "grid",
+             "widget": self.create_checkbox()},
+            {"label": "Legend", "property": "legend",
+             "widget": self.create_checkbox()},
+            {"label": "Legend position", "property": "legend_position",
+             "widget": self.default_plot_contour_legend_position_widget()},
+            {"label": "Font size", "property": "font_size",
+             "widget": self.default_fontsize_widget()},
+            {"label": "Font color", "property": "font_color", "widget": ColorPicker("font_color")},
+            {"label": "Contour Levels", "property": "contour_levels",
+             "widget": self.default_contour_levels_widget()},
+            {"label": "Contour Filled", "property": "contour_filled",
+             "widget": self.create_checkbox()},
+
+        ]
+        super().__init__(fields=prototype, label="A plot", parent=parent, f=f)
+
+    @Slot()
+    def reset_prefs(self):
+        py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+
+        if isinstance(py_object, PlotContour):
             py_object.reset_preferences()
         else:
             return

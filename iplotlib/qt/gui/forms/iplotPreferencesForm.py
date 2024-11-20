@@ -198,6 +198,11 @@ class IplotPreferencesForm(QWidget):
                                                       'center': 'Center'})
 
     @staticmethod
+    def default_plot_contour_legend_position_widget():
+        return IplotPreferencesForm.create_combo_box({'right': 'Right', 'left': 'Left', 'bottom': 'Bottom',
+                                                      'top': 'Top'})
+
+    @staticmethod
     def default_canvas_legend_layout_widget():
         return IplotPreferencesForm.create_combo_box({'vertical': 'Vertical',
                                                       'horizontal': 'Horizontal'})

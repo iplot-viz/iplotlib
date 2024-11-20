@@ -82,10 +82,14 @@ class Plot(ABC):
 
 @dataclass
 class PlotContour(Plot):
-    log_scale: bool = None  # delete this property
     grid: bool = None
     contour_levels: int = None  # Define these contour properties at SignalContour Level
     contour_filled: bool = False  # Define these contour properties at SignalContour Level
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.axes is None:
+            self.axes = [LinearAxis(), LinearAxis()]
 
     def reset_preferences(self):
         self.grid = PlotContour.grid

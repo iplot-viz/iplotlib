@@ -66,8 +66,8 @@ class SignalContourForm(IplotPreferencesForm):
             {"label": "Varname", "property": "varname",
              "widget": self.create_lineedit(readonly=True)},
             {"label": "Color map", "property": "color", "widget": ColorPicker("color_map")},
-            {"label": "Levels", "property": "levels", "widget": self.default_contour_levels_widget()},
-            {"label": "Filled", "property": "filled", "widget": self.create_checkbox()}]
+            {"label": "Contour Levels", "property": "contour_levels", "widget": self.default_contour_levels_widget()},
+            {"label": "Contour Filled", "property": "contour_filled", "widget": self.create_checkbox()}]
         super().__init__(fields=prototype, label="A signal", parent=parent, f=f)
 
     @Slot()

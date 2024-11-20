@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis
 from matplotlib.axis import Axis as MPLAxis
+from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
@@ -71,9 +72,7 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
-    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, data):
-        # will have to review this type
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, data: List[BufferObject]):
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = cache_item.plot()
@@ -81,19 +80,20 @@ class MatplotlibParser(BackendParserBase):
             cache_item = None
             plot = None
 
+        plot_lines = None
         if isinstance(signal, SignalXY):
-            plot_lines = self.do_mpl_line_plot_xy(signal, mpl_axes, plot, cache_item, data[0], data[1], plot_lines)
+            plot_lines = self.do_mpl_line_plot_xy(signal, mpl_axes, plot, cache_item, data[0], data[1])
         elif isinstance(signal, SignalContour):
-            plot_lines = self.do_mpl_line_plot_contour(mpl_axes, plot, data[0], data[1], data[2], plot_lines)
+            plot_lines = self.do_mpl_line_plot_contour(signal, mpl_axes, plot, data[0], data[1], data[2])
 
         self._signal_impl_shape_lut.update({id(signal): plot_lines})
 
-    def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data,
-                            plot_lines):
+    def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+
         # Review to implement directly in PlotXY class
         if signal.color is None:
             signal.color = plot.get_next_color()
-        style = self.get_signal_style(signal, plot)
 
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -104,6 +104,8 @@ class MatplotlibParser(BackendParserBase):
                 for i, line in enumerate(plot_lines):
                     line[0].set_xdata(x_data)
                     line[0].set_ydata(y_data[:, i])
+
+            # Put this out in a method only for streaming
             if self.canvas.streaming:
                 ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
                 all_y_data = []
@@ -119,6 +121,7 @@ class MatplotlibParser(BackendParserBase):
                 mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
             self.figure.canvas.draw_idle()
         else:
+            style = self.get_signal_style(signal, plot)
             params = dict(**style)
             draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -136,9 +139,11 @@ class MatplotlibParser(BackendParserBase):
 
         return plot_lines
 
-    def do_mpl_line_plot_contour(self, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data, z_data, plot_lines):
-        if isinstance(plot_lines, list):
-            for tp in plot_lines[0].collections:
+    def do_mpl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
+                                 z_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
+        if isinstance(plot_lines, QuadContourSet):
+            for tp in plot_lines.collections:
                 tp.remove()
             contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
             contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
@@ -147,18 +152,21 @@ class MatplotlibParser(BackendParserBase):
             else:
                 draw_fn = mpl_axes.contour
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap='magma')
             mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
         else:
-            contour_filled = self._pm.get_value('contour_filled', plot)  # Will change with the new properties system
-            contour_levels = self._pm.get_value('contour_levels', plot)  # Will change with the new properties system
+            # Will change with the new properties system
+            contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
+            contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
             if contour_filled:
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_lines = [draw_fn(x_data, y_data, z_data, levels=contour_levels)]
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap='magma')
+                color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
+                color_bar.set_label('Z value', size=self.legend_size)
             mpl_axes.set_aspect('equal', adjustable='box')
 
         return plot_lines
@@ -300,6 +308,12 @@ class MatplotlibParser(BackendParserBase):
             if not canvas.font_size:
                 canvas.font_size = None
             self.figure.suptitle(canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
+
+    def process_ipl_plot_xy(self):
+        pass
+
+    def process_ipl_plot_contour(self):
+        pass
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
         logger.debug(f"process_ipl_plot AA: {self.canvas.step}")
