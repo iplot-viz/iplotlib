@@ -75,23 +75,15 @@ class PlotContourForm(IplotPreferencesForm):
 
     def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         prototype = [
-            {"label": "Title", "property": "title",
-             "widget": self.create_lineedit()},
-            {"label": "Grid", "property": "grid",
-             "widget": self.create_checkbox()},
-            {"label": "Legend", "property": "legend",
-             "widget": self.create_checkbox()},
-            {"label": "Legend position", "property": "legend_position",
-             "widget": self.default_plot_contour_legend_position_widget()},
-            {"label": "Font size", "property": "font_size",
-             "widget": self.default_fontsize_widget()},
+            {"label": "Title", "property": "title", "widget": self.create_lineedit()},
+            {"label": "Grid", "property": "grid", "widget": self.create_checkbox()},
+            {"label": "Legend format", "property": "legend_format",
+             "widget": self.default_plot_contour_legend_format_widget()},
+            {"label": "Font size", "property": "font_size", "widget": self.default_fontsize_widget()},
             {"label": "Font color", "property": "font_color", "widget": ColorPicker("font_color")},
-            {"label": "Contour Levels", "property": "contour_levels",
-             "widget": self.default_contour_levels_widget()},
-            {"label": "Contour Filled", "property": "contour_filled",
-             "widget": self.create_checkbox()},
-
-        ]
+            {"label": "Contour Levels", "property": "contour_levels", "widget": self.default_contour_levels_widget()},
+            {"label": "Contour Filled", "property": "contour_filled", "widget": self.create_checkbox()},
+            {"label": "Equivalent Units", "property": "equivalent_units", "widget": self.create_checkbox()}]
         super().__init__(fields=prototype, label="A plot", parent=parent, f=f)
 
     @Slot()

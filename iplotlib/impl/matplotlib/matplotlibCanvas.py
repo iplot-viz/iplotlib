@@ -1,7 +1,6 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 
-from contextlib import ExitStack
 from typing import Any, Callable, Collection, List
 
 import numpy as np
@@ -12,8 +11,8 @@ from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
-from matplotlib.text import Text
 from matplotlib.ticker import MaxNLocator, LogLocator
+import matplotlib.pyplot as plt
 from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
@@ -152,8 +151,12 @@ class MatplotlibParser(BackendParserBase):
             else:
                 draw_fn = mpl_axes.contour
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap='magma')
-            mpl_axes.set_aspect('equal', adjustable='box')
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=signal.color_map)
+                if plot.legend_format == 'in_lines':
+                    if not plot.contour_filled:
+                        plt.clabel(plot_lines, inline=1, fontsize=10)
+            if plot.equivalent_units:
+                mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
         else:
             # Will change with the new properties system
@@ -164,10 +167,18 @@ class MatplotlibParser(BackendParserBase):
             else:
                 draw_fn = mpl_axes.contour
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap='magma')
-                color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
-                color_bar.set_label('Z value', size=self.legend_size)
-            mpl_axes.set_aspect('equal', adjustable='box')
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=signal.color_map)
+                if plot.legend_format == 'color_bar':
+                    color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
+                    color_bar.set_label('Z value', size=self.legend_size)
+                else:
+                    if not plot.contour_filled:
+                        plt.clabel(plot_lines, inline=1, fontsize=10)
+                # 2 Legend in line for multiple signal contour in one plot contour
+                # plt.clabel(plot_lines, inline=True)
+                # self.proxies = [Line2D([], [], color=c) for c in ['viridis']]
+            if plot.equivalent_units:
+                mpl_axes.set_aspect('equal', adjustable='box')
 
         return plot_lines
 
@@ -450,6 +461,8 @@ class MatplotlibParser(BackendParserBase):
                             legend_lines[ix_legend].set_visible(True)
                             legend_lines[ix_legend].set_alpha(alpha)
                             ix_legend += 1
+                # else:
+                # mpl_axes.legend(self.proxies, ['signal name'])
 
         # Observe the axis limit change events
         if not self.canvas.streaming:

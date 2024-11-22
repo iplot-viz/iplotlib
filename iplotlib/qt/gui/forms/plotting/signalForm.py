@@ -61,13 +61,10 @@ class SignalContourForm(IplotPreferencesForm):
 
     def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         prototype = [
-            {"label": "Label", "property": "label",
-             "widget": self.create_lineedit()},
-            {"label": "Varname", "property": "varname",
-             "widget": self.create_lineedit(readonly=True)},
-            {"label": "Color map", "property": "color", "widget": ColorPicker("color_map")},
-            {"label": "Contour Levels", "property": "contour_levels", "widget": self.default_contour_levels_widget()},
-            {"label": "Contour Filled", "property": "contour_filled", "widget": self.create_checkbox()}]
+            {"label": "Label", "property": "label", "widget": self.create_lineedit()},
+            {"label": "Varname", "property": "varname", "widget": self.create_lineedit(readonly=True)},
+            {"label": "Color map", "property": "color_map", "widget": self.default_plot_contour_color_map_widget()},
+            {"label": "Contour Levels", "property": "contour_levels", "widget": self.default_contour_levels_widget()}]
         super().__init__(fields=prototype, label="A signal", parent=parent, f=f)
 
     @Slot()

@@ -93,9 +93,8 @@ class SignalContour(Signal, IplotSignalAdapter):
     SignalContour [...]
     """
 
-    # color_map: str = None  - for the moment this property is commented until we realize that it is needed
-    contour_levels: int = None  # set the number of levels
-    contour_filled: bool = False  # set if the plot is filled or not
+    color_map: str = 'viridis'
+    contour_levels: int = 10  # set the number of levels
     plot_type: str = "PlotContour"
 
     def __post_init__(self):

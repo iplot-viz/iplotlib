@@ -83,8 +83,10 @@ class Plot(ABC):
 @dataclass
 class PlotContour(Plot):
     grid: bool = None
-    contour_levels: int = None  # Define these contour properties at SignalContour Level
-    contour_filled: bool = False  # Define these contour properties at SignalContour Level
+    contour_levels: int = 10
+    contour_filled: bool = False  # Set if the plot is filled or not
+    legend_format: str = 'color_bar'
+    equivalent_units: bool = False  # Set the aspect ratio of the graphic
 
     def __post_init__(self):
         super().__post_init__()
