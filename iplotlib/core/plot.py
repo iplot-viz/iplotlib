@@ -97,12 +97,16 @@ class PlotContour(Plot):
         self.grid = PlotContour.grid
         self.contour_levels = PlotContour.contour_levels
         self.contour_filled = PlotContour.contour_filled
+        self.legend_format = PlotContour.legend_format
+        self.equivalent_units = PlotContour.equivalent_units
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotContour'):
         self.grid = old_plot.grid
         self.contour_levels = old_plot.contour_levels
         self.contour_filled = old_plot.contour_filled
+        self.legend_format = old_plot.legend_format
+        self.equivalent_units = old_plot.equivalent_units
         super().merge(old_plot)
 
 

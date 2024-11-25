@@ -9,9 +9,7 @@ for when you wish to take over the data customization.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import List
-import numpy as np
+from dataclasses import dataclass
 
 from iplotlib.interface import IplotSignalAdapter
 
@@ -106,3 +104,13 @@ class SignalContour(Signal, IplotSignalAdapter):
 
     def set_data(self, data=None):
         IplotSignalAdapter.set_data(self, data)
+
+    def reset_preferences(self):
+        self.color_map = SignalContour.color_map
+        self.contour_levels = SignalContour.contour_levels
+        super().reset_preferences()
+
+    def merge(self, old_signal: 'SignalContour'):
+        self.color_map = old_signal.color_map
+        self.contour_levels = old_signal.contour_levels
+        super().merge(old_signal)
