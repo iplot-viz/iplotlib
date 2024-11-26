@@ -170,7 +170,7 @@ class MatplotlibParser(BackendParserBase):
                 plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=signal.color_map)
                 if plot.legend_format == 'color_bar':
                     color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
-                    color_bar.set_label('Z value', size=self.legend_size)
+                    color_bar.set_label(z_data.unit, size=self.legend_size)
                 else:
                     if not plot.contour_filled:
                         plt.clabel(plot_lines, inline=1, fontsize=10)
