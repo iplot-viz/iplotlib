@@ -23,7 +23,7 @@ from iplotlib.core import (Axis,
                            Canvas,
                            BackendParserBase,
                            Plot,
-                           Signal)
+                           Signal, PlotXY)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
@@ -264,10 +264,10 @@ class MatplotlibParser(BackendParserBase):
                 canvas.font_size = None
             self.figure.suptitle(canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
 
-    def process_ipl_plot(self, plot: Plot, column: int, row: int):
+    def process_ipl_plot(self, plot: PlotXY, column: int, row: int):
         logger.debug(f"process_ipl_plot AA: {self.canvas.step}")
         super().process_ipl_plot(plot, column, row)
-        if not isinstance(plot, Plot):
+        if not isinstance(plot, PlotXY):
             return
 
         grid_item = self._layout[row: row + plot.row_span, column: column + plot.col_span]  # type: SubplotSpec
@@ -304,8 +304,8 @@ class MatplotlibParser(BackendParserBase):
 
                 # Set the plot title
                 if plot.title is not None and stack_id == 0:
-                    fc = self._pm.get_value('font_color', self.canvas, plot) or 'black'
-                    fs = self._pm.get_value('font_size', self.canvas, plot)
+                    fc = plot.font_color
+                    fs = plot.font_size
                     if not fs:
                         fs = None
                     mpl_axes.set_title(plot.title, color=fc, size=fs)
@@ -329,8 +329,8 @@ class MatplotlibParser(BackendParserBase):
                         e.set_visible(visible)
 
                 # Show the grid if enabled
-                show_grid = self._pm.get_value('grid', self.canvas, plot)
-                log_scale = self._pm.get_value('log_scale', self.canvas, plot)
+                show_grid = plot.grid
+                log_scale = plot.log_scale
 
                 if show_grid:
                     if log_scale:
@@ -360,12 +360,12 @@ class MatplotlibParser(BackendParserBase):
                     self.update_range_axis(x_axis, 0, mpl_axes, which='original')
 
                 # Show the plot legend if enabled
-                show_legend = self._pm.get_value('legend', self.canvas, plot)
+                show_legend = plot.legend
                 if show_legend and mpl_axes.get_lines():
-                    plot_leg_position = self._pm.get_value('legend_position', self.canvas, plot)
-                    canvas_leg_position = self._pm.get_value('legend_position', self.canvas)
-                    plot_leg_layout = self._pm.get_value('legend_layout', self.canvas, plot)
-                    canvas_leg_layout = self._pm.get_value('legend_layout', self.canvas)
+                    plot_leg_position = plot.legend_position
+                    canvas_leg_position = self.canvas.legend_position
+                    plot_leg_layout = plot.legend_layout
+                    canvas_leg_layout = self.canvas.legend_layout
 
                     plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' \
                         else plot_leg_position
@@ -466,15 +466,15 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(axis, Axis):
 
             if isinstance(mpl_axis, YAxis):
-                log_scale = self._pm.get_value('log_scale', self.canvas, plot)
+                log_scale = plot.log_scale
                 if log_scale:
                     mpl_axis.axes.set_yscale('log')
                     # Format for minor ticks
                     y_minor = LogLocator(base=10, subs=(1.0,))
                     mpl_axis.set_minor_locator(y_minor)
 
-            fc = self._pm.get_value('font_color', self.canvas, plot, axis) or 'black'
-            fs = self._pm.get_value('font_size', self.canvas, plot, axis)
+            fc = axis.font_color
+            fs = axis.font_size
 
             mpl_axis._font_color = fc
             mpl_axis._font_size = fs
@@ -508,7 +508,7 @@ class MatplotlibParser(BackendParserBase):
                 NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, roundh=self.canvas.round_hour))
 
         # Configurate number of ticks and labels
-        tick_number = self._pm.get_value("tick_number", self.canvas, axis)
+        tick_number = axis.tick_number
         mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
     @BackendParserBase.run_in_one_thread
@@ -670,18 +670,14 @@ class MatplotlibParser(BackendParserBase):
     def get_signal_style(self, signal: Signal, plot: Plot = None):
         style = dict()
 
-        if signal.label:
-            style['label'] = signal.label
-        if hasattr(signal, "color"):
-            style['color'] = signal.color
+        style['label'] = signal.label
+        style['color'] = signal.color
 
-        style['linewidth'] = self._pm.get_value('line_size', self.canvas, plot, signal=signal) or 1
-        style['linestyle'] = (self._pm.get_value('line_style', self.canvas, plot, signal=signal) or "Solid").lower()
-        style['marker'] = self._pm.get_value('marker', self.canvas, plot, signal=signal)
-        style['markersize'] = self._pm.get_value('marker_size', self.canvas, plot, signal=signal) or 0
-        step = self._pm.get_value('step', self.canvas, plot, signal=signal)
-        if step is None:
-            step = 'linear'
+        style['linewidth'] = signal.line_size
+        style['linestyle'] = signal.line_style.lower()
+        style['marker'] = signal.marker
+        style['markersize'] = signal.marker_size
+        step = signal.step
         style["drawstyle"] = STEP_MAP[step]
 
         return style

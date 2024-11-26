@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Collection, Union
 
 from iplotlib.core.axis import Axis, LinearAxis
-from iplotlib.core.signal import Signal, SimpleSignal
+from iplotlib.core.signal import Signal
+from hierarchical_property import HierarchicalProperty
 
 
 @dataclass
@@ -50,10 +51,10 @@ class Plot(ABC):
     title: str = None
     axes: List[Union[Axis, List[Axis]]] = None
     signals: Dict[int, List[Signal]] = None
-    background_color: str = '#FFFFFF'
-    legend: bool = True
-    legend_position: str = 'upper right'
-    legend_layout: str = 'vertical'
+    background_color = HierarchicalProperty('background_color', default='#FFFFFF')
+    legend = HierarchicalProperty('legend', default=True)
+    legend_position = HierarchicalProperty('legend_position', default='upper right')
+    legend_layout = HierarchicalProperty('legend_layout', default='vertical')
     _type: str = None
 
     def __post_init__(self):
@@ -62,6 +63,7 @@ class Plot(ABC):
             self.signals = {}
 
     def add_signal(self, signal, stack: int = 1):
+        signal.parent = self
         if stack not in self.signals:
             self.signals[stack] = []
         self.signals[stack].append(signal)
@@ -142,42 +144,41 @@ class PlotXY(Plot):
         A list of colors for cycling through plot lines, ensuring variety in signal colors
     _color_index : int
         Current index within the color cycle for assigning a new color
-    attrs_propagated : dict
-        contains all hierarchical attributes, combining signal and axis properties
-    _attribute_hierarchy_signal : dict
-        inherited attributes specific to signal properties
-    _attribute_hierarchy_axis : dict
-        inherited attributes specific to axis properties
     """
 
-    log_scale: bool = False
-    grid: bool = True
     _color_cycle = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
                     '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',
                     '#e6ff33', '#8a2be2', '#000080', '#cc6600']
     _color_index: int = 0
-    attrs_propagated = None
-    _attribute_hierarchy_signal = SimpleSignal().attrs_propagated
-    _attribute_hierarchy_axis = LinearAxis().attrs_propagated
+    axes: List[Union[Axis, List[Axis]]] = None
 
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        instance.__dict__.update(cls._attribute_hierarchy_signal)
-        instance.__dict__.update(cls._attribute_hierarchy_axis)
-        return instance
+    log_scale = HierarchicalProperty('log_scale', default=False)
+    grid = HierarchicalProperty('grid', default=True)
+
+    # Axis
+    label = HierarchicalProperty('label', default=None)
+    font_size = HierarchicalProperty('font_size', default=10)
+    font_color = HierarchicalProperty('font_color', default='#000000')
+    tick_number = HierarchicalProperty('tick_number', default=7)
+    autoscale = HierarchicalProperty('autoscale', default=True)
+
+    # SignalXY
+    color = HierarchicalProperty('color', default=None)
+    line_style = HierarchicalProperty('line_style', default='Solid')
+    line_size = HierarchicalProperty('line_size', default=1)
+    marker = HierarchicalProperty('marker', default=None)
+    marker_size = HierarchicalProperty('marker_size', default=0)
+    step = HierarchicalProperty('step', default="linear")
 
     def __post_init__(self):
         super().__post_init__()
         if self.axes is None:
             self.axes = [LinearAxis(), [LinearAxis()]]
 
-        combined_attrs = {**vars(super(type(self), self)), **self.__dict__}
-
-        self.attrs_propagated = {k: v for k, v in combined_attrs.items() if
-                                 k in ["background_color", "legend", "legend_position", "legend_layout", "log_scale",
-                                       "grid"]}
-        self.attrs_propagated.update(self._attribute_hierarchy_signal)
-        self.attrs_propagated.update(self._attribute_hierarchy_axis)
+        # ~TODO change
+        self.axes[0].parent = self
+        for axe in self.axes[1]:
+            axe.parent = self
 
     def get_next_color(self):
         position = self._color_index % len(self._color_cycle)
@@ -192,23 +193,7 @@ class PlotXY(Plot):
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotXY'):
-        for attr in self.attrs_propagated.keys():
-            super().__setattr__(attr, getattr(old_plot, attr))
         self.log_scale = old_plot.log_scale
         self.grid = old_plot.grid
         self._color_index = old_plot._color_index
         super().merge(old_plot)
-
-    def __setattr__(self, key, value):
-        super().__setattr__(key, value)
-        if key in self._attribute_hierarchy_signal.keys() and self.signals:
-            for signal_list in self.signals.values():
-                for signal in signal_list:
-                    setattr(signal, key, value)
-        elif key in self._attribute_hierarchy_axis.keys() and self.axes:
-            for idxAxis, axis in enumerate(self.axes):
-                if isinstance(axis, Collection):
-                    for idxSubAxis, subAxis in enumerate(axis):
-                        setattr(subAxis, key, value)
-                else:
-                    setattr(axis, key, value)

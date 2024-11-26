@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import Collection, List
 import numpy as np
 
+from hierarchical_property import HierarchicalProperty
+
 
 @dataclass
 class SignalStyle(ABC):
@@ -59,25 +61,26 @@ class Signal(ABC):
         used for attribute propagation
     """
 
+    plot_type: str = ''
     uid: str = None
     name: str = ''
     label: str = None
-    color: str = None
-    line_style: str = 'Solid'
-    line_size: int = 1
-    marker: str = None
-    marker_size: int = 0
-    step: str = "linear"
     hi_precision_data: bool = None
-    plot_type: str = ''
     lines = []
     _type: str = None
-    attrs_propagated = None
+
+    color = HierarchicalProperty('color', default=None)
+    line_style = HierarchicalProperty('line_style', default='Solid')
+    line_size = HierarchicalProperty('line_size', default=1)
+    marker = HierarchicalProperty('marker', default=None)
+    marker_size = HierarchicalProperty('marker_size', default=0)
+    step = HierarchicalProperty('step', default="linear")
+
+    def __init__(self):
+        self.parent = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
-        self.attrs_propagated = {k: v for k, v in self.__dict__.items() if
-                                 k in ["line_style", "line_size", "marker", "marker_size", "step"]}
 
     @abstractmethod
     def get_data(self) -> tuple:

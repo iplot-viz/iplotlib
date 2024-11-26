@@ -12,6 +12,8 @@ implementations for description of ranges and datetime properties.
 
 from dataclasses import dataclass
 
+from hierarchical_property import HierarchicalProperty
+
 
 @dataclass
 class Axis:
@@ -32,22 +34,14 @@ class Axis:
         enables automatic scaling of the axis range to fit displayed data if set to True
     _type : str
         type of the axis
-    attrs_propagated : dict
-        used for attribute propagation
     """
 
-    label: str = None
-    font_size: int = 10
-    font_color: str = '#000000'
-    tick_number: int = 7
-    autoscale: bool = False
     _type: str = None
-    attrs_propagated = None
-
-    def __post_init__(self):
-        self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
-        self.attrs_propagated = {k: v for k, v in self.__dict__.items() if
-                                 k in ["font_size", "font_color", "tick_number"]}
+    label = None
+    font_size = HierarchicalProperty('font_size', default=10)
+    font_color = HierarchicalProperty('font_color', default='#000000')
+    tick_number = HierarchicalProperty('tick_number', default=7)
+    autoscale = HierarchicalProperty('autoscale', default=True)
 
     @staticmethod
     def ticks():
@@ -145,3 +139,6 @@ class LinearAxis(RangeAxis):
     is_date: bool = False
     window: float = None
     follow: bool = False
+
+    # def __post_init__(self):
+    #     self.parent = None

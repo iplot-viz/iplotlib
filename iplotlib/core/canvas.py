@@ -14,6 +14,8 @@ from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.core.signal import Signal
 import pandas as pd
 
+from hierarchical_property import HierarchicalProperty
+
 
 @dataclass
 class Canvas(ABC):
@@ -111,12 +113,30 @@ class Canvas(ABC):
     auto_refresh: int = 0
     undo_redo: bool = False
     _type: str = None
-    _attribute_hierarchy = PlotXY().attrs_propagated
 
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        instance.__dict__.update(cls._attribute_hierarchy)
-        return instance
+    # Axis
+    font_size = HierarchicalProperty('font_size', default=10)
+    font_color = HierarchicalProperty('font_color', default='#000000')
+    tick_number = HierarchicalProperty('tick_number', default=7)
+    autoscale = HierarchicalProperty('autoscale', default=True)
+
+    # Plot
+    background_color = HierarchicalProperty('background_color', default='#FFFFFF')
+    legend = HierarchicalProperty('legend', default=True)
+    legend_position = HierarchicalProperty('legend_position', default='upper right')
+    legend_layout = HierarchicalProperty('legend_layout', default='vertical')
+
+    # PlotXY
+    log_scale = HierarchicalProperty('log_scale', default=False)
+    grid = HierarchicalProperty('grid', default=True)
+
+    # SignalXY
+    color = HierarchicalProperty('color', default=None)
+    line_style = HierarchicalProperty('line_style', default='Solid')
+    line_size = HierarchicalProperty('line_size', default=1)
+    marker = HierarchicalProperty('marker', default=None)
+    marker_size = HierarchicalProperty('marker_size', default=0)
+    step = HierarchicalProperty('step', default="linear")
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -127,6 +147,7 @@ class Canvas(ABC):
         """
         Add a plot to this canvas.
         """
+        plot.parent = self
         if col >= len(self.plots):
             raise Exception("Cannot add plot to column {}: Canvas has only {} column(s)".format(col, len(self.plots)))
         if len(self.plots[col]) >= self.rows:
@@ -170,14 +191,6 @@ class Canvas(ABC):
         """
         pass
 
-    def __setattr__(self, key, value):
-        super().__setattr__(key, value)
-        if key in self._attribute_hierarchy.keys() and self.plots:
-            for column in self.plots:
-                for plot in column:
-                    if plot is not None:
-                        setattr(plot, key, value)
-
     def reset_preferences(self):
         """
         Reset the preferences to default values.
@@ -196,8 +209,6 @@ class Canvas(ABC):
         """
         Reset the preferences to default values.
         """
-        for attr in self._attribute_hierarchy.keys():
-            super().__setattr__(attr, getattr(old_canvas, attr))
         self.title = old_canvas.title
         self.shared_x_axis = old_canvas.shared_x_axis
         self.round_hour = old_canvas.round_hour
