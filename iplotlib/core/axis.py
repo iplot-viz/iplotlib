@@ -12,7 +12,7 @@ implementations for description of ranges and datetime properties.
 
 from dataclasses import dataclass
 
-from hierarchical_property import HierarchicalProperty
+from iplotlib.core.hierarchical_property import HierarchicalProperty
 
 
 @dataclass

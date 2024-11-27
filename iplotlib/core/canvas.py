@@ -14,7 +14,7 @@ from iplotlib.core.plot import Plot, PlotXY
 from iplotlib.core.signal import Signal
 import pandas as pd
 
-from hierarchical_property import HierarchicalProperty
+from iplotlib.core.hierarchical_property import HierarchicalProperty
 
 
 @dataclass

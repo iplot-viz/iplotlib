@@ -14,7 +14,7 @@ from typing import Dict, List, Collection, Union
 
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.signal import Signal
-from hierarchical_property import HierarchicalProperty
+from iplotlib.core.hierarchical_property import HierarchicalProperty
 
 
 @dataclass

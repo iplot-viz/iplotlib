@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Collection, List
 import numpy as np
 
-from hierarchical_property import HierarchicalProperty
+from iplotlib.core.hierarchical_property import HierarchicalProperty
 
 
 @dataclass
