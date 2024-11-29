@@ -125,10 +125,10 @@ class Canvas(ABC):
     legend = HierarchicalProperty('legend', default=True)
     legend_position = HierarchicalProperty('legend_position', default='upper right')
     legend_layout = HierarchicalProperty('legend_layout', default='vertical')
+    grid = HierarchicalProperty('grid', default=True)
 
     # PlotXY
     log_scale = HierarchicalProperty('log_scale', default=False)
-    grid = HierarchicalProperty('grid', default=True)
 
     # SignalXY
     color = HierarchicalProperty('color', default=None)
@@ -137,6 +137,15 @@ class Canvas(ABC):
     marker = HierarchicalProperty('marker', default=None)
     marker_size = HierarchicalProperty('marker_size', default=0)
     step = HierarchicalProperty('step', default="linear")
+
+    # PlotContour
+    contour_filled = HierarchicalProperty('contour_filled', default=False)  # Set if the plot is filled or not
+    legend_format = HierarchicalProperty('legend_format', default='color_bar')
+    axis_prop = HierarchicalProperty('axis_prop', default=False)  # Set the aspect ratio of the graphic
+
+    # SignalContour
+    color_map = HierarchicalProperty('color_map', default="viridis")
+    contour_levels = HierarchicalProperty('contour_levels', default=10)
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -226,7 +235,15 @@ class Canvas(ABC):
                     # Found matching plot
                     old_plot = old_canvas.plots[idxColumn][idxPlot]
                     if old_plot:
-                        plot.merge(old_plot)
+                        if type(plot) is type(old_plot):
+                            plot.merge(old_plot)
+                        else:
+                            # Handle when it is a plot of a different type.
+                            # Simplest way: Warning that a plot has been drawn where before there was a plot of a
+                            # different type, therefore, the properties cannot be kept to make a merge. In this way,
+                            # the new plot is drawn with its default properties.
+                            pass
+                            # logging.warning("Merge with different type of plots")
 
         # Gather all old signals into a map with uid as key
         def compute_signal_uniqkey(computed_signal: Signal):

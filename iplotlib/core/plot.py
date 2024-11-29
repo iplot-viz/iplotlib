@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Collection, Union
 
 from iplotlib.core.axis import Axis, LinearAxis
-from iplotlib.core.signal import Signal
+from iplotlib.core.signal import Signal, SignalXY
 from iplotlib.core.hierarchical_property import HierarchicalProperty
 
 
@@ -55,6 +55,7 @@ class Plot(ABC):
     legend = HierarchicalProperty('legend', default=True)
     legend_position = HierarchicalProperty('legend_position', default='upper right')
     legend_layout = HierarchicalProperty('legend_layout', default='vertical')
+    grid = HierarchicalProperty('grid', default=True)
     _type: str = None
 
     def __post_init__(self):
@@ -73,6 +74,7 @@ class Plot(ABC):
         self.legend_position = Plot.legend_position
         self.legend_layout = Plot.legend_layout
         self.background_color = Plot.background_color
+        self.grid = Plot.grid
 
     def merge(self, old_plot: 'Plot'):
         self.title = old_plot.title
@@ -80,6 +82,7 @@ class Plot(ABC):
         self.legend_position = old_plot.legend_position
         self.legend_layout = old_plot.legend_layout
         self.background_color = old_plot.background_color
+        self.grid = old_plot.grid
 
         for idxAxis, axis in enumerate(self.axes):
             if axis and idxAxis < len(old_plot.axes):
@@ -98,13 +101,29 @@ class Plot(ABC):
 
 @dataclass
 class PlotContour(Plot):
-    pass
+    contour_levels = HierarchicalProperty('contour_levels', default=10)
+    contour_filled = HierarchicalProperty('contour_filled', default=False)  # Set if the plot is filled or not
+    legend_format = HierarchicalProperty('legend_format', default='color_bar')
+    axis_prop = HierarchicalProperty('axis_prop', default=False)  # Set the aspect ratio of the graphic
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.axes is None:
+            self.axes = [LinearAxis(), LinearAxis()]
 
     def reset_preferences(self):
         super().reset_preferences()
+        self.contour_levels = PlotContour.contour_levels
+        self.contour_filled = PlotContour.contour_filled
+        self.legend_format = PlotContour.legend_format
+        self.axis_prop = PlotContour.axis_prop
 
     def merge(self, old_plot: 'PlotContour'):
         super().merge(old_plot)
+        self.contour_levels = old_plot.contour_levels
+        self.contour_filled = old_plot.contour_filled
+        self.legend_format = old_plot.legend_format
+        self.axis_prop = old_plot.axis_prop
 
 
 @dataclass
@@ -180,6 +199,11 @@ class PlotXY(Plot):
         for axe in self.axes[1]:
             axe.parent = self
 
+    def add_signal(self, signal, stack: int = 1):
+        super().add_signal(signal, stack)
+        if signal.color is None:
+            signal.color = self.get_next_color()
+
     def get_next_color(self):
         position = self._color_index % len(self._color_cycle)
         color_signal = self._color_cycle[position]
@@ -189,11 +213,10 @@ class PlotXY(Plot):
 
     def reset_preferences(self):
         self.log_scale = PlotXY.log_scale
-        self.grid = PlotXY.grid
+        self._color_index = PlotXY._color_index
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotXY'):
         self.log_scale = old_plot.log_scale
-        self.grid = old_plot.grid
         self._color_index = old_plot._color_index
         super().merge(old_plot)

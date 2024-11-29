@@ -20,11 +20,12 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter
 
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.signal import ArraySignal, SimpleSignal, Signal
-from iplotlib.core.plot import Plot, PlotXY
+from iplotlib.core.signal import Signal, SignalXY, SignalContour
+from iplotlib.core.plot import Plot, PlotXY, PlotContour
 from iplotlib.interface import IplotSignalAdapter
 
-from iplotlib.qt.gui.forms import IplotPreferencesForm, AxisForm, CanvasForm, PlotForm, SignalForm
+from iplotlib.qt.gui.forms import (IplotPreferencesForm, AxisForm, CanvasForm, PlotXYForm, PlotContourForm,
+                                   SignalXYForm, SignalContourForm)
 
 from iplotLogging import setupLogger as Sl
 
@@ -56,12 +57,11 @@ class IplotQtPreferencesWindow(QMainWindow):
 
         self._forms = {
             Canvas: CanvasForm(self),
-            PlotXY: PlotForm(self),
+            PlotXY: PlotXYForm(self),
+            PlotContour: PlotContourForm(self),
             LinearAxis: AxisForm(self),
-            ArraySignal: SignalForm(self),
-            IplotSignalAdapter: SignalForm(self),
-            SimpleSignal: SignalForm(self),
-            type(None): QPushButton("Select item", parent=self)
+            SignalXY: SignalXYForm(self),
+            SignalContour: SignalContourForm(self),
         }
         self.formsStack = QStackedWidget()
         for form in self._forms.values():

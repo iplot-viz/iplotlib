@@ -32,7 +32,6 @@ import numpy as np
 import os
 import typing
 
-from iplotlib.core.signal import ArraySignal
 from iplotlib.interface.utils import string_classifier
 from iplotProcessing.common.errors import InvalidExpression
 from iplotProcessing.core import BufferObject
@@ -97,7 +96,7 @@ class StatusInfo:
 
 
 @dataclass
-class IplotSignalAdapter(ArraySignal, ProcessingSignal):
+class IplotSignalAdapter(ProcessingSignal):
     """This is an adapter class that is the culmination of two crucial classes in the iplotlib framework.
         Its purpose is to make ProcessingSignal interface compatible with the ArraySignal interface.
 
@@ -116,8 +115,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     envelope: bool = False
     isDownsampled: bool = False
     x_expr: str = '${self}.time'
-    y_expr: str = '${self}.data_store[1]'  # Changed by IDV-333
-    z_expr: str = '${self}.data_store[2]'  # Changed by IDV-333
+    y_expr: str = '${self}.data_store[1]'
+    z_expr: str = '${self}.data_store[2]'
 
     extremities: bool = False
 
@@ -130,10 +129,10 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
     data_access_enabled: bool = True
     processing_enabled: bool = True
 
-    time_out_value: float = 60  # Unimplemented.
+    time_out_value: float = 60  # Unimplemented  ---> REVIEW: purpose of this attribute?
 
     def __post_init__(self):
-        super().__post_init__()
+        super().__init__()
         ProcessingSignal.__init__(self)
 
         # 1.1 Initialize access parameters
@@ -579,6 +578,8 @@ class IplotSignalAdapter(ArraySignal, ProcessingSignal):
                 return x_data_incremental
             elif len(self.children):
                 return True
+            elif self.plot_type == 'PlotContour':
+                return False
             elif self._contained_bounds():
                 return False
             else:
@@ -727,7 +728,7 @@ class AccessHelper:
         logger.debug(f"[UDA {AccessHelper.query_no}] Get data: {signal.name} "
                      f"ts_start={self.str_ts(signal.ts_start)} "
                      f"ts_end={self.str_ts(signal.ts_end)} "
-                     f"pulse_nb={ signal.pulse_nb} "
+                     f"pulse_nb={signal.pulse_nb} "
                      f"nbsamples={AccessHelper.num_samples if AccessHelper.num_samples_override else -1} "
                      f"relative={signal.ts_relative}")
         AccessHelper.query_no += 1
