@@ -119,11 +119,11 @@ class SignalXY(Signal, IplotSignalAdapter):
         super().reset_preferences()
 
     def merge(self, old_signal: 'SignalXY'):
-        self.line_style = old_signal.line_style
-        self.line_size = old_signal.line_size
-        self.marker = old_signal.marker
-        self.marker_size = old_signal.marker_size
-        self.step = old_signal.step
+        self.line_style = getattr(old_signal, "_line_style", None)
+        self.line_size = getattr(old_signal, "_line_size", None)
+        self.marker = getattr(old_signal, "_marker", None)
+        self.marker_size = getattr(old_signal, "_marker_size", None)
+        self.step = getattr(old_signal, "_step", None)
         super().merge(old_signal)
 
 
@@ -153,6 +153,6 @@ class SignalContour(Signal, IplotSignalAdapter):
         super().reset_preferences()
 
     def merge(self, old_signal: 'SignalContour'):
-        self.color_map = old_signal.color_map
-        self.contour_levels = old_signal.contour_levels
+        self.color_map = getattr(old_signal, "_color_map", None)
+        self.contour_levels = getattr(old_signal, "_contour_levels", None)
         super().merge(old_signal)

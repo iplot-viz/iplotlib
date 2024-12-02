@@ -59,10 +59,10 @@ class Axis:
 
     def merge(self, old_axis: 'Axis'):
         self.label = old_axis.label
-        self.font_size = old_axis.font_size
-        self.font_color = old_axis.font_color
-        self.tick_number = old_axis.tick_number
-        self.autoscale = old_axis.autoscale
+        self.font_size = getattr(old_axis, "_font_size", None)
+        self.font_color = getattr(old_axis, "_font_color", None)
+        self.tick_number = getattr(old_axis, "_tick_number", None)
+        self.autoscale = getattr(old_axis, "_autoscale", None)
 
 
 @dataclass

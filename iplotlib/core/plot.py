@@ -120,32 +120,10 @@ class PlotContour(Plot):
 
     def merge(self, old_plot: 'PlotContour'):
         super().merge(old_plot)
-        self.contour_levels = old_plot.contour_levels
-        self.contour_filled = old_plot.contour_filled
-        self.legend_format = old_plot.legend_format
-        self.axis_prop = old_plot.axis_prop
-
-
-@dataclass
-class PlotSurface(Plot):
-    pass
-
-    def reset_preferences(self):
-        super().reset_preferences()
-
-    def merge(self, old_plot: 'PlotSurface'):
-        super().merge(old_plot)
-
-
-@dataclass
-class PlotImage(Plot):
-    pass
-
-    def reset_preferences(self):
-        super().reset_preferences()
-
-    def merge(self, old_plot: 'PlotImage'):
-        super().merge(old_plot)
+        self.contour_levels = getattr(old_plot, "_contour_levels", None)
+        self.contour_filled = getattr(old_plot, "_contour_filled", None)
+        self.legend_format = getattr(old_plot, "_legend_format", None)
+        self.axis_prop = getattr(old_plot, "_axis_prop", None)
 
 
 @dataclass
@@ -217,6 +195,28 @@ class PlotXY(Plot):
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotXY'):
-        self.log_scale = old_plot.log_scale
-        self._color_index = old_plot._color_index
+        self.log_scale = getattr(old_plot, "_log_scale", None)
+        self._color_index = getattr(old_plot, "__color_index", None)
+        super().merge(old_plot)
+
+
+@dataclass
+class PlotSurface(Plot):
+    pass
+
+    def reset_preferences(self):
+        super().reset_preferences()
+
+    def merge(self, old_plot: 'PlotSurface'):
+        super().merge(old_plot)
+
+
+@dataclass
+class PlotImage(Plot):
+    pass
+
+    def reset_preferences(self):
+        super().reset_preferences()
+
+    def merge(self, old_plot: 'PlotImage'):
         super().merge(old_plot)
