@@ -1,7 +1,7 @@
 # Description: A concrete Qt GUI for a matplotlib canvas.
 # Author: Piotr Mazur
 # Changelog:
-#   Sept 2021:  -Fix orphaned matploitlib figure. [Jaswant Sai Panchumarti]
+#   Sept 2021:  -Fix orphaned matplotlib figure. [Jaswant Sai Panchumarti]
 #               -Fix draw_in_main_thread for when C++ object might have been deleted. [Jaswant Sai Panchumarti]
 #               -Refactor qt classes [Jaswant Sai Panchumarti]
 #               -Port to PySide2 [Jaswant Sai Panchumarti]
@@ -21,6 +21,7 @@ from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, Mouse
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
+from iplotlib.core import PlotContour
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
@@ -43,7 +44,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self.info_shared_x_dialog = False
 
-        self._mpl_size_pol = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._mpl_size_pol = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
         self._mpl_renderer = FigureCanvas(self._parser.figure)
         self._mpl_renderer.setParent(self)
@@ -52,7 +53,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_toolbar.setVisible(False)
 
         self._vlayout = QVBoxLayout(self)
-        self._vlayout.setAlignment(Qt.AlignTop)
+        self._vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._vlayout.setContentsMargins(QMargins())
         self._vlayout.addWidget(self._mpl_renderer)
 
@@ -106,7 +107,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # range
                 if len(dict_ranges) > 1:
                     box = QMessageBox()
-                    box.setIcon(QMessageBox.Information)
+                    box.setIcon(QMessageBox.Icon.Information)
                     message = "There are plots with different time range:\n"
                     for i, stacks in enumerate(dict_ranges.values(), start=1):
                         plots_str = ", ".join(stacks)
@@ -234,16 +235,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         else:
             if event.inaxes is None:
                 return
-            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                # Stage a command to obtain original view limits
-                self.stage_view_lim_cmd()
-                return
-            if event.button != MouseButton.LEFT:
-                return
             ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
             if not hasattr(ci, 'plot'):
                 return
             plot = ci.plot()
+            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                # Stage a command to obtain original view limits
+                # Disable Zoom and Pan in PlotContour
+                if isinstance(plot, PlotContour):
+                    return
+                self.stage_view_lim_cmd()
+                return
+            if event.button != MouseButton.LEFT:
+                return
             if not plot:
                 self._dist_calculator.reset()
                 return
@@ -325,7 +329,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self.dropInfo.col = col
         self.dropInfo.dragged_item = event.source().dragged_item
         self.dropSignal.emit(self.dropInfo)
-        # row, col = self.get_postion(plot)
+        # row, col = self.get_position(plot)
         # new_data = pd.DataFrame([['codacuda', f"{dragged_item.key}", f'{col}.{row}']],
         #                       columns=['DS', 'Variable', 'Stack'])
         # self.parent().parent().parent().parent().sigCfgWidget._model.append_dataframe(new_data)

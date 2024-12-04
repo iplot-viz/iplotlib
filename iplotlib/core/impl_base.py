@@ -439,8 +439,8 @@ class BackendParserBase(ABC):
         This offset is needed because matplotlib does not allow zooming so deep when the plot ends are too large.
         E.g. if the limits are O(10^15) the n you cannot zoom in where the distance between both is less than 1000.
         """
-        if (isinstance(vals, (List, BufferObject)) and len(vals) > 0 and vals[0] > 10 ** 15 and
-                isinstance(vals[0], (int, np.int64, np.uint64))):
+        if (isinstance(vals, (List, BufferObject)) and len(vals) > 0 and
+                isinstance(vals[0], (int, np.int64, np.uint64)) and vals[0] > 10 ** 15):
             return int(vals[0])
         return None
 

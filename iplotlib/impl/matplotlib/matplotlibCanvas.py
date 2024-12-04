@@ -1,18 +1,18 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 
-from contextlib import ExitStack
 from typing import Any, Callable, Collection, List
 
 import numpy as np
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis
 from matplotlib.axis import Axis as MPLAxis
+from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
-from matplotlib.text import Text
 from matplotlib.ticker import MaxNLocator, LogLocator
+import matplotlib.pyplot as plt
 from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
@@ -23,7 +23,11 @@ from iplotlib.core import (Axis,
                            Canvas,
                            BackendParserBase,
                            Plot,
-                           Signal)
+                           PlotXY,
+                           PlotContour,
+                           Signal,
+                           SignalXY,
+                           SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
@@ -33,7 +37,6 @@ STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre"
 
 
 class MatplotlibParser(BackendParserBase):
-
     def __init__(self,
                  canvas: Canvas = None,
                  tight_layout: bool = True,
@@ -68,8 +71,7 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
-    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y_data):
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, data: List[BufferObject]):
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = cache_item.plot()
@@ -77,10 +79,20 @@ class MatplotlibParser(BackendParserBase):
             cache_item = None
             plot = None
 
+        plot_lines = None
+        if isinstance(signal, SignalXY):
+            plot_lines = self.do_mpl_line_plot_xy(signal, mpl_axes, plot, cache_item, data[0], data[1])
+        elif isinstance(signal, SignalContour):
+            plot_lines = self.do_mpl_line_plot_contour(signal, mpl_axes, plot, data[0], data[1], data[2])
+
+        self._signal_impl_shape_lut.update({id(signal): plot_lines})
+
+    def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+
+        # Review to implement directly in PlotXY class
         if signal.color is None:
             signal.color = plot.get_next_color()
-
-        style = self.get_signal_style(signal, plot)
 
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -91,6 +103,8 @@ class MatplotlibParser(BackendParserBase):
                 for i, line in enumerate(plot_lines):
                     line[0].set_xdata(x_data)
                     line[0].set_ydata(y_data[:, i])
+
+            # Put this out in a method only for streaming
             if self.canvas.streaming:
                 ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
                 all_y_data = []
@@ -105,14 +119,8 @@ class MatplotlibParser(BackendParserBase):
                     mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
                 mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
             self.figure.canvas.draw_idle()
-            # Not necessary, the lines has already all the style
-            # for line in lines:
-            #     for k, v in style.items():
-            #         setter = getattr(line[0], f"set_{k}")
-            #         if v is None and k != "drawstyle":
-            #             continue
-            #         setter(v)
         else:
+            style = self.get_signal_style(signal, plot)
             params = dict(**style)
             draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -123,11 +131,56 @@ class MatplotlibParser(BackendParserBase):
                 for i, line in enumerate(plot_lines):
                     line[0].set_label(f"{signal.label}[{i}]")
 
-            for new, old in zip(plot_lines, signal.lines):
-                for n, o in zip(new, old):
-                    n.set_visible(o.get_visible())
+        for new, old in zip(plot_lines, signal.lines):
+            for n, o in zip(new, old):
+                n.set_visible(o.get_visible())
             signal.lines = plot_lines
-            self._signal_impl_shape_lut.update({id(signal): plot_lines})
+
+        return plot_lines
+
+    def do_mpl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
+                                 z_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
+        if isinstance(plot_lines, QuadContourSet):
+            for tp in plot_lines.collections:
+                tp.remove()
+            contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
+            contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
+            if contour_filled:
+                draw_fn = mpl_axes.contourf
+            else:
+                draw_fn = mpl_axes.contour
+            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=signal.color_map)
+                if plot.legend_format == 'in_lines':
+                    if not plot.contour_filled:
+                        plt.clabel(plot_lines, inline=1, fontsize=10)
+            if plot.equivalent_units:
+                mpl_axes.set_aspect('equal', adjustable='box')
+            self.figure.canvas.draw_idle()
+        else:
+            # Will change with the new properties system
+            contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
+            contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
+            if contour_filled:
+                draw_fn = mpl_axes.contourf
+            else:
+                draw_fn = mpl_axes.contour
+            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=signal.color_map)
+                if plot.legend_format == 'color_bar':
+                    color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
+                    color_bar.set_label(z_data.unit, size=self.legend_size)
+                else:
+                    if not plot.contour_filled:
+                        plt.clabel(plot_lines, inline=1, fontsize=10)
+                # 2 Legend in line for multiple signal contour in one plot contour
+                # plt.clabel(plot_lines, inline=True)
+                # self.proxies = [Line2D([], [], color=c) for c in ['viridis']]
+            if plot.equivalent_units:
+                mpl_axes.set_aspect('equal', adjustable='box')
+
+        return plot_lines
 
     def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
         shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
@@ -267,6 +320,12 @@ class MatplotlibParser(BackendParserBase):
                 canvas.font_size = None
             self.figure.suptitle(canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
 
+    def process_ipl_plot_xy(self):
+        pass
+
+    def process_ipl_plot_contour(self):
+        pass
+
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
         logger.debug(f"process_ipl_plot AA: {self.canvas.step}")
         super().process_ipl_plot(plot, column, row)
@@ -402,6 +461,8 @@ class MatplotlibParser(BackendParserBase):
                             legend_lines[ix_legend].set_visible(True)
                             legend_lines[ix_legend].set_alpha(alpha)
                             ix_legend += 1
+                # else:
+                # mpl_axes.legend(self.proxies, ['signal name'])
 
         # Observe the axis limit change events
         if not self.canvas.streaming:
@@ -559,7 +620,7 @@ class MatplotlibParser(BackendParserBase):
                 logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
                              f"arrays (<2). {signal}")
                 return
-            self.do_mpl_line_plot(signal, mpl_axes, data[0], data[1])
+            self.do_mpl_line_plot(signal, mpl_axes, data)
 
         self.update_axis_labels_with_units(mpl_axes, signal)
 
@@ -698,23 +759,6 @@ class MatplotlibParser(BackendParserBase):
         style["drawstyle"] = STEP_MAP[step]
 
         return style
-
-    def _redraw_in_frame_with_grid(self, a):
-        """A copy of Axes.redraw_in_frame that fixes the problem of not drawing the grid since grid is treated as a
-        part of the axes. This function tries to hide all axis elements besides the grid itself before drawing"""
-        with ExitStack() as stack:
-            hide_elements = []
-            for axis in [a.get_xaxis(), a.get_yaxis()]:
-                hide_elements += [e for e in axis.get_children()
-                                  if not (isinstance(e, Tick))]
-                hide_elements += [a for e in axis.get_children() if isinstance(e, Tick)
-                                  for a in e.get_children() if isinstance(a, Text)]
-
-            for artist in [a.title, a._right_title, *hide_elements]:
-                stack.callback(artist.set_visible, artist.get_visible())
-                artist.set_visible(False)
-
-            a.draw(a.figure._cachedRenderer)
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):
