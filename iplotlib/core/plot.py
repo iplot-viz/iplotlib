@@ -78,11 +78,11 @@ class Plot(ABC):
 
     def merge(self, old_plot: 'Plot'):
         self.title = old_plot.title
-        self.legend = old_plot.legend
-        self.legend_position = old_plot.legend_position
-        self.legend_layout = old_plot.legend_layout
-        self.background_color = old_plot.background_color
-        self.grid = old_plot.grid
+        self.legend = getattr(old_plot, "_legend", None)
+        self.legend_position = getattr(old_plot, "_legend_position", None)
+        self.legend_layout = getattr(old_plot, "_legend_layout", None)
+        self.background_color = getattr(old_plot, "_background_color", None)
+        self.grid = getattr(old_plot, "_grid", None)
 
         for idxAxis, axis in enumerate(self.axes):
             if axis and idxAxis < len(old_plot.axes):
