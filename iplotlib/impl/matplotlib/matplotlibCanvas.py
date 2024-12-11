@@ -202,6 +202,8 @@ class MatplotlibParser(BackendParserBase):
                                                      alpha=0.3,
                                                      color=shapes[0][0].get_color(),
                                                      step=STEP_MAP[style['drawstyle']])
+                shapes[0][2].set_visible(shapes[0][0].get_visible())
+
             self.figure.canvas.draw_idle()
 
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
@@ -264,7 +266,8 @@ class MatplotlibParser(BackendParserBase):
                     continue
                 limits = self.get_plot_limits(plot, which='original')
                 begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                if (begin, end) == (base_begin, base_end):
+                if ((begin, end) == (base_begin, base_end) or
+                        (abs(begin-base_begin)<1000000000 and abs(end-base_end)<1000000000 and (5e17 < begin < 1e19))) :
                     shared.append(axes)
         return shared
 
