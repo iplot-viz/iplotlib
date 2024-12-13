@@ -164,6 +164,10 @@ class IplotPreferencesForm(QWidget):
         return IplotPreferencesForm.create_spinbox(min=1, max=7)
 
     @staticmethod
+    def default_contour_levels_widget():
+        return IplotPreferencesForm.create_spinbox(min=1, max=10)
+
+    @staticmethod
     def default_linestyle_widget():
         return IplotPreferencesForm.create_combo_box(
             {"Solid": "Solid", "Dotted": "Dotted", "Dashed": "Dashed", "None": "None"})
@@ -192,6 +196,19 @@ class IplotPreferencesForm(QWidget):
                                                       'lower left': 'Lower left', 'lower center': 'Lower center',
                                                       'center right': 'Center right', 'center left': 'Center left',
                                                       'center': 'Center'})
+
+    @staticmethod
+    def default_plot_contour_legend_format_widget():
+        return IplotPreferencesForm.create_combo_box({'color_bar': 'Color bar', 'in_lines': 'In Lines'})
+
+    @staticmethod
+    def default_plot_contour_color_map_widget():
+        return IplotPreferencesForm.create_combo_box({'viridis': 'Viridis', 'plasma': 'Plasma', 'inferno': 'Inferno',
+                                                      'magma': 'Magma', 'cividis': 'Cividis', 'Greys': 'Greys',
+                                                      'Purples': 'Purples', 'Blues': 'Blues', 'Greens': 'Greens',
+                                                      'Oranges': 'Oranges', 'Reds': 'Reds', 'coolwarm': 'Coolwarm',
+                                                      'bwr': 'Bwr', 'seismic': 'Seismic', 'PiYG': 'PiYG',
+                                                      'RdBu': 'RdBu'})
 
     @staticmethod
     def default_canvas_legend_layout_widget():

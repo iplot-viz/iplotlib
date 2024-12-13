@@ -67,7 +67,11 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.default_markersize_widget()},
             {"label": "Line Path", "property": "step",
              "widget": self.default_linepath_widget()},
-            {"label": "Focus all plots in stack", "property": "full_mode_all_stack", "widget": self.create_checkbox()}]
+            {"label": "Focus all plots in stack", "property": "full_mode_all_stack", "widget": self.create_checkbox()},
+            {"label": "Contour Levels", "property": "contour_levels",
+             "widget": self.default_contour_levels_widget()},
+            {"label": "Contour Filled", "property": "contour_filled",
+             "widget": self.create_checkbox()}]
         super().__init__(fields=prototype, label="Canvas", parent=parent, f=f)
 
     @Slot()

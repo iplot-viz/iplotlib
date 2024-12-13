@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Collection, Union
 
 from iplotlib.core.axis import Axis, LinearAxis
-from iplotlib.core.signal import Signal
+from iplotlib.core.signal import Signal, SignalXY
 
 
 @dataclass
@@ -24,13 +24,10 @@ class Plot(ABC):
 
     row_span: int = 1  #: nº of rows of canvas grid that this plot will span
     col_span: int = 1  #: nº of columns of canvas grid that this plot will span
-
     title: str = None  #: a plot title text, will be shown above the plot
-
     axes: List[Union[Axis, List[Axis]]] = None  #: the plot axes.
     signals: Dict[int, List[Signal]] = None  #: the signals drawn in this plot
     _type: str = None
-
     font_size: int = None  #: the font size of the plot title text
     font_color: str = '#000000'  #: the font color of the plot title text
     background_color: str = '#FFFFFF'
@@ -85,12 +82,31 @@ class Plot(ABC):
 
 @dataclass
 class PlotContour(Plot):
-    pass
+    grid: bool = None
+    contour_levels: int = 10
+    contour_filled: bool = False  # Set if the plot is filled or not
+    legend_format: str = 'color_bar'
+    equivalent_units: bool = False  # Set the aspect ratio of the graphic
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.axes is None:
+            self.axes = [LinearAxis(), LinearAxis()]
 
     def reset_preferences(self):
+        self.grid = PlotContour.grid
+        self.contour_levels = PlotContour.contour_levels
+        self.contour_filled = PlotContour.contour_filled
+        self.legend_format = PlotContour.legend_format
+        self.equivalent_units = PlotContour.equivalent_units
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotContour'):
+        self.grid = old_plot.grid
+        self.contour_levels = old_plot.contour_levels
+        self.contour_filled = old_plot.contour_filled
+        self.legend_format = old_plot.legend_format
+        self.equivalent_units = old_plot.equivalent_units
         super().merge(old_plot)
 
 
@@ -138,6 +154,7 @@ class PlotXY(Plot):
                     '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',
                     '#e6ff33', '#8a2be2', '#000080', '#cc6600']
     _color_index: int = None
+    signals: Dict[int, List[SignalXY]] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -151,6 +168,12 @@ class PlotXY(Plot):
         self._color_index += 1
 
         return color_signal
+
+    # Review: Implement the method directly in this class
+    def add_signal(self, signal, stack: int = 1):
+        super().add_signal(signal, stack)
+        if signal.color is None:
+            signal.color = self.get_next_color()
 
     def reset_preferences(self):
         self.log_scale = PlotXY.log_scale

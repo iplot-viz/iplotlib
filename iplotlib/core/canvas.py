@@ -218,7 +218,15 @@ class Canvas(ABC):
                     # Found matching plot
                     old_plot = old_canvas.plots[idxColumn][idxPlot]
                     if old_plot:
-                        plot.merge(old_plot)
+                        if type(plot) is type(old_plot):
+                            plot.merge(old_plot)
+                        else:
+                            # Handle when it is a plot of a different type.
+                            # Simplest way: Warning that a plot has been drawn where before there was a plot of a
+                            # different type, therefore, the properties cannot be kept to make a merge. In this way,
+                            # the new plot is drawn with its default properties.
+                            pass
+                            # logging.warning("Merge with different type of plots")
 
         # Gather all old signals into a map with uid as key
         def compute_signal_uniqkey(computed_signal: Signal):
