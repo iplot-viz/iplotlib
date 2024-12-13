@@ -1,7 +1,6 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 
-from contextlib import ExitStack
 from typing import Any, Callable, Collection, List
 
 import numpy as np
@@ -12,7 +11,6 @@ from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
-from matplotlib.text import Text
 from matplotlib.ticker import MaxNLocator, LogLocator
 import matplotlib.pyplot as plt
 from pandas.plotting import register_matplotlib_converters
@@ -39,7 +37,6 @@ STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre"
 
 
 class MatplotlibParser(BackendParserBase):
-
     def __init__(self,
                  canvas: Canvas = None,
                  tight_layout: bool = True,
@@ -158,7 +155,7 @@ class MatplotlibParser(BackendParserBase):
                 if plot.legend_format == 'in_lines':
                     if not plot.contour_filled:
                         plt.clabel(plot_lines, inline=1, fontsize=10)
-            if plot.equivalent_units:
+            if plot.axis_prop:
                 mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
         else:
@@ -320,7 +317,13 @@ class MatplotlibParser(BackendParserBase):
                 canvas.font_size = None
             self.figure.suptitle(canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
 
-    def process_ipl_plot(self, plot: PlotXY, column: int, row: int):
+    def process_ipl_plot_xy(self):
+        pass
+
+    def process_ipl_plot_contour(self):
+        pass
+
+    def process_ipl_plot(self, plot: Plot, column: int, row: int):
         logger.debug(f"process_ipl_plot AA: {self.canvas.step}")
         super().process_ipl_plot(plot, column, row)
         if not isinstance(plot, PlotXY):

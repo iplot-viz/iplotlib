@@ -30,34 +30,34 @@ class PlotItem(QStandardItem):
         # process signals..
         for stack_id, stack in enumerate(value.signals.values()):
             for signal_id, signal in enumerate(stack):
-                signalItem = SignalItem(f'Signal {signal_id} | stack {stack_id}', self.auto_name)
-                signalItem.setEditable(False)
-                signalItem.setData(signal, Qt.UserRole)
+                signal_item = SignalItem(f'Signal {signal_id+1} | stack {stack_id+1}', self.auto_name)
+                signal_item.setEditable(False)
+                signal_item.setData(signal, Qt.UserRole)
                 if self.auto_name and signal.title:
-                    signalItem.setText(signal.title)
-                self.appendRow(signalItem)
+                    signal_item.setText(signal.title)
+                self.appendRow(signal_item)
 
         # process axes..
-        axisPlan = dict()
+        axis_plan = dict()
         for ax_id, ax in enumerate(value.axes):
-            if isinstance(ax, typing.Collection):
+            if isinstance(ax, typing.List):
                 if len(ax) == 1:
                     name = f'Axis {self.AXIS_NAMES[ax_id]}'
-                    axisObject = ax[0]
-                    axisPlan.update({name: axisObject})
+                    axis_object = ax[0]
+                    axis_plan.update({name: axis_object})
                 else:
                     for subax_id, sub_ax in enumerate(ax):
                         name = f'Axis {self.AXIS_NAMES[ax_id]}{subax_id}'
-                        axisObject = sub_ax
-                        axisPlan.update({name: axisObject})
+                        axis_object = sub_ax
+                        axis_plan.update({name: axis_object})
             elif isinstance(ax, Axis):
                 name = f'Axis {self.AXIS_NAMES[ax_id]}'
-                axisObject = ax
-                axisPlan.update({name: axisObject})
+                axis_object = ax
+                axis_plan.update({name: axis_object})
 
-        for name, axisObject in axisPlan.items():
-            axisItem = AxisItem(name, self.auto_name)
-            axisItem.setData(axisObject, Qt.UserRole)
-            if self.auto_name and axisObject.label:
-                axisItem.setText(axisObject.label)
-            self.appendRow(axisItem)
+        for name, axis_object in axis_plan.items():
+            axis_item = AxisItem(name, self.auto_name)
+            axis_item.setData(axis_object, Qt.UserRole)
+            if self.auto_name and axis_object.label:
+                axis_item.setText(axis_object.label)
+            self.appendRow(axis_item)

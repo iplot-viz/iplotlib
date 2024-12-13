@@ -97,7 +97,8 @@ class StatusInfo:
 
 @dataclass
 class IplotSignalAdapter(ProcessingSignal):
-    """This is an adapter class that is the culmination of two crucial classes in the iplotlib framework.
+    """
+        This is an adapter class that is the culmination of two crucial classes in the iplotlib framework.
         Its purpose is to make ProcessingSignal interface compatible with the ArraySignal interface.
 
         Warning: Consider this class as a frozen blueprint, i.e, do not expect it to be consistent once
@@ -106,7 +107,6 @@ class IplotSignalAdapter(ProcessingSignal):
     """
     data_source: str = ''
     alias: str = ''
-
     stream_valid: bool = True
     pulse_nb: int = None
     ts_start: str = ''
@@ -117,23 +117,16 @@ class IplotSignalAdapter(ProcessingSignal):
     x_expr: str = '${self}.time'
     y_expr: str = '${self}.data_store[1]'
     z_expr: str = '${self}.data_store[2]'
-
     extremities: bool = False
-
     plot_type: str = ''
-
     children: typing.List[IplotSignalAdapterT] = field(default_factory=list)
-
     status_info: StatusInfo = None
-
     data_access_enabled: bool = True
     processing_enabled: bool = True
-
     time_out_value: float = 60  # Unimplemented  ---> REVIEW: purpose of this attribute?
 
     def __post_init__(self):
         super().__init__()
-        ProcessingSignal.__init__(self)
 
         # 1.1 Initialize access parameters
         if string_classifier.is_non_empty(self.ts_start):

@@ -6,6 +6,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.lines import Line2D
 from matplotlib.text import Annotation
 from matplotlib.widgets import Widget
+
+from iplotlib.core import SignalContour
 from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotLogging import setupLogger
 
@@ -137,6 +139,8 @@ class IplotMultiCursor(Widget):
                 ci = self._cache_table.get_cache_item(ax)
                 if hasattr(ci, "signals") and ci.signals is not None:
                     for signal in ci.signals:
+                        if isinstance(signal(), SignalContour):
+                            continue
                         x_min, x_max = ax.get_xbound()
                         y_min, y_max = ax.get_ybound()
 

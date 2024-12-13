@@ -147,7 +147,8 @@ class PlotXY(Plot):
                     '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',
                     '#e6ff33', '#8a2be2', '#000080', '#cc6600']
     _color_index: int = 0
-    axes: List[Union[Axis, List[Axis]]] = None
+    signals: Dict[int, List[SignalXY]] = None
+    axes: List[Union[LinearAxis, List[LinearAxis]]] = None
 
     log_scale = HierarchicalProperty('log_scale', default=False)
     grid = HierarchicalProperty('grid', default=True)
@@ -172,7 +173,6 @@ class PlotXY(Plot):
         if self.axes is None:
             self.axes = [LinearAxis(), [LinearAxis()]]
 
-        # ~TODO change
         self.axes[0].parent = self
         for axe in self.axes[1]:
             axe.parent = self
