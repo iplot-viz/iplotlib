@@ -119,6 +119,10 @@ class MatplotlibParser(BackendParserBase):
                     mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
                 mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
             self.figure.canvas.draw_idle()
+            # Preserve visible status for lines
+            for new, old in zip(plot_lines, signal.lines):
+                for n, o in zip(new, old):
+                    n.set_visible(o.get_visible())
         else:
             style = self.get_signal_style(signal, plot)
             params = dict(**style)
@@ -131,10 +135,7 @@ class MatplotlibParser(BackendParserBase):
                 for i, line in enumerate(plot_lines):
                     line[0].set_label(f"{signal.label}[{i}]")
 
-        for new, old in zip(plot_lines, signal.lines):
-            for n, o in zip(new, old):
-                n.set_visible(o.get_visible())
-            signal.lines = plot_lines
+        signal.lines = plot_lines
 
         return plot_lines
 
@@ -635,6 +636,9 @@ class MatplotlibParser(BackendParserBase):
             lo, hi = impl_plot.get_xlim()
             y_displayed = yd[((xd > lo) & (xd < hi))]
             if len(y_displayed) > 0:
+                # Check if there exist NaN values in the y_displayed array
+                if np.isnan(y_displayed).any():
+                    y_displayed = y_displayed[~np.isnan(y_displayed)]
                 h = np.max(y_displayed) - np.min(y_displayed)
                 min_bot = np.min(y_displayed) - margin * h
                 max_top = np.max(y_displayed) + margin * h
