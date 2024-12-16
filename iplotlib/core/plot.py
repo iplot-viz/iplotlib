@@ -49,7 +49,7 @@ class Plot(ABC):
     row_span: int = 1
     col_span: int = 1
     title: str = None
-    axes: List[Union[Axis, List[Axis]]] = None
+    axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None
     background_color = HierarchicalProperty('background_color', default='#FFFFFF')
     legend = HierarchicalProperty('legend', default=True)
@@ -63,6 +63,12 @@ class Plot(ABC):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.signals is None:
             self.signals = {}
+        if self.axes is None:
+            self.axes = [LinearAxis(), [LinearAxis()]]
+
+        self.axes[0].parent = self
+        for axe in self.axes[1]:
+            axe.parent = self
 
     def add_signal(self, signal, stack: int = 1):
         signal.parent = self
@@ -78,6 +84,10 @@ class Plot(ABC):
         self.grid = Plot.grid
         self.log_scale = Plot.log_scale
 
+        self.axes[0].reset_preferences()
+        for axe in self.axes[1]:
+            axe.reset_preferences()
+
     def merge(self, old_plot: 'Plot'):
         self.title = old_plot.title
         self.legend = getattr(old_plot, "_legend", None)
@@ -86,7 +96,6 @@ class Plot(ABC):
         self.background_color = getattr(old_plot, "_background_color", None)
         self.grid = getattr(old_plot, "_grid", None)
         self.log_scale = getattr(old_plot, "_log_scale", None)
-
         for idxAxis, axis in enumerate(self.axes):
             if axis and idxAxis < len(old_plot.axes):
                 # Found matching axes
@@ -114,8 +123,6 @@ class PlotContour(Plot):
 
     def __post_init__(self):
         super().__post_init__()
-        if self.axes is None:
-            self.axes = [LinearAxis(), LinearAxis()]
 
     def reset_preferences(self):
         super().reset_preferences()
@@ -152,7 +159,6 @@ class PlotXY(Plot):
                     '#e6ff33', '#8a2be2', '#000080', '#cc6600']
     _color_index: int = 0
     signals: Dict[int, List[SignalXY]] = None
-    axes: List[Union[LinearAxis, List[LinearAxis]]] = None
 
     # Axis
     label = HierarchicalProperty('label', default=None)
@@ -171,12 +177,6 @@ class PlotXY(Plot):
 
     def __post_init__(self):
         super().__post_init__()
-        if self.axes is None:
-            self.axes = [LinearAxis(), [LinearAxis()]]
-
-        self.axes[0].parent = self
-        for axe in self.axes[1]:
-            axe.parent = self
 
     def add_signal(self, signal, stack: int = 1):
         super().add_signal(signal, stack)
@@ -194,17 +194,9 @@ class PlotXY(Plot):
         super().reset_preferences()
         self._color_index = PlotXY._color_index
 
-        self.axes[0].reset_preferences()
-        for axe in self.axes[1]:
-            axe.reset_preferences()
-
     def merge(self, old_plot: 'PlotXY'):
         super().merge(old_plot)
         self._color_index = getattr(old_plot, "__color_index", None)
-
-        self.axes[0].merge(old_plot.axes[0])
-        for ix in range(min(len(self.axes[1]), len(old_plot.axes[1]))):
-            self.axes[1][ix].merge(old_plot.axes[1][ix])
 
 
 @dataclass
