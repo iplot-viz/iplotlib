@@ -56,6 +56,7 @@ class Plot(ABC):
     legend_position = HierarchicalProperty('legend_position', default='upper right')
     legend_layout = HierarchicalProperty('legend_layout', default='vertical')
     grid = HierarchicalProperty('grid', default=True)
+    log_scale = HierarchicalProperty('log_scale', default=False)
     _type: str = None
 
     def __post_init__(self):
@@ -75,6 +76,7 @@ class Plot(ABC):
         self.legend_layout = Plot.legend_layout
         self.background_color = Plot.background_color
         self.grid = Plot.grid
+        self.log_scale = Plot.log_scale
 
     def merge(self, old_plot: 'Plot'):
         self.title = old_plot.title
@@ -83,6 +85,7 @@ class Plot(ABC):
         self.legend_layout = getattr(old_plot, "_legend_layout", None)
         self.background_color = getattr(old_plot, "_background_color", None)
         self.grid = getattr(old_plot, "_grid", None)
+        self.log_scale = getattr(old_plot, "_log_scale", None)
 
         for idxAxis, axis in enumerate(self.axes):
             if axis and idxAxis < len(old_plot.axes):
@@ -101,10 +104,13 @@ class Plot(ABC):
 
 @dataclass
 class PlotContour(Plot):
-    contour_levels = HierarchicalProperty('contour_levels', default=10)
     contour_filled = HierarchicalProperty('contour_filled', default=False)  # Set if the plot is filled or not
     legend_format = HierarchicalProperty('legend_format', default='color_bar')
     axis_prop = HierarchicalProperty('axis_prop', default=False)  # Set the aspect ratio of the graphic
+
+    # Signal Contour
+    color_map = HierarchicalProperty('color_map', default="viridis")
+    contour_levels = HierarchicalProperty('contour_levels', default=10)
 
     def __post_init__(self):
         super().__post_init__()
@@ -113,14 +119,12 @@ class PlotContour(Plot):
 
     def reset_preferences(self):
         super().reset_preferences()
-        self.contour_levels = PlotContour.contour_levels
         self.contour_filled = PlotContour.contour_filled
         self.legend_format = PlotContour.legend_format
         self.axis_prop = PlotContour.axis_prop
 
     def merge(self, old_plot: 'PlotContour'):
         super().merge(old_plot)
-        self.contour_levels = getattr(old_plot, "_contour_levels", None)
         self.contour_filled = getattr(old_plot, "_contour_filled", None)
         self.legend_format = getattr(old_plot, "_legend_format", None)
         self.axis_prop = getattr(old_plot, "_axis_prop", None)
@@ -150,9 +154,6 @@ class PlotXY(Plot):
     signals: Dict[int, List[SignalXY]] = None
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
 
-    log_scale = HierarchicalProperty('log_scale', default=False)
-    grid = HierarchicalProperty('grid', default=True)
-
     # Axis
     label = HierarchicalProperty('label', default=None)
     font_size = HierarchicalProperty('font_size', default=10)
@@ -166,7 +167,7 @@ class PlotXY(Plot):
     line_size = HierarchicalProperty('line_size', default=1)
     marker = HierarchicalProperty('marker', default=None)
     marker_size = HierarchicalProperty('marker_size', default=0)
-    step = HierarchicalProperty('step', default="linear")
+    step = HierarchicalProperty('step', default="default")
 
     def __post_init__(self):
         super().__post_init__()
@@ -190,14 +191,20 @@ class PlotXY(Plot):
         return color_signal
 
     def reset_preferences(self):
-        self.log_scale = PlotXY.log_scale
-        self._color_index = PlotXY._color_index
         super().reset_preferences()
+        self._color_index = PlotXY._color_index
+
+        self.axes[0].reset_preferences()
+        for axe in self.axes[1]:
+            axe.reset_preferences()
 
     def merge(self, old_plot: 'PlotXY'):
-        self.log_scale = getattr(old_plot, "_log_scale", None)
-        self._color_index = getattr(old_plot, "__color_index", None)
         super().merge(old_plot)
+        self._color_index = getattr(old_plot, "__color_index", None)
+
+        self.axes[0].merge(old_plot.axes[0])
+        for ix in range(min(len(self.axes[1]), len(old_plot.axes[1]))):
+            self.axes[1][ix].merge(old_plot.axes[1][ix])
 
 
 @dataclass

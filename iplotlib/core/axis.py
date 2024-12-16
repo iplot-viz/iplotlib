@@ -140,5 +140,5 @@ class LinearAxis(RangeAxis):
     window: float = None
     follow: bool = False
 
-    # def __post_init__(self):
-    #     self.parent = None
+    def __post_init__(self):
+        self.parent = None

@@ -9,12 +9,15 @@ from abc import ABC
 from dataclasses import dataclass
 from typing import List, Union, Dict
 
+from iplotLogging import setupLogger
 from iplotlib.core.persistence import JSONExporter
-from iplotlib.core.plot import Plot, PlotXY
+from iplotlib.core.plot import Plot
 from iplotlib.core.signal import Signal
 import pandas as pd
 
 from iplotlib.core.hierarchical_property import HierarchicalProperty
+
+logger = setupLogger.get_logger(__name__)
 
 
 @dataclass
@@ -81,8 +84,6 @@ class Canvas(ABC):
         Auto redraw canvas every X seconds
     _type : str
         type of the canvas
-    _attribute_hierarchy : dict
-         inherited attributes specific to plot properties
     """
 
     MOUSE_MODE_SELECT = "MM_SELECT"
@@ -136,7 +137,7 @@ class Canvas(ABC):
     line_size = HierarchicalProperty('line_size', default=1)
     marker = HierarchicalProperty('marker', default=None)
     marker_size = HierarchicalProperty('marker_size', default=0)
-    step = HierarchicalProperty('step', default="linear")
+    step = HierarchicalProperty('step', default="default")
 
     # PlotContour
     contour_filled = HierarchicalProperty('contour_filled', default=False)  # Set if the plot is filled or not
@@ -156,7 +157,8 @@ class Canvas(ABC):
         """
         Add a plot to this canvas.
         """
-        plot.parent = self
+        if plot:
+            plot.parent = self
         if col >= len(self.plots):
             raise Exception("Cannot add plot to column {}: Canvas has only {} column(s)".format(col, len(self.plots)))
         if len(self.plots[col]) >= self.rows:
@@ -234,16 +236,17 @@ class Canvas(ABC):
                 if plot and idxColumn < len(old_canvas.plots) and idxPlot < len(old_canvas.plots[idxColumn]):
                     # Found matching plot
                     old_plot = old_canvas.plots[idxColumn][idxPlot]
-                    if old_plot:
-                        if type(plot) is type(old_plot):
-                            plot.merge(old_plot)
-                        else:
-                            # Handle when it is a plot of a different type.
-                            # Simplest way: Warning that a plot has been drawn where before there was a plot of a
-                            # different type, therefore, the properties cannot be kept to make a merge. In this way,
-                            # the new plot is drawn with its default properties.
-                            pass
-                            # logging.warning("Merge with different type of plots")
+                    if not old_plot:
+                        continue
+
+                    if type(plot) is type(old_plot):
+                        plot.merge(old_plot)
+                    else:
+                        # Handle when it is a plot of a different type.
+                        # Simplest way: Warning that a plot has been drawn where before there was a plot of a
+                        # different type, therefore, the properties cannot be kept to make a merge. In this way,
+                        # the new plot is drawn with its default properties.
+                        logger.warning("Merge with different type of plots")
 
         # Gather all old signals into a map with uid as key
         def compute_signal_uniqkey(computed_signal: Signal):
@@ -254,11 +257,12 @@ class Canvas(ABC):
         map_old_signals: Dict[str, Signal] = {}
         for columns in old_canvas.plots:
             for old_plot in columns:
-                if old_plot:
-                    for old_signals in old_plot.signals.values():
-                        for old_signal in old_signals:
-                            key = compute_signal_uniqkey(old_signal)
-                            map_old_signals[key] = old_signal
+                if not old_plot:
+                    continue
+                for old_signals in old_plot.signals.values():
+                    for old_signal in old_signals:
+                        key = compute_signal_uniqkey(old_signal)
+                        map_old_signals[key] = old_signal
 
         # Merge signals at canvas level to handle move between plots
         for columns in self.plots:

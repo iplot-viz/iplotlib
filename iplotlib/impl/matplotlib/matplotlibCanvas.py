@@ -120,8 +120,7 @@ class MatplotlibParser(BackendParserBase):
                 mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
             self.figure.canvas.draw_idle()
         else:
-            style = self.get_signal_style(signal, plot)
-            params = dict(**style)
+            params = dict(**signal.get_style())
             draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
                 plot_lines = [draw_fn(x_data, y_data, **params)]
@@ -189,7 +188,7 @@ class MatplotlibParser(BackendParserBase):
             plot = cache_item.plot()
         except AttributeError:
             plot = None
-        style = self.get_signal_style(signal, plot)
+        style = signal.get_style()
 
         if shapes is not None:
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
@@ -725,21 +724,6 @@ class MatplotlibParser(BackendParserBase):
         for cursor in self._cursors:
             cursor.remove()
         self._cursors.clear()
-
-    def get_signal_style(self, signal: Signal, plot: Plot = None):
-        style = dict()
-
-        style['label'] = signal.label
-        style['color'] = signal.color
-
-        style['linewidth'] = signal.line_size
-        style['linestyle'] = signal.line_style.lower()
-        style['marker'] = signal.marker
-        style['markersize'] = signal.marker_size
-        step = signal.step
-        style["drawstyle"] = STEP_MAP[step]
-
-        return style
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):

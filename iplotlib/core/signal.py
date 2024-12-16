@@ -17,7 +17,7 @@ from iplotlib.core.hierarchical_property import HierarchicalProperty
 
 
 @dataclass
-class Signal(ABC):
+class Signal(ABC, IplotSignalAdapter):
     """
     Main abstraction for a Signal
 
@@ -29,6 +29,50 @@ class Signal(ABC):
         Signal variable name
     label : str
         Signal label. This value is presented on plot legend
+    hi_precision_data : bool
+        indicate whether the data is sensitive to round off errors and requires special handling. Keep for VTK
+    _type : str
+        type of the signal
+    lines = []
+        collection of line elements associated with the signal
+    """
+    uid: str = None
+    name: str = ''
+    label: str = None
+    hi_precision_data: bool = None  # TODO review this utility
+    lines = []
+    _type: str = None
+
+    def __init__(self):
+        super().__init__()
+        self.parent = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
+
+    @abstractmethod
+    def get_data(self) -> tuple:
+        pass
+
+    @abstractmethod
+    def set_data(self, data=None):
+        pass
+
+    def get_style(self):
+        pass
+
+    def reset_preferences(self):
+        self.label = Signal.label
+
+    def merge(self, old_signal: 'Signal'):
+        self.label = old_signal.label
+
+
+@dataclass
+class SignalXY(Signal, IplotSignalAdapter):
+    """
+    SignalXY [...]
     color : str
         signal color
     line_style : str
@@ -44,61 +88,14 @@ class Signal(ABC):
         dependent
     step : str
         default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
-    hi_precision_data : bool
-        indicate whether the data is sensitive to round off errors and requires special handling. Keep for VTK
-    plot_type : str
-        indicates the type of plot for the signal
-    _type : str
-        type of the signal
-    lines = []
-        collection of line elements associated with the signal
-    attrs_propagated : dict
-        used for attribute propagation
     """
-
-    plot_type: str = ''
-    uid: str = None
-    name: str = ''
-    label: str = None
-    hi_precision_data: bool = None
-    lines = []
-    _type: str = None
-
-    def __init__(self):
-        self.parent = None
-
-    def __post_init__(self):
-        self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
-
-    @abstractmethod
-    def get_data(self) -> tuple:
-        pass
-
-    @abstractmethod
-    def set_data(self, data=None):
-        pass
-
-    def reset_preferences(self):
-        pass
-
-    def merge(self, old_signal: 'Signal'):
-        pass
-
-
-@dataclass
-class SignalXY(Signal, IplotSignalAdapter):
-    """
-    SignalXY [...]
-    """
-
-    plot_type: str = "PlotXY"
     lines = []
     color = HierarchicalProperty('color', default=None)
     line_style = HierarchicalProperty('line_style', default='Solid')
     line_size = HierarchicalProperty('line_size', default=1)
     marker = HierarchicalProperty('marker', default=None)
     marker_size = HierarchicalProperty('marker_size', default=0)
-    step = HierarchicalProperty('step', default="linear")
+    step = HierarchicalProperty('step', default="default")
 
     def __post_init__(self):
         super().__post_init__()
@@ -110,21 +107,38 @@ class SignalXY(Signal, IplotSignalAdapter):
     def set_data(self, data=None):
         IplotSignalAdapter.set_data(self, data)
 
+    def get_style(self):
+
+        style = dict()
+
+        style['label'] = self.label
+        style['color'] = self.color
+
+        style['linewidth'] = self.line_size
+        style['linestyle'] = self.line_style.lower()
+        style['marker'] = self.marker
+        style['markersize'] = self.marker_size
+        style["drawstyle"] = self.step
+
+        return style
+
     def reset_preferences(self):
+        super().reset_preferences()
+        self.color = SignalXY.color
         self.line_style = SignalXY.line_style
         self.line_size = SignalXY.line_size
         self.marker = SignalXY.marker
         self.marker_size = SignalXY.marker_size
         self.step = SignalXY.step
-        super().reset_preferences()
 
     def merge(self, old_signal: 'SignalXY'):
+        super().merge(old_signal)
+        self.color = getattr(old_signal, "_color", None)
         self.line_style = getattr(old_signal, "_line_style", None)
         self.line_size = getattr(old_signal, "_line_size", None)
         self.marker = getattr(old_signal, "_marker", None)
         self.marker_size = getattr(old_signal, "_marker_size", None)
         self.step = getattr(old_signal, "_step", None)
-        super().merge(old_signal)
 
 
 @dataclass
@@ -132,8 +146,6 @@ class SignalContour(Signal, IplotSignalAdapter):
     """
     SignalContour [...]
     """
-
-    plot_type: str = "PlotContour"
     color_map = HierarchicalProperty('color_map', default="viridis")
     contour_levels = HierarchicalProperty('contour_levels', default=10)
 
@@ -148,11 +160,11 @@ class SignalContour(Signal, IplotSignalAdapter):
         IplotSignalAdapter.set_data(self, data)
 
     def reset_preferences(self):
+        super().reset_preferences()
         self.color_map = SignalContour.color_map
         self.contour_levels = SignalContour.contour_levels
-        super().reset_preferences()
 
     def merge(self, old_signal: 'SignalContour'):
+        super().merge(old_signal)
         self.color_map = getattr(old_signal, "_color_map", None)
         self.contour_levels = getattr(old_signal, "_contour_levels", None)
-        super().merge(old_signal)

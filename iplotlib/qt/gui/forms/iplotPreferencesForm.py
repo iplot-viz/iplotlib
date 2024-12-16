@@ -178,7 +178,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_linepath_widget():
-        return IplotPreferencesForm.create_combo_box({"linear": "Linear", "post": "Last Value"})
+        return IplotPreferencesForm.create_combo_box({"default": "Linear", "steps-post": "Last Value"})
 
     @staticmethod
     def default_canvas_legend_position_widget():
