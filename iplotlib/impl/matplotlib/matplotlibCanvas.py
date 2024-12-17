@@ -2,7 +2,7 @@
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 
 from typing import Any, Callable, Collection, List
-
+import pandas
 import numpy as np
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis
@@ -12,6 +12,7 @@ from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator, LogLocator
+from matplotlib.widgets import Button, Slider,SliderBase
 import matplotlib.pyplot as plt
 from pandas.plotting import register_matplotlib_converters
 
@@ -25,6 +26,7 @@ from iplotlib.core import (Axis,
                            Plot,
                            PlotXY,
                            PlotContour,
+                           PlotXYWithSlider,
                            Signal,
                            SignalXY,
                            SignalContour)
@@ -81,7 +83,10 @@ class MatplotlibParser(BackendParserBase):
 
         plot_lines = None
         if isinstance(signal, SignalXY):
-            plot_lines = self.do_mpl_line_plot_xy(signal, mpl_axes, plot, cache_item, data[0], data[1])
+            if isinstance(plot, PlotXYWithSlider):
+                plot_lines = self.do_mpl_line_plot_xy_slider(signal, mpl_axes, plot, cache_item, data[0], data[1])
+            else:
+                plot_lines = self.do_mpl_line_plot_xy(signal, mpl_axes, plot, cache_item, data[0], data[1])
         elif isinstance(signal, SignalContour):
             plot_lines = self.do_mpl_line_plot_contour(signal, mpl_axes, plot, data[0], data[1], data[2])
 
@@ -137,6 +142,76 @@ class MatplotlibParser(BackendParserBase):
             signal.lines = plot_lines
 
         return plot_lines
+
+    def do_mpl_line_plot_xy_slider(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXYWithSlider, cache_item, x_data, y_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+        
+        print(plot.slider.val)
+        actual_time2=signal.time[plot.slider.val]
+        print(actual_time2)
+        print(pandas.Timestamp(actual_time2))
+        print(x_data)
+        print(y_data)
+        ysub_data= y_data[plot.slider.val]
+        print(ysub_data)
+
+        
+        # Review to implement directly in PlotXY class
+        if signal.color is None:
+            signal.color = plot.get_next_color()
+
+        if isinstance(plot_lines, list):
+            print("is list")
+            if x_data.ndim == 1 and ysub_data.ndim == 1:
+                print("1D")
+                line = plot_lines[0][0]
+                line.set_xdata(x_data)
+                line.set_ydata(ysub_data)
+            elif x_data.ndim == 1 and ysub_data.ndim == 2:
+                print("not 1D")
+                for i, line in enumerate(plot_lines):
+                    line[0].set_xdata(x_data)
+                    line[0].set_ydata(ysub_data[:, i])
+
+            # Put this out in a method only for streaming
+            if self.canvas.streaming:
+                ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
+                all_y_data = []
+                for signal in plot.signals[cache_item.stack_key]:
+                    if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
+                        max_x_data = signal.x_data.max()[0]
+                        for x_temp, y_temp in zip(signal.x_data, signal.y_data):
+                            if max_x_data - ax_window <= x_temp <= max_x_data:
+                                all_y_data.append(y_temp)
+                if all_y_data:
+                    diff = (max(all_y_data) - min(all_y_data)) / 15
+                    mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
+                mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
+            self.figure.canvas.draw_idle()
+        else:
+            # print("is not list")
+            style = self.get_signal_style(signal, plot)
+            params = dict(**style)
+            draw_fn = mpl_axes.plot
+            if x_data.ndim == 1 and ysub_data.ndim == 1:
+                print("1D")
+                plot_lines = [draw_fn(x_data, ysub_data, **params)]
+            elif x_data.ndim == 1 and ysub_data.ndim == 2:
+                print("not 1D")
+                lines = draw_fn(x_data, ysub_data, **params)
+                plot_lines = [[line] for line in lines]
+                for i, line in enumerate(plot_lines):
+                    line[0].set_label(f"{signal.label}[{i}]")
+
+        for new, old in zip(plot_lines, signal.lines):
+            print("something here")
+            for n, o in zip(new, old):
+                print("something here too")
+                n.set_visible(o.get_visible())
+            signal.lines = plot_lines
+
+        return plot_lines
+    
 
     def do_mpl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
                                  z_data):
@@ -336,11 +411,41 @@ class MatplotlibParser(BackendParserBase):
 
         if not self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None:
             stack_sz = 1
+            heights = [0.03, 1.0]
         else:
             stack_sz = len(plot.signals.keys())
+            heights = [0.03 * self.canvas.rows] + [1.0] * stack_sz
 
         # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
         subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
+
+        if isinstance(plot, PlotXYWithSlider):
+            # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
+            subgrid_item = grid_item.subgridspec(stack_sz + 1, 1, hspace=0, height_ratios=heights)
+            sub_subgrid_item = subgrid_item[0, 0].subgridspec(1, 2, hspace=0, width_ratios=[0.9, 0.15])
+            # Add Slider
+            slider_ax = self.figure.add_subplot(sub_subgrid_item[0, 0])
+            if not plot.slider_last_val:
+                plot.slider_last_val = plot.signals[1][0].ts_start
+            
+            #print(plot.signals[1][0].y_data)
+            #slider = Slider(slider_ax, '', plot.signals[1][0].ts_start,plot.signals[1][0].ts_end, valinit=plot.slider_last_val, valstep=1)
+            slider = Slider(slider_ax, '', 0,plot.signals[1][0].y_data.shape[0]-1,valinit=0, valstep=1)
+
+            #slider.valtext.set_text(pandas.Timestamp(slider.val))
+            #slider.canvas = None
+            plot.slider = slider
+
+            def update_slider(event):
+                # slider.valtext.set_text(pandas.Timestamp(event))
+                print(pandas.Timestamp(event))
+                plot.slider_last_val = event
+
+            plot.slider.on_changed(update_slider)
+            add_slider = 1
+        else:
+            subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
+            add_slider = 0
 
         mpl_axes = None
         mpl_axes_prev = None
@@ -355,7 +460,7 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     row_id = stack_id
 
-                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0], sharex=mpl_axes_prev)
+                mpl_axes = self.figure.add_subplot(subgrid_item[row_id + add_slider, 0], sharex=mpl_axes_prev)
                 mpl_axes_prev = mpl_axes
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
                 # Keep references to iplotlib instances for ease of access in callbacks.

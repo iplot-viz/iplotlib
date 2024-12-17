@@ -21,7 +21,7 @@ from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, Mouse
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
-from iplotlib.core import PlotContour
+from iplotlib.core import PlotContour, PlotXYWithSlider
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
@@ -242,12 +242,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
                 # Stage a command to obtain original view limits
                 # Disable Zoom and Pan in PlotContour
-                if isinstance(plot, PlotContour):
+                if isinstance(plot, PlotContour) or isinstance(plot, PlotXYWithSlider):
                     return
                 self.stage_view_lim_cmd()
                 return
             if event.button != MouseButton.LEFT:
                 return
+            ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+            if not hasattr(ci, 'plot'):
+                return
+            plot = ci.plot()
             if not plot:
                 self._dist_calculator.reset()
                 return
@@ -285,6 +289,17 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # push uncommitted changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
+            if event.inaxes is None:
+                return
+            if self._parser._impl_plot_cache_table.get_cache_item(event.inaxes):
+                return
+
+            pos = event.inaxes.figure.axes.index(event.inaxes)
+            ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes.figure.axes[pos + 1])
+            plot = ci.plot()
+            for row in plot.signals.values():
+                for signal in row:
+                    self._parser.process_ipl_signal(signal)
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.text() == 'n':
