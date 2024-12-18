@@ -43,13 +43,10 @@ class Signal(ABC, IplotSignalAdapter):
     lines = []
     _type: str = None
 
-    def __init__(self):
-        super().__init__()
-        self.parent = None
-
     def __post_init__(self):
         super().__post_init__()
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
+        self.parent = None
 
     @abstractmethod
     def get_data(self) -> tuple:
@@ -90,12 +87,12 @@ class SignalXY(Signal, IplotSignalAdapter):
         default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
     """
     lines = []
-    color = HierarchicalProperty('color', default=None)
-    line_style = HierarchicalProperty('line_style', default='Solid')
-    line_size = HierarchicalProperty('line_size', default=1)
-    marker = HierarchicalProperty('marker', default=None)
-    marker_size = HierarchicalProperty('marker_size', default=0)
-    step = HierarchicalProperty('step', default="default")
+    color: HierarchicalProperty = HierarchicalProperty('color', default=None)
+    line_style: HierarchicalProperty = HierarchicalProperty('line_style', default='Solid')
+    line_size: HierarchicalProperty = HierarchicalProperty('line_size', default=1)
+    marker: HierarchicalProperty = HierarchicalProperty('marker', default=None)
+    marker_size: HierarchicalProperty = HierarchicalProperty('marker_size', default=1)
+    step: HierarchicalProperty = HierarchicalProperty('step', default="default")
 
     def __post_init__(self):
         super().__post_init__()
@@ -108,7 +105,6 @@ class SignalXY(Signal, IplotSignalAdapter):
         IplotSignalAdapter.set_data(self, data)
 
     def get_style(self):
-
         style = dict()
 
         style['label'] = self.label
@@ -146,8 +142,8 @@ class SignalContour(Signal, IplotSignalAdapter):
     """
     SignalContour [...]
     """
-    color_map = HierarchicalProperty('color_map', default="viridis")
-    contour_levels = HierarchicalProperty('contour_levels', default=10)
+    color_map: HierarchicalProperty = HierarchicalProperty('color_map', default="viridis")
+    contour_levels: HierarchicalProperty = HierarchicalProperty('contour_levels', default=10)
 
     def __post_init__(self):
         super().__post_init__()

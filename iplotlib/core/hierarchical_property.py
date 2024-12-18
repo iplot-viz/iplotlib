@@ -1,8 +1,14 @@
+from dataclasses import dataclass
+
+
+@dataclass
 class HierarchicalProperty:
-    def __init__(self, name, default=None):
-        self.name = name
-        self.default = default
-        self.local_name = f"_{name}"
+    name: str
+    default: any
+
+    def __post_init__(self):
+        self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
+        self.local_name = f"_{self.name}"
 
     def __get__(self, instance, owner):
         if instance is None:
@@ -15,8 +21,14 @@ class HierarchicalProperty:
         return self.default
 
     def __set__(self, instance, value):
-        setattr(instance, self.local_name, value)
+        if not isinstance(value, HierarchicalProperty):
+            setattr(instance, self.local_name, value)
 
     def __delete__(self, instance):
         if hasattr(instance, self.local_name):
             delattr(instance, self.local_name)
+
+    def get_real_value(self, instance):
+        if instance is None:
+            raise ValueError("`instance` should be valid.")
+        return instance.__dict__.get(self.local_name, None)

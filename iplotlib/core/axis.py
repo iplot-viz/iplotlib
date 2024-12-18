@@ -38,10 +38,13 @@ class Axis:
 
     _type: str = None
     label = None
-    font_size = HierarchicalProperty('font_size', default=10)
-    font_color = HierarchicalProperty('font_color', default='#000000')
-    tick_number = HierarchicalProperty('tick_number', default=7)
-    autoscale = HierarchicalProperty('autoscale', default=True)
+    font_size: HierarchicalProperty = HierarchicalProperty('font_size', default=10)
+    font_color: HierarchicalProperty = HierarchicalProperty('font_color', default='#000000')
+    tick_number: HierarchicalProperty = HierarchicalProperty('tick_number', default=7)
+    autoscale: HierarchicalProperty = HierarchicalProperty('autoscale', default=True)
+
+    def __post_init__(self):
+        self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
 
     @staticmethod
     def ticks():
@@ -141,4 +144,5 @@ class LinearAxis(RangeAxis):
     follow: bool = False
 
     def __post_init__(self):
+        super().__post_init__()
         self.parent = None
