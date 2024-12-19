@@ -546,7 +546,7 @@ class MatplotlibParser(BackendParserBase):
                 # mpl_axes.legend(self.proxies, ['signal name'])
 
         # Observe the axis limit change events
-        if not self.canvas.streaming:
+        if not self.canvas.streaming and not isinstance(plot, PlotXYWithSlider):
             for axes in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
                 axes.callbacks.connect('xlim_changed', self._axis_update_callback)
                 # axes.callbacks.connect('ylim_changed', self._axis_update_callback)
