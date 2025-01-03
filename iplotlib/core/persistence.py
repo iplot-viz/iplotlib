@@ -89,18 +89,9 @@ class JSONExporter:
 
 
 class DataclassNumpyJSONEncoder(JSONEncoder):
-
     def default(self, o):
         if dataclasses.is_dataclass(o):
-            result = {}
-            for field in dataclasses.fields(o):
-                if getattr(type(o), field.name, None).__class__.__name__ == "HierarchicalProperty":
-                    value = getattr(type(o), field.name).get_real_value(o)
-                    if value:
-                        result[field.name] = value
-                else:
-                    result[field.name] = getattr(o, field.name)
-            return result
+            return dataclasses.asdict(o)
         if isinstance(o, np.integer):
             return int(o)
         elif isinstance(o, np.floating):
