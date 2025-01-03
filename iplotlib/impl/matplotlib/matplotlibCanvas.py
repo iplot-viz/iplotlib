@@ -313,9 +313,9 @@ class MatplotlibParser(BackendParserBase):
 
         # 4. Update the title at the top of canvas.
         if canvas.title is not None:
-            if not canvas.font_size:
+            if not self._pm.get_value(self.canvas, 'font_size'):
                 canvas.font_size = None
-            self.figure.suptitle(canvas.title, size=canvas.font_size,
+            self.figure.suptitle(canvas.title, size=self._pm.get_value(self.canvas, 'font_size'),
                                  color=self._pm.get_value(self.canvas, 'font_color') or 'black')
 
     def process_ipl_plot_xy(self):
