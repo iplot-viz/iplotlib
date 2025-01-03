@@ -31,8 +31,8 @@ class ColorPicker(QWidget):
         self.selectButton.clicked.connect(self.openColorDialog)
 
         self.colorWindow = QLabel('', self)
-        self.colorWindow.setFrameShape(QFrame.StyledPanel)
-        self.colorWindow.setFrameShadow(QFrame.Raised)
+        self.colorWindow.setFrameShape(QFrame.Shape.StyledPanel)
+        self.colorWindow.setFrameShadow(QFrame.Shadow.Raised)
         self.colorWindow.setFixedWidth(40)
         self.colorWindow.setFixedHeight(40)
         self.layout().addWidget(self.selectButton)

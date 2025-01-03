@@ -1,12 +1,9 @@
-"""
-The property manager returns the appropriate value for an attribute in the hierarchy of core iplotlib classes.
-"""
-
 default_property: dict = {
     'font_size': 10,
     'font_color': '#000000',
     'tick_number': 7,
     'autoscale': True,
+
     # Plot
     'background_color': '#FFFFFF',
     'legend': True,
@@ -14,7 +11,9 @@ default_property: dict = {
     'legend_layout': 'vertical',
     'grid': True,
     'log_scale': False,
+
     # PlotXY
+
     # SignalXY
     'color': None,
     'line_style': 'Solid',
@@ -22,10 +21,12 @@ default_property: dict = {
     'marker': None,
     'marker_size': 1,
     'step': "default",
+
     # PlotContour
     'contour_filled': False,
     'legend_format': 'color_bar',
-    'equivalent_units': False,
+    'axis_prop': False,
+
     # SignalContour
     'color_map': "viridis",
     'contour_levels': 10,

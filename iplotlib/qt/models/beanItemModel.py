@@ -28,14 +28,14 @@ class BeanItemModel(QStandardItemModel):
     """
     An implementation of QStandardItemModel that binds indexes to object properties
     """
-    PyObjectRole = Qt.UserRole + 50  #: This role is used to bind this model to a python object.
+    PyObjectRole = Qt.ItemDataRole.UserRole + 50  #: This role is used to bind this model to a python object.
 
     def __init__(self, parent: typing.Optional[QObject] = ...):
         super().__init__(parent=parent)
         self._pyObject = None
         self.setItemPrototype(BeanItem('Bean', BeanPrototype))
 
-    def data(self, index: QModelIndex, role: int = Qt.UserRole) -> typing.Any:
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.UserRole) -> typing.Any:
         logger.debug(f"Index: {index}, role: {role}")
 
         if role == BeanItemModel.PyObjectRole:
@@ -51,7 +51,7 @@ class BeanItemModel(QStandardItemModel):
 
         value = PropertyManager().get_value(self._pyObject, property_name)
         if isinstance(widget, QComboBox):
-            keys = [widget.itemData(i, Qt.UserRole) for i in range(widget.count())]
+            keys = [widget.itemData(i, Qt.ItemDataRole.UserRole) for i in range(widget.count())]
             try:
                 return keys.index(value)
             except ValueError:
@@ -59,7 +59,7 @@ class BeanItemModel(QStandardItemModel):
         else:
             return str(value) if value is not None else None
 
-    def setData(self, index: QModelIndex, value: typing.Any, role: int = Qt.UserRole) -> bool:
+    def setData(self, index: QModelIndex, value: typing.Any, role: int = Qt.ItemDataRole.UserRole) -> bool:
         logger.debug(f"Index: {index}, role: {role}, value: {value}")
         if role == BeanItemModel.PyObjectRole:
             self._pyObject = value
@@ -73,19 +73,15 @@ class BeanItemModel(QStandardItemModel):
             property_name = bean.data(BeanItem.PropertyRole)
 
             if isinstance(widget, QComboBox):
-                keys = [widget.itemData(i, Qt.UserRole) for i in range(widget.count())]
-                if hasattr(self._pyObject, property_name):
-                    setattr(self._pyObject, property_name, keys[value])
-                    self.dataChanged.emit(index, index)
-                    return True
-                else:
-                    return False
+                keys = [widget.itemData(i, Qt.ItemDataRole.UserRole) for i in range(widget.count())]
+                setattr(self._pyObject, property_name, keys[value])
+                self.dataChanged.emit(index, index)
+                return True
             else:
                 if hasattr(self._pyObject, property_name):
                     type_func = type(getattr(self._pyObject, property_name))
                     value = ConversionHelper.asType(value, type_func)
-                    setattr(self._pyObject, property_name, value)
-                    self.dataChanged.emit(index, index)
-                    return True
-                else:
-                    return False
+
+                setattr(self._pyObject, property_name, value)
+                self.dataChanged.emit(index, index)
+                return True

@@ -120,8 +120,7 @@ class MatplotlibParser(BackendParserBase):
                 mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
             self.figure.canvas.draw_idle()
         else:
-            style = self.get_signal_style(signal, plot)
-            params = dict(**style)
+            params = dict(**self.get_signal_style(signal))
             draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
                 plot_lines = [draw_fn(x_data, y_data, **params)]
@@ -146,16 +145,17 @@ class MatplotlibParser(BackendParserBase):
                 tp.remove()
             contour_filled = self._pm.get_value(plot, 'contour_filled')
             contour_levels = self._pm.get_value(plot, 'contour_levels')
+            color_map = self._pm.get_value(plot, 'color_map')
             if contour_filled:
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=signal.color_map)
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
                 if plot.legend_format == 'in_lines':
                     if not plot.contour_filled:
                         plt.clabel(plot_lines, inline=1, fontsize=10)
-            if plot.equivalent_units:
+            if self._pm.get_value(plot, "axis_prop"):
                 mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
         else:
@@ -177,7 +177,7 @@ class MatplotlibParser(BackendParserBase):
                 # 2 Legend in line for multiple signal contour in one plot contour
                 # plt.clabel(plot_lines, inline=True)
                 # self.proxies = [Line2D([], [], color=c) for c in ['viridis']]
-            if plot.equivalent_units:
+            if self._pm.get_value(plot, "axis_prop"):
                 mpl_axes.set_aspect('equal', adjustable='box')
 
         return plot_lines
@@ -189,7 +189,7 @@ class MatplotlibParser(BackendParserBase):
             plot = cache_item.plot()
         except AttributeError:
             plot = None
-        style = self.get_signal_style(signal, plot)
+        style = self.get_signal_style(signal)
 
         if shapes is not None:
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
@@ -727,22 +727,17 @@ class MatplotlibParser(BackendParserBase):
             cursor.remove()
         self._cursors.clear()
 
-    def get_signal_style(self, signal: Signal, plot: Plot = None):
+
+    def get_signal_style(self, signal: SignalXY) -> dict:
         style = dict()
 
-        if signal.label:
-            style['label'] = signal.label
-        if hasattr(signal, "color"):
-            style['color'] = self._pm.get_value(signal, 'color')
-        style['linewidth'] = self._pm.get_value(signal, 'line_size') or 1
-        style['linestyle'] = (self._pm.get_value(signal, 'line_style')).lower()
-        style['marker'] = self._pm.get_value(signal, 'marker')
-        style['markersize'] = self._pm.get_value(signal, 'marker_size')
-        step = self._pm.get_value(signal, 'step')
-
-        if step is None:
-            step = 'linear'
-        style["drawstyle"] = STEP_MAP[step]
+        style['label'] = signal.label
+        style['color'] = self._pm.get_value(signal, "color")
+        style['linewidth'] = self._pm.get_value(signal, "line_size")
+        style['linestyle'] = self._pm.get_value(signal, "line_style").lower()
+        style['marker'] = self._pm.get_value(signal, "marker")
+        style['markersize'] = self._pm.get_value(signal, "marker_size")
+        style["drawstyle"] = self._pm.get_value(signal, "step")
 
         return style
 

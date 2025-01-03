@@ -9,6 +9,10 @@ from typing import Dict, List
 
 import numpy as np
 
+from iplotLogging import setupLogger
+
+logger = setupLogger.get_logger(__name__)
+
 
 class JSONExporter:
     """
@@ -78,7 +82,7 @@ class JSONExporter:
                 field_types = {f.name: f.type for f in dataclasses.fields(klass)}
                 return klass(**{f: self.dataclass_from_dict(d[f], field_types[f]) for f in d if f in field_types})
             except Exception as e:
-                print(f"Error: {e}")
+                logger.error(f"Error: {e}")
                 return d
         else:
             return d

@@ -54,13 +54,16 @@ class Plot(ABC):
     title: str = None
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None
-    background_color: str = None
+
     legend: bool = None
     legend_position: str = None
     legend_layout: str = None
+    background_color: str = None
     grid: bool = None
     log_scale: bool = None
+
     _type: str = None
+    parent = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -99,6 +102,7 @@ class Plot(ABC):
         self.background_color = old_plot.background_color
         self.grid = old_plot.grid
         self.log_scale = old_plot.log_scale
+
         for idxAxis, axis in enumerate(self.axes):
             if axis and idxAxis < len(old_plot.axes):
                 # Found matching axes
@@ -124,9 +128,10 @@ class PlotContour(Plot):
 
     """
     signals: Dict[int, List[SignalContour]] = None
+
     contour_filled: bool = None  # Set if the plot is filled or not
     legend_format: str = None
-    equivalent_units: bool = None  # Set the aspect ratio of the graphic
+    axis_prop: bool = None  # Set the aspect ratio of the graphic
 
     def __post_init__(self):
         super().__post_init__()
@@ -135,13 +140,13 @@ class PlotContour(Plot):
         super().reset_preferences()
         self.contour_filled = PlotContour.contour_filled
         self.legend_format = PlotContour.legend_format
-        self.equivalent_units = PlotContour.equivalent_units
+        self.axis_prop = PlotContour.axis_prop
 
     def merge(self, old_plot: 'PlotContour'):
         super().merge(old_plot)
         self.contour_filled = old_plot.contour_filled
         self.legend_format = old_plot.legend_format
-        self.equivalent_units = old_plot.equivalent_units
+        self.axis_prop = old_plot.axis_prop
 
 
 @dataclass

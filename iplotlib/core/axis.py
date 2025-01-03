@@ -40,6 +40,7 @@ class Axis:
     font_color: str = None
     tick_number: int = None
     autoscale: bool = None
+    parent = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__

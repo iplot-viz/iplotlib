@@ -40,11 +40,11 @@ class Signal(ABC, IplotSignalAdapter):
     hi_precision_data: bool = None  # TODO review this utility
     lines = []
     _type: str = None
+    parent = None
 
     def __post_init__(self):
         super().__post_init__()
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
-        self.parent = None
 
     @abstractmethod
     def get_data(self) -> tuple:
@@ -101,18 +101,6 @@ class SignalXY(Signal, IplotSignalAdapter):
 
     def set_data(self, data=None):
         IplotSignalAdapter.set_data(self, data)
-
-    def get_style(self):
-        style = dict()
-        style['label'] = self.label
-        style['color'] = self.color
-        style['linewidth'] = self.line_size
-        style['linestyle'] = self.line_style.lower()
-        style['marker'] = self.marker
-        style['markersize'] = self.marker_size
-        style["drawstyle"] = self.step
-
-        return style
 
     def reset_preferences(self):
         super().reset_preferences()
