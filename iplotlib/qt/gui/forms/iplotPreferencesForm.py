@@ -99,8 +99,7 @@ class IplotPreferencesForm(QWidget):
         This encapsulation is done in :data:`~iplotlib.qt.gui.iplotQtCanvasAssembly.IplotQtCanvasAssembly.setCanvasData`
         """
         py_object = idx.data(Qt.ItemDataRole.UserRole)
-        self.widgetModel.setData(
-            QModelIndex(), py_object, BeanItemModel.PyObjectRole)
+        self.widgetModel.setData(QModelIndex(), py_object, BeanItemModel.PyObjectRole)
         self.widgetMapper.toFirst()
 
     @Slot()

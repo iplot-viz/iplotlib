@@ -14,7 +14,6 @@ from typing import Dict, List, Collection, Union
 
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
-from iplotlib.core.hierarchical_property import HierarchicalProperty
 
 
 @dataclass
@@ -25,7 +24,7 @@ class Plot(ABC):
     Attributes
     ----------
     row_span : int
-        nº of rows of canvas grid that this plot will span '!"·
+        nº of rows of canvas grid that this plot will span
     col_span : int
         nº of columns of canvas grid that this plot will span
     title : str
@@ -42,6 +41,10 @@ class Plot(ABC):
         indicate the location of the plot legend
     legend_layout : str
         indicate the layout of the plot legend
+    grid : bool
+        indicate if the grid must be drawn
+    log_scale : bool
+        A boolean that represents the log scale
     _type : str
         type of the plot
     """
@@ -51,12 +54,12 @@ class Plot(ABC):
     title: str = None
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None
-    background_color: HierarchicalProperty = HierarchicalProperty('background_color', default='#FFFFFF')
-    legend: HierarchicalProperty = HierarchicalProperty('legend', default=True)
-    legend_position: HierarchicalProperty = HierarchicalProperty('legend_position', default='upper right')
-    legend_layout: HierarchicalProperty = HierarchicalProperty('legend_layout', default='vertical')
-    grid: HierarchicalProperty = HierarchicalProperty('grid', default=True)
-    log_scale: HierarchicalProperty = HierarchicalProperty('log_scale', default=False)
+    background_color: str = None
+    legend: bool = None
+    legend_position: str = None
+    legend_layout: str = None
+    grid: bool = None
+    log_scale: bool = None
     _type: str = None
 
     def __post_init__(self):
@@ -90,12 +93,12 @@ class Plot(ABC):
 
     def merge(self, old_plot: 'Plot'):
         self.title = old_plot.title
-        self.legend = getattr(old_plot, "_legend", None)
-        self.legend_position = getattr(old_plot, "_legend_position", None)
-        self.legend_layout = getattr(old_plot, "_legend_layout", None)
-        self.background_color = getattr(old_plot, "_background_color", None)
-        self.grid = getattr(old_plot, "_grid", None)
-        self.log_scale = getattr(old_plot, "_log_scale", None)
+        self.legend = old_plot.legend
+        self.legend_position = old_plot.legend_position
+        self.legend_layout = old_plot.legend_layout
+        self.background_color = old_plot.background_color
+        self.grid = old_plot.grid
+        self.log_scale = old_plot.log_scale
         for idxAxis, axis in enumerate(self.axes):
             if axis and idxAxis < len(old_plot.axes):
                 # Found matching axes
@@ -113,14 +116,17 @@ class Plot(ABC):
 
 @dataclass
 class PlotContour(Plot):
-    signals: Dict[int, List[SignalContour]] = None
-    contour_filled: HierarchicalProperty = HierarchicalProperty('contour_filled', default=False)
-    legend_format: HierarchicalProperty = HierarchicalProperty('legend_format', default='color_bar')
-    axis_prop: HierarchicalProperty = HierarchicalProperty('axis_prop', default=False)
+    """
+    A concrete Plot class specialized for contour
 
-    # Signal Contour
-    color_map: HierarchicalProperty = HierarchicalProperty('color_map', default="viridis")
-    contour_levels: HierarchicalProperty = HierarchicalProperty('contour_levels', default=10)
+    Attributes
+    ----------
+
+    """
+    signals: Dict[int, List[SignalContour]] = None
+    contour_filled: bool = None  # Set if the plot is filled or not
+    legend_format: str = None
+    equivalent_units: bool = None  # Set the aspect ratio of the graphic
 
     def __post_init__(self):
         super().__post_init__()
@@ -129,13 +135,13 @@ class PlotContour(Plot):
         super().reset_preferences()
         self.contour_filled = PlotContour.contour_filled
         self.legend_format = PlotContour.legend_format
-        self.axis_prop = PlotContour.axis_prop
+        self.equivalent_units = PlotContour.equivalent_units
 
     def merge(self, old_plot: 'PlotContour'):
         super().merge(old_plot)
-        self.contour_filled = getattr(old_plot, "_contour_filled", None)
-        self.legend_format = getattr(old_plot, "_legend_format", None)
-        self.axis_prop = getattr(old_plot, "_axis_prop", None)
+        self.contour_filled = old_plot.contour_filled
+        self.legend_format = old_plot.legend_format
+        self.equivalent_units = old_plot.equivalent_units
 
 
 @dataclass
@@ -145,10 +151,6 @@ class PlotXY(Plot):
 
     Attributes
     ----------
-    log_scale : bool
-        A boolean that represents the log scale
-    grid : bool
-        indicate if the grid must be drawn
     _color_cycle : List[str]
         A list of colors for cycling through plot lines, ensuring variety in signal colors
     _color_index : int
@@ -160,20 +162,6 @@ class PlotXY(Plot):
                     '#e6ff33', '#8a2be2', '#000080', '#cc6600']
     _color_index: int = 0
     signals: Dict[int, List[SignalXY]] = None
-
-    # Axis
-    font_size: HierarchicalProperty = HierarchicalProperty('font_size', default=10)
-    font_color: HierarchicalProperty = HierarchicalProperty('font_color', default='#000000')
-    tick_number: HierarchicalProperty = HierarchicalProperty('tick_number', default=7)
-    autoscale: HierarchicalProperty = HierarchicalProperty('autoscale', default=True)
-
-    # SignalXY
-    color: HierarchicalProperty = HierarchicalProperty('color', default=None)
-    line_style: HierarchicalProperty = HierarchicalProperty('line_style', default='Solid')
-    line_size: HierarchicalProperty = HierarchicalProperty('line_size', default=1)
-    marker: HierarchicalProperty = HierarchicalProperty('marker', default=None)
-    marker_size: HierarchicalProperty = HierarchicalProperty('marker_size', default=1)
-    step: HierarchicalProperty = HierarchicalProperty('step', default="default")
 
     def __post_init__(self):
         super().__post_init__()
@@ -196,7 +184,7 @@ class PlotXY(Plot):
 
     def merge(self, old_plot: 'PlotXY'):
         super().merge(old_plot)
-        self._color_index = getattr(old_plot, "__color_index", None)
+        self._color_index = old_plot._color_index
 
 
 @dataclass

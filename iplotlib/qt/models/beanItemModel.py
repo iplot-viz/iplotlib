@@ -15,6 +15,7 @@ from PySide6.QtCore import QModelIndex, QObject, Qt
 from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import QComboBox
 
+from iplotlib.core import PropertyManager
 from iplotlib.qt.models.beanItem import BeanItem, BeanPrototype
 from iplotlib.qt.utils.conversions import ConversionHelper
 
@@ -47,15 +48,15 @@ class BeanItemModel(QStandardItemModel):
         property_name = bean.data(BeanItem.PropertyRole)
 
         logger.debug(f"PyObject: {self._pyObject}")
+
+        value = PropertyManager().get_value(self._pyObject, property_name)
         if isinstance(widget, QComboBox):
-            key = getattr(self._pyObject, property_name, None)
             keys = [widget.itemData(i, Qt.UserRole) for i in range(widget.count())]
             try:
-                return keys.index(key)
+                return keys.index(value)
             except ValueError:
                 return None
         else:
-            value = getattr(self._pyObject, property_name, None)
             return str(value) if value is not None else None
 
     def setData(self, index: QModelIndex, value: typing.Any, role: int = Qt.UserRole) -> bool:

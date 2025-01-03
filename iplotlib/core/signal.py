@@ -13,8 +13,6 @@ from dataclasses import dataclass
 
 from iplotlib.interface import IplotSignalAdapter
 
-from iplotlib.core.hierarchical_property import HierarchicalProperty
-
 
 @dataclass
 class Signal(ABC, IplotSignalAdapter):
@@ -87,12 +85,12 @@ class SignalXY(Signal, IplotSignalAdapter):
         default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
     """
     lines = []
-    color: HierarchicalProperty = HierarchicalProperty('color', default=None)
-    line_style: HierarchicalProperty = HierarchicalProperty('line_style', default='Solid')
-    line_size: HierarchicalProperty = HierarchicalProperty('line_size', default=1)
-    marker: HierarchicalProperty = HierarchicalProperty('marker', default=None)
-    marker_size: HierarchicalProperty = HierarchicalProperty('marker_size', default=1)
-    step: HierarchicalProperty = HierarchicalProperty('step', default="default")
+    color: str = None
+    line_style: str = None
+    line_size: int = None
+    marker: str = None
+    marker_size: int = None
+    step: str = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -106,10 +104,8 @@ class SignalXY(Signal, IplotSignalAdapter):
 
     def get_style(self):
         style = dict()
-
         style['label'] = self.label
         style['color'] = self.color
-
         style['linewidth'] = self.line_size
         style['linestyle'] = self.line_style.lower()
         style['marker'] = self.marker
@@ -129,21 +125,25 @@ class SignalXY(Signal, IplotSignalAdapter):
 
     def merge(self, old_signal: 'SignalXY'):
         super().merge(old_signal)
-        self.color = getattr(old_signal, "_color", None)
-        self.line_style = getattr(old_signal, "_line_style", None)
-        self.line_size = getattr(old_signal, "_line_size", None)
-        self.marker = getattr(old_signal, "_marker", None)
-        self.marker_size = getattr(old_signal, "_marker_size", None)
-        self.step = getattr(old_signal, "_step", None)
+        self.color = old_signal.color
+        self.line_style = old_signal.line_style
+        self.line_size = old_signal.line_size
+        self.marker = old_signal.marker
+        self.marker_size = old_signal.marker_size
+        self.step = old_signal.step
 
 
 @dataclass
 class SignalContour(Signal, IplotSignalAdapter):
     """
     SignalContour [...]
+    color_map : str
+        signal contour color map
+    contour_levels : int
+         number of levels
     """
-    color_map: HierarchicalProperty = HierarchicalProperty('color_map', default="viridis")
-    contour_levels: HierarchicalProperty = HierarchicalProperty('contour_levels', default=10)
+    color_map: str = None
+    contour_levels: int = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -162,5 +162,5 @@ class SignalContour(Signal, IplotSignalAdapter):
 
     def merge(self, old_signal: 'SignalContour'):
         super().merge(old_signal)
-        self.color_map = getattr(old_signal, "_color_map", None)
-        self.contour_levels = getattr(old_signal, "_contour_levels", None)
+        self.color_map = old_signal.color_map
+        self.contour_levels = old_signal.contour_levels

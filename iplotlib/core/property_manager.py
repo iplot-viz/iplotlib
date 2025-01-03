@@ -2,50 +2,45 @@
 The property manager returns the appropriate value for an attribute in the hierarchy of core iplotlib classes.
 """
 
-from iplotlib.core.axis import Axis
-from iplotlib.core.canvas import Canvas
-from iplotlib.core.plot import Plot
-from iplotlib.core.signal import Signal
+default_property: dict = {
+    'font_size': 10,
+    'font_color': '#000000',
+    'tick_number': 7,
+    'autoscale': True,
+    # Plot
+    'background_color': '#FFFFFF',
+    'legend': True,
+    'legend_position': 'upper right',
+    'legend_layout': 'vertical',
+    'grid': True,
+    'log_scale': False,
+    # PlotXY
+    # SignalXY
+    'color': None,
+    'line_style': 'Solid',
+    'line_size': 1,
+    'marker': None,
+    'marker_size': 1,
+    'step': "default",
+    # PlotContour
+    'contour_filled': False,
+    'legend_format': 'color_bar',
+    'equivalent_units': False,
+    # SignalContour
+    'color_map': "viridis",
+    'contour_levels': 10,
+}
 
 
 class PropertyManager:
-    """ 
+    """
     This class provides an API that returns attributes in the iplotlib hierarchy.
     """
 
-    def get_value(self, attr_name: str, canvas: Canvas, plot: Plot = None, axis: Axis = None, signal: Signal = None):
-        """ 
-        Get the value of the attribute from the given core iplotlib objects respecting the hierarchy constraint.
-        """
-        if canvas is None:
-            return None
-        elif plot is None and axis is None and signal is None:
-            return self._get_canvas_attr(attr_name, canvas)
-        elif axis is None and signal is None:
-            return self._get_plot_attr(attr_name, canvas, plot)
-        elif signal is None:
-            return self._get_axis_attr(attr_name, canvas, plot, axis)
-        else:
-            return self._get_signal_attr(attr_name, canvas, plot, signal)
-
-    @staticmethod
-    def _get_canvas_attr(attr_name: str, canvas: Canvas):
-        return getattr(canvas, attr_name, None)
-
-    def _get_plot_attr(self, attr_name: str, canvas: Canvas, plot: Plot):
-        if getattr(plot, attr_name, None) is not None:
-            return getattr(plot, attr_name)
-        else:
-            return self._get_canvas_attr(attr_name, canvas)
-
-    def _get_axis_attr(self, attr_name: str, canvas: Canvas, plot: Plot, axis: Axis):
-        if getattr(axis, attr_name, None) is not None:
-            return getattr(axis, attr_name)
-        else:
-            return self._get_plot_attr(attr_name, canvas, plot)
-
-    def _get_signal_attr(self, attr_name: str, canvas: Canvas, plot: Plot, signal: Signal):
-        if getattr(signal, attr_name, None) is not None:
-            return getattr(signal, attr_name)
-        else:
-            return self._get_plot_attr(attr_name, canvas, plot)
+    def get_value(self, obj: any, attr_name: str):
+        value = getattr(obj, attr_name, None)
+        if value is not None:
+            return value
+        if hasattr(obj, 'parent'):
+            return self.get_value(obj.parent, attr_name)
+        return default_property.get(attr_name, None)

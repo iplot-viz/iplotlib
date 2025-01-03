@@ -5,7 +5,6 @@ This module defines the `Canvas` object.
 # Changelog:
 #   Jan 2023:   -Added legend position and layout properties [Alberto Luengo]
 
-from abc import ABC
 from dataclasses import dataclass
 from typing import List, Union, Dict
 
@@ -14,8 +13,6 @@ from iplotlib.core.persistence import JSONExporter
 from iplotlib.core.plot import Plot
 from iplotlib.core.signal import Signal
 import pandas as pd
-
-from iplotlib.core.hierarchical_property import HierarchicalProperty
 
 logger = setupLogger.get_logger(__name__)
 
@@ -114,39 +111,6 @@ class Canvas:
     auto_refresh: int = 0
     undo_redo: bool = False
     _type: str = None
-
-    # Axis
-    font_size: HierarchicalProperty = HierarchicalProperty('font_size', default=10)
-    font_color: HierarchicalProperty = HierarchicalProperty('font_color', default='#000000')
-    tick_number: HierarchicalProperty = HierarchicalProperty('tick_number', default=7)
-    autoscale: HierarchicalProperty = HierarchicalProperty('autoscale', default=True)
-
-    # Plot
-    background_color: HierarchicalProperty = HierarchicalProperty('background_color', default='#FFFFFF')
-    legend: HierarchicalProperty = HierarchicalProperty('legend', default=True)
-    legend_position: HierarchicalProperty = HierarchicalProperty('legend_position', default='upper right')
-    legend_layout: HierarchicalProperty = HierarchicalProperty('legend_layout', default='vertical')
-    grid: HierarchicalProperty = HierarchicalProperty('grid', default=True)
-    log_scale: HierarchicalProperty = HierarchicalProperty('log_scale', default=False)
-
-    # PlotXY
-
-    # SignalXY
-    color: HierarchicalProperty = HierarchicalProperty('color', default=None)
-    line_style: HierarchicalProperty = HierarchicalProperty('line_style', default='Solid')
-    line_size: HierarchicalProperty = HierarchicalProperty('line_size', default=1)
-    marker: HierarchicalProperty = HierarchicalProperty('marker', default=None)
-    marker_size: HierarchicalProperty = HierarchicalProperty('marker_size', default=1)
-    step: HierarchicalProperty = HierarchicalProperty('step', default="default")
-
-    # PlotContour
-    contour_filled: HierarchicalProperty = HierarchicalProperty('contour_filled', default=False)
-    legend_format: HierarchicalProperty = HierarchicalProperty('legend_format', default='color_bar')
-    axis_prop: HierarchicalProperty = HierarchicalProperty('axis_prop', default=False)
-
-    # SignalContour
-    color_map: HierarchicalProperty = HierarchicalProperty('color_map', default="viridis")
-    contour_levels: HierarchicalProperty = HierarchicalProperty('contour_levels', default=10)
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__

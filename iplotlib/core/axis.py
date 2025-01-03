@@ -12,8 +12,6 @@ implementations for description of ranges and datetime properties.
 
 from dataclasses import dataclass
 
-from iplotlib.core.hierarchical_property import HierarchicalProperty
-
 
 @dataclass
 class Axis:
@@ -22,6 +20,8 @@ class Axis:
 
     Attributes
     ----------
+    _type : str
+        type of the axis
     label : str
         a text to be shown next to an axis
     font_size : int
@@ -32,16 +32,14 @@ class Axis:
         number of ticks and labels to be shown in the axis
     autoscale : bool
         enables automatic scaling of the axis range to fit displayed data if set to True
-    _type : str
-        type of the axis
     """
 
     _type: str = None
-    label = None
-    font_size: HierarchicalProperty = HierarchicalProperty('font_size', default=10)
-    font_color: HierarchicalProperty = HierarchicalProperty('font_color', default='#000000')
-    tick_number: HierarchicalProperty = HierarchicalProperty('tick_number', default=7)
-    autoscale: HierarchicalProperty = HierarchicalProperty('autoscale', default=True)
+    label: str = None
+    font_size: int = None
+    font_color: str = None
+    tick_number: int = None
+    autoscale: bool = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -62,10 +60,10 @@ class Axis:
 
     def merge(self, old_axis: 'Axis'):
         self.label = old_axis.label
-        self.font_size = getattr(old_axis, "_font_size", None)
-        self.font_color = getattr(old_axis, "_font_color", None)
-        self.tick_number = getattr(old_axis, "_tick_number", None)
-        self.autoscale = getattr(old_axis, "_autoscale", None)
+        self.font_size = old_axis.font_size
+        self.font_color = old_axis.font_color
+        self.tick_number = old_axis.tick_number
+        self.autoscale = old_axis.autoscale
 
 
 @dataclass
