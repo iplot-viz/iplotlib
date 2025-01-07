@@ -91,7 +91,6 @@ class Canvas:
     rows: int = 1
     cols: int = 1
     title: str = None
-    round_hour: bool = False
     ticks_position: bool = False
     mouse_mode: str = MOUSE_MODE_SELECT
     enable_x_label_crosshair: bool = True
@@ -111,6 +110,22 @@ class Canvas:
     auto_refresh: int = 0
     undo_redo: bool = False
     _type: str = None
+    font_size: int = None
+    font_color: str = None
+    background_color: str = None
+    tick_number: int = None
+    round_hour: bool = None
+    log_scale: bool = None
+    line_style: str = None
+    line_size: int = None
+    marker: str = None
+    marker_size: int = None
+    step: str = None
+    legend: bool = True
+    legend_position: str = None
+    legend_layout: str = None
+    grid: bool = None
+    autoscale: bool = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -185,9 +200,24 @@ class Canvas:
         Reset the preferences to default values.
         """
         self.title = old_canvas.title
-        self.shared_x_axis = old_canvas.shared_x_axis
+        self.font_size = old_canvas.font_size
+        self.font_color = old_canvas.font_color
+        self.background_color = old_canvas.background_color
+        self.tick_number = old_canvas.tick_number
         self.round_hour = old_canvas.round_hour
+        self.log_scale = old_canvas.log_scale
+        self.line_style: old_canvas.line_style
+        self.line_size = old_canvas.line_size
+        self.marker = old_canvas.marker
+        self.marker_size = old_canvas.marker_size
+        self.step = old_canvas.step
+        self.legend = old_canvas.legend
+        self.legend_position = old_canvas.legend_position
+        self.legend_layout = old_canvas.legend_layout
+        self.grid = old_canvas.grid
+        self.autoscale = old_canvas.autoscale
         self.ticks_position = old_canvas.ticks_position
+        self.shared_x_axis = old_canvas.shared_x_axis
         self.enable_x_label_crosshair = old_canvas.enable_x_label_crosshair
         self.enable_y_label_crosshair = old_canvas.enable_y_label_crosshair
         self.enable_val_label_crosshair = old_canvas.enable_val_label_crosshair

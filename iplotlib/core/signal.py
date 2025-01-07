@@ -37,7 +37,7 @@ class Signal(ABC, IplotSignalAdapter):
     uid: str = None
     name: str = ''
     label: str = None
-    hi_precision_data: bool = None  # TODO review this utility
+    hi_precision_data: bool = None
     lines = []
     _type: str = None
     parent = None

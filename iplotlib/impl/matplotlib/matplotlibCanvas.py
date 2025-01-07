@@ -155,7 +155,7 @@ class MatplotlibParser(BackendParserBase):
                 if plot.legend_format == 'in_lines':
                     if not plot.contour_filled:
                         plt.clabel(plot_lines, inline=1, fontsize=10)
-            if self._pm.get_value(plot, "axis_prop"):
+            if self._pm.get_value(plot, "equivalent_units"):
                 mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
         else:
@@ -177,7 +177,7 @@ class MatplotlibParser(BackendParserBase):
                 # 2 Legend in line for multiple signal contour in one plot contour
                 # plt.clabel(plot_lines, inline=True)
                 # self.proxies = [Line2D([], [], color=c) for c in ['viridis']]
-            if self._pm.get_value(plot, "axis_prop"):
+            if self._pm.get_value(plot, "equivalent_units"):
                 mpl_axes.set_aspect('equal', adjustable='box')
 
         return plot_lines

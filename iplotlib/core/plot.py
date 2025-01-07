@@ -54,16 +54,16 @@ class Plot(ABC):
     title: str = None
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None
-
     legend: bool = None
     legend_position: str = None
     legend_layout: str = None
     background_color: str = None
     grid: bool = None
     log_scale: bool = None
-
     _type: str = None
     parent = None
+    font_size: int = None
+    font_color: str = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -99,6 +99,8 @@ class Plot(ABC):
         self.legend = old_plot.legend
         self.legend_position = old_plot.legend_position
         self.legend_layout = old_plot.legend_layout
+        self.font_size = old_plot.font_size
+        self.font_color = old_plot.font_color
         self.background_color = old_plot.background_color
         self.grid = old_plot.grid
         self.log_scale = old_plot.log_scale
@@ -128,10 +130,11 @@ class PlotContour(Plot):
 
     """
     signals: Dict[int, List[SignalContour]] = None
-
     contour_filled: bool = None  # Set if the plot is filled or not
     legend_format: str = None
-    axis_prop: bool = None  # Set the aspect ratio of the graphic
+    equivalent_units: bool = None  # Set the aspect ratio of the graphic
+    color_map: str = None
+    contour_levels: int = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -140,13 +143,17 @@ class PlotContour(Plot):
         super().reset_preferences()
         self.contour_filled = PlotContour.contour_filled
         self.legend_format = PlotContour.legend_format
-        self.axis_prop = PlotContour.axis_prop
+        self.equivalent_units = PlotContour.equivalent_units
+        self.color_map = PlotContour.color_map
+        self.contour_levels = PlotContour.contour_levels
 
     def merge(self, old_plot: 'PlotContour'):
         super().merge(old_plot)
         self.contour_filled = old_plot.contour_filled
         self.legend_format = old_plot.legend_format
-        self.axis_prop = old_plot.axis_prop
+        self.equivalent_units = old_plot.equivalent_units
+        self.color_map = old_plot.color_map
+        self.contour_levels = old_plot.contour_levels
 
 
 @dataclass
@@ -167,6 +174,11 @@ class PlotXY(Plot):
                     '#e6ff33', '#8a2be2', '#000080', '#cc6600']
     _color_index: int = 0
     signals: Dict[int, List[SignalXY]] = None
+    line_style: str = None
+    line_size: int = None
+    marker: str = None
+    marker_size: int = None
+    step: str = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -186,10 +198,20 @@ class PlotXY(Plot):
     def reset_preferences(self):
         super().reset_preferences()
         self._color_index = PlotXY._color_index
+        self.line_style = PlotXY.line_style
+        self.line_size = PlotXY.line_size
+        self.marker = PlotXY.marker
+        self.marker_size = PlotXY.marker_size
+        self.step = PlotXY.step
 
     def merge(self, old_plot: 'PlotXY'):
         super().merge(old_plot)
         self._color_index = old_plot._color_index
+        self.line_style = old_plot.line_style
+        self.line_size = old_plot.line_size
+        self.marker = old_plot.marker
+        self.marker_size = old_plot.marker_size
+        self.step = old_plot.step
 
 
 @dataclass

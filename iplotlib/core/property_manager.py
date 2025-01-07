@@ -1,9 +1,9 @@
 default_property: dict = {
+    # LinearAxis
     'font_size': 10,
     'font_color': '#000000',
     'tick_number': 7,
     'autoscale': True,
-
     # Plot
     'background_color': '#FFFFFF',
     'legend': True,
@@ -11,25 +11,20 @@ default_property: dict = {
     'legend_layout': 'vertical',
     'grid': True,
     'log_scale': False,
-
-    # PlotXY
-
+    # PlotContour
+    'contour_filled': False,
+    'legend_format': 'color_bar',
+    'equivalent_units': False,
+    # SignalContour
+    'color_map': "viridis",
+    'contour_levels': 10,
     # SignalXY
     'color': None,
     'line_style': 'Solid',
     'line_size': 1,
     'marker': None,
     'marker_size': 1,
-    'step': "default",
-
-    # PlotContour
-    'contour_filled': False,
-    'legend_format': 'color_bar',
-    'axis_prop': False,
-
-    # SignalContour
-    'color_map': "viridis",
-    'contour_levels': 10,
+    'step': "default"
 }
 
 
