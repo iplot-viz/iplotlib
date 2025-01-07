@@ -86,6 +86,8 @@ class Plot(ABC):
         self.legend = Plot.legend
         self.legend_position = Plot.legend_position
         self.legend_layout = Plot.legend_layout
+        self.font_size = Plot.font_size
+        self.font_color = Plot.font_color
         self.background_color = Plot.background_color
         self.grid = Plot.grid
         self.log_scale = Plot.log_scale

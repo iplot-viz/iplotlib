@@ -126,6 +126,11 @@ class Canvas:
     legend_layout: str = None
     grid: bool = None
     autoscale: bool = None
+    contour_filled: bool = None
+    legend_format: str = None
+    equivalent_units: bool = None
+    color_map: str = None
+    contour_levels: int = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -216,6 +221,11 @@ class Canvas:
         self.legend_layout = old_canvas.legend_layout
         self.grid = old_canvas.grid
         self.autoscale = old_canvas.autoscale
+        self.contour_filled = old_canvas.contour_filled
+        self.legend_format = old_canvas.legend_format
+        self.equivalent_units = old_canvas.equivalent_units
+        self.color_map = old_canvas.color_map
+        self.contour_levels = old_canvas.contour_levels
         self.ticks_position = old_canvas.ticks_position
         self.shared_x_axis = old_canvas.shared_x_axis
         self.enable_x_label_crosshair = old_canvas.enable_x_label_crosshair

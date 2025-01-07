@@ -81,6 +81,7 @@ class PlotContourForm(IplotPreferencesForm):
              "widget": self.default_plot_contour_legend_format_widget()},
             {"label": "Font size", "property": "font_size", "widget": self.default_fontsize_widget()},
             {"label": "Font color", "property": "font_color", "widget": ColorPicker("font_color")},
+            {"label": "Background color", "property": "background_color", "widget": ColorPicker("background_color")},
             {"label": "Contour Levels", "property": "contour_levels", "widget": self.default_contour_levels_widget()},
             {"label": "Contour Filled", "property": "contour_filled", "widget": self.create_checkbox()},
             {"label": "Equivalent Units", "property": "equivalent_units", "widget": self.create_checkbox()}]
