@@ -25,7 +25,7 @@ from iplotlib.core import (Axis,
                            Plot,
                            PlotXY,
                            PlotContour,
-                           Signal,
+                           SimpleSignal,
                            SignalXY,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
@@ -71,7 +71,7 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
-    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, data: List[BufferObject]):
+    def do_mpl_line_plot(self, signal: SimpleSignal, mpl_axes: MPLAxes, data: List[BufferObject]):
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = cache_item.plot()
@@ -91,8 +91,8 @@ class MatplotlibParser(BackendParserBase):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
 
         # Review to implement directly in PlotXY class
-        if signal.color is None:
-            signal.color = plot.get_next_color()
+        if signal.properties.color is None:
+            signal.properties.color = plot.get_next_color()
 
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -141,10 +141,10 @@ class MatplotlibParser(BackendParserBase):
     def do_mpl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
                                  z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
-        contour_filled = self._pm.get_value(plot, 'contour_filled')
-        contour_levels = self._pm.get_value(plot, 'contour_levels')
-        legend_format = self._pm.get_value(plot, "legend_format")
-        equivalent_units = self._pm.get_value(plot, "equivalent_units")
+        contour_filled = plot.properties.contour_filled
+        contour_levels = plot.properties.contour_levels
+        legend_format = plot.properties.legend_format
+        equivalent_units = plot.properties.equivalent_units
 
         if isinstance(plot_lines, QuadContourSet):
             for tp in plot_lines.collections:
@@ -182,7 +182,7 @@ class MatplotlibParser(BackendParserBase):
 
         return plot_lines
 
-    def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
+    def do_mpl_envelope_plot(self, signal: SimpleSignal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
         shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
@@ -267,7 +267,10 @@ class MatplotlibParser(BackendParserBase):
                     continue
                 limits = self.get_plot_limits(plot, which='original')
                 begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                if (begin, end) == (base_begin, base_end):
+                # Check if it is date and the max difference is 1 second
+                if ((begin, end) == (base_begin, base_end) or
+                        ((5e17 < begin < 1e19) and abs(begin - base_begin) < 1000000000 and abs(
+                            end - base_end) < 1000000000)):
                     shared.append(axes)
         return shared
 
@@ -277,7 +280,7 @@ class MatplotlibParser(BackendParserBase):
 
         """
         if canvas is not None:
-            logger.debug(f"ipl_canvas 1: {self._pm.get_value(canvas, 'step')}")
+            logger.debug(f"ipl_canvas 1: {canvas.properties.step}")
         super().process_ipl_canvas(canvas)
         if canvas is None:
             self.canvas = canvas
@@ -315,11 +318,11 @@ class MatplotlibParser(BackendParserBase):
                 break
 
         # 4. Update the title at the top of canvas.
-        if canvas.title is not None:
-            if not self._pm.get_value(self.canvas, 'font_size'):
+        if canvas.properties.title is not None:
+            if not self.canvas.properties.font_size:
                 canvas.font_size = None
-            self.figure.suptitle(canvas.title, size=self._pm.get_value(self.canvas, 'font_size'),
-                                 color=self._pm.get_value(self.canvas, 'font_color') or 'black')
+            self.figure.suptitle(canvas.properties.title, size=self.canvas.properties.font_size,
+                                 color=self.canvas.properties.font_color) or 'black'
 
     def process_ipl_plot_xy(self):
         pass
@@ -328,7 +331,7 @@ class MatplotlibParser(BackendParserBase):
         pass
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
-        logger.debug(f"process_ipl_plot AA: {self._pm.get_value(self.canvas, 'step')}")
+        logger.debug(f"process_ipl_plot AA: {self.canvas.properties.step}")
         super().process_ipl_plot(plot, column, row)
         if not isinstance(plot, Plot):
             return
@@ -367,14 +370,14 @@ class MatplotlibParser(BackendParserBase):
 
                 # Set the plot title
                 if plot.title is not None and stack_id == 0:
-                    fc = self._pm.get_value(plot, 'font_color')
-                    fs = self._pm.get_value(plot, 'font_size')
+                    fc = plot.properties.font_color
+                    fs = plot.properties.font_size
                     if not fs:
                         fs = None
                     mpl_axes.set_title(plot.title, color=fc, size=fs)
 
                 # Set the background color
-                mpl_axes.set_facecolor(self._pm.get_value(plot, 'background_color'))
+                mpl_axes.set_facecolor(plot.properties.background_color)
 
                 # If this is a stacked plot the X axis should be visible only at the bottom
                 # plot of the stack except it is focused
@@ -392,8 +395,8 @@ class MatplotlibParser(BackendParserBase):
                         e.set_visible(visible)
 
                 # Show the grid if enabled
-                show_grid = self._pm.get_value(plot, 'grid')
-                log_scale = self._pm.get_value(plot, 'log_scale')
+                show_grid = plot.properties.grid
+                log_scale = plot.properties.log_scale
 
                 if show_grid:
                     if log_scale:
@@ -423,12 +426,12 @@ class MatplotlibParser(BackendParserBase):
                     self.update_range_axis(x_axis, 0, mpl_axes, which='original')
 
                 # Show the plot legend if enabled
-                show_legend = self._pm.get_value(plot, 'legend')
+                show_legend = plot.properties.legend
                 if show_legend and mpl_axes.get_lines():
-                    plot_leg_position = self._pm.get_value(plot, 'legend_position')
-                    canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
-                    plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
-                    canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
+                    plot_leg_position = plot.properties.legend_position
+                    canvas_leg_position = self.canvas.properties.legend_position
+                    plot_leg_layout = plot.properties.legend_layout
+                    canvas_leg_layout = self.canvas.properties.legend_layout
 
                     plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' \
                         else plot_leg_position
@@ -471,7 +474,7 @@ class MatplotlibParser(BackendParserBase):
     def _axis_update_callback(self, mpl_axes):
 
         affected_axes = mpl_axes.get_shared_x_axes().get_siblings(mpl_axes)
-        if self.canvas.shared_x_axis and not self.canvas.undo_redo:
+        if self.canvas.properties.shared_x_axis and not self.canvas.undo_redo:
             other_axes = self._get_all_shared_axes(mpl_axes)
             for other_axis in other_axes:
                 cur_x_limits = self.get_oaw_axis_limits(mpl_axes, 0)
@@ -538,15 +541,15 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(axis, Axis):
 
             if isinstance(mpl_axis, YAxis):
-                log_scale = self._pm.get_value(plot, 'log_scale')
+                log_scale = plot.properties.log_scale
                 if log_scale:
                     mpl_axis.axes.set_yscale('log')
                     # Format for minor ticks
                     y_minor = LogLocator(base=10, subs=(1.0,))
                     mpl_axis.set_minor_locator(y_minor)
 
-            fc = self._pm.get_value(axis, 'font_color')
-            fs = self._pm.get_value(axis, 'font_size')
+            fc = axis.properties.font_color
+            fs = axis.properties.font_size
 
             mpl_axis._font_color = fc
             mpl_axis._font_size = fs
@@ -554,7 +557,7 @@ class MatplotlibParser(BackendParserBase):
 
             label_props = dict(color=fc)
             # Set ticks on the top and right axis
-            if self.canvas.ticks_position:
+            if self.canvas.properties.ticks_position:
                 tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
             else:
                 tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
@@ -569,7 +572,7 @@ class MatplotlibParser(BackendParserBase):
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
             # autoscale = self._pm.get_value('autoscale', axis)
-            if axis.autoscale and ax_idx == 1:
+            if axis.properties.autoscale and ax_idx == 1:
                 self.autoscale_y_axis(impl_plot)
             else:
                 logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
@@ -577,22 +580,22 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(axis, LinearAxis) and axis.is_date:
             ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
             mpl_axis.set_major_formatter(
-                NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, roundh=self.canvas.round_hour))
+                NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, roundh=self.canvas.properties.round_hour))
 
         # Configurate number of ticks and labels
-        tick_number = self._pm.get_value(axis, 'tick_number')
+        tick_number = axis.properties.tick_number
         mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
     @BackendParserBase.run_in_one_thread
-    def process_ipl_signal(self, signal: Signal):
+    def process_ipl_signal(self, signal: SimpleSignal):
         """Refresh a specific signal. This will repaint the necessary items after the signal
             data has changed.
 
         Args:
-            signal (Signal): An object derived from abstract iplotlib.core.signal.Signal
+            signal (SimpleSignal): An object derived from abstract iplotlib.core.signal.Signal
         """
 
-        if not isinstance(signal, Signal):
+        if not isinstance(signal, SimpleSignal):
             return
 
         mpl_axes = self._signal_impl_plot_lut.get(id(signal))  # type: MPLAxes
@@ -744,12 +747,12 @@ class MatplotlibParser(BackendParserBase):
         if signal.label:
             style['label'] = signal.label
         if hasattr(signal, "color"):
-            style['color'] = self._pm.get_value(signal, 'color')
-        style['linewidth'] = self._pm.get_value(signal, 'line_size')
-        style['linestyle'] = (self._pm.get_value(signal, 'line_style')).lower()
-        style['marker'] = self._pm.get_value(signal, 'marker')
-        style['markersize'] = self._pm.get_value(signal, 'marker_size')
-        step = self._pm.get_value(signal, 'step')
+            style['color'] = signal.properties.color
+        style['linewidth'] = signal.properties.line_size
+        style['linestyle'] = signal.properties.line_style.lower()
+        style['marker'] = signal.properties.marker
+        style['markersize'] = signal.properties.marker_size
+        step = signal.properties.step
         if step is None:
             step = 'linear'
         style["drawstyle"] = STEP_MAP[step]

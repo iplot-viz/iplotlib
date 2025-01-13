@@ -9,8 +9,7 @@ from iplotlib.core.history_manager import HistoryManager
 from iplotlib.core.impl_base import BackendParserBase, ImplementationPlotCacheItem
 from iplotlib.core.limits import IplAxisLimits, IplPlotViewLimits
 from iplotlib.core.plot import Plot, PlotContour, PlotImage, PlotSurface, PlotXY
-from iplotlib.core.signal import Signal, SignalXY, SignalContour
-from iplotlib.core.property_manager import PropertyManager
+from iplotlib.core.signal import SimpleSignal, SignalXY, SignalContour
 
 __all__ = ['Axis',
            'RangeAxis',
@@ -28,7 +27,6 @@ __all__ = ['Axis',
            'PlotImage',
            'PlotSurface',
            'PlotXY',
-           'Signal',
+           'SimpleSignal',
            'SignalXY',
-           'SignalContour',
-           'PropertyManager']
+           'SignalContour']

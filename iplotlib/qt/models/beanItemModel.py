@@ -15,7 +15,6 @@ from PySide6.QtCore import QModelIndex, QObject, Qt
 from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import QComboBox
 
-from iplotlib.core import PropertyManager
 from iplotlib.qt.models.beanItem import BeanItem, BeanPrototype
 from iplotlib.qt.utils.conversions import ConversionHelper
 
@@ -37,6 +36,8 @@ class BeanItemModel(QStandardItemModel):
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.UserRole) -> typing.Any:
         logger.debug(f"Index: {index}, role: {role}")
+        if self._pyObject is None:
+            return None
 
         if role == BeanItemModel.PyObjectRole:
             return self._pyObject
@@ -49,7 +50,7 @@ class BeanItemModel(QStandardItemModel):
 
         logger.debug(f"PyObject: {self._pyObject}")
 
-        value = PropertyManager().get_value(self._pyObject, property_name)
+        value = getattr(self._pyObject.properties, property_name)
         if isinstance(widget, QComboBox):
             keys = [widget.itemData(i, Qt.ItemDataRole.UserRole) for i in range(widget.count())]
             try:
@@ -74,14 +75,14 @@ class BeanItemModel(QStandardItemModel):
 
             if isinstance(widget, QComboBox):
                 keys = [widget.itemData(i, Qt.ItemDataRole.UserRole) for i in range(widget.count())]
-                setattr(self._pyObject, property_name, keys[value])
+                setattr(self._pyObject.properties, property_name, keys[value])
                 self.dataChanged.emit(index, index)
                 return True
             else:
-                if hasattr(self._pyObject, property_name):
-                    type_func = type(getattr(self._pyObject, property_name))
+                if hasattr(self._pyObject.properties, property_name):
+                    type_func = type(getattr(self._pyObject.properties, property_name))
                     value = ConversionHelper.asType(value, type_func)
 
-                setattr(self._pyObject, property_name, value)
+                setattr(self._pyObject.properties, property_name, value)
                 self.dataChanged.emit(index, index)
                 return True

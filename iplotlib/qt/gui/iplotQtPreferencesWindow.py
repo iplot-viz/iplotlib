@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter
 
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.signal import Signal, SignalXY, SignalContour
+from iplotlib.core.signal import SimpleSignal, SignalXY, SignalContour
 from iplotlib.core.plot import Plot, PlotXY, PlotContour
 from iplotlib.interface import IplotSignalAdapter
 
@@ -180,7 +180,7 @@ class IplotQtPreferencesWindow(QMainWindow):
                         continue
                 for stack in plot.signals.values():
                     for signal in stack:
-                        if isinstance(signal, Signal):
+                        if isinstance(signal, SimpleSignal):
                             signal.reset_preferences()
                         else:
                             continue

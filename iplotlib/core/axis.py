@@ -12,6 +12,8 @@ implementations for description of ranges and datetime properties.
 
 from dataclasses import dataclass
 
+from iplotlib.core.property_manager import AxisProp
+
 
 @dataclass
 class Axis:
@@ -36,11 +38,7 @@ class Axis:
 
     _type: str = None
     label: str = None
-    font_size: int = None
-    font_color: str = None
-    tick_number: int = None
-    autoscale: bool = None
-    parent = None
+    properties: AxisProp = AxisProp()
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -54,17 +52,9 @@ class Axis:
         Reset font size and font color
         """
         self.label = Axis.label
-        self.font_size = Axis.font_size
-        self.font_color = Axis.font_color
-        self.tick_number = Axis.tick_number
-        self.autoscale = Axis.autoscale
 
     def merge(self, old_axis: 'Axis'):
         self.label = old_axis.label
-        self.font_size = old_axis.font_size
-        self.font_color = old_axis.font_color
-        self.tick_number = old_axis.tick_number
-        self.autoscale = old_axis.autoscale
 
 
 @dataclass
@@ -144,4 +134,3 @@ class LinearAxis(RangeAxis):
 
     def __post_init__(self):
         super().__post_init__()
-        self.parent = None

@@ -11,11 +11,12 @@ for when you wish to take over the data customization.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from iplotlib.core.property_manager import SignalContourProp, SignalXYProp
 from iplotlib.interface import IplotSignalAdapter
 
 
 @dataclass
-class Signal(ABC, IplotSignalAdapter):
+class SimpleSignal(ABC, IplotSignalAdapter):
     """
     Main abstraction for a Signal
 
@@ -40,7 +41,6 @@ class Signal(ABC, IplotSignalAdapter):
     hi_precision_data: bool = None
     lines = []
     _type: str = None
-    parent = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -58,14 +58,14 @@ class Signal(ABC, IplotSignalAdapter):
         pass
 
     def reset_preferences(self):
-        self.label = Signal.label
+        self.label = SimpleSignal.label
 
-    def merge(self, old_signal: 'Signal'):
+    def merge(self, old_signal: 'SimpleSignal'):
         self.label = old_signal.label
 
 
 @dataclass
-class SignalXY(Signal, IplotSignalAdapter):
+class SignalXY(SimpleSignal, IplotSignalAdapter):
     """
     SignalXY [...]
     color : str
@@ -85,12 +85,7 @@ class SignalXY(Signal, IplotSignalAdapter):
         default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
     """
     lines = []
-    color: str = None
-    line_style: str = None
-    line_size: int = None
-    marker: str = None
-    marker_size: int = None
-    step: str = None
+    properties: SignalXYProp = SignalXYProp()
 
     def __post_init__(self):
         super().__post_init__()
@@ -104,25 +99,15 @@ class SignalXY(Signal, IplotSignalAdapter):
 
     def reset_preferences(self):
         super().reset_preferences()
-        self.color = SignalXY.color
-        self.line_style = SignalXY.line_style
-        self.line_size = SignalXY.line_size
-        self.marker = SignalXY.marker
-        self.marker_size = SignalXY.marker_size
-        self.step = SignalXY.step
+        self.properties.reset_preferences()
 
     def merge(self, old_signal: 'SignalXY'):
         super().merge(old_signal)
-        self.color = old_signal.color
-        self.line_style = old_signal.line_style
-        self.line_size = old_signal.line_size
-        self.marker = old_signal.marker
-        self.marker_size = old_signal.marker_size
-        self.step = old_signal.step
+        self.properties.merge(old_signal.properties)
 
 
 @dataclass
-class SignalContour(Signal, IplotSignalAdapter):
+class SignalContour(SimpleSignal, IplotSignalAdapter):
     """
     SignalContour [...]
     color_map : str
@@ -130,8 +115,7 @@ class SignalContour(Signal, IplotSignalAdapter):
     contour_levels : int
          number of levels
     """
-    color_map: str = None
-    contour_levels: int = None
+    properties: SignalContourProp = SignalContourProp()
 
     def __post_init__(self):
         super().__post_init__()
@@ -145,10 +129,8 @@ class SignalContour(Signal, IplotSignalAdapter):
 
     def reset_preferences(self):
         super().reset_preferences()
-        self.color_map = SignalContour.color_map
-        self.contour_levels = SignalContour.contour_levels
+        self.properties.reset_preferences()
 
     def merge(self, old_signal: 'SignalContour'):
         super().merge(old_signal)
-        self.color_map = old_signal.color_map
-        self.contour_levels = old_signal.contour_levels
+        self.properties.merge(old_signal.properties)

@@ -11,7 +11,8 @@ from typing import List, Union, Dict
 from iplotLogging import setupLogger
 from iplotlib.core.persistence import JSONExporter
 from iplotlib.core.plot import Plot
-from iplotlib.core.signal import Signal
+from iplotlib.core.property_manager import CanvasProp
+from iplotlib.core.signal import SimpleSignal
 import pandas as pd
 
 logger = setupLogger.get_logger(__name__)
@@ -90,50 +91,24 @@ class Canvas:
     MOUSE_MODE_DIST = 'MM_DIST'
     rows: int = 1
     cols: int = 1
-    title: str = None
-    ticks_position: bool = False
     mouse_mode: str = MOUSE_MODE_SELECT
-    enable_x_label_crosshair: bool = True
-    enable_y_label_crosshair: bool = True
-    enable_val_label_crosshair: bool = True
     plots: List[List[Union[Plot, None]]] = None
     focus_plot: Plot = None
     crosshair_enabled: bool = False
-    crosshair_color: str = "red"
-    crosshair_line_width: int = 1
-    crosshair_horizontal: bool = True
-    crosshair_vertical: bool = True
-    crosshair_per_plot: bool = False
+    crosshair_line_width: int = 1  # TODO remove this
+    crosshair_horizontal: bool = True  # TODO remove this
+    crosshair_vertical: bool = True  # TODO remove this
+    crosshair_per_plot: bool = False  # TODO remove this
     streaming: bool = False
-    shared_x_axis: bool = False
     full_mode_all_stack: bool = True
     auto_refresh: int = 0
     undo_redo: bool = False
     _type: str = None
-    font_size: int = None
-    font_color: str = None
-    background_color: str = None
-    tick_number: int = None
-    round_hour: bool = None
-    log_scale: bool = None
-    line_style: str = None
-    line_size: int = None
-    marker: str = None
-    marker_size: int = None
-    step: str = None
-    legend: bool = True
-    legend_position: str = None
-    legend_layout: str = None
-    grid: bool = None
-    autoscale: bool = None
-    contour_filled: bool = None
-    legend_format: str = None
-    equivalent_units: bool = None
-    color_map: str = None
-    contour_levels: int = None
+    properties: CanvasProp = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
+        self.properties = CanvasProp()
         if self.plots is None:
             self.plots = [[] for _ in range(self.cols)]
 
@@ -142,7 +117,7 @@ class Canvas:
         Add a plot to this canvas.
         """
         if plot:
-            plot.parent = self
+            plot.properties.parent = self.properties
         if col >= len(self.plots):
             raise Exception("Cannot add plot to column {}: Canvas has only {} column(s)".format(col, len(self.plots)))
         if len(self.plots[col]) >= self.rows:
@@ -156,11 +131,10 @@ class Canvas:
         """
         self.mouse_mode = mode
 
-    def enable_crosshair(self, color="red", linewidth=1, horizontal=False, vertical=True):
+    def enable_crosshair(self, linewidth=1, horizontal=False, vertical=True):
         """
         Enable the crosshair cursor.
         """
-        self.crosshair_color = color
         self.crosshair_line_width = linewidth
         self.crosshair_enabled = True
         self.crosshair_vertical = vertical
@@ -190,48 +164,12 @@ class Canvas:
         """
         Reset the preferences to default values.
         """
-        self.shared_x_axis = Canvas.shared_x_axis
-        self.round_hour = Canvas.round_hour
-        self.ticks_position = Canvas.ticks_position
-        self.enable_x_label_crosshair = Canvas.enable_x_label_crosshair
-        self.enable_y_label_crosshair = Canvas.enable_y_label_crosshair
-        self.enable_val_label_crosshair = Canvas.enable_val_label_crosshair
-        self.crosshair_color = Canvas.crosshair_color
-        self.full_mode_all_stack = Canvas.full_mode_all_stack
-        self.focus_plot = Canvas.focus_plot
+
 
     def merge(self, old_canvas: 'Canvas'):
         """
         Reset the preferences to default values.
         """
-        self.title = old_canvas.title
-        self.font_size = old_canvas.font_size
-        self.font_color = old_canvas.font_color
-        self.background_color = old_canvas.background_color
-        self.tick_number = old_canvas.tick_number
-        self.round_hour = old_canvas.round_hour
-        self.log_scale = old_canvas.log_scale
-        self.line_style: old_canvas.line_style
-        self.line_size = old_canvas.line_size
-        self.marker = old_canvas.marker
-        self.marker_size = old_canvas.marker_size
-        self.step = old_canvas.step
-        self.legend = old_canvas.legend
-        self.legend_position = old_canvas.legend_position
-        self.legend_layout = old_canvas.legend_layout
-        self.grid = old_canvas.grid
-        self.autoscale = old_canvas.autoscale
-        self.contour_filled = old_canvas.contour_filled
-        self.legend_format = old_canvas.legend_format
-        self.equivalent_units = old_canvas.equivalent_units
-        self.color_map = old_canvas.color_map
-        self.contour_levels = old_canvas.contour_levels
-        self.ticks_position = old_canvas.ticks_position
-        self.shared_x_axis = old_canvas.shared_x_axis
-        self.enable_x_label_crosshair = old_canvas.enable_x_label_crosshair
-        self.enable_y_label_crosshair = old_canvas.enable_y_label_crosshair
-        self.enable_val_label_crosshair = old_canvas.enable_val_label_crosshair
-        self.crosshair_color = old_canvas.crosshair_color
         self.full_mode_all_stack = old_canvas.full_mode_all_stack
         self.focus_plot = old_canvas.focus_plot
 
@@ -253,12 +191,12 @@ class Canvas:
                         logger.warning("Merge with different type of plots")
 
         # Gather all old signals into a map with uid as key
-        def compute_signal_uniqkey(computed_signal: Signal):
+        def compute_signal_uniqkey(computed_signal: SimpleSignal):
             # Consider signal is same if it has the same row uid, name
             signal_key = computed_signal.uid + ";" + computed_signal.name
             return signal_key
 
-        map_old_signals: Dict[str, Signal] = {}
+        map_old_signals: Dict[str, SimpleSignal] = {}
         for columns in old_canvas.plots:
             for old_plot in columns:
                 if not old_plot:

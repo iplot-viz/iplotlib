@@ -42,8 +42,8 @@ class JSONExporter:
 
     @staticmethod
     def make_compatible(d, klass):
-        from iplotlib.core.signal import Signal
-        if issubclass(klass, Signal):
+        from iplotlib.core.signal import SimpleSignal
+        if issubclass(klass, SimpleSignal):
             try:
                 label = d.pop('title')
                 d.update({'label': label})

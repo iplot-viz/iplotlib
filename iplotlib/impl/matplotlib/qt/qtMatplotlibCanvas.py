@@ -89,7 +89,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         ranges = []
         plot_stack = []
 
-        if canvas.shared_x_axis:
+        if canvas.properties.shared_x_axis:
             if not self.info_shared_x_dialog:
                 self.info_shared_x_dialog = True
                 for row_idx, col in enumerate(canvas.plots, start=1):

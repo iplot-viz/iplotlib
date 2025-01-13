@@ -27,11 +27,10 @@ from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits
 from iplotlib.core.plot import Plot
-from iplotlib.core.signal import Signal
+from iplotlib.core.signal import SimpleSignal
 import iplotLogging.setupLogger as Sl
 
 from iplotlib.core.history_manager import HistoryManager
-from iplotlib.core.property_manager import PropertyManager
 
 logger = Sl.get_logger(__name__)
 
@@ -58,7 +57,7 @@ class ImplementationPlotCacheTable:
 
     @staticmethod
     def register(impl_obj: Any, canvas: Canvas = None, plot: Plot = None, stack_key: str = '',
-                 signals: List[Signal] = None):
+                 signals: List[SimpleSignal] = None):
         """
         Register the other arguments to the implementation plot(`impl_obj`)
         """
@@ -116,7 +115,6 @@ class BackendParserBase(ABC):
         super().__init__()
         self.canvas = canvas
         self._hm = HistoryManager()
-        self._pm = PropertyManager()
         self._impl_plot_cache_table = ImplementationPlotCacheTable()
         self._impl_flush_method = impl_flush_method
         self._impl_task_queue = Queue()
@@ -243,15 +241,15 @@ class BackendParserBase(ABC):
 
     @abstractmethod
     @run_in_one_thread
-    def process_ipl_signal(self, signal: Signal):
+    def process_ipl_signal(self, signal: SimpleSignal):
         """
         Prepare the implementation shape for the plot of a signal.
 
         :param signal: A Signal instance
-        :type signal: Signal
+        :type signal: SimpleSignal
         """
 
-    def update_axis_labels_with_units(self, impl_plot: Any, signal: Signal):
+    def update_axis_labels_with_units(self, impl_plot: Any, signal: SimpleSignal):
         """
         Get the unit information from the signal object and set the axis labels with those units.
         """
