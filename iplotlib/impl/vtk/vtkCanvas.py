@@ -808,8 +808,8 @@ class VTKParser(BackendParserBase):
 
         for i, chart in enumerate(self._plot_impl_plot_lut[id(plot)]):
             draw_title = not stacked or (stacked and i == stack_sz - 1)
-            if (plot.title is not None) and draw_title:
-                chart.SetTitle(plot.title)
+            if (plot.plot_title is not None) and draw_title:
+                chart.SetTitle(plot.plot_title)
                 appearance = chart.GetTitleProperties()  # type: vtkTextProperty
                 fc = self._pm.get_value('font_color', self.canvas, plot)
                 fs = self._pm.get_value('font_size', self.canvas, plot)

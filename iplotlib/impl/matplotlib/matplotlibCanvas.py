@@ -92,7 +92,8 @@ class MatplotlibParser(BackendParserBase):
 
         # Review to implement directly in PlotXY class
         if signal.color is None:
-            signal.color = plot.get_next_color()
+            # It means that the color has been reset but must keep the original color
+            signal.color = signal.original_color
 
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -142,9 +143,10 @@ class MatplotlibParser(BackendParserBase):
                                  z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
         contour_filled = self._pm.get_value(plot, 'contour_filled')
-        contour_levels = self._pm.get_value(plot, 'contour_levels')
         legend_format = self._pm.get_value(plot, "legend_format")
         equivalent_units = self._pm.get_value(plot, "equivalent_units")
+        contour_levels = self._pm.get_value(signal, 'contour_levels')
+        color_map = self._pm.get_value(signal, 'color_map')
 
         if isinstance(plot_lines, QuadContourSet):
             for tp in plot_lines.collections:
@@ -154,7 +156,7 @@ class MatplotlibParser(BackendParserBase):
             else:
                 draw_fn = mpl_axes.contour
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=signal.color_map)
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'in_lines':
                     if not contour_filled:
                         plt.clabel(plot_lines, inline=1, fontsize=10)
@@ -167,7 +169,7 @@ class MatplotlibParser(BackendParserBase):
             else:
                 draw_fn = mpl_axes.contour
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=signal.color_map)
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'color_bar':
                     color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
                     color_bar.set_label(z_data.unit, size=self.legend_size)
@@ -366,12 +368,12 @@ class MatplotlibParser(BackendParserBase):
                 mpl_axes.set_autoscaley_on(True)
 
                 # Set the plot title
-                if plot.title is not None and stack_id == 0:
+                if plot.plot_title is not None and stack_id == 0:
                     fc = self._pm.get_value(plot, 'font_color')
                     fs = self._pm.get_value(plot, 'font_size')
                     if not fs:
                         fs = None
-                    mpl_axes.set_title(plot.title, color=fc, size=fs)
+                    mpl_axes.set_title(plot.plot_title, color=fc, size=fs)
 
                 # Set the background color
                 mpl_axes.set_facecolor(self._pm.get_value(plot, 'background_color'))
@@ -569,7 +571,7 @@ class MatplotlibParser(BackendParserBase):
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
             # autoscale = self._pm.get_value('autoscale', axis)
-            if axis.autoscale and ax_idx == 1:
+            if self._pm.get_value(axis, 'autoscale') and ax_idx == 1:
                 self.autoscale_y_axis(impl_plot)
             else:
                 logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
