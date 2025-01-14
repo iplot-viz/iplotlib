@@ -58,7 +58,8 @@ class Signal(ABC, IplotSignalAdapter):
         pass
 
     def reset_preferences(self):
-        self.label = Signal.label
+        # keep label for legend plot
+        self.label = self.label
 
     def merge(self, old_signal: 'Signal'):
         self.label = old_signal.label
@@ -86,6 +87,7 @@ class SignalXY(Signal, IplotSignalAdapter):
     """
     lines = []
     color: str = None
+    original_color: str = None
     line_style: str = None
     line_size: int = None
     marker: str = None
@@ -114,6 +116,7 @@ class SignalXY(Signal, IplotSignalAdapter):
     def merge(self, old_signal: 'SignalXY'):
         super().merge(old_signal)
         self.color = old_signal.color
+        self.original_color = old_signal.original_color
         self.line_style = old_signal.line_style
         self.line_size = old_signal.line_size
         self.marker = old_signal.marker

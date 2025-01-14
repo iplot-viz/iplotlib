@@ -117,8 +117,6 @@ class RangeAxis(Axis):
         """
         Reset begin and end.
         """
-        self.begin = RangeAxis.begin
-        self.end = RangeAxis.end
         super().reset_preferences()
 
 

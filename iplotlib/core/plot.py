@@ -27,7 +27,7 @@ class Plot(ABC):
         nº of rows of canvas grid that this plot will span
     col_span : int
         nº of columns of canvas grid that this plot will span
-    title : str
+    plot_title : str
         a plot title text, will be shown above the plot
     axes : List[Union[Axis, List[Axis]]]
         the plot axes
@@ -51,7 +51,7 @@ class Plot(ABC):
 
     row_span: int = 1
     col_span: int = 1
-    title: str = None
+    plot_title: str = None
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None
     legend: bool = None
@@ -83,21 +83,28 @@ class Plot(ABC):
         self.signals[stack].append(signal)
 
     def reset_preferences(self):
+        self.plot_title = Plot.plot_title
         self.legend = Plot.legend
         self.legend_position = Plot.legend_position
         self.legend_layout = Plot.legend_layout
-        self.font_size = Plot.font_size
-        self.font_color = Plot.font_color
         self.background_color = Plot.background_color
         self.grid = Plot.grid
         self.log_scale = Plot.log_scale
-
+        self.font_size = Plot.font_size
+        self.font_color = Plot.font_color
+        # Reset axis and signal preferences
         self.axes[0].reset_preferences()
         for axe in self.axes[1]:
             axe.reset_preferences()
+        for stack in self.signals.values():
+            for signal in stack:
+                if isinstance(signal, SignalXY):
+                    signal.reset_preferences()
+                elif isinstance(signal, SignalContour):
+                    signal.reset_preferences()
 
     def merge(self, old_plot: 'Plot'):
-        self.title = old_plot.title
+        self.plot_title = old_plot.plot_title
         self.legend = old_plot.legend
         self.legend_position = old_plot.legend_position
         self.legend_layout = old_plot.legend_layout
@@ -188,7 +195,9 @@ class PlotXY(Plot):
     def add_signal(self, signal, stack: int = 1):
         super().add_signal(signal, stack)
         if signal.color is None:
-            signal.color = self.get_next_color()
+            color = self.get_next_color()
+            signal.color = color
+            signal.original_color = color
 
     def get_next_color(self):
         position = self._color_index % len(self._color_cycle)

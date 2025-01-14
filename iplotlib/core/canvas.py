@@ -10,7 +10,7 @@ from typing import List, Union, Dict
 
 from iplotLogging import setupLogger
 from iplotlib.core.persistence import JSONExporter
-from iplotlib.core.plot import Plot
+from iplotlib.core.plot import Plot, PlotXY, PlotContour
 from iplotlib.core.signal import Signal
 import pandas as pd
 
@@ -190,6 +190,30 @@ class Canvas:
         """
         Reset the preferences to default values.
         """
+
+        # Propagated attributes
+        self.title = Canvas.title
+        self.font_size = Canvas.font_size
+        self.font_color = Canvas.font_color
+        self.background_color = Canvas.background_color
+        self.tick_number = Canvas.tick_number
+        self.log_scale = Canvas.log_scale
+        self.line_style = Canvas.line_style
+        self.line_size = Canvas.line_size
+        self.marker = Canvas.marker
+        self.marker_size = Canvas.marker_size
+        self.step = Canvas.step
+        self.legend = Canvas.legend
+        self.legend_position = Canvas.legend_position
+        self.legend_layout = Canvas.legend_layout
+        self.grid = Canvas.grid
+        self.autoscale = Canvas.autoscale
+        self.contour_filled = Canvas.contour_filled
+        self.legend_format = Canvas.legend_format
+        self.equivalent_units = Canvas.equivalent_units
+        self.color_map = Canvas.color_map
+        self.contour_levels = Canvas.contour_levels
+        # Specific attributes
         self.shared_x_axis = Canvas.shared_x_axis
         self.round_hour = Canvas.round_hour
         self.ticks_position = Canvas.ticks_position
@@ -200,18 +224,28 @@ class Canvas:
         self.full_mode_all_stack = Canvas.full_mode_all_stack
         self.focus_plot = Canvas.focus_plot
 
+        for _, col in enumerate(self.plots):
+            for _, plot in enumerate(col):
+                if isinstance(plot, PlotXY):
+                    plot.reset_preferences()
+                elif isinstance(plot, PlotContour):
+                    plot.reset_preferences()
+                else:
+                    continue
+
     def merge(self, old_canvas: 'Canvas'):
         """
         Reset the preferences to default values.
         """
+
+        # Propagated attributes
         self.title = old_canvas.title
         self.font_size = old_canvas.font_size
         self.font_color = old_canvas.font_color
         self.background_color = old_canvas.background_color
         self.tick_number = old_canvas.tick_number
-        self.round_hour = old_canvas.round_hour
         self.log_scale = old_canvas.log_scale
-        self.line_style: old_canvas.line_style
+        self.line_style = old_canvas.line_style
         self.line_size = old_canvas.line_size
         self.marker = old_canvas.marker
         self.marker_size = old_canvas.marker_size
@@ -226,8 +260,10 @@ class Canvas:
         self.equivalent_units = old_canvas.equivalent_units
         self.color_map = old_canvas.color_map
         self.contour_levels = old_canvas.contour_levels
-        self.ticks_position = old_canvas.ticks_position
+        # Specific attributes
         self.shared_x_axis = old_canvas.shared_x_axis
+        self.round_hour = old_canvas.round_hour
+        self.ticks_position = old_canvas.ticks_position
         self.enable_x_label_crosshair = old_canvas.enable_x_label_crosshair
         self.enable_y_label_crosshair = old_canvas.enable_y_label_crosshair
         self.enable_val_label_crosshair = old_canvas.enable_val_label_crosshair
