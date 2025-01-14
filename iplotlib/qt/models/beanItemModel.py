@@ -15,7 +15,7 @@ from PySide6.QtCore import QModelIndex, QObject, Qt
 from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import QComboBox
 
-from iplotlib.core import PropertyManager
+from iplotlib.core import PropertyManager, SignalXY
 from iplotlib.qt.models.beanItem import BeanItem, BeanPrototype
 from iplotlib.qt.utils.conversions import ConversionHelper
 
@@ -50,6 +50,10 @@ class BeanItemModel(QStandardItemModel):
         logger.debug(f"PyObject: {self._pyObject}")
 
         value = PropertyManager().get_value(self._pyObject, property_name)
+
+        if isinstance(self._pyObject, SignalXY) and property_name == 'color' and value is None:
+            return PropertyManager().get_value(self._pyObject, 'original_color')
+
         if isinstance(widget, QComboBox):
             keys = [widget.itemData(i, Qt.ItemDataRole.UserRole) for i in range(widget.count())]
             try:
