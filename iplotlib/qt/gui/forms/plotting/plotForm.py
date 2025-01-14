@@ -26,7 +26,7 @@ class PlotXYForm(IplotPreferencesForm):
 
     def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
         prototype = [
-            {"label": "Title", "property": "title",
+            {"label": "Title", "property": "plot_title",
              "widget": self.create_lineedit()},
             {"label": "Log scale", "property": "log_scale",
              "widget": self.create_checkbox()},

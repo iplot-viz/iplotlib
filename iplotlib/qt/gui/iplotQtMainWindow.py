@@ -43,6 +43,7 @@ class IplotQtMainWindow(QMainWindow):
         self.prefWindow.canvasSelected.connect(self.canvasStack.setCurrentIndex)
         self.prefWindow.onApply.connect(self.update_canvas_preferences)
         self.prefWindow.onReset.connect(self.reset_prefs)
+        self.prefWindow.onDiscard.connect(self.discard_prefs)
 
         self.addToolBar(self.toolBar)
         self.setCentralWidget(self.canvasStack)
@@ -138,6 +139,13 @@ class IplotQtMainWindow(QMainWindow):
         self.prefWindow.post_applied()
 
     def reset_prefs(self):
+        w = self.canvasStack.currentWidget()
+        with w.view_retainer():
+            w.refresh()
+        self.prefWindow.set_canvas_from_preferences()
+        self.prefWindow.update()
+
+    def discard_prefs(self):
         idx = self.canvasStack.currentIndex()
         self.prefWindow.reset_prefs(idx)
         self.prefWindow.formsStack.currentWidget().widgetMapper.revert()

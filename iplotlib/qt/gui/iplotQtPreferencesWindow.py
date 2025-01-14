@@ -22,8 +22,6 @@ from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 from iplotlib.core.plot import Plot, PlotXY, PlotContour
-from iplotlib.interface import IplotSignalAdapter
-
 from iplotlib.qt.gui.forms import (IplotPreferencesForm, AxisForm, CanvasForm, PlotXYForm, PlotContourForm,
                                    SignalXYForm, SignalContourForm)
 
@@ -40,6 +38,7 @@ class IplotQtPreferencesWindow(QMainWindow):
 
     onApply = QtSignal()
     onReset = QtSignal()
+    onDiscard = QtSignal()
     canvasSelected = QtSignal(int)
 
     def __init__(self, canvas_assembly: QStandardItemModel = None, parent: typing.Optional[QWidget] = None,
@@ -132,7 +131,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         if QApplication.focusWidget():
             QApplication.focusWidget().clearFocus()
         if self._applyTime < self.get_collective_m_time():
-            self.onReset.emit()
+            self.onDiscard.emit()
 
     def setModel(self, model: QStandardItemModel):
         self.treeView.setModel(model)

@@ -41,7 +41,7 @@ class CanvasItem(QStandardItem):
                 plot_item.setEditable(False)
                 plot_item.setData(plot, Qt.UserRole)
 
-                if self.auto_name and plot.title:
-                    plot_item.setText(plot.title)
+                if self.auto_name and plot.plot_title:
+                    plot_item.setText(plot.plot_title)
 
                 plot_column_item.appendRow(plot_item)
