@@ -54,7 +54,7 @@ class SignalXY(Signal, IplotSignalAdapter):
     line_style: str = None
     line_size: int = None
     marker: str = None
-    marker_size: int = 5
+    marker_size: int = None
     step: str = None
     plot_type: str = "PlotXY"
     lines = []

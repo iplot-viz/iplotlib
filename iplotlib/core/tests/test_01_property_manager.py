@@ -1,5 +1,5 @@
 from functools import partial
-from iplotlib.core.signal import SimpleSignal
+from iplotlib.core.signal import SignalXY
 import unittest
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
@@ -68,10 +68,10 @@ class TestPropertyManager(unittest.TestCase):
 
     def test_signal_inherits_plot_properties(self):
         plot = PlotXY()
-        signal = SimpleSignal()
+        signal = SignalXY()
         plot.add_signal(signal)
 
-        f = partial(self.pm.get_value, canvas=self.canvas, plot=plot, signal=signal)
+        f = partial(self.pm.get_value, canvas=self.canvas, plot=plot, axis=None, signal=signal)
 
         self.assertEqual(f("line_style"), self.canvas.line_style)
         self.assertEqual(f("line_size"), self.canvas.line_size)
