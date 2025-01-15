@@ -1,7 +1,10 @@
 import numpy as np
 import pytest
 
-from iplotlib.core.signal import SimpleSignal
+from iplotlib.core.signal import SignalXY
+
+
+# Pick functionality removed
 
 
 def test_numpy_pick_smaller(example_numpy_data):
@@ -61,6 +64,7 @@ def example_numpy_data():
 
 
 def do_pick(data, sample):
-    signal = SimpleSignal()
+    # Pick functionality removed
+    signal = SignalXY()
     signal.set_data(data)
     return signal.pick(sample)
