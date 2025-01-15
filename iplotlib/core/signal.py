@@ -24,6 +24,7 @@ class Signal(ABC):
     label: str = None  #: Signal label. This value is presented on plot legend
     color: str = None
     plot_type: str = ''
+    hi_precision_data: bool = None
     _type: str = None
 
     def __post_init__(self):
