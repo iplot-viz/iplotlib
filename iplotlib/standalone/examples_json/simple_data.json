@@ -1,64 +1,340 @@
 {
-  "rows": 4,
-  "cols": 1,
-  "grid": true,
-  "plots": [
-    [
-      {
-        "row_span": 1,
-        "col_span": 1,
-        "axes": [
-          {
-            "_type": "iplotlib.core.axis.LinearAxis",
-            "original_begin": 1713195380000000000,
-            "original_end": 1713800180000000000,
-            "begin": 1713195380000000000,
-            "end": 1713800180000000000,
-            "is_date": true,
-            "window": null,
-            "follow": false
-          },
-          [
+  "_metadata": {
+    "createdAt": "2025-01-17T10:11:33.116211",
+    "createdBy": "cabanij",
+    "createdOnHost": "sdcc-login02.iter.org",
+    "appVersion": "0+unknown"
+  },
+  "data_range": {
+    "mode": "TIME_RANGE",
+    "ts_start": "2024-04-15T15:36:20",
+    "ts_end": "2024-04-22T15:36:20",
+    "ts_ns_start": "000000000",
+    "ts_ns_end": "000000000"
+  },
+  "signal_cfg": {
+    "view_options": {
+      "All": {
+        "DS": true,
+        "Variable": true,
+        "Stack": true,
+        "Row span": true,
+        "Col span": true,
+        "Envelope": true,
+        "Alias": true,
+        "PulseId": true,
+        "StartTime": true,
+        "EndTime": true,
+        "x": true,
+        "y": true,
+        "z": true,
+        "Extremities": true,
+        "Plot type": true,
+        "Status": true
+      },
+      "Data-Access": {
+        "DS": true,
+        "Variable": true,
+        "Stack": false,
+        "Row span": false,
+        "Col span": false,
+        "Envelope": true,
+        "Alias": true,
+        "PulseId": true,
+        "StartTime": true,
+        "EndTime": true,
+        "x": false,
+        "y": false,
+        "z": false,
+        "Extremities": false,
+        "Plot type": false,
+        "Status": true
+      },
+      "Plot-Layout": {
+        "DS": true,
+        "Variable": true,
+        "Stack": true,
+        "Row span": true,
+        "Col span": true,
+        "Envelope": false,
+        "Alias": true,
+        "PulseId": false,
+        "StartTime": false,
+        "EndTime": false,
+        "x": false,
+        "y": false,
+        "z": false,
+        "Extremities": false,
+        "Plot type": true,
+        "Status": true
+      }
+    },
+    "model": {
+      "blueprint": {
+        "$schema": "https://git.iter.org/projects/VIS/repos/mint/raw/mint/data/mint.schema.json?at=refs%2Ftags%2F0.8.1",
+        "DataSource": {
+          "code_name": "data_source",
+          "default": "codacuda",
+          "label": "DS",
+          "type_name": "str"
+        },
+        "Variable": {
+          "code_name": "name",
+          "default": "",
+          "type_name": "str"
+        },
+        "Stack": {
+          "code_name": "stack_val",
+          "default": "",
+          "no_construct": true,
+          "type_name": "str"
+        },
+        "RowSpan": {
+          "label": "Row span",
+          "code_name": "row_span",
+          "type_name": "int",
+          "default": 1,
+          "no_construct": true
+        },
+        "ColSpan": {
+          "label": "Col span",
+          "code_name": "col_span",
+          "type_name": "int",
+          "default": 1,
+          "no_construct": true
+        },
+        "Envelope": {
+          "code_name": "envelope",
+          "type_name": "bool",
+          "default": false
+        },
+        "Alias": {
+          "code_name": "alias",
+          "type_name": "str",
+          "default": ""
+        },
+        "PulseNumber": {
+          "label": "PulseId",
+          "code_name": "pulse_nb",
+          "type_name": "mint.tools.table_parser.str_to_arr",
+          "default": null,
+          "override": true
+        },
+        "StartTime": {
+          "code_name": "ts_start",
+          "type_name": "mint.tools.table_parser.parse_timestamp",
+          "default": 1713195380000000000,
+          "override": true
+        },
+        "EndTime": {
+          "code_name": "ts_end",
+          "type_name": "mint.tools.table_parser.parse_timestamp",
+          "default": 1713800180000000000,
+          "override": true
+        },
+        "x": {
+          "code_name": "x_expr",
+          "type_name": "str",
+          "default": "${self}.time"
+        },
+        "y": {
+          "code_name": "y_expr",
+          "type_name": "str",
+          "default": "${self}.data_store[1]"
+        },
+        "z": {
+          "code_name": "z_expr",
+          "type_name": "str",
+          "default": "${self}.data_store[2]"
+        },
+        "Extremities": {
+          "code_name": "extremities",
+          "type_name": "bool",
+          "default": false
+        },
+        "PlotType": {
+          "label": "Plot type",
+          "code_name": "plot_type",
+          "type_name": "str",
+          "default": "PlotXY"
+        },
+        "Status": {
+          "code_name": "status_info",
+          "no_construct": true,
+          "type_name": "iplotlib.interface.iplotSignalAdapter.StatusInfo"
+        },
+        "uid": {
+          "code_name": "uid",
+          "default": "",
+          "label": "uid",
+          "type_name": "str"
+        }
+      },
+      "table": [
+        [
+          "codacuda",
+          "CWS-SCSU-HR00:ML0004-LT-XI",
+          "1",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "PlotXY",
+          "Success|1946 points|Downsampled",
+          "b63d7530-bb41-4ea7-87e7-67cf4b141906"
+        ]
+      ]
+    }
+  },
+  "main_canvas": {
+    "rows": 1,
+    "cols": 1,
+    "title": null,
+    "font_size": null,
+    "font_color": "#000000",
+    "background_color": "#FFFFFF",
+    "tick_number": 7,
+    "round_hour": false,
+    "log_scale": false,
+    "line_style": null,
+    "line_size": null,
+    "marker": null,
+    "marker_size": null,
+    "step": null,
+    "hi_precision_data": false,
+    "dec_samples": 1000,
+    "legend": true,
+    "legend_position": "upper right",
+    "legend_layout": "vertical",
+    "grid": true,
+    "ticks_position": false,
+    "mouse_mode": "MM_SELECT",
+    "enable_Xlabel_crosshair": true,
+    "enable_Ylabel_crosshair": true,
+    "enable_ValLabel_crosshair": true,
+    "plots": [
+      [
+        {
+          "row_span": 1,
+          "col_span": 1,
+          "title": null,
+          "axes": [
             {
+              "label": null,
+              "font_size": null,
+              "font_color": "#000000",
+              "tick_number": null,
+              "autoscale": false,
               "_type": "iplotlib.core.axis.LinearAxis",
-              "original_begin": 651.3888916015627,
-              "original_end": 783.7962890625003,
-              "begin": 651.3888916015627,
-              "end": 783.7962890625003,
-              "is_date": false,
+              "original_begin": 1713195380000000000,
+              "original_end": 1713800180000000000,
+              "begin": 1713195380000000000,
+              "end": 1713800180000000000,
+              "is_date": true,
               "window": null,
               "follow": false
-            }
-          ]
-        ],
-        "signals": {
-          "1": [
-            {
-              "uid": "1836c2f5-dcdc-48ee-8558-a2db9e09a2c9",
-              "name": "CWS-SCSU-HR00:ML0004-LT-XI",
-              "color": "#1f77b4",
-              "hi_precision_data": false,
-              "plot_type": "PlotXY",
-              "_type": "iplotlib.interface.iplotSignalAdapter.IplotSignalAdapter",
-              "data_source": "codacuda",
-              "ts_start": 1713195380000000000,
-              "ts_end": 1713800180000000000,
-              "ts_relative": false,
-              "isDownsampled": true,
-              "status_info": {
-                "msg": "",
-                "num_points": 1931,
-                "result": "Success",
-                "stage": "Data-Access",
-                "inf": 0
+            },
+            [
+              {
+                "label": null,
+                "font_size": null,
+                "font_color": "#000000",
+                "tick_number": null,
+                "autoscale": true,
+                "_type": "iplotlib.core.axis.LinearAxis",
+                "original_begin": 646.527770996094,
+                "original_end": 784.027770996094,
+                "begin": null,
+                "end": null,
+                "is_date": false,
+                "window": null,
+                "follow": false
               }
-            }
-          ]
-        },
-        "_type": "iplotlib.core.plot.PlotXY"
-      }
-    ]
-  ],
-  "streaming": false,
-  "_type": "iplotlib.core.canvas.Canvas"
+            ]
+          ],
+          "signals": {
+            "1": [
+              {
+                "data_source": "codacuda",
+                "alias": "",
+                "stream_valid": true,
+                "pulse_nb": "",
+                "ts_start": 1713195380000000000,
+                "ts_end": 1713800180000000000,
+                "ts_relative": false,
+                "envelope": false,
+                "isDownsampled": true,
+                "x_expr": "${self}.time",
+                "y_expr": "${self}.data_store[1]",
+                "z_expr": "${self}.data_store[2]",
+                "extremities": false,
+                "plot_type": "PlotXY",
+                "children": [],
+                "status_info": {
+                  "msg": "",
+                  "num_points": 1946,
+                  "result": "Success",
+                  "stage": "Data-Access",
+                  "inf": 0
+                },
+                "data_access_enabled": true,
+                "processing_enabled": true,
+                "time_out_value": 60,
+                "uid": "b63d7530-bb41-4ea7-87e7-67cf4b141906",
+                "name": "CWS-SCSU-HR00:ML0004-LT-XI",
+                "label": "CWS-SCSU-HR00:ML0004-LT-XI",
+                "color": "#1f77b4",
+                "hi_precision_data": false,
+                "_type": "iplotlib.core.signal.SignalXY",
+                "line_style": null,
+                "line_size": null,
+                "marker": null,
+                "marker_size": null,
+                "step": null
+              }
+            ]
+          },
+          "_type": "iplotlib.core.plot.PlotXY",
+          "font_size": null,
+          "font_color": "#000000",
+          "background_color": "#FFFFFF",
+          "tick_number": null,
+          "legend": null,
+          "legend_position": "same as canvas",
+          "legend_layout": "same as canvas",
+          "log_scale": null,
+          "grid": null,
+          "line_style": null,
+          "line_size": null,
+          "marker": null,
+          "marker_size": null,
+          "step": null,
+          "hi_precision_data": null,
+          "dec_samples": null,
+          "_color_index": 0
+        }
+      ]
+    ],
+    "focus_plot": null,
+    "crosshair_enabled": false,
+    "crosshair_color": "red",
+    "crosshair_line_width": 1,
+    "crosshair_horizontal": true,
+    "crosshair_vertical": true,
+    "crosshair_per_plot": false,
+    "streaming": false,
+    "shared_x_axis": false,
+    "autoscale": true,
+    "full_mode_all_stack": true,
+    "auto_refresh": 0,
+    "_type": "iplotlib.core.canvas.Canvas",
+    "undo_redo": false
+  }
 }
