@@ -16,11 +16,10 @@ import sys
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import (QGuiApplication, QKeySequence,
-                           QAction, QActionGroup)
+from PySide6.QtGui import (QGuiApplication, QKeySequence, QAction, QActionGroup)
 
 from iplotlib.core import Canvas
-from iplotlib.standalone import examples as iplotExamples
+from iplotlib.standalone import examples
 from iplotlib.interface.iplotSignalAdapter import AccessHelper
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.gui.iplotQtMainWindow import IplotQtMainWindow
@@ -133,7 +132,7 @@ def proxy_main():
     canvas_app = QStandaloneCanvas(args.impl, use_toolbar=True)
     canvas_app.prepare()
 
-    for script in pkgutil.walk_packages(iplotExamples.__path__, iplotExamples.__name__ + '.'):
+    for script in pkgutil.walk_packages(examples.__path__, examples.__name__ + '.'):
         module = importlib.import_module(script.name)
         if hasattr(module, 'skip'):
             continue
