@@ -269,8 +269,8 @@ class MatplotlibParser(BackendParserBase):
                 # Check if it is date and the max difference is 1 second
                 max_diff = 1e9
                 if ((begin, end) == (base_begin, base_end) or
-                        ((5e17 < begin < 1e19) and abs(begin - base_begin) < max_diff and abs(
-                            end - base_end) < max_diff)):
+                        ((5e17 < begin < 1e19) and abs(begin - base_begin) <= max_diff and
+                         abs(end - base_end) <= max_diff)):
                     shared.append(axes)
         return shared
 
