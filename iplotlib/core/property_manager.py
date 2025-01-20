@@ -24,7 +24,7 @@ default_property: dict = {
     'line_size': 1,
     'marker': None,
     'marker_size': 1,
-    'step': "default"
+    'step': None
 }
 
 

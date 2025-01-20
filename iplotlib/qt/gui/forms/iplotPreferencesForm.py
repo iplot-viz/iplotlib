@@ -41,7 +41,7 @@ class IplotPreferencesForm(QWidget):
 
         self.applyButton = QPushButton("Apply")
         self.applyButton.pressed.connect(self.onApply.emit)
-        self.resetButton = QPushButton("Reset Scope")
+        self.resetButton = QPushButton("Reset")
         self.resetButton.pressed.connect(self.reset_prefs)
         self._modifiedTime = time.time_ns()
 
@@ -177,7 +177,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_linepath_widget():
-        return IplotPreferencesForm.create_combo_box({"default": "Linear", "steps-post": "Last Value"})
+        return IplotPreferencesForm.create_combo_box({"linear": "Linear", "post": "Last Value"})
 
     @staticmethod
     def default_canvas_legend_position_widget():
