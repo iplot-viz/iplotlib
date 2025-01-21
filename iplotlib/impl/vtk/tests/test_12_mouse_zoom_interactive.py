@@ -17,7 +17,6 @@ from PySide6.QtTest import QTest
 class VTKCanvasTesting(QVTKAppTestAdapter):
 
     def setUp(self):
-
         super().setUp()
 
         # A 2col x 3row canvas
@@ -102,10 +101,8 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
                            Qt.KeyboardModifier.NoModifier, QPoint(550, 250))
 
         renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
-        valid_image_name = os.path.basename(__file__).replace(
-            "test", "valid").replace(".py", ".1.png")
-        valid_image_path = os.path.join(os.path.join(
-            os.path.dirname(__file__), "baseline"), valid_image_name)
+        valid_image_name = os.path.basename(__file__).replace("test", "new_valid").replace(".py", ".1.png")
+        valid_image_path = os.path.join(os.path.join(os.path.dirname(__file__), "baseline_1_3_0"), valid_image_name)
         self.assertTrue(regression_test(valid_image_path, renWin))
 
         # zoom inside a stacked plot
@@ -118,10 +115,8 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
                            Qt.KeyboardModifier.NoModifier, QPoint(400, 400))
 
         renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
-        valid_image_name = os.path.basename(__file__).replace(
-            "test", "valid").replace(".py", ".2.png")
-        valid_image_path = os.path.join(os.path.join(
-            os.path.dirname(__file__), "baseline"), valid_image_name)
+        valid_image_name = os.path.basename(__file__).replace("test", "new_valid").replace(".py", ".2.png")
+        valid_image_path = os.path.join(os.path.join(os.path.dirname(__file__), "baseline_1_3_0"), valid_image_name)
         self.assertTrue(regression_test(valid_image_path, renWin))
 
         # import sys
