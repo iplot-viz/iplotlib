@@ -473,6 +473,10 @@ class VTKParser(BackendParserBase):
                 self.set_oaw_axis_limits(impl_plot, ax_idx, [ax_max - axis.window, ax_max])
         vtk_axis.AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
 
+        if ax_idx == 0:
+            tick_number = self._pm.get_value("tick_number", self.canvas, axis)
+            vtk_axis.SetNumberOfTicks(tick_number)
+
     def _refresh_shared_x_axis(self):
         size = self.matrix.GetSize()
         if self.canvas.shared_x_axis and not self._shared_x_axis:

@@ -492,7 +492,6 @@ class VTK64BitTimePlotSupport:
         tick_labels = vtkStringArray()
         for ts in tss:
             tick_label = ts.strftime(tickLabelFmt)
-            # Check if the round hour option is enabled
             tick_label = tick_label.replace("nano", str(ts.nanosecond).zfill(3))
             tick_labels.InsertNextValue(tick_label)
 
