@@ -100,13 +100,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                             plot_stack.append(f"{col_idx}.{row_idx}")
 
                 dict_ranges = defaultdict(list)
-                max_diff = 1e9
+                max_diff_ns = canvas.max_diff * 1e9
                 for idx, uniq_range in enumerate(ranges):
                     if uniq_range == ranges[0]:
                         dict_ranges[uniq_range].append(plot_stack[idx])
                     # If the difference of the ranges is less than 1 second, we consider them equal
-                    elif abs(uniq_range[0] - ranges[0][0]) <= max_diff and abs(
-                            uniq_range[1] - ranges[0][1]) <= max_diff:
+                    elif abs(uniq_range[0] - ranges[0][0]) <= max_diff_ns and abs(
+                            uniq_range[1] - ranges[0][1]) <= max_diff_ns:
                         dict_ranges[ranges[0]].append(plot_stack[idx])
                     else:
                         dict_ranges[uniq_range].append(plot_stack[idx])
