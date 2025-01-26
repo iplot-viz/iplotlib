@@ -203,6 +203,8 @@ class MatplotlibParser(BackendParserBase):
                                                      alpha=0.3,
                                                      color=shapes[0][0].get_color(),
                                                      step=STEP_MAP[style['drawstyle']])
+                shapes[0][2].set_visible(shapes[0][0].get_visible())
+
             self.figure.canvas.draw_idle()
 
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
@@ -265,7 +267,11 @@ class MatplotlibParser(BackendParserBase):
                     continue
                 limits = self.get_plot_limits(plot, which='original')
                 begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                if (begin, end) == (base_begin, base_end):
+                # Check if it is date and the max difference is 1 second
+                max_diff_ns = self.canvas.max_diff * 1e9
+                if ((begin, end) == (base_begin, base_end) or
+                        ((5e17 < begin < 1e19) and abs(begin - base_begin) <= max_diff_ns and
+                         abs(end - base_end) <= max_diff_ns)):
                     shared.append(axes)
         return shared
 
@@ -445,21 +451,44 @@ class MatplotlibParser(BackendParserBase):
                     plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' \
                         else plot_leg_layout
 
-                    ncols = 1 if plot_leg_layout == 'vertical' else len(signals)
-
                     legend_props = dict(size=self.legend_size)
 
-                    n_lines = mpl_axes.get_lines()
-                    leg_label = []
-                    for line in n_lines:
-                        line_label = line.get_label()
-                        line_label_formatted = line_label.replace("$", r"\$")
-                        leg_label.append(line_label_formatted)
+                    # Legend creation process:
+                    #   - Vertical legend: it has one column, which will be increased until there is no overlapping of
+                    #   lines up to a maximum of 3 columns, (1, 3).
+                    #   - Horizontal legend: the number of columns corresponds to the number of signals contained in the
+                    #   plot. If there is line overlapping, the number of columns will be reduced, (len(signals), 1).
+                    leg_ver = (1, 3)
+                    leg_hor = (len(signals), 1)
+                    # The case is established as follows
+                    case = leg_ver if plot_leg_layout == 'vertical' else leg_hor
+                    start, stop = case
+                    step = 1 if start < stop else -1
+                    leg = None
+                    for col in range(start, stop + step, step):
+                        leg = mpl_axes.legend(prop=legend_props, loc=plot_leg_position, ncol=col)
+                        if self.figure.get_tight_layout():
+                            leg.set_in_layout(False)
+                        # Check if the legend's edges are outside the axes' bounds in the figure
+                        legend_bbox = leg.get_window_extent()
+                        axes_bbox = mpl_axes.get_window_extent()
+                        legend_bbox = legend_bbox.transformed(self.figure.transFigure.inverted())
+                        axes_bbox = axes_bbox.transformed(self.figure.transFigure.inverted())
+                        legend_outside = (
+                                legend_bbox.xmin < axes_bbox.xmin or
+                                legend_bbox.xmax > axes_bbox.xmax or
+                                legend_bbox.ymin < axes_bbox.ymin or
+                                legend_bbox.ymax > axes_bbox.ymax
+                        )
+                        if not legend_outside:
+                            break
 
-                    leg = mpl_axes.legend(leg_label, prop=legend_props,
-                                          loc=plot_leg_position, ncol=ncols)
-                    if self.figure.get_tight_layout():
-                        leg.set_in_layout(False)
+                    # Check the text of the legend lines in case there is a '$' to be escaped
+                    for line in leg.texts:
+                        current_text = line.get_text()
+                        if '$' in current_text:
+                            new_text = current_text.replace("$", r"\$")
+                            line.set_text(new_text)
 
                     legend_lines = leg.get_lines()
                     ix_legend = 0
@@ -471,8 +500,6 @@ class MatplotlibParser(BackendParserBase):
                             legend_lines[ix_legend].set_visible(True)
                             legend_lines[ix_legend].set_alpha(alpha)
                             ix_legend += 1
-                # else:
-                # mpl_axes.legend(self.proxies, ['signal name'])
 
         # Observe the axis limit change events
         if not self.canvas.streaming:

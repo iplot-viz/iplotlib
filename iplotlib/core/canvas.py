@@ -101,6 +101,7 @@ class Canvas(ABC):
     _type: str = None
 
     undo_redo: bool = False
+    max_diff: int = 1  # Maximum allowed difference for comparing axis ranges between different plots
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -182,6 +183,7 @@ class Canvas(ABC):
         self.step = Canvas.step
         self.full_mode_all_stack = Canvas.full_mode_all_stack
         self.focus_plot = Canvas.focus_plot
+        self.max_diff = Canvas.max_diff
 
     def merge(self, old_canvas: 'Canvas'):
         """
@@ -211,6 +213,7 @@ class Canvas(ABC):
         self.step = old_canvas.step
         self.full_mode_all_stack = old_canvas.full_mode_all_stack
         self.focus_plot = old_canvas.focus_plot
+        self.max_diff = old_canvas.max_diff
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
