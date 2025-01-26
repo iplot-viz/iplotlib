@@ -24,6 +24,7 @@ class Signal(ABC):
     label: str = None  #: Signal label. This value is presented on plot legend
     color: str = None
     plot_type: str = ''
+    hi_precision_data: bool = None
     _type: str = None
 
     def __post_init__(self):
@@ -53,7 +54,7 @@ class SignalXY(Signal, IplotSignalAdapter):
     line_style: str = None
     line_size: int = None
     marker: str = None
-    marker_size: int = 5
+    marker_size: int = None
     step: str = None
     plot_type: str = "PlotXY"
     lines = []
