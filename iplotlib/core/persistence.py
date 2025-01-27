@@ -25,6 +25,7 @@ class JSONExporter:
         "iplotlib.Plot.Plot2D": "iplotlib.core.plot.PlotXY",
         "iplotlib.Axis.LinearAxis": "iplotlib.core.axis.LinearAxis",
         "iplotlib.Signal.UDAPulse": "iplotlib.interface.iplotSignalAdapter.IplotSignalAdapter",
+        "iplotlib.interface.iplotSignalAdapter.IplotSignalAdapter": "iplotlib.core.signal.SignalXY",
     }
 
     def to_dict(self, obj):

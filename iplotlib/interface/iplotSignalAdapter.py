@@ -706,7 +706,11 @@ class AccessHelper:
             signal.isDownsampled = result['isds']
         except Exception as e:
             # Indicate failure with message.
-            signal.set_da_fail(msg=str(e))
+            if signal.pulse_nb:
+                message = f"{e} for the signal: {signal.name} within the pulse: {signal.pulse_nb}"
+            else:
+                message = f"{e} for the signal: {signal.name}"
+            signal.set_da_fail(msg=message)
             return
 
         # finalize function after fetch.

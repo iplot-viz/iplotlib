@@ -5,6 +5,7 @@ This module defines the `Canvas` object.
 # Changelog:
 #   Jan 2023:   -Added legend position and layout properties [Alberto Luengo]
 
+from abc import ABC
 from dataclasses import dataclass
 from typing import List, Union, Dict
 
@@ -18,7 +19,7 @@ logger = setupLogger.get_logger(__name__)
 
 
 @dataclass
-class Canvas:
+class Canvas(ABC):
     """
     This class exposes visual properties of a canvas.
 
@@ -81,6 +82,8 @@ class Canvas:
         Auto redraw canvas every X seconds
     _type : str
         type of the canvas
+    max_diff: int
+        Maximum allowed difference for comparing axis ranges between different plots
     """
 
     MOUSE_MODE_SELECT = "MM_SELECT"
@@ -109,6 +112,7 @@ class Canvas:
     full_mode_all_stack: bool = True
     auto_refresh: int = 0
     undo_redo: bool = False
+    max_diff: int = 1
     _type: str = None
     font_size: int = None
     font_color: str = None
@@ -192,7 +196,6 @@ class Canvas:
         """
 
         # Propagated attributes
-        self.title = Canvas.title
         self.font_size = Canvas.font_size
         self.font_color = Canvas.font_color
         self.background_color = Canvas.background_color
@@ -214,6 +217,7 @@ class Canvas:
         self.color_map = Canvas.color_map
         self.contour_levels = Canvas.contour_levels
         # Specific attributes
+        self.title = Canvas.title
         self.shared_x_axis = Canvas.shared_x_axis
         self.round_hour = Canvas.round_hour
         self.ticks_position = Canvas.ticks_position
@@ -223,6 +227,7 @@ class Canvas:
         self.crosshair_color = Canvas.crosshair_color
         self.full_mode_all_stack = Canvas.full_mode_all_stack
         self.focus_plot = Canvas.focus_plot
+        self.max_diff = Canvas.max_diff
 
         for _, col in enumerate(self.plots):
             for _, plot in enumerate(col):
@@ -239,7 +244,6 @@ class Canvas:
         """
 
         # Propagated attributes
-        self.title = old_canvas.title
         self.font_size = old_canvas.font_size
         self.font_color = old_canvas.font_color
         self.background_color = old_canvas.background_color
@@ -261,6 +265,7 @@ class Canvas:
         self.color_map = old_canvas.color_map
         self.contour_levels = old_canvas.contour_levels
         # Specific attributes
+        self.title = old_canvas.title
         self.shared_x_axis = old_canvas.shared_x_axis
         self.round_hour = old_canvas.round_hour
         self.ticks_position = old_canvas.ticks_position
@@ -270,6 +275,7 @@ class Canvas:
         self.crosshair_color = old_canvas.crosshair_color
         self.full_mode_all_stack = old_canvas.full_mode_all_stack
         self.focus_plot = old_canvas.focus_plot
+        self.max_diff = old_canvas.max_diff
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):

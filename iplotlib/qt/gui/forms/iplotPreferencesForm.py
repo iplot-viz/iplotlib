@@ -167,6 +167,10 @@ class IplotPreferencesForm(QWidget):
         return IplotPreferencesForm.create_spinbox(min=1, max=10)
 
     @staticmethod
+    def default_canvas_max_diff():
+        return IplotPreferencesForm.create_spinbox(min=1, max=60)
+
+    @staticmethod
     def default_linestyle_widget():
         return IplotPreferencesForm.create_combo_box(
             {"Solid": "Solid", "Dotted": "Dotted", "Dashed": "Dashed", "None": "None"})

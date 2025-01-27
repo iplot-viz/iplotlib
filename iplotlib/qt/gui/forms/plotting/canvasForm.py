@@ -32,6 +32,8 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.default_fontsize_widget()},
             {"label": "Shared x axis", "property": "shared_x_axis",
              "widget": self.create_checkbox()},
+            {"label": "Time range difference (s)", "property": "max_diff",
+             "widget": self.default_canvas_max_diff()},
             {"label": "Round hours", "property": "round_hour",
              "widget": self.create_checkbox()},
             {"label": "Log scale", "property": "log_scale",

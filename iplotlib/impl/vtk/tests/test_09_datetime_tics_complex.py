@@ -4,7 +4,7 @@ import unittest
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.axis import LinearAxis
 from iplotlib.core.plot import PlotXY
-from iplotlib.core.signal import SimpleSignal
+from iplotlib.core.signal import SignalXY
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.qVTKAppTestAdapter import QVTKAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
@@ -21,37 +21,38 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         self.core_canvas = Canvas(2, 2, title=os.path.basename(__file__))
 
         # A plot in top-left with 1 signal.
-        signal11 = SimpleSignal(label="Signal1.1", hi_precision_data=True)
+        signal11 = SignalXY(label="Signal1.1", hi_precision_data=True)
         signal11.set_data([xs, ys])
-        plot11 = PlotXY(title="DateTime=True, HiPrecision=True")
+        plot11 = PlotXY(plot_title="DateTime=True, HiPrecision=True")
         plot11.axes[0].is_date = True
         plot11.add_signal(signal11)
         self.core_canvas.add_plot(plot11, 0)
 
         # A plot in bottom-left with 2 stacked signal.
-        signal121 = SimpleSignal(label="Signal1.2.1")
+        signal121 = SignalXY(label="Signal1.2.1")
         signal121.set_data([xs, ys])
-        plot12 = PlotXY(title="DateTime=True, HiPrecision=True")
+        plot12 = PlotXY(plot_title="DateTime=True, HiPrecision=True",
+                        axes=[LinearAxis(), [LinearAxis(), LinearAxis()]])
         plot12.axes[0].is_date = True
         plot12.add_signal(signal121)
-        signal122 = SimpleSignal(label="Signal1.2.2")
+        signal122 = SignalXY(label="Signal1.2.2")
         signal122.set_data([xs, -ys])
         plot12.add_signal(signal122, 2)
         self.core_canvas.add_plot(plot12, 0)
 
         # A plot in top-right with 1 signal.
         plot12.axes[1] = [LinearAxis(), LinearAxis()]
-        signal21 = SimpleSignal(label="Signal2.1", hi_precision_data=True)
+        signal21 = SignalXY(label="Signal2.1", hi_precision_data=True)
         signal21.set_data([xs, ys])
-        plot21 = PlotXY(title="DateTime=True, HiPrecision=True")
+        plot21 = PlotXY(plot_title="DateTime=True, HiPrecision=True")
         plot21.axes[0].is_date = True
         plot21.add_signal(signal21)
         self.core_canvas.add_plot(plot21, 1)
 
         # A plot in bottom-right with 1 signal.
-        signal22 = SimpleSignal(label="Signal2.2")
+        signal22 = SignalXY(label="Signal2.2")
         signal22.set_data([xs, ys])
-        plot22 = PlotXY(title="DateTime=False, HiPrecision=True")
+        plot22 = PlotXY(plot_title="DateTime=False, HiPrecision=True")
         plot22.add_signal(signal22)
         self.core_canvas.add_plot(plot22, 1)
 
@@ -73,10 +74,8 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         self.canvas.get_vtk_renderer().Render()
 
         renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
-        valid_image_name = os.path.basename(__file__).replace(
-            "test", "valid").replace(".py", ".png")
-        valid_image_path = os.path.join(os.path.join(
-            os.path.dirname(__file__), "baseline"), valid_image_name)
+        valid_image_name = os.path.basename(__file__).replace("test", "valid").replace(".py", ".png")
+        valid_image_path = os.path.join(os.path.join(os.path.dirname(__file__), "baseline"), valid_image_name)
         self.assertTrue(regression_test(valid_image_path, renWin))
 
 

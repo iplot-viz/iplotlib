@@ -23,3 +23,5 @@ source environ.sh $*
 
 # ENV name is used in other scripts
 export PREFIX_DIR=iplotlib_$toolchain
+export IPLOT_PMODULE_PATH=/tmp # must point to a writable folder
+

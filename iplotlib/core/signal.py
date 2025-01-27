@@ -15,7 +15,7 @@ from iplotlib.interface import IplotSignalAdapter
 
 
 @dataclass
-class Signal(ABC, IplotSignalAdapter):
+class Signal(ABC):
     """
     Main abstraction for a Signal
 

@@ -13,7 +13,7 @@ from iplotlib.core import (Axis,
                            Canvas,
                            Plot,
                            PlotXY,
-                           ArraySignal,
+                           SignalXY,
                            Signal)
 
 # DON'T REMOVE THIS IMPORTS - NEEDED
@@ -303,7 +303,7 @@ class VTKParser(BackendParserBase):
         retVal = False
         for signals in plot.signals.values():
             for signal in signals:
-                if isinstance(signal, ArraySignal):
+                if isinstance(signal, SignalXY):
                     retVal |= self._pm.get_value(
                         'hi_precision_data', self.canvas, plot, signal=signal)
         return retVal
@@ -334,9 +334,7 @@ class VTKParser(BackendParserBase):
             stop_drawing = False
             for i, column in enumerate(canvas.plots):
 
-                j = 0
-
-                for plot in column:
+                for j, plot in enumerate(column):
 
                     if self._focus_plot is not None:
                         if self._focus_plot == plot:
@@ -346,9 +344,6 @@ class VTKParser(BackendParserBase):
                             break
                     else:
                         self.process_ipl_plot(plot, i, j)
-
-                    # Increment row number carefully. (for next iteration)
-                    j += plot.row_span if isinstance(plot, Plot) else 1
 
                 if stop_drawing:
                     break
@@ -413,33 +408,6 @@ class VTKParser(BackendParserBase):
                 chart = self.add_vtk_chart(element, 0, row_id)
             elif isinstance(element, vtkChart):
                 chart = element
-                # Change this to make visible all axis
-                chart.SetAutoAxes(False)
-                chart.GetAxis(vtkAxis.RIGHT).SetVisible(True)
-                chart.GetAxis(vtkAxis.TOP).SetVisible(True)
-                chart.GetAxis(vtkAxis.TOP).SetTitle("Top")
-                chart.GetAxis(vtkAxis.RIGHT).SetTitle("Right")
-                chart.GetAxis(vtkAxis.TOP).SetTitleVisible(False)
-                chart.GetAxis(vtkAxis.RIGHT).SetTitleVisible(False)
-
-                # Label visibility
-                chart.GetAxis(vtkAxis.RIGHT).SetLabelsVisible(False)
-                chart.GetAxis(vtkAxis.TOP).SetLabelsVisible(False)
-
-                if self.canvas.ticks_position:
-                    # Ticks visibility
-                    chart.GetAxis(vtkAxis.RIGHT).SetTicksVisible(True)
-                    chart.GetAxis(vtkAxis.TOP).SetTicksVisible(True)
-                    # Ticks position
-                    chart.GetAxis(vtkAxis.TOP).SetPosition(1)
-                    chart.GetAxis(vtkAxis.RIGHT).SetPosition(0)
-                    chart.GetAxis(vtkAxis.LEFT).GetLabelProperties()
-                else:
-                    # Ticks visibility
-                    chart.GetAxis(vtkAxis.RIGHT).SetTicksVisible(False)
-                    chart.GetAxis(vtkAxis.TOP).SetTicksVisible(False)
-                    chart.GetAxis(vtkAxis.BOTTOM).SetPosition(1)
-                    chart.GetAxis(vtkAxis.LEFT).SetPosition(0)
             else:
                 logger.critical(f"Unexpected code path in process_ipl_plot {column}, {row}, {row_id}")
 
@@ -492,10 +460,6 @@ class VTKParser(BackendParserBase):
             if fs is not None:
                 appearance.SetFontSize(fs)
 
-            if vtk_axis.GetTitle() == 'X Axis':
-                if self.canvas.round_hour:
-                    vtk_axis.SetBehavior(1)  # Fixed behavior"
-
         if isinstance(axis, RangeAxis) and not (isinstance(axis, LinearAxis) and axis.follow):
             if axis.begin is not None and axis.end is not None:
                 self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
@@ -504,14 +468,10 @@ class VTKParser(BackendParserBase):
                 ax_max = self.get_oaw_axis_limits(impl_plot, ax_idx)[1]
                 self.set_oaw_axis_limits(impl_plot, ax_idx, [ax_max - axis.window, ax_max])
         vtk_axis.AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
-        if ax_idx == 0:
-            impl_plot.GetAxis(vtkAxis.TOP).AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
-        else:
-            impl_plot.GetAxis(vtkAxis.RIGHT).AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
 
-        # Configurate the number of ticks and labels
-        tick_number = self._pm.get_value("tick_number", self.canvas, axis)
-        vtk_axis.SetNumberOfTicks(tick_number)
+        if ax_idx == 0:
+            tick_number = self._pm.get_value("tick_number", self.canvas, axis)
+            vtk_axis.SetNumberOfTicks(tick_number)
 
     def _refresh_shared_x_axis(self):
         size = self.matrix.GetSize()
@@ -690,8 +650,6 @@ class VTKParser(BackendParserBase):
                 if grid is not None:
                     chart.GetAxis(vtkAxis.BOTTOM).SetGridVisible(grid)
                     chart.GetAxis(vtkAxis.LEFT).SetGridVisible(grid)
-                    chart.GetAxis(vtkAxis.TOP).SetGridVisible(grid)
-                    chart.GetAxis(vtkAxis.RIGHT).SetGridVisible(grid)
 
     def _refresh_legend(self, plot: Plot):
         """Update legend visibility
@@ -899,7 +857,7 @@ class VTKParser(BackendParserBase):
         self._process_ipl_signal_label(signal)
         self._process_ipl_signal_color(signal)
 
-        if isinstance(signal, ArraySignal):
+        if isinstance(signal, SignalXY):
             self._refresh_line_size(signal)
             self._refresh_line_style(signal)
             self._refresh_marker_size(signal)
@@ -923,7 +881,7 @@ class VTKParser(BackendParserBase):
         if signal.label is not None:
             lines.SetLabel(signal.label)
 
-    def _refresh_step_type(self, signal: ArraySignal):
+    def _refresh_step_type(self, signal: SignalXY):
         line = self._signal_impl_shape_lut.get(id(signal))
 
         if not isinstance(line, vtkPlotPoints):
@@ -973,7 +931,7 @@ class VTKParser(BackendParserBase):
         self.refresh_impl_plot_data(
             line, newxs, newys, var_name, bitSequencing)
 
-    def _refresh_line_size(self, signal: ArraySignal):
+    def _refresh_line_size(self, signal: SignalXY):
         line = self._signal_impl_shape_lut.get(id(signal))
         if not isinstance(line, vtkPlot):
             return
@@ -986,7 +944,7 @@ class VTKParser(BackendParserBase):
         if ls is not None:
             pen.SetWidth(ls)
 
-    def _refresh_line_style(self, signal: ArraySignal):
+    def _refresh_line_style(self, signal: SignalXY):
         line = self._signal_impl_shape_lut.get(id(signal))
         if not isinstance(line, vtkPlotPoints):
             return
@@ -1007,7 +965,7 @@ class VTKParser(BackendParserBase):
         elif ls.lower() == "dotted":
             pen.SetLineType(vtkPen.DOT_LINE)
 
-    def _refresh_marker_size(self, signal: ArraySignal):
+    def _refresh_marker_size(self, signal: SignalXY):
         line = self._signal_impl_shape_lut.get(id(signal))
         if not isinstance(line, vtkPlotPoints):
             return
@@ -1019,7 +977,7 @@ class VTKParser(BackendParserBase):
         if signal.marker_size is not None:
             line.SetMarkerSize(ms)
 
-    def _refresh_marker_style(self, signal: ArraySignal):
+    def _refresh_marker_style(self, signal: SignalXY):
         line = self._signal_impl_shape_lut.get(id(signal))
         if not isinstance(line, vtkPlotPoints):
             return
@@ -1133,7 +1091,6 @@ class VTKParser(BackendParserBase):
     def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
         try:
             impl_plot.GetAxis(vtkAxis.LEFT).SetRange(limits[0], limits[1])
-            impl_plot.GetAxis(vtkAxis.RIGHT).SetRange(limits[0], limits[1])
         except AttributeError:
             return
 
