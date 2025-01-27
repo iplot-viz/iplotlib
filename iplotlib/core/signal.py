@@ -37,13 +37,12 @@ class Signal(ABC):
     uid: str = None
     name: str = ''
     label: str = None
-    hi_precision_data: bool = None
+    hi_precision_data: bool = False
     lines = []
     _type: str = None
     parent = None
 
     def __post_init__(self):
-        super().__post_init__()
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
 
     @abstractmethod
