@@ -31,19 +31,19 @@ def get_canvas():
     # Setup the graphics objects for plotting.
     c = Canvas(rows=4, title=os.path.basename(__file__).replace('.py', ''))
 
-    p1 = PlotXY(axes=[LinearAxis(is_date=True), LinearAxis(autoscale=True)])
+    p1 = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis(autoscale=True)]])
     p1.add_signal(s1)
     c.add_plot(p1)
 
-    p2 = PlotXY(axes=[LinearAxis(is_date=True), LinearAxis(autoscale=True)])
+    p2 = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis(autoscale=True)]])
     p2.add_signal(s2)
     c.add_plot(p2)
 
-    p3 = PlotXY(axes=[LinearAxis(is_date=True), LinearAxis(autoscale=True)])
+    p3 = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis(autoscale=True)]])
     p3.add_signal(s3)
     c.add_plot(p3)
 
-    p4 = PlotXY(axes=[LinearAxis(is_date=True), LinearAxis(autoscale=True)])
+    p4 = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis(autoscale=True)]])
     p4.add_signal(s4)
     c.add_plot(p4)
     s4.get_data()

@@ -42,7 +42,7 @@ def get_canvas():
 
             # Setup the graphics objects for plotting.
             c = Canvas(rows=3, title=os.path.basename(__file__).replace('.py', ''))
-            p = PlotXY(axes=[LinearAxis(is_date=True), LinearAxis(autoscale=True)])
+            p = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis(autoscale=True)]])
             p.add_signal(s)
             c.add_plot(p)
 
