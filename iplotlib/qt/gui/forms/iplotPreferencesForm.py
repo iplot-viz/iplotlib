@@ -168,7 +168,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_canvas_max_diff():
-        return IplotPreferencesForm.create_spinbox(min=1, max=60)
+        return IplotPreferencesForm.create_spinbox(min=1, max=3600)
 
     @staticmethod
     def default_linestyle_widget():

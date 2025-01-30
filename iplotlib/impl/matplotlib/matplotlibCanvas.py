@@ -273,10 +273,13 @@ class MatplotlibParser(BackendParserBase):
                 limits = self.get_plot_limits(plot, which='original')
                 begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
                 # Check if it is date and the max difference is 1 second
-                max_diff_ns = self.canvas.max_diff * 1e9
-                if ((begin, end) == (base_begin, base_end) or
-                        ((5e17 < begin < 1e19) and abs(begin - base_begin) <= max_diff_ns and
-                         abs(end - base_end) <= max_diff_ns)):
+                # Need to differentiate if it is absolute or relative
+                if plot.axes[0].is_date:
+                    max_diff_ns = self.canvas.max_diff * 1e9
+                else:
+                    max_diff_ns = self.canvas.max_diff
+                if ((begin, end) == (base_begin, base_end) or (
+                        abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
                     shared.append(axes)
         return shared
 
