@@ -287,7 +287,7 @@ class QtVTKCanvas(IplotQtCanvas):
         self._debug_log_event(event, "")
         self.render()
 
-    def get_vtk_renderer(self) -> QVTKRenderWindowInteractor:
+    def get_renderer(self) -> QVTKRenderWindowInteractor:
         return self._vtk_renderer
 
     def _debug_log_event(self, event, msg: str):

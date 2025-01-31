@@ -4,21 +4,20 @@ from iplotlib.core.plot import Plot
 from iplotlib.impl.vtk.vtkCanvas import VTKParser
 
 
-class VTKParserTesting(unittest.TestCase):
+class ParserTesting(unittest.TestCase):
 
     def setUp(self) -> None:
-
+        super().setUp()
         canvas = Canvas(6, 5)
-        self.vtk_parser = VTKParser()
 
         for c in range(canvas.cols):
             for _ in range(0, canvas.rows, 2):
                 plot = Plot(row_span=2)
                 canvas.add_plot(plot, c)
 
+        self.vtk_parser = VTKParser()
         self.vtk_parser.process_ipl_canvas(canvas)
 
-        return super().setUp()
 
     def test_04_row_inversion_complex(self):
 

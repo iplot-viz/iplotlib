@@ -172,6 +172,30 @@ def regression_test(valid_image_abs_path: str, renWin: vtkRenderWindow, threshol
         return True
 
 
+def regression_test2(test_image_path: str, threshold=0.15) -> bool:
+    test_image_name = os.path.basename(test_image_path)
+    valid_image_name = test_image_name.replace("test", "valid")
+    diff_image_name = test_image_name.replace("test", "diff")
+
+    baseline_dir = os.path.dirname(test_image_path)
+
+    valid_image_path = os.path.join(baseline_dir, valid_image_name)
+    diff_image_path = os.path.join(baseline_dir, diff_image_name)
+
+    if not os.path.exists(valid_image_path):
+        logger.warning(f"Valid image does not exist. Creating {valid_image_path}")
+        shutil.move(test_image_path, valid_image_path)
+        return False
+
+    error, diff = compare_images(read_image(valid_image_path), read_image(test_image_path))
+
+    if error > threshold:
+        write_image(diff_image_path, diff)
+        return False
+    else:
+        os.remove(test_image_path)
+        return True
+
 def step_function(i: int, xs, ys, step_type: str):
     """See [steps-demo](https://matplotlib.org/stable/gallery/lines_bars_and_markers/step_demo.html)
     for meaning of step_type

@@ -132,21 +132,21 @@ class VTKParser(BackendParserBase):
 
     def export_image(self, filename: str, **kwargs):
         super().export_image(filename, **kwargs)
-        renWin = vtkRenderWindow()
-        dpi = kwargs.get("dpi") or 100
-        width_i = kwargs.get("width") or 18.4
-        height_i = kwargs.get("height") or 10.5
-        width = int(dpi * width_i)
-        height = int(dpi * height_i)
-        renWin.SetSize(width, height)
-        self.resize(width, height)
-        renWin.SetDPI(dpi)
-
-        self.view.SetRenderWindow(renWin)
-        renWin.GetInteractor().Initialize()
-        if kwargs.get('canvas'):
-            self.process_ipl_canvas(kwargs.get('canvas'))
-        renWin.GetInteractor().Render()
+        # renWin = vtkRenderWindow()
+        # dpi = kwargs.get("dpi") or 100
+        # width_i = kwargs.get("width") or 18.4
+        # height_i = kwargs.get("height") or 10.5
+        # width = int(dpi * width_i)
+        # height = int(dpi * height_i)
+        # renWin.SetSize(width, height)
+        # self.resize(width, height)
+        # renWin.SetDPI(dpi)
+        #
+        # self.view.SetRenderWindow(renWin)
+        # renWin.GetInteractor().Initialize()
+        # if kwargs.get('canvas'):
+        #     self.process_ipl_canvas(kwargs.get('canvas'))
+        # renWin.GetInteractor().Render()
         vtkImplUtils.screenshot(self.view.GetRenderWindow(), filename)
 
     @staticmethod
@@ -304,8 +304,7 @@ class VTKParser(BackendParserBase):
         for signals in plot.signals.values():
             for signal in signals:
                 if isinstance(signal, SignalXY):
-                    retVal |= self._pm.get_value(
-                        'hi_precision_data', self.canvas, plot, signal=signal)
+                    retVal |= self._pm.get_value(signal, 'hi_precision_data')
         return retVal
 
     def process_ipl_canvas(self, canvas: Canvas):
@@ -452,8 +451,8 @@ class VTKParser(BackendParserBase):
                 vtk_axis.SetTitle(axis.label)
 
             appearance = vtk_axis.GetTitleProperties()  # type: vtkTextProperty
-            fc = self._pm.get_value('font_color', self.canvas, plot, axis)
-            fs = self._pm.get_value('font_size', self.canvas, plot, axis)
+            fc = self._pm.get_value(axis, 'font_color')
+            fs = self._pm.get_value(axis, 'font_size')
             if fc is not None:
                 appearance.SetColor(*vtkImplUtils.get_color3d(fc))
                 logger.debug(f"Ax color: {vtkImplUtils.get_color3d(fc)}")
@@ -470,7 +469,7 @@ class VTKParser(BackendParserBase):
         vtk_axis.AddObserver(vtkChart.UpdateRange, self._axis_update_callback)
 
         if ax_idx == 0:
-            tick_number = self._pm.get_value("tick_number", self.canvas, axis)
+            tick_number = self._pm.get_value(axis, "tick_number")
             vtk_axis.SetNumberOfTicks(tick_number)
 
     def _refresh_shared_x_axis(self):
@@ -646,7 +645,7 @@ class VTKParser(BackendParserBase):
         """
         for chart in self._plot_impl_plot_lut[id(plot)]:
             if isinstance(plot, PlotXY):
-                grid = self._pm.get_value('grid', self.canvas, plot)
+                grid = self._pm.get_value(plot, 'grid')
                 if grid is not None:
                     chart.GetAxis(vtkAxis.BOTTOM).SetGridVisible(grid)
                     chart.GetAxis(vtkAxis.LEFT).SetGridVisible(grid)
@@ -658,13 +657,13 @@ class VTKParser(BackendParserBase):
             plot (Plot): An abstract plot object
         """
         for chart in self._plot_impl_plot_lut[id(plot)]:
-            legend = self._pm.get_value('legend', self.canvas, plot)
+            legend = self._pm.get_value(plot, 'legend')
             chart.SetShowLegend(legend)
             if legend:
-                canvas_leg_position = self._pm.get_value('legend_position', self.canvas)
-                canvas_leg_layout = self._pm.get_value('legend_layout', self.canvas)
-                plot_leg_position = self._pm.get_value('legend_position', self.canvas, plot)
-                plot_leg_layout = self._pm.get_value('legend_layout', self.canvas, plot)
+                canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
+                canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
+                plot_leg_position = self._pm.get_value(plot, 'legend_position')
+                plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
 
                 plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' \
                     else plot_leg_position
@@ -769,8 +768,8 @@ class VTKParser(BackendParserBase):
             if (plot.plot_title is not None) and draw_title:
                 chart.SetTitle(plot.plot_title)
                 appearance = chart.GetTitleProperties()  # type: vtkTextProperty
-                fc = self._pm.get_value('font_color', self.canvas, plot)
-                fs = self._pm.get_value('font_size', self.canvas, plot)
+                fc = self._pm.get_value(plot, 'font_color')
+                fs = self._pm.get_value(plot, 'font_size')
                 if fc is not None:
                     appearance.SetColor(*vtkImplUtils.get_color3d(fc))
                 if fs is not None:
@@ -781,7 +780,7 @@ class VTKParser(BackendParserBase):
         Update plot background color
         """
         for i, chart in enumerate(self._plot_impl_plot_lut[id(plot)]):
-            rgb_color = self.hex_to_rgb(plot.background_color)
+            rgb_color = self.hex_to_rgb(self._pm.get_value(plot, 'background_color'))
             # Set the background color using vtkBrush
             background_brush = vtk.vtkBrush()
             background_brush.SetColorF(rgb_color)
@@ -890,8 +889,7 @@ class VTKParser(BackendParserBase):
             id(signal))
         plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
 
-        step = self._pm.get_value(
-            'step', self.canvas, plot, signal=signal)
+        step = self._pm.get_value(signal, 'step')
         if step is None:
             return
 
@@ -940,7 +938,7 @@ class VTKParser(BackendParserBase):
         plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
         # line style, width if supported by hardware.
         pen = line.GetPen()
-        ls = self._pm.get_value('line_size', self.canvas, plot, signal=signal)
+        ls = self._pm.get_value(signal, 'line_size')
         if ls is not None:
             pen.SetWidth(ls)
 
@@ -953,7 +951,7 @@ class VTKParser(BackendParserBase):
         plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
         # line style, width if supported by hardware.
         pen = line.GetPen()
-        ls = self._pm.get_value('line_style', self.canvas, plot, signal=signal)
+        ls = self._pm.get_value(signal, 'line_style')
         if ls is None:
             return
         elif ls.lower() == "none":
@@ -973,7 +971,7 @@ class VTKParser(BackendParserBase):
             id(signal))
         plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
         # marker style, size
-        ms = self._pm.get_value('marker_size', self.canvas, plot, signal=signal)
+        ms = self._pm.get_value(signal, 'marker_size')
         if signal.marker_size is not None:
             line.SetMarkerSize(ms)
 
@@ -984,17 +982,16 @@ class VTKParser(BackendParserBase):
         chart = self._signal_impl_plot_lut.get(
             id(signal))
         plot = self._impl_plot_cache_table.get_cache_item(chart).plot()
-        marker = self._pm.get_value(
-            'marker', self.canvas, plot, signal=signal)
+        marker = self._pm.get_value(signal, 'marker')
         if marker == 'x':
             line.SetMarkerStyle(vtkMarkerUtilities.CROSS)
         elif marker == '+':
             line.SetMarkerStyle(vtkMarkerUtilities.PLUS)
-        elif marker == "square":
+        elif marker == "s":
             line.SetMarkerStyle(vtkMarkerUtilities.SQUARE)
         elif marker == 'o' or marker == "circle":
             line.SetMarkerStyle(vtkMarkerUtilities.CIRCLE)
-        elif marker == "diamond":
+        elif marker == "d":
             line.SetMarkerStyle(vtkMarkerUtilities.DIAMOND)
 
     def resize(self, w: int, h: int):
@@ -1031,16 +1028,11 @@ class VTKParser(BackendParserBase):
         if hasattr(signal, "color"):
             style['color'] = signal.color
 
-        style['linewidth'] = self._pm.get_value(
-            'line_size', self.canvas, plot, signal=signal) or 1
-        style['linestyle'] = (self._pm.get_value(
-            'line_style', self.canvas, plot, signal=signal) or "Solid").lower()
-        style['marker'] = self._pm.get_value(
-            'marker', self.canvas, plot, signal=signal)
-        style['markersize'] = self._pm.get_value(
-            'marker_size', self.canvas, plot, signal=signal) or 0
-        style["drawstyle"] = self._pm.get_value(
-            'step', self.canvas, plot, signal=signal)
+        style['linewidth'] = self._pm.get_value(signal, 'line_size') or 1
+        style['linestyle'] = (self._pm.get_value(signal, 'line_style') or "Solid").lower()
+        style['marker'] = self._pm.get_value(signal, 'marker')
+        style['markersize'] = self._pm.get_value(signal, 'marker_size') or 0
+        style["drawstyle"] = self._pm.get_value(signal, 'step')
 
         return style
 

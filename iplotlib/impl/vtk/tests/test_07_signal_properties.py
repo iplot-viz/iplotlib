@@ -4,15 +4,17 @@ import unittest
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
-from iplotlib.impl.vtk.utils import regression_test
-from iplotlib.impl.vtk.tests.qVTKAppTestAdapter import QVTKAppTestAdapter
-from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
+from iplotlib.impl.matplotlib.qt import QtMatplotlibCanvas
+from iplotlib.impl.vtk.qt import QtVTKCanvas
+from iplotlib.impl.vtk.utils import regression_test2
+from iplotlib.qt.testing import QAppTestAdapter
+from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless, matplotlib_is_headless
 
 
-class VTKCanvasTesting(QVTKAppTestAdapter):
+class CanvasTesting(QAppTestAdapter):
 
     def setUp(self) -> None:
-
+        super().setUp()
         # A 1col x 6row canvas
         self.core_canvas = Canvas(6, 1, title=os.path.basename(__file__), legend=True, grid=True)
 
@@ -21,9 +23,8 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         y_lo_prec = np.sin(x_lo_prec)
 
         # A plot with 5 signals for color testing
-        colors = ["blue", "chocolate", "orange_red",
-                  "cadmium_yellow", "emerald_green"]
-        plot = PlotXY(title="Color")
+        colors = ["blue", "red", "orange", "yellow", "green"]
+        plot = PlotXY(plot_title="Color")
         for i in range(5):
             signal = SignalXY(
                 label=f"{colors[i]}",
@@ -36,7 +37,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
 
         # A plot with 3 signals for line style testing
         line_styles = ["solid", "dashed", "dotted"]
-        plot = PlotXY(title="LineStyle")
+        plot = PlotXY(plot_title="LineStyle")
         for i in range(3):
             signal = SignalXY(
                 label=f"{line_styles[i]}",
@@ -50,7 +51,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
 
         # A plot with 3 signals for line size testing
         line_sizes = [2, 3, 4]
-        plot = PlotXY(title="LineSize")
+        plot = PlotXY(plot_title="LineSize")
         for i in range(3):
             signal = SignalXY(
                 label=f"LineSize-{line_sizes[i]}",
@@ -63,8 +64,8 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         self.core_canvas.add_plot(plot)
 
         # A plot with 5 signals for marker-style testing
-        markers = ['x', 'o', 'square', 'diamond', 'circle']
-        plot = PlotXY(title="Marker")
+        markers = ['x', 'o', 's', 'd', '+']
+        plot = PlotXY(plot_title="Marker")
         for i in range(5):
             signal = SignalXY(
                 label=f"{markers[i]}",
@@ -78,7 +79,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
 
         # A plot with 3 signals for marker-size testing
         marker_sizes = [8, 12, 14]
-        plot = PlotXY(title="MarkerSize")
+        plot = PlotXY(plot_title="MarkerSize")
         for i in range(3):
             signal = SignalXY(
                 label=f"{marker_sizes[i]}",
@@ -93,7 +94,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
 
         # A plot with 3 signals to test various kind of stepping draw styles
         step_types = [None, "steps-mid", "steps-post", "steps-pre"]
-        plot = PlotXY(title="Step")
+        plot = PlotXY(plot_title="Step")
         for i in range(4):
             signal = SignalXY(
                 label=f"{step_types[i]}",
@@ -106,28 +107,26 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
             plot.add_signal(signal)
         self.core_canvas.add_plot(plot)
 
-        return super().setUp()
-
-    def tearDown(self):
-        return super().tearDown()
-
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
-    def test_07_signal_properties_refresh(self):
-        self.canvas.set_canvas(self.core_canvas)
+    def test_07_signal_properties_visuals_vtk(self):
+        self.canvas = QtVTKCanvas()
+        self.tst_07_signal_properties_visuals()
 
-    @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
-    def test_07_signal_properties_visuals(self):
+    @unittest.skipIf(matplotlib_is_headless(), "Matplotlib was built in headless mode.")
+    def test_07_signal_properties_visuals_matplotlib(self):
+        self.canvas = QtMatplotlibCanvas()
+        self.tst_07_signal_properties_visuals()
 
+    def tst_07_signal_properties_visuals(self):
+        self.canvas.setFixedSize(800, 800)
         self.canvas.set_canvas(self.core_canvas)
         self.canvas.update()
         self.canvas.show()
-        self.canvas.get_vtk_renderer().Initialize()
-        self.canvas.get_vtk_renderer().Render()
 
-        renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
-        valid_image_name = os.path.basename(__file__).replace("test", "valid").replace(".py", ".png")
-        valid_image_path = os.path.join(os.path.join(os.path.dirname(__file__), "baseline"), valid_image_name)
-        self.assertTrue(regression_test(valid_image_path, renWin))
+        test_image_name = f"{self.id().split('.')[-1]}.png"
+        test_image_path = os.path.join(os.path.dirname(__file__), "baseline", test_image_name)
+        self.canvas._parser.export_image(test_image_path, canvas=self.core_canvas)
+        self.assertTrue(regression_test2(test_image_path))
 
 
 if __name__ == "__main__":

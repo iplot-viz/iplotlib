@@ -81,50 +81,51 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
+            # Check if plots share time axis
+            ranges = []
+            plot_stack = []
+
+            if canvas.shared_x_axis:
+                if not self.info_shared_x_dialog:
+                    self.info_shared_x_dialog = True
+                    for row_idx, col in enumerate(canvas.plots, start=1):
+                        for col_idx, plot in enumerate(col, start=1):
+                            if plot:
+                                axis = plot.axes[0]
+                                ranges.append((axis.original_begin, axis.original_end))
+                                plot_stack.append(f"{col_idx}.{row_idx}")
+
+                    dict_ranges = defaultdict(list)
+                    max_diff_ns = canvas.max_diff * 1e9
+                    for idx, uniq_range in enumerate(ranges):
+                        if uniq_range == ranges[0]:
+                            dict_ranges[uniq_range].append(plot_stack[idx])
+                        # If the difference of the ranges is less than 1 second, we consider them equal
+                        elif abs(uniq_range[0] - ranges[0][0]) <= max_diff_ns and abs(
+                                uniq_range[1] - ranges[0][1]) <= max_diff_ns:
+                            dict_ranges[ranges[0]].append(plot_stack[idx])
+                        else:
+                            dict_ranges[uniq_range].append(plot_stack[idx])
+
+                    # If there is more than one element in the dictionary it means that there is more than one time
+                    # range
+                    if len(dict_ranges) > 1:
+                        box = QMessageBox()
+                        box.setIcon(QMessageBox.Icon.Information)
+                        message = "There are plots with different time range:\n"
+                        for i, stacks in enumerate(dict_ranges.values(), start=1):
+                            plots_str = ", ".join(stacks)
+                            message += f"Time range {i}: Plots {plots_str}\n"
+
+                        box.setText(message)
+                        box.exec_()
+            else:
+                self.info_shared_x_dialog = False
 
         self.render()
         super().set_canvas(canvas)
 
-        # Check if plots share time axis
-        ranges = []
-        plot_stack = []
 
-        if canvas.shared_x_axis:
-            if not self.info_shared_x_dialog:
-                self.info_shared_x_dialog = True
-                for row_idx, col in enumerate(canvas.plots, start=1):
-                    for col_idx, plot in enumerate(col, start=1):
-                        if plot:
-                            axis = plot.axes[0]
-                            ranges.append((axis.original_begin, axis.original_end))
-                            plot_stack.append(f"{col_idx}.{row_idx}")
-
-                dict_ranges = defaultdict(list)
-                max_diff_ns = canvas.max_diff * 1e9
-                for idx, uniq_range in enumerate(ranges):
-                    if uniq_range == ranges[0]:
-                        dict_ranges[uniq_range].append(plot_stack[idx])
-                    # If the difference of the ranges is less than 1 second, we consider them equal
-                    elif abs(uniq_range[0] - ranges[0][0]) <= max_diff_ns and abs(
-                            uniq_range[1] - ranges[0][1]) <= max_diff_ns:
-                        dict_ranges[ranges[0]].append(plot_stack[idx])
-                    else:
-                        dict_ranges[uniq_range].append(plot_stack[idx])
-
-                # If there is more than one element in the dictionary it means that there is more than one time
-                # range
-                if len(dict_ranges) > 1:
-                    box = QMessageBox()
-                    box.setIcon(QMessageBox.Icon.Information)
-                    message = "There are plots with different time range:\n"
-                    for i, stacks in enumerate(dict_ranges.values(), start=1):
-                        plots_str = ", ".join(stacks)
-                        message += f"Time range {i}: Plots {plots_str}\n"
-
-                    box.setText(message)
-                    box.exec_()
-        else:
-            self.info_shared_x_dialog = False
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
@@ -358,3 +359,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             for row, row_plot in enumerate(col_plots):
                 if row_plot == plot:
                     return row + 1, column + 1
+
+    def get_renderer(self):
+        return self._mpl_renderer

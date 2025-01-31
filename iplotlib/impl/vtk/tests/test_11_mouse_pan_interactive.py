@@ -7,17 +7,18 @@ from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
-from iplotlib.impl.vtk.utils import regression_test
-from iplotlib.impl.vtk.tests.qVTKAppTestAdapter import QVTKAppTestAdapter
-from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
+from iplotlib.impl.matplotlib.qt import QtMatplotlibCanvas
+from iplotlib.impl.vtk.qt import QtVTKCanvas
+from iplotlib.impl.vtk.utils import regression_test2
+from iplotlib.qt.testing import QAppTestAdapter
+from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless, matplotlib_is_headless
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
 
-class VTKCanvasTesting(QVTKAppTestAdapter):
+class CanvasTesting(QAppTestAdapter):
 
     def setUp(self):
-
         super().setUp()
 
         # A 2col x 3row canvas
@@ -78,52 +79,51 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         # by default horizontal is off
         self.core_canvas.enable_crosshair(horizontal=True)
 
-    def tearDown(self):
-        return super().tearDown()
-
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
-    def test_11_mouse_pan_interactive_refresh(self):
-        self.canvas.set_canvas(self.core_canvas)
+    def test_11_mouse_pan_interactive_visuals_vtk(self):
+        self.canvas = QtVTKCanvas()
+        self.tst_11_mouse_pan_interactive_visuals()
 
-    @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
-    def test_11_mouse_pan_interactive_visuals(self):
+    @unittest.skipIf(matplotlib_is_headless(), "VTK was built in headless mode.")
+    def test_11_mouse_pan_interactive_visuals_matplotlib(self):
+        self.canvas = QtMatplotlibCanvas()
+        self.tst_11_mouse_pan_interactive_visuals()
 
+    def tst_11_mouse_pan_interactive_visuals(self):
+        self.canvas.setFixedSize(800, 800)
         self.canvas.set_canvas(self.core_canvas)
         self.canvas.set_mouse_mode(Canvas.MOUSE_MODE_PAN)
         self.canvas.show()
-        self.canvas.get_vtk_renderer().Initialize()
-        # pan simple
-        QTest.mouseMove(self.canvas.get_vtk_renderer(), QPoint(200, 150))
-        QTest.mousePress(self.canvas.get_vtk_renderer(), Qt.MouseButton.LeftButton,
-                         Qt.KeyboardModifier.NoModifier, QPoint(200, 150))
-        for i in range(200, 0, -1):
-            QTest.mouseMove(self.canvas.get_vtk_renderer(),
-                            QPoint(i, 150 + i * 0.1), delay=1)
-        QTest.mouseRelease(self.canvas.get_vtk_renderer(), Qt.MouseButton.LeftButton,
-                           Qt.KeyboardModifier.NoModifier, QPoint(0, 150))
 
-        renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
-        valid_image_name = os.path.basename(__file__).replace("test", "valid").replace(".py", ".1.png")
-        valid_image_path = os.path.join(os.path.join(os.path.dirname(__file__), "baseline"), valid_image_name)
-        self.assertTrue(regression_test(valid_image_path, renWin))
+        test_image_name = f"{self.id().split('.')[-1]}_1.png"
+        test_image_path = os.path.join(os.path.dirname(__file__), "baseline", test_image_name)
+        self.canvas._parser.export_image(test_image_path, canvas=self.core_canvas)
+        self.assertTrue(regression_test2(test_image_path))
+        # pan simple
+        QTest.mouseMove(self.canvas.get_renderer(), QPoint(200, 150))
+        QTest.mousePress(self.canvas.get_renderer(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                         QPoint(200, 150))
+        QTest.mouseMove(self.canvas.get_renderer(), QPoint(0, 150), delay=1)
+        QTest.mouseRelease(self.canvas.get_renderer(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                           QPoint(0, 150))
+
+        test_image_name = f"{self.id().split('.')[-1]}_2.png"
+        test_image_path = os.path.join(os.path.dirname(__file__), "baseline", test_image_name)
+        self.canvas._parser.export_image(test_image_path, canvas=self.core_canvas)
+        self.assertTrue(regression_test2(test_image_path))
 
         # pan inside a stacked plot
-        QTest.mouseMove(self.canvas.get_vtk_renderer(), QPoint(200, 350))
-        QTest.mousePress(self.canvas.get_vtk_renderer(), Qt.MouseButton.LeftButton,
-                         Qt.KeyboardModifier.NoModifier, QPoint(200, 350))
-        for i in range(200, 0, -1):
-            QTest.mouseMove(self.canvas.get_vtk_renderer(),
-                            QPoint(i, 350 + i * 0.1), delay=1)
-        QTest.mouseRelease(self.canvas.get_vtk_renderer(), Qt.MouseButton.LeftButton,
-                           Qt.KeyboardModifier.NoModifier, QPoint(0, 350))
+        QTest.mouseMove(self.canvas.get_renderer(), QPoint(200, 350))
+        QTest.mousePress(self.canvas.get_renderer(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                         QPoint(200, 350))
+        QTest.mouseMove(self.canvas.get_renderer(), QPoint(0, 350), delay=1)
+        QTest.mouseRelease(self.canvas.get_renderer(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                           QPoint(0, 350))
 
-        renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
-        valid_image_name = os.path.basename(__file__).replace("test", "valid").replace(".py", ".2.png")
-        valid_image_path = os.path.join(os.path.join(os.path.dirname(__file__), "baseline"), valid_image_name)
-        self.assertTrue(regression_test(valid_image_path, renWin))
-
-        # import sys
-        # sys.exit(self.app.exec_())
+        test_image_name = f"{self.id().split('.')[-1]}_3.png"
+        test_image_path = os.path.join(os.path.dirname(__file__), "baseline", test_image_name)
+        self.canvas._parser.export_image(test_image_path, canvas=self.core_canvas)
+        self.assertTrue(regression_test2(test_image_path))
 
 
 if __name__ == "__main__":

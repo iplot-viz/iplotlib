@@ -67,7 +67,7 @@ class MatplotlibParser(BackendParserBase):
         width = kwargs.get("width") or 18.5
         height = kwargs.get("height") or 10.5
 
-        self.figure.set_size_inches(width / dpi, height / dpi)
+        # self.figure.set_size_inches(width / dpi, height / dpi)
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
@@ -340,6 +340,9 @@ class MatplotlibParser(BackendParserBase):
         logger.debug(f"process_ipl_plot AA: {self._pm.get_value(self.canvas, 'step')}")
         super().process_ipl_plot(plot, column, row)
         if not isinstance(plot, Plot):
+            return
+
+        if len(plot.signals.keys()) == 0:
             return
 
         grid_item = self._layout[row: row + plot.row_span, column: column + plot.col_span]  # type: SubplotSpec

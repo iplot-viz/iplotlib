@@ -7,29 +7,28 @@ from iplotlib.impl.vtk.vtkCanvas import VTKParser
 class VTKParserTesting(unittest.TestCase):
 
     def setUp(self) -> None:
+        super().setUp()
+        self.canvas = Canvas(6, 5)
 
-        canvas = Canvas(6, 5)
-        self.vtk_parser = VTKParser()
-
-        for c in range(canvas.cols):
-            for _ in range(canvas.rows):
+        for c in range(self.canvas.cols):
+            for _ in range(self.canvas.rows):
                 plot = Plot()
-                canvas.add_plot(plot, c)
+                self.canvas.add_plot(plot, c)
 
-        self.vtk_parser.process_ipl_canvas(canvas)
+        self.parser = VTKParser()
 
-        return super().setUp()
+        self.parser.process_ipl_canvas(self.canvas)
 
-    def test_03_row_inversion_simple(self):
+    def tst_03_row_inversion_simple_vtk(self):
 
         valid_internal_row_ids = [5, 4, 3, 2, 1, 0]
 
-        for c, column in enumerate(self.vtk_parser.canvas.plots):
+        for c, column in enumerate(self.parser.canvas.plots):
             r = 0
             test_internal_row_ids = []
 
             for plot in column:
-                test_internal_row_ids.append(self.vtk_parser.get_internal_row_id(r, plot))
+                test_internal_row_ids.append(self.parser.get_internal_row_id(r, plot))
                 r += plot.row_span
 
             self.assertListEqual(test_internal_row_ids, valid_internal_row_ids)
