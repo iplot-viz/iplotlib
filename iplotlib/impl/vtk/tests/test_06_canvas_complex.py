@@ -102,6 +102,7 @@ class CanvasTesting(QAppTestAdapter):
         self.tst_06_canvas_complex_visuals()
 
     def tst_06_canvas_complex_visuals(self):
+        self.canvas.setFixedSize(800, 800)
         self.canvas.set_canvas(self.core_canvas)
         self.canvas.update()
         self.canvas.show()
