@@ -54,7 +54,7 @@ class IplotPreferencesForm(QWidget):
         self.layout().addWidget(self.top_label)
         self.layout().addWidget(self.scrollArea)
         self.layout().addWidget(self.applyButton)
-        # self.layout().addWidget(self.resetButton)
+        self.layout().addWidget(self.resetButton)
 
         self.widgetMapper = QDataWidgetMapper(self)
         self.widgetModel = BeanItemModel(self)
@@ -99,8 +99,7 @@ class IplotPreferencesForm(QWidget):
         This encapsulation is done in :data:`~iplotlib.qt.gui.iplotQtCanvasAssembly.IplotQtCanvasAssembly.setCanvasData`
         """
         py_object = idx.data(Qt.ItemDataRole.UserRole)
-        self.widgetModel.setData(
-            QModelIndex(), py_object, BeanItemModel.PyObjectRole)
+        self.widgetModel.setData(QModelIndex(), py_object, BeanItemModel.PyObjectRole)
         self.widgetMapper.toFirst()
 
     @Slot()
@@ -149,7 +148,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_fontsize_widget():
-        return IplotPreferencesForm.create_spinbox(min=0, max=40)
+        return IplotPreferencesForm.create_spinbox(min=0, max=15)
 
     @staticmethod
     def default_linesize_widget():
@@ -157,7 +156,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_markersize_widget():
-        return IplotPreferencesForm.create_spinbox(min=0, max=20)
+        return IplotPreferencesForm.create_spinbox(min=0, max=10)
 
     @staticmethod
     def default_ticknumber_widget():
@@ -166,6 +165,10 @@ class IplotPreferencesForm(QWidget):
     @staticmethod
     def default_contour_levels_widget():
         return IplotPreferencesForm.create_spinbox(min=1, max=10)
+
+    @staticmethod
+    def default_canvas_max_diff():
+        return IplotPreferencesForm.create_spinbox(min=1, max=60)
 
     @staticmethod
     def default_linestyle_widget():

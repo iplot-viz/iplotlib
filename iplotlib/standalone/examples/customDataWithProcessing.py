@@ -4,8 +4,7 @@ Demonstrate usage of iplotlib by plotting simple user-defined data combined with
 
 import numpy as np
 import os
-from iplotlib.core import Canvas, PlotXY
-from iplotlib.interface import IplotSignalAdapter
+from iplotlib.core import Canvas, PlotXY, SignalXY
 
 
 def func(x):
@@ -19,25 +18,37 @@ def get_canvas():
     # 1. s1.x.shape == s1.y.shape == s2.x.shape == s2.y.shape == s3.x.shape == s3.y.shape
     # 2. min(s1.x) == min(s2.x) && min(s3.x)
     # 3. max(s1.x) == max(s2.x) && max(s3.x)
-    s1 = IplotSignalAdapter(name='s1', alias='s1a', data_access_enabled=False, plot_type="PlotXY")
+    s1 = SignalXY(name='s1',
+                  alias='s1a',
+                  data_access_enabled=False,
+                  plot_type="PlotXY")
     s1.set_data([x, func(x)])
 
-    s2 = IplotSignalAdapter(name='s2', alias='s2a', data_access_enabled=False, plot_type="PlotXY")
+    s2 = SignalXY(name='s2',
+                  alias='s2a',
+                  data_access_enabled=False,
+                  plot_type="PlotXY")
     s2.set_data([x, func(x) + 100])
 
-    s3 = IplotSignalAdapter(name='s3', alias='s3a', data_access_enabled=False, plot_type="PlotXY")
+    s3 = SignalXY(name='s3', alias='s3a',
+                  data_access_enabled=False,
+                  plot_type="PlotXY")
     s3.set_data([x, func(x) + 200])
 
-    s4 = IplotSignalAdapter(name='${s1a} + ${s2a} + ${s3a}', data_access_enabled=False, plot_type="PlotXY")
+    s4 = SignalXY(name='${s1a} + ${s2a} + ${s3a}',
+                  data_access_enabled=False,
+                  plot_type="PlotXY")
 
-    s5 = IplotSignalAdapter(name='np.sin(${s1a} + ${s2a} + ${s3a})', data_access_enabled=False, plot_type="PlotXY")
+    s5 = SignalXY(name='np.sin(${s1a} + ${s2a} + ${s3a})',
+                  data_access_enabled=False,
+                  plot_type="PlotXY")
 
     # A little advanced usage of the signal object in the x, y, .. fields
-    s6 = IplotSignalAdapter(name='s6: x=x-10, y=np.sin(y * np.linspace(0, 1, np.size(y))',
-                            x_expr='${self}.time - 10',
-                            y_expr='np.sin(${self}.data * np.linspace(0, 1, np.size(${self}.data)))',
-                            data_access_enabled=False,
-                            plot_type="PlotXY")
+    s6 = SignalXY(name='s6: x=x-10, y=np.sin(y * np.linspace(0, 1, np.size(y))',
+                  x_expr='${self}.time - 10',
+                  y_expr='np.sin(${self}.data * np.linspace(0, 1, np.size(${self}.data)))',
+                  data_access_enabled=False,
+                  plot_type="PlotXY")
     s6.set_data([x, func(x)])
 
     # Setup the graphics objects for plotting.

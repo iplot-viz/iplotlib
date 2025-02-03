@@ -17,15 +17,30 @@ from dataclasses import dataclass
 class Axis:
     """
     Main abstraction of an axis
+
+    Attributes
+    ----------
+    _type : str
+        type of the axis
+    label : str
+        a text to be shown next to an axis
+    font_size : int
+        font size applies both for axis label and axis tick labels
+    font_color : str
+        color applies to an axis label and axis tick labels
+    tick_number : int
+        number of ticks and labels to be shown in the axis
+    autoscale : bool
+        enables automatic scaling of the axis range to fit displayed data if set to True
     """
 
-    label: str = None  #: a text to be shown next to an axis.
-    font_size: int = None  # font size applies both for axis label and axis tick labels.
-    font_color: str = '#000000'  # color applies to an axis label and axis tick labels.
-    tick_number: int = None  #: number of ticks and labels to be shown in a XAxis
-    autoscale: bool = False
-
     _type: str = None
+    label: str = None
+    font_size: int = None
+    font_color: str = None
+    tick_number: int = None
+    autoscale: bool = None
+    parent = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -56,7 +71,19 @@ class Axis:
 class RangeAxis(Axis):
     """
     Expose `begin`, `end` properties of an axis.
+
+    Attributes
+    ----------
+    original_begin : any
+        The initial starting value of the axis range
+    original_end : any
+        The initial ending value of the axis range
+    begin : any
+        The current starting value of the axis range, can be adjusted dynamically if the axis is not autoscaled
+    end : any
+        The current ending value of the axis range, can be adjusted dynamically if the axis is not autoscaled
     """
+
     original_begin: any = None
     original_end: any = None
     begin: any = None
@@ -90,19 +117,29 @@ class RangeAxis(Axis):
         """
         Reset begin and end.
         """
-        self.begin = RangeAxis.begin
-        self.end = RangeAxis.end
         super().reset_preferences()
 
 
 @dataclass
 class LinearAxis(RangeAxis):
     """
-    A specialized range axis to deal with date time properties.
+    A specialized range axis to deal with date time properties
+
+    Attributes
+    ----------
+    is_date : bool
+        suggests that axis should be formatted as date instead of number
+    window : float
+        Implies that instead of using (begin,end) to specify axis range the range is specified by (end-window,end)
+    follow : bool
+        If true plot 'follows' the data which means it is refreshed when new data arrives and range is automatically
+        changed to show new data
     """
 
-    is_date: bool = False  #: suggests that axis should be formatted as date instead of number
-    window: float = None  #: Implies that instead of using (begin,end) to specify axis range the range is specified by
-    # (end-window,end)
-    follow: bool = False  #: If true plot 'follows' the data which means it is refreshed when new data arrives and range
-    # is automatically changed to show new data
+    is_date: bool = False
+    window: float = None
+    follow: bool = False
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.parent = None

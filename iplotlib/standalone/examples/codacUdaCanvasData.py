@@ -35,7 +35,8 @@ def get_canvas():
 
             with open(json_file_path, 'r') as f:
                 data = json.load(f)
-                c = Canvas.from_dict(data)
+                canvas_dict = data.get('main_canvas')
+                c = Canvas.from_dict(canvas_dict)
                 # Set title
                 c.title = os.path.basename(__file__).replace('.py', '')
                 return c

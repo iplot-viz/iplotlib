@@ -7,9 +7,9 @@ import tempfile
 
 from iplotDataAccess.dataAccess import DataAccess
 
-from iplotlib.core import Canvas, PlotXY
+from iplotlib.core import Canvas, PlotXY, SignalXY
 from iplotlib.core.axis import LinearAxis
-from iplotlib.interface import AccessHelper, IplotSignalAdapter
+from iplotlib.interface import AccessHelper
 
 dscfg = """[codacuda]
 conninfo=host=io-ls-udasrv1.iter.org,port=3090
@@ -32,7 +32,7 @@ def get_canvas():
         os.environ.update({'IPLOT_SOURCES_CONFIG': os.path.abspath(fp.name)})
         if da.load_config(fp.name):
             AccessHelper.da = da
-            s = IplotSignalAdapter(
+            s = SignalXY(
                 data_source='codacuda',
                 name='UTIL-HV-S22-BUS1:TOTAL_POWER',
                 ts_start=start_time,
@@ -42,7 +42,7 @@ def get_canvas():
 
             # Setup the graphics objects for plotting.
             c = Canvas(rows=3, title=os.path.basename(__file__).replace('.py', ''))
-            p = PlotXY(axes=[LinearAxis(is_date=True), LinearAxis()])
+            p = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis(autoscale=True)]])
             p.add_signal(s)
             c.add_plot(p)
 

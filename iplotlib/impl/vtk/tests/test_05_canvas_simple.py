@@ -3,7 +3,7 @@ import os
 import unittest
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
-from iplotlib.core.signal import SimpleSignal
+from iplotlib.core.signal import SignalXY
 from iplotlib.impl.vtk.utils import regression_test
 from iplotlib.impl.vtk.tests.qVTKAppTestAdapter import QVTKAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
@@ -16,7 +16,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         self.core_canvas = Canvas(2, 2, title=os.path.basename(__file__))
 
         # A plot in top-left with 1 signal.
-        signal11 = SimpleSignal(label="Signal1.1")
+        signal11 = SignalXY(label="Signal1.1")
         signal11.set_data([np.array([0., 1., 2., 3.]),
                            np.array([0., 1., 2., 3.])])
         plot11 = PlotXY()
@@ -24,7 +24,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         self.core_canvas.add_plot(plot11, 0)
 
         # A plot in bottom-left with 1 signal.
-        signal12 = SimpleSignal(label="Signal1.2")
+        signal12 = SignalXY(label="Signal1.2")
         signal12.set_data([np.array([0., 1., 2., 3.]),
                            np.array([0., 1., 2., 3.])])
         plot12 = PlotXY()
@@ -32,7 +32,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         self.core_canvas.add_plot(plot12, 0)
 
         # A plot in top-right with 1 signal.
-        signal21 = SimpleSignal(label="Signal2.1")
+        signal21 = SignalXY(label="Signal2.1")
         signal21.set_data([np.array([0., 1., 2., 3.]),
                            np.array([0., 1., 2., 3.])])
         plot21 = PlotXY()
@@ -40,7 +40,7 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         self.core_canvas.add_plot(plot21, 1)
 
         # A plot in bottom-right with 1 signal.
-        signal22 = SimpleSignal(label="Signal2.2")
+        signal22 = SignalXY(label="Signal2.2")
         signal22.set_data([np.array([0., 1., 2., 3.]),
                            np.array([0., 1., 2., 3.])])
         plot22 = PlotXY()
@@ -68,10 +68,8 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         self.canvas.get_vtk_renderer().Render()
 
         renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
-        valid_image_name = os.path.basename(__file__).replace(
-            "test", "valid").replace(".py", ".png")
-        valid_image_path = os.path.join(os.path.join(
-            os.path.dirname(__file__), "baseline"), valid_image_name)
+        valid_image_name = os.path.basename(__file__).replace("test", "valid").replace(".py", ".png")
+        valid_image_path = os.path.join(os.path.join(os.path.dirname(__file__), "baseline"), valid_image_name)
         self.assertTrue(regression_test(valid_image_path, renWin))
 
 

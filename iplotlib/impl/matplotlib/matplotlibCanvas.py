@@ -97,7 +97,8 @@ class MatplotlibParser(BackendParserBase):
 
         # Review to implement directly in PlotXY class
         if signal.color is None:
-            signal.color = plot.get_next_color()
+            # It means that the color has been reset but must keep the original color
+            signal.color = signal.original_color
 
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -124,8 +125,12 @@ class MatplotlibParser(BackendParserBase):
                     mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
                 mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
             self.figure.canvas.draw_idle()
+            # Preserve visible status for lines
+            for new, old in zip(plot_lines, signal.lines):
+                for n, o in zip(new, old):
+                    n.set_visible(o.get_visible())
         else:
-            style = self.get_signal_style(signal, plot)
+            style = self.get_signal_style(signal)
             params = dict(**style)
             draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -136,10 +141,7 @@ class MatplotlibParser(BackendParserBase):
                 for i, line in enumerate(plot_lines):
                     line[0].set_label(f"{signal.label}[{i}]")
 
-        for new, old in zip(plot_lines, signal.lines):
-            for n, o in zip(new, old):
-                n.set_visible(o.get_visible())
-            signal.lines = plot_lines
+        signal.lines = plot_lines
 
         return plot_lines
 
@@ -201,43 +203,44 @@ class MatplotlibParser(BackendParserBase):
     def do_mpl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
                                  z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
+        contour_filled = self._pm.get_value(plot, 'contour_filled')
+        legend_format = self._pm.get_value(plot, "legend_format")
+        equivalent_units = self._pm.get_value(plot, "equivalent_units")
+        contour_levels = self._pm.get_value(signal, 'contour_levels')
+        color_map = self._pm.get_value(signal, 'color_map')
+
         if isinstance(plot_lines, QuadContourSet):
             for tp in plot_lines.collections:
                 tp.remove()
-            contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
-            contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
             if contour_filled:
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=signal.color_map)
-                if plot.legend_format == 'in_lines':
-                    if not plot.contour_filled:
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
+                if legend_format == 'in_lines':
+                    if not contour_filled:
                         plt.clabel(plot_lines, inline=1, fontsize=10)
-            if plot.equivalent_units:
+            if equivalent_units:
                 mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
         else:
-            # Will change with the new properties system
-            contour_filled = self._pm.get_value('contour_filled', self.canvas, plot)
-            contour_levels = self._pm.get_value('contour_levels', self.canvas, plot)
             if contour_filled:
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=signal.color_map)
-                if plot.legend_format == 'color_bar':
+                plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
+                if legend_format == 'color_bar':
                     color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
                     color_bar.set_label(z_data.unit, size=self.legend_size)
                 else:
-                    if not plot.contour_filled:
+                    if not contour_filled:
                         plt.clabel(plot_lines, inline=1, fontsize=10)
                 # 2 Legend in line for multiple signal contour in one plot contour
                 # plt.clabel(plot_lines, inline=True)
                 # self.proxies = [Line2D([], [], color=c) for c in ['viridis']]
-            if plot.equivalent_units:
+            if equivalent_units:
                 mpl_axes.set_aspect('equal', adjustable='box')
 
         return plot_lines
@@ -249,7 +252,10 @@ class MatplotlibParser(BackendParserBase):
             plot = cache_item.plot()
         except AttributeError:
             plot = None
-        style = self.get_signal_style(signal, plot)
+
+        style = dict()
+        if isinstance(signal, SignalXY):
+            style = self.get_signal_style(signal)
 
         if shapes is not None:
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
@@ -262,6 +268,8 @@ class MatplotlibParser(BackendParserBase):
                                                      alpha=0.3,
                                                      color=shapes[0][0].get_color(),
                                                      step=STEP_MAP[style['drawstyle']])
+                shapes[0][2].set_visible(shapes[0][0].get_visible())
+
             self.figure.canvas.draw_idle()
 
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
@@ -324,7 +332,11 @@ class MatplotlibParser(BackendParserBase):
                     continue
                 limits = self.get_plot_limits(plot, which='original')
                 begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                if (begin, end) == (base_begin, base_end):
+                # Check if it is date and the max difference is 1 second
+                max_diff_ns = self.canvas.max_diff * 1e9
+                if ((begin, end) == (base_begin, base_end) or
+                        ((5e17 < begin < 1e19) and abs(begin - base_begin) <= max_diff_ns and
+                         abs(end - base_end) <= max_diff_ns)):
                     shared.append(axes)
         return shared
 
@@ -334,7 +346,7 @@ class MatplotlibParser(BackendParserBase):
 
         """
         if canvas is not None:
-            logger.debug(f"ipl_canvas 1: {canvas.step}")
+            logger.debug(f"ipl_canvas 1: {self._pm.get_value(canvas, 'step')}")
         super().process_ipl_canvas(canvas)
         if canvas is None:
             self.canvas = canvas
@@ -371,14 +383,12 @@ class MatplotlibParser(BackendParserBase):
             if stop_drawing:
                 break
 
-        # Update the previous background color at Canvas level
-        self.canvas.prev_background_color = self.canvas.background_color
-
         # 4. Update the title at the top of canvas.
         if canvas.title is not None:
-            if not canvas.font_size:
+            if not self._pm.get_value(self.canvas, 'font_size'):
                 canvas.font_size = None
-            self.figure.suptitle(canvas.title, size=canvas.font_size, color=self.canvas.font_color or 'black')
+            self.figure.suptitle(canvas.title, size=self._pm.get_value(self.canvas, 'font_size'),
+                                 color=self._pm.get_value(self.canvas, 'font_color') or 'black')
 
     def process_ipl_plot_xy(self):
         pass
@@ -387,7 +397,7 @@ class MatplotlibParser(BackendParserBase):
         pass
 
     def process_ipl_plot(self, plot: Plot, column: int, row: int):
-        logger.debug(f"process_ipl_plot AA: {self.canvas.step}")
+        logger.debug(f"process_ipl_plot AA: {self._pm.get_value(self.canvas, 'step')}")
         super().process_ipl_plot(plot, column, row)
         if not isinstance(plot, Plot):
             return
@@ -446,25 +456,15 @@ class MatplotlibParser(BackendParserBase):
                 mpl_axes.set_autoscaley_on(True)
 
                 # Set the plot title
-                if plot.title is not None and stack_id == 0:
-                    fc = self._pm.get_value('font_color', self.canvas, plot) or 'black'
-                    fs = self._pm.get_value('font_size', self.canvas, plot)
+                if plot.plot_title is not None and stack_id == 0:
+                    fc = self._pm.get_value(plot, 'font_color')
+                    fs = self._pm.get_value(plot, 'font_size')
                     if not fs:
                         fs = None
-                    mpl_axes.set_title(plot.title, color=fc, size=fs)
+                    mpl_axes.set_title(plot.plot_title, color=fc, size=fs)
 
                 # Set the background color
-                if self.canvas.background_color != self.canvas.prev_background_color:
-                    mpl_axes.set_facecolor(self.canvas.background_color)
-                    # Refresh background color for each plot
-                    plot.background_color = self.canvas.background_color
-                elif plot.background_color is None:
-                    mpl_axes.set_facecolor(self.canvas.background_color)
-                    plot.background_color = self.canvas.background_color
-                elif plot.background_color != self.canvas.background_color:
-                    mpl_axes.set_facecolor(plot.background_color)
-                else:
-                    mpl_axes.set_facecolor(self.canvas.background_color)
+                mpl_axes.set_facecolor(self._pm.get_value(plot, 'background_color'))
 
                 # If this is a stacked plot the X axis should be visible only at the bottom
                 # plot of the stack except it is focused
@@ -482,8 +482,8 @@ class MatplotlibParser(BackendParserBase):
                         e.set_visible(visible)
 
                 # Show the grid if enabled
-                show_grid = self._pm.get_value('grid', self.canvas, plot)
-                log_scale = self._pm.get_value('log_scale', self.canvas, plot)
+                show_grid = self._pm.get_value(plot, 'grid')
+                log_scale = self._pm.get_value(plot, 'log_scale')
 
                 if show_grid:
                     if log_scale:
@@ -513,24 +513,56 @@ class MatplotlibParser(BackendParserBase):
                     self.update_range_axis(x_axis, 0, mpl_axes, which='original')
 
                 # Show the plot legend if enabled
-                show_legend = self._pm.get_value('legend', self.canvas, plot)
+                show_legend = self._pm.get_value(plot, 'legend')
                 if show_legend and mpl_axes.get_lines():
-                    plot_leg_position = self._pm.get_value('legend_position', self.canvas, plot)
-                    canvas_leg_position = self._pm.get_value('legend_position', self.canvas)
-                    plot_leg_layout = self._pm.get_value('legend_layout', self.canvas, plot)
-                    canvas_leg_layout = self._pm.get_value('legend_layout', self.canvas)
+                    plot_leg_position = self._pm.get_value(plot, 'legend_position')
+                    canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
+                    plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
+                    canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
 
                     plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' \
                         else plot_leg_position
                     plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' \
                         else plot_leg_layout
 
-                    ncols = 1 if plot_leg_layout == 'vertical' else len(signals)
-
                     legend_props = dict(size=self.legend_size)
-                    leg = mpl_axes.legend(prop=legend_props, loc=plot_leg_position, ncol=ncols)
-                    if self.figure.get_tight_layout():
-                        leg.set_in_layout(False)
+
+                    # Legend creation process:
+                    #   - Vertical legend: it has one column, which will be increased until there is no overlapping of
+                    #   lines up to a maximum of 3 columns, (1, 3).
+                    #   - Horizontal legend: the number of columns corresponds to the number of signals contained in the
+                    #   plot. If there is line overlapping, the number of columns will be reduced, (len(signals), 1).
+                    leg_ver = (1, 3)
+                    leg_hor = (len(signals), 1)
+                    # The case is established as follows
+                    case = leg_ver if plot_leg_layout == 'vertical' else leg_hor
+                    start, stop = case
+                    step = 1 if start < stop else -1
+                    leg = None
+                    for col in range(start, stop + step, step):
+                        leg = mpl_axes.legend(prop=legend_props, loc=plot_leg_position, ncol=col)
+                        if self.figure.get_tight_layout():
+                            leg.set_in_layout(False)
+                        # Check if the legend's edges are outside the axes' bounds in the figure
+                        legend_bbox = leg.get_window_extent()
+                        axes_bbox = mpl_axes.get_window_extent()
+                        legend_bbox = legend_bbox.transformed(self.figure.transFigure.inverted())
+                        axes_bbox = axes_bbox.transformed(self.figure.transFigure.inverted())
+                        legend_outside = (
+                                legend_bbox.xmin < axes_bbox.xmin or
+                                legend_bbox.xmax > axes_bbox.xmax or
+                                legend_bbox.ymin < axes_bbox.ymin or
+                                legend_bbox.ymax > axes_bbox.ymax
+                        )
+                        if not legend_outside:
+                            break
+
+                    # Check the text of the legend lines in case there is a '$' to be escaped
+                    for line in leg.texts:
+                        current_text = line.get_text()
+                        if '$' in current_text:
+                            new_text = current_text.replace("$", r"\$")
+                            line.set_text(new_text)
 
                     legend_lines = leg.get_lines()
                     ix_legend = 0
@@ -542,8 +574,6 @@ class MatplotlibParser(BackendParserBase):
                             legend_lines[ix_legend].set_visible(True)
                             legend_lines[ix_legend].set_alpha(alpha)
                             ix_legend += 1
-                # else:
-                # mpl_axes.legend(self.proxies, ['signal name'])
 
         # Observe the axis limit change events
         if not self.canvas.streaming and not isinstance(plot, PlotXYWithSlider):
@@ -621,15 +651,15 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(axis, Axis):
 
             if isinstance(mpl_axis, YAxis):
-                log_scale = self._pm.get_value('log_scale', self.canvas, plot)
+                log_scale = self._pm.get_value(plot, 'log_scale')
                 if log_scale:
                     mpl_axis.axes.set_yscale('log')
                     # Format for minor ticks
                     y_minor = LogLocator(base=10, subs=(1.0,))
                     mpl_axis.set_minor_locator(y_minor)
 
-            fc = self._pm.get_value('font_color', self.canvas, plot, axis) or 'black'
-            fs = self._pm.get_value('font_size', self.canvas, plot, axis)
+            fc = self._pm.get_value(axis, 'font_color')
+            fs = self._pm.get_value(axis, 'font_size')
 
             mpl_axis._font_color = fc
             mpl_axis._font_size = fs
@@ -652,7 +682,7 @@ class MatplotlibParser(BackendParserBase):
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
             # autoscale = self._pm.get_value('autoscale', axis)
-            if axis.autoscale and ax_idx == 1:
+            if self._pm.get_value(axis, 'autoscale') and ax_idx == 1:
                 self.autoscale_y_axis(impl_plot)
             else:
                 logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
@@ -663,7 +693,7 @@ class MatplotlibParser(BackendParserBase):
                 NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, roundh=self.canvas.round_hour))
 
         # Configurate number of ticks and labels
-        tick_number = self._pm.get_value("tick_number", self.canvas, axis)
+        tick_number = self._pm.get_value(axis, 'tick_number')
         mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
     @BackendParserBase.run_in_one_thread
@@ -716,6 +746,9 @@ class MatplotlibParser(BackendParserBase):
             lo, hi = impl_plot.get_xlim()
             y_displayed = yd[((xd > lo) & (xd < hi))]
             if len(y_displayed) > 0:
+                # Check if there exist NaN values in the y_displayed array
+                if np.isnan(y_displayed).any():
+                    y_displayed = y_displayed[~np.isnan(y_displayed)]
                 h = np.max(y_displayed) - np.min(y_displayed)
                 min_bot = np.min(y_displayed) - margin * h
                 max_top = np.max(y_displayed) + margin * h
@@ -806,9 +839,9 @@ class MatplotlibParser(BackendParserBase):
 
             self._cursors.append(
                 IplotMultiCursor(self.figure.canvas, axes_group,
-                                 x_label=self.canvas.enable_Xlabel_crosshair,
-                                 y_label=self.canvas.enable_Ylabel_crosshair,
-                                 val_label=self.canvas.enable_ValLabel_crosshair,
+                                 x_label=self.canvas.enable_x_label_crosshair,
+                                 y_label=self.canvas.enable_y_label_crosshair,
+                                 val_label=self.canvas.enable_val_label_crosshair,
                                  color=self.canvas.crosshair_color,
                                  lw=self.canvas.crosshair_line_width,
                                  horiz_on=False or self.canvas.crosshair_horizontal,
@@ -822,19 +855,17 @@ class MatplotlibParser(BackendParserBase):
             cursor.remove()
         self._cursors.clear()
 
-    def get_signal_style(self, signal: Signal, plot: Plot = None):
+    def get_signal_style(self, signal: SignalXY) -> dict:
         style = dict()
-
         if signal.label:
             style['label'] = signal.label
         if hasattr(signal, "color"):
-            style['color'] = signal.color
-
-        style['linewidth'] = self._pm.get_value('line_size', self.canvas, plot, signal=signal) or 1
-        style['linestyle'] = (self._pm.get_value('line_style', self.canvas, plot, signal=signal) or "Solid").lower()
-        style['marker'] = self._pm.get_value('marker', self.canvas, plot, signal=signal)
-        style['markersize'] = self._pm.get_value('marker_size', self.canvas, plot, signal=signal) or 0
-        step = self._pm.get_value('step', self.canvas, plot, signal=signal)
+            style['color'] = self._pm.get_value(signal, 'color')
+        style['linewidth'] = self._pm.get_value(signal, 'line_size')
+        style['linestyle'] = (self._pm.get_value(signal, 'line_style')).lower()
+        style['marker'] = self._pm.get_value(signal, 'marker')
+        style['markersize'] = self._pm.get_value(signal, 'marker_size')
+        step = self._pm.get_value(signal, 'step')
         if step is None:
             step = 'linear'
         style["drawstyle"] = STEP_MAP[step]

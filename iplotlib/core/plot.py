@@ -14,57 +14,106 @@ from typing import Dict, List, Collection, Union
 
 from iplotlib.core.axis import Axis, LinearAxis
 from matplotlib.widgets import Slider
-from iplotlib.core.signal import Signal, SignalXY
+from iplotlib.core.signal import Signal, SignalXY, SignalContour
 
 
 @dataclass
 class Plot(ABC):
     """
     Main abstraction of a Plot
+
+    Attributes
+    ----------
+    row_span : int
+        nº of rows of canvas grid that this plot will span
+    col_span : int
+        nº of columns of canvas grid that this plot will span
+    plot_title : str
+        a plot title text, will be shown above the plot
+    axes : List[Union[Axis, List[Axis]]]
+        the plot axes
+    signals : Dict[int, List[Signal]]
+        the signals drawn in this plot
+    background_color : str
+        indicate background color of the plot
+    legend : bool
+        indicate if the plot legend must be shown
+    legend_position : str
+        indicate the location of the plot legend
+    legend_layout : str
+        indicate the layout of the plot legend
+    grid : bool
+        indicate if the grid must be drawn
+    log_scale : bool
+        A boolean that represents the log scale
+    _type : str
+        type of the plot
     """
 
-    row_span: int = 1  #: nº of rows of canvas grid that this plot will span
-    col_span: int = 1  #: nº of columns of canvas grid that this plot will span
-    title: str = None  #: a plot title text, will be shown above the plot
-    axes: List[Union[Axis, List[Axis]]] = None  #: the plot axes.
-    signals: Dict[int, List[Signal]] = None  #: the signals drawn in this plot
+    row_span: int = 1
+    col_span: int = 1
+    plot_title: str = None
+    axes: List[Union[LinearAxis, List[LinearAxis]]] = None
+    signals: Dict[int, List[Signal]] = None
+    legend: bool = None
+    legend_position: str = None
+    legend_layout: str = None
+    background_color: str = None
+    grid: bool = None
+    log_scale: bool = None
     _type: str = None
-    font_size: int = None  #: the font size of the plot title text
-    font_color: str = '#000000'  #: the font color of the plot title text
-    background_color: str = '#FFFFFF'
-    tick_number: int = None
-    legend: bool = None  #: indicate if the plot legend must be shown
-    legend_position: str = 'same as canvas'  #: indicate the location of the plot legend
-    legend_layout: str = 'same as canvas'  #: indicate the layout of the plot legend
+    parent = None
+    font_size: int = None
+    font_color: str = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.signals is None:
             self.signals = {}
+        if self.axes is None:
+            self.axes = [LinearAxis(), [LinearAxis()]]
+
+        self.axes[0].parent = self
+        for axe in self.axes[1]:
+            axe.parent = self
 
     def add_signal(self, signal, stack: int = 1):
+        signal.parent = self
         if stack not in self.signals:
             self.signals[stack] = []
         self.signals[stack].append(signal)
 
     def reset_preferences(self):
+        self.plot_title = Plot.plot_title
         self.legend = Plot.legend
         self.legend_position = Plot.legend_position
         self.legend_layout = Plot.legend_layout
+        self.background_color = Plot.background_color
+        self.grid = Plot.grid
+        self.log_scale = Plot.log_scale
         self.font_size = Plot.font_size
         self.font_color = Plot.font_color
-        self.background_color = Plot.background_color
-        self.tick_number = Plot.tick_number
+        # Reset axis and signal preferences
+        self.axes[0].reset_preferences()
+        for axe in self.axes[1]:
+            axe.reset_preferences()
+        for stack in self.signals.values():
+            for signal in stack:
+                if isinstance(signal, SignalXY):
+                    signal.reset_preferences()
+                elif isinstance(signal, SignalContour):
+                    signal.reset_preferences()
 
     def merge(self, old_plot: 'Plot'):
-        self.title = old_plot.title
+        self.plot_title = old_plot.plot_title
         self.legend = old_plot.legend
         self.legend_position = old_plot.legend_position
         self.legend_layout = old_plot.legend_layout
         self.font_size = old_plot.font_size
         self.font_color = old_plot.font_color
         self.background_color = old_plot.background_color
-        self.tick_number = old_plot.tick_number
+        self.grid = old_plot.grid
+        self.log_scale = old_plot.log_scale
 
         for idxAxis, axis in enumerate(self.axes):
             if axis and idxAxis < len(old_plot.axes):
@@ -83,32 +132,98 @@ class Plot(ABC):
 
 @dataclass
 class PlotContour(Plot):
-    grid: bool = None
-    contour_levels: int = 10
-    contour_filled: bool = False  # Set if the plot is filled or not
-    legend_format: str = 'color_bar'
-    equivalent_units: bool = False  # Set the aspect ratio of the graphic
+    """
+    A concrete Plot class specialized for contour
+
+    Attributes
+    ----------
+
+    """
+    signals: Dict[int, List[SignalContour]] = None
+    contour_filled: bool = None  # Set if the plot is filled or not
+    legend_format: str = None
+    equivalent_units: bool = None  # Set the aspect ratio of the graphic
+    color_map: str = None
+    contour_levels: int = None
 
     def __post_init__(self):
         super().__post_init__()
-        if self.axes is None:
-            self.axes = [LinearAxis(), LinearAxis()]
 
     def reset_preferences(self):
-        self.grid = PlotContour.grid
-        self.contour_levels = PlotContour.contour_levels
+        super().reset_preferences()
         self.contour_filled = PlotContour.contour_filled
         self.legend_format = PlotContour.legend_format
         self.equivalent_units = PlotContour.equivalent_units
-        super().reset_preferences()
+        self.color_map = PlotContour.color_map
+        self.contour_levels = PlotContour.contour_levels
 
     def merge(self, old_plot: 'PlotContour'):
-        self.grid = old_plot.grid
-        self.contour_levels = old_plot.contour_levels
+        super().merge(old_plot)
         self.contour_filled = old_plot.contour_filled
         self.legend_format = old_plot.legend_format
         self.equivalent_units = old_plot.equivalent_units
+        self.color_map = old_plot.color_map
+        self.contour_levels = old_plot.contour_levels
+
+
+@dataclass
+class PlotXY(Plot):
+    """
+    A concrete Plot class specialized for 2D plotting
+
+    Attributes
+    ----------
+    _color_cycle : List[str]
+        A list of colors for cycling through plot lines, ensuring variety in signal colors
+    _color_index : int
+        Current index within the color cycle for assigning a new color
+    """
+
+    _color_cycle = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
+                    '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',
+                    '#e6ff33', '#8a2be2', '#000080', '#cc6600']
+    _color_index: int = 0
+    signals: Dict[int, List[SignalXY]] = None
+    line_style: str = None
+    line_size: int = None
+    marker: str = None
+    marker_size: int = None
+    step: str = None
+
+    def __post_init__(self):
+        super().__post_init__()
+
+    def add_signal(self, signal, stack: int = 1):
+        super().add_signal(signal, stack)
+        if signal.color is None:
+            color = self.get_next_color()
+            signal.color = color
+            signal.original_color = color
+
+    def get_next_color(self):
+        position = self._color_index % len(self._color_cycle)
+        color_signal = self._color_cycle[position]
+        self._color_index += 1
+
+        return color_signal
+
+    def reset_preferences(self):
+        super().reset_preferences()
+        self._color_index = PlotXY._color_index
+        self.line_style = PlotXY.line_style
+        self.line_size = PlotXY.line_size
+        self.marker = PlotXY.marker
+        self.marker_size = PlotXY.marker_size
+        self.step = PlotXY.step
+
+    def merge(self, old_plot: 'PlotXY'):
         super().merge(old_plot)
+        self._color_index = old_plot._color_index
+        self.line_style = old_plot.line_style
+        self.line_size = old_plot.line_size
+        self.marker = old_plot.marker
+        self.marker_size = old_plot.marker_size
+        self.step = old_plot.step
 
 
 @dataclass
@@ -130,71 +245,6 @@ class PlotImage(Plot):
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotImage'):
-        super().merge(old_plot)
-
-
-@dataclass
-class PlotXY(Plot):
-    """
-    A concrete Plot class specialized for 2D plottling.
-    """
-
-    log_scale: bool = None  # indicate the log scale
-    grid: bool = None  #: indicate if the grid must be drawn
-    line_style: str = None  #: set the line style of all signals.
-    line_size: int = None  #: set the line size of all signals.
-    marker: str = None  #: set the marker shape of all signals.
-    marker_size: int = None  #: set the marker size of all signals.
-    step: str = None  #: indicate if the step function of the data must be plotted for all signals.Ex: 'steps-post',
-    # 'steps-mid', 'steps-pre', 'None'
-    hi_precision_data: bool = None  #: indicate whether the data is sensitive to round off errors and requires
-    # special handling
-    dec_samples: int = None  #: DEPRECATED Nº of samples for each signal. Forwarded to data-access module.
-
-    _color_cycle = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
-                    '#bcbd22', '#17becf', '#ff5733', '#7f00ff', '#33ff57', '#5733ff', '#ff33e6', '#17becf',
-                    '#e6ff33', '#8a2be2', '#000080', '#cc6600']
-    _color_index: int = None
-    signals: Dict[int, List[SignalXY]] = None
-
-    def __post_init__(self):
-        super().__post_init__()
-        if self.axes is None:
-            self.axes = [LinearAxis(), [LinearAxis()]]
-        self._color_index = 0
-
-    def get_next_color(self):
-        position = self._color_index % len(self._color_cycle)
-        color_signal = self._color_cycle[position]
-        self._color_index += 1
-
-        return color_signal
-
-    # Review: Implement the method directly in this class
-    def add_signal(self, signal, stack: int = 1):
-        super().add_signal(signal, stack)
-        if signal.color is None:
-            signal.color = self.get_next_color()
-
-    def reset_preferences(self):
-        self.log_scale = PlotXY.log_scale
-        self.grid = PlotXY.grid
-        self.line_style = PlotXY.line_style
-        self.line_size = PlotXY.line_size
-        self.marker = PlotXY.marker
-        self.marker_size = PlotXY.marker_size
-        self.step = PlotXY.step
-        super().reset_preferences()
-
-    def merge(self, old_plot: 'PlotXY'):
-        self.log_scale = old_plot.log_scale
-        self.grid = old_plot.grid
-        self.line_style = old_plot.line_style
-        self.line_size = old_plot.line_size
-        self.marker = old_plot.marker
-        self.marker_size = old_plot.marker_size
-        self.step = old_plot.step
-        self._color_index = old_plot._color_index
         super().merge(old_plot)
 
 @dataclass

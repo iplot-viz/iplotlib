@@ -434,22 +434,15 @@ class VTK64BitTimePlotSupport:
         xAxis.SetNumberOfTicks(6)
         xAxis.SetTickLabelAlgorithm(vtkAxis.TICK_SIMPLE)
 
-        # Top ticks
-        xAxis_top = chart.GetAxis(vtkAxis.TOP)  # type: vtkAxis
-        xAxis_top.SetCustomTickPositions(None, None)
-        xAxis_top.SetNumberOfTicks(6)
-        xAxis_top.SetTickLabelAlgorithm(vtkAxis.TICK_SIMPLE)
-
         self.compute_offset_value(chart)
 
         xAxis.Update()
-        xAxis_top.Update()
-        tickPositionsVtkArr = xAxis.GetTickPositions()
-        tickPositionsNpArr = numpy_support.vtk_to_numpy(tickPositionsVtkArr)
+        tick_positions_vtk_arr = xAxis.GetTickPositions()
+        tick_positions_np_arr = numpy_support.vtk_to_numpy(tick_positions_vtk_arr)
         tss = []
 
         logger.debug(f"TimeStamp | Tick Position | time")
-        for pos in tickPositionsNpArr:
+        for pos in tick_positions_np_arr:
             t = self.transformValue(pos)
             if t < 0:
                 t = 0
@@ -470,19 +463,19 @@ class VTK64BitTimePlotSupport:
         tickLabelFmt = "%Y-%m-%dT%H:%M:%S.%f.nano"
         if uniq_year:
             prefixFmt += "%Y-"
-            removeSuffix = ":%S.%f.nano"
+            removeSuffix = "T%H:%M:%S.%f.nano"
             if uniq_month:
                 prefixFmt += "%m-"
-                removeSuffix = ".%f.nano"
+                removeSuffix = ":%M:%S.%f.nano"
                 if uniq_day:
                     prefixFmt += "%dT"
-                    removeSuffix = ".nano"
+                    removeSuffix = ":%S.%f.nano"
                     if uniq_hour:
                         prefixFmt += "%H:"
-                        removeSuffix = ".nano"
+                        removeSuffix = ".%f.nano"
                         if uniq_minute:
                             prefixFmt += "%M:"
-                            removeSuffix = ""
+                            removeSuffix = ".nano"
                             if uniq_second:
                                 prefixFmt += "%S."
                                 removeSuffix = ""
@@ -499,24 +492,16 @@ class VTK64BitTimePlotSupport:
         tick_labels = vtkStringArray()
         for ts in tss:
             tick_label = ts.strftime(tickLabelFmt)
-            # Check if the round hour option is enabled
-            if xAxis.GetBehavior() == 1 and 'T' in tick_label:
-                # Implemented rounding only at the hour level, so the separator must be in that exact position
-                if tick_label[2] == 'T' or tick_label[5] == 'T':
-                    tick_label = self.round_hour(tick_label)
-            tick_label = tick_label.replace("nano",
-                                            str(ts.nanosecond).zfill(3))
+            tick_label = tick_label.replace("nano", str(ts.nanosecond).zfill(3))
             tick_labels.InsertNextValue(tick_label)
 
-        xAxis.SetCustomTickPositions(tickPositionsVtkArr, tick_labels)
-        xAxis_top.SetCustomTickPositions(tickPositionsVtkArr, tick_labels)
+        xAxis.SetCustomTickPositions(tick_positions_vtk_arr, tick_labels)
         try:
             xAxis.SetTitle(tss[0].strftime(prefixFmt))
         except IndexError:
             logger.critical(f"There is no data for chart. Setting xAxis title to 'X Axis'")
             xAxis.SetTitle('X Axis')
         xAxis.Update()
-        xAxis_top.Update()
 
     @staticmethod
     def round_hour(ret):

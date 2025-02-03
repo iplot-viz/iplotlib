@@ -98,7 +98,7 @@ class StatusInfo:
 @dataclass
 class IplotSignalAdapter(ProcessingSignal):
     """
-    This is an adapter class that is the culmination of two crucial classes in the iplotlib framework.
+        This is an adapter class that is the culmination of two crucial classes in the iplotlib framework.
         Its purpose is to make ProcessingSignal interface compatible with the ArraySignal interface.
 
         Warning: Consider this class as a frozen blueprint, i.e, do not expect it to be consistent once
@@ -123,7 +123,7 @@ class IplotSignalAdapter(ProcessingSignal):
     status_info: StatusInfo = None
     data_access_enabled: bool = True
     processing_enabled: bool = True
-    time_out_value: float = 60  # Unimplemented ---> REVIEW: purpose of this attribute?
+    time_out_value: float = 60  # Unimplemented  ---> REVIEW: purpose of this attribute?
 
     def __post_init__(self):
         super().__init__()
@@ -706,7 +706,11 @@ class AccessHelper:
             signal.isDownsampled = result['isds']
         except Exception as e:
             # Indicate failure with message.
-            signal.set_da_fail(msg=str(e))
+            if signal.pulse_nb:
+                message = f"{e} for the signal: {signal.name} within the pulse: {signal.pulse_nb}"
+            else:
+                message = f"{e} for the signal: {signal.name}"
+            signal.set_da_fail(msg=message)
             return
 
         # finalize function after fetch.

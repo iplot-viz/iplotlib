@@ -162,8 +162,7 @@ def regression_test(valid_image_abs_path: str, renWin: vtkRenderWindow, threshol
         shutil.move(test_image_path, valid_image_abs_path)
         return False
 
-    error, diff = compare_images(read_image(
-        valid_image_abs_path), read_image(test_image_path))
+    error, diff = compare_images(read_image(valid_image_abs_path), read_image(test_image_path))
 
     if error > threshold:
         write_image(diff_image_path, diff)
