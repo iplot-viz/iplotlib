@@ -67,7 +67,7 @@ class MatplotlibParser(BackendParserBase):
         width = kwargs.get("width") or 18.5
         height = kwargs.get("height") or 10.5
 
-        # self.figure.set_size_inches(width / dpi, height / dpi)
+        self.figure.set_size_inches(width / dpi, height / dpi)
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
