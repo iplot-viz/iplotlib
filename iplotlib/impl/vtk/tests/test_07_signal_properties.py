@@ -19,7 +19,7 @@ class CanvasTesting(QAppTestAdapter):
         self.core_canvas = Canvas(6, 1, title=os.path.basename(__file__), legend=True, grid=True)
 
         n_samples = 10
-        x_lo_prec = np.linspace(0, 2 * np.math.pi, n_samples, dtype=np.float32)
+        x_lo_prec = np.linspace(0, 2 * np.pi, n_samples, dtype=np.float32)
         y_lo_prec = np.sin(x_lo_prec)
 
         # A plot with 5 signals for color testing

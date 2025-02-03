@@ -74,7 +74,6 @@ class CanvasTesting(QAppTestAdapter):
         plot22.add_signal(signal22)
         self.core_canvas.add_plot(plot22, 1)
 
-        
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
     def test_06_canvas_complex_refresh_vtk(self):
         self.canvas = QtVTKCanvas()
@@ -110,7 +109,6 @@ class CanvasTesting(QAppTestAdapter):
         valid_image_path = os.path.join(os.path.dirname(__file__), "baseline", valid_image_name)
         self.canvas._parser.export_image(valid_image_path, canvas=self.core_canvas)
         self.assertTrue(regression_test2(valid_image_path))
-
 
 
 if __name__ == "__main__":
