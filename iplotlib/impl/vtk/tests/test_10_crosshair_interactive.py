@@ -3,18 +3,21 @@ import os
 import unittest
 
 from iplotlib.core.axis import LinearAxis
+from PySide6.QtGui import Qt
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
-from iplotlib.impl.vtk.utils import regression_test
-from iplotlib.impl.vtk.tests.qVTKAppTestAdapter import QVTKAppTestAdapter
-from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
+from iplotlib.impl.matplotlib.qt import QtMatplotlibCanvas
+from iplotlib.impl.vtk.qt import QtVTKCanvas
+from iplotlib.impl.vtk.utils import regression_test2
+from iplotlib.qt.testing import QAppTestAdapter
+from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless, matplotlib_is_headless
 from PySide6.QtCore import QPoint
 from PySide6.QtTest import QTest
 
 
-class VTKCanvasTesting(QVTKAppTestAdapter):
+class CanvasTesting(QAppTestAdapter):
 
     def setUp(self):
         super().setUp()
@@ -77,29 +80,31 @@ class VTKCanvasTesting(QVTKAppTestAdapter):
         # by default horizontal is off
         self.core_canvas.enable_crosshair(horizontal=True)
 
-    def tearDown(self):
-        return super().tearDown()
-
     @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
-    def test_10_crosshair_refresh(self):
-        self.canvas.set_canvas(self.core_canvas)
+    def test_10_crosshair_visuals_vtk(self):
+        self.canvas = QtVTKCanvas()
+        self.tst_10_crosshair_visuals()
 
-    @unittest.skipIf(vtk_is_headless(), "VTK was built in headless mode.")
-    def test_10_crosshair_visuals(self):
+    @unittest.skipIf(matplotlib_is_headless(), "Matplotlib was built in headless mode.")
+    def test_10_crosshair_visuals_matplotlib(self):
+        self.canvas = QtMatplotlibCanvas()
+        self.tst_10_crosshair_visuals()
+
+    def tst_10_crosshair_visuals(self):
+        self.canvas.setFixedSize(800, 800)
         self.canvas.set_canvas(self.core_canvas)
         self.canvas.set_mouse_mode(Canvas.MOUSE_MODE_CROSSHAIR)
         self.canvas.show()
+        self.canvas.get_renderer().setMouseTracking(True)
+        QTest.mousePress(self.canvas.get_renderer(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                         QPoint(400, 150))
 
-        QTest.mouseMove(self.canvas.get_vtk_renderer(), QPoint(400, 150), delay=1)
-        self.app.processEvents()
+        QTest.mouseMove(self.canvas.get_renderer(), QPoint(400, 150), delay=1)
 
-        renWin = self.canvas.get_vtk_renderer().GetRenderWindow()
-        valid_image_name = os.path.basename(__file__).replace("test", "valid").replace(".py", ".png")
-        valid_image_path = os.path.join(os.path.join(os.path.dirname(__file__), "baseline"), valid_image_name)
-        self.assertTrue(regression_test(valid_image_path, renWin))
-
-        # import sys
-        # sys.exit(self.app.exec_())
+        test_image_name = f"{self.id().split('.')[-1]}.png"
+        test_image_path = os.path.join(os.path.dirname(__file__), "baseline", test_image_name)
+        self.canvas._parser.export_image(test_image_path, canvas=self.core_canvas)
+        self.assertTrue(regression_test2(test_image_path))
 
 
 if __name__ == "__main__":
