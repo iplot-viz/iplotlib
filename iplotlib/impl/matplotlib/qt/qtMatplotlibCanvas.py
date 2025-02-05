@@ -57,7 +57,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._vlayout.setContentsMargins(QMargins())
         self._vlayout.addWidget(self._mpl_renderer)
 
-        # GUI event handlers 
+        # GUI event handlers
         self._mpl_renderer.mpl_connect('draw_event', self._mpl_draw_finish)
         self._mpl_renderer.mpl_connect('button_press_event', self._mpl_mouse_press_handler)
         self._mpl_renderer.mpl_connect('button_release_event', self._mpl_mouse_release_handler)
@@ -70,6 +70,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     # Implement basic superclass functionality
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
+        super().set_canvas(canvas)
 
         prev_canvas = self._parser.canvas
 
@@ -81,9 +82,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
+        else:
+            self.render()
+            return
 
         self.render()
-        super().set_canvas(canvas)
 
         # Check if plots share time axis
         ranges = []
@@ -301,13 +304,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 return
             if self._parser._impl_plot_cache_table.get_cache_item(event.inaxes):
                 return
-
-            pos = event.inaxes.figure.axes.index(event.inaxes)
-            ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes.figure.axes[pos + 1])
-            plot = ci.plot()
-            for row in plot.signals.values():
-                for signal in row:
-                    self._parser.process_ipl_signal(signal)
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.text() == 'n':
