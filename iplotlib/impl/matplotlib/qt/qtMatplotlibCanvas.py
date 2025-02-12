@@ -16,6 +16,7 @@ from PySide6.QtCore import QMargins, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
 
+import matplotlib.pyplot as plt
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -26,6 +27,7 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
+from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
@@ -41,6 +43,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
+        self._marker_window = IplotQtMarker()
+        self._marker_window.dropMarker.connect(self.draw_marker_label)
+        self._marker_window.deleteMarker.connect(self.delete_marker_label)
 
         self.info_shared_x_dialog = False
 
@@ -138,6 +143,28 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Gets current iplotlib canvas"""
         return self._parser.canvas
 
+    def draw_marker_label(self, marker_name, ax, xy):
+        # Add annotation to the corresponding axis
+        ax.annotate(text=marker_name,
+                    xy=xy,
+                    xytext=(xy[0], xy[1] + 0.1))
+        # bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor="white")
+
+        # Show labels
+        self._parser.figure.canvas.draw()
+
+    def delete_marker_label(self, ax):
+        # Get annotations from the axis
+        annotations = [child for child in ax.get_children() if isinstance(child, plt.Annotation)]
+
+        # Remove annotations
+        if annotations:
+            for annotation in annotations:
+                annotation.remove()
+
+            # Hide labels
+            self._parser.figure.canvas.draw()
+
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
 
@@ -158,6 +185,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self._mpl_toolbar.pan()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
             self._mpl_toolbar.zoom()
+        elif mode == Canvas.MOUSE_MODE_MARKER:
+            if not self._marker_window.isVisible():
+                self._marker_window.show()
+            elif self._marker_window.isMinimized():
+                self._marker_window.showNormal()
+            else:
+                self._marker_window.raise_()
+                self._marker_window.activateWindow()
 
     def undo(self):
         self._parser.undo()
@@ -216,7 +251,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 self._refresh_original_ranges = False
                 self.refresh()
                 self._refresh_original_ranges = True
-            elif self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+            elif self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN] and event.button == MouseButton.RIGHT:
                 mpl_axes = event.inaxes
                 if not isinstance(mpl_axes, MPLAxes):
                     return
@@ -243,6 +278,29 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self.push_view_lim_cmd()
 
                 self.render()
+            elif self._mmode in [Canvas.MOUSE_MODE_CROSSHAIR, Canvas.MOUSE_MODE_ZOOM,
+                                 Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER] and event.button == MouseButton.LEFT:
+                mpl_axes = event.inaxes
+                if not isinstance(mpl_axes, MPLAxes):
+                    return
+                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+                if not hasattr(ci, 'plot'):
+                    return
+                plot = ci.plot()
+                x_value = event.xdata
+                y_value = event.ydata
+                new_marker, relative_marker, marker_signal = self._parser.add_marker_scaled(mpl_axes, plot, x_value,
+                                                                                            y_value)
+                if new_marker is not None and new_marker not in self._marker_window.get_markers():
+                    # Check if the coordinates of the marker are correct and if the marker has not already been created
+                    self._marker_window.add_marker(mpl_axes, marker_signal, new_marker, relative_marker)
+                    if not self._marker_window.isVisible():
+                        self._marker_window.show()
+                    elif self._marker_window.isMinimized():
+                        self._marker_window.showNormal()
+                    else:
+                        self._marker_window.raise_()
+                        self._marker_window.activateWindow()
             else:
                 self._parser.set_focus_plot(None)
                 self._refresh_original_ranges = False

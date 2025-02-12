@@ -61,7 +61,7 @@ class Signal(ABC):
         self.label = self.label
 
     def merge(self, old_signal: 'Signal'):
-        self.label = old_signal.label
+        pass
 
 
 @dataclass

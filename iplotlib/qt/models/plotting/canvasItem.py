@@ -28,7 +28,7 @@ class CanvasItem(QStandardItem):
 
         for column_idx in range(len(value.plots)):
             column = value.plots[column_idx]
-            plot_column_item = QStandardItem(f'Column {column_idx+1}')
+            plot_column_item = QStandardItem(f'Column {column_idx + 1}')
             self.appendRow(plot_column_item)
 
             if not isinstance(column, typing.Collection):
@@ -37,9 +37,10 @@ class CanvasItem(QStandardItem):
             for plot_idx, plot in enumerate(column):
                 if not isinstance(plot, Plot):
                     continue
-                plot_item = PlotItem(f'Plot {plot_idx+1}', self.auto_name)
+                plot_item = PlotItem(f'Plot {plot_idx + 1}', self.auto_name)
                 plot_item.setEditable(False)
                 plot_item.setData(plot, Qt.UserRole)
+                plot.id = [column_idx + 1, plot_idx + 1]
 
                 if self.auto_name and plot.plot_title:
                     plot_item.setText(plot.plot_title)
