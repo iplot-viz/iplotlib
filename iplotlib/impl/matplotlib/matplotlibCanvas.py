@@ -426,7 +426,8 @@ class MatplotlibParser(BackendParserBase):
                         self.process_ipl_axis(x_axis, ax_idx, plot, mpl_axes)
 
                 for signal in signals:
-                    self._signal_impl_plot_lut.update({id(signal): mpl_axes})
+                    # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
+                    self._signal_impl_plot_lut.update({signal.uid: mpl_axes})
                     self.process_ipl_signal(signal)
 
                 # Set limits for processed signals
@@ -630,7 +631,8 @@ class MatplotlibParser(BackendParserBase):
         if not isinstance(signal, Signal):
             return
 
-        mpl_axes = self._signal_impl_plot_lut.get(id(signal))  # type: MPLAxes
+        # mpl_axes = self._signal_impl_plot_lut.get(id(signal))  # type: MPLAxes
+        mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
         if not isinstance(mpl_axes, MPLAxes):
             logger.error(f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
@@ -656,6 +658,19 @@ class MatplotlibParser(BackendParserBase):
             self.do_mpl_line_plot(signal, mpl_axes, data)
 
         self.update_axis_labels_with_units(mpl_axes, signal)
+
+        # Check for annotations if the labels are currently enabled
+        if isinstance(signal, SignalXY):
+            if signal.markers_list:
+                for marker in signal.markers_list:
+                    if marker.visible:
+                        x = self.transform_value(mpl_axes, 0, marker.xy[0], inverse=True)
+                        y = marker.xy[1]
+                        mpl_axes.annotate(text=marker.name,
+                                          xy=(x, y),
+                                          xytext=(x, y + 0.1),
+                                          bbox=dict(boxstyle="round,pad=0.3", edgecolor="black",
+                                                    facecolor=marker.color))
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         """This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
@@ -805,8 +820,6 @@ class MatplotlibParser(BackendParserBase):
         points = []
         x_zoom = []
         y_zoom = []
-        x_relative = []
-        y_relative = []
         marker_signal = None
 
         for ax_idx, ax in enumerate(plot.axes):
@@ -821,9 +834,6 @@ class MatplotlibParser(BackendParserBase):
 
                 x_zoom = signal.data_store[0][idx1:idx2]
                 y_zoom = signal.data_store[1][idx1:idx2]
-
-                x_relative = mpl_axes.get_lines()[0].get_xdata()[idx1:idx2]
-                y_relative = mpl_axes.get_lines()[0].get_ydata()[idx1:idx2]
 
                 # If the number of samples per signal is less than 50 we continue, if not the user shall keep zooming
                 if len(x_zoom) > 50:
@@ -851,10 +861,7 @@ class MatplotlibParser(BackendParserBase):
         idx_result = np.argmin(distances)
         nearest_point = points[idx_result]
 
-        # Get relative points
-        relative_point = (x_relative[idx_result], y_relative[idx_result])
-
-        return nearest_point, relative_point, marker_signal
+        return nearest_point, marker_signal
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):

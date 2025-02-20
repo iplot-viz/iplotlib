@@ -143,24 +143,29 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Gets current iplotlib canvas"""
         return self._parser.canvas
 
-    def draw_marker_label(self, marker_name, ax, xy):
-        # Add annotation to the corresponding axis
-        ax.annotate(text=marker_name,
-                    xy=xy,
-                    xytext=(xy[0], xy[1] + 0.1))
-        # bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor="white")
+    def draw_marker_label(self, marker_name, signal, xy, color):
+        ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
+        if ax:
+            x = self._parser.transform_value(ax, 0, xy[0], inverse=True)
+            y = xy[1]
+            ax.annotate(text=marker_name,
+                        xy=(x, y),
+                        xytext=(x, y + 0.1),
+                        bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=color))
+            # Show labels
+            self._parser.figure.canvas.draw()
 
-        # Show labels
-        self._parser.figure.canvas.draw()
+    def delete_marker_label(self, marker_name, signal):
+        ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
 
-    def delete_marker_label(self, ax):
         # Get annotations from the axis
         annotations = [child for child in ax.get_children() if isinstance(child, plt.Annotation)]
 
         # Remove annotations
         if annotations:
             for annotation in annotations:
-                annotation.remove()
+                if annotation.get_text() == marker_name:
+                    annotation.remove()
 
             # Hide labels
             self._parser.figure.canvas.draw()
@@ -289,11 +294,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 plot = ci.plot()
                 x_value = event.xdata
                 y_value = event.ydata
-                new_marker, relative_marker, marker_signal = self._parser.add_marker_scaled(mpl_axes, plot, x_value,
-                                                                                            y_value)
+                new_marker, marker_signal = self._parser.add_marker_scaled(mpl_axes, plot, x_value, y_value)
+
+                # Check if the coordinates of the marker are correct and if the marker has not already been created
                 if new_marker is not None and new_marker not in self._marker_window.get_markers():
-                    # Check if the coordinates of the marker are correct and if the marker has not already been created
-                    self._marker_window.add_marker(mpl_axes, marker_signal, new_marker, relative_marker)
+                    self._marker_window.add_marker(marker_signal, new_marker)
                     if not self._marker_window.isVisible():
                         self._marker_window.show()
                     elif self._marker_window.isMinimized():
@@ -422,5 +427,5 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         all_plots = self._parser.canvas.plots
         for column, col_plots in enumerate(all_plots):
             for row, row_plot in enumerate(col_plots):
-                if row_plot == plot:
+                if row_plot.id == plot.id:
                     return row + 1, column + 1

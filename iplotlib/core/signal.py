@@ -9,8 +9,10 @@ for when you wish to take over the data customization.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List
 
+from iplotlib.core.marker import Marker
 from iplotlib.interface import IplotSignalAdapter
 
 
@@ -92,6 +94,7 @@ class SignalXY(Signal, IplotSignalAdapter):
     marker: str = None
     marker_size: int = None
     step: str = None
+    markers_list: List[Marker] = field(default_factory=list)
 
     def __post_init__(self):
         super().__post_init__()
@@ -121,6 +124,16 @@ class SignalXY(Signal, IplotSignalAdapter):
         self.marker = old_signal.marker
         self.marker_size = old_signal.marker_size
         self.step = old_signal.step
+        self.markers_list = old_signal.markers_list
+
+    def add_marker(self, marker: Marker):
+        self.markers_list.append(marker)
+
+    def delete_marker(self, index):
+        self.markers_list.pop(index)
+
+    def get_marker(self, index):
+        return self.markers_list[index]
 
 
 @dataclass
