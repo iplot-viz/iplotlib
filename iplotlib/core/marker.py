@@ -4,7 +4,7 @@ one might want to use when plotting data.
 
 TODO: cambiar descripcion de clase
 """
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Tuple
 
 

@@ -659,18 +659,24 @@ class MatplotlibParser(BackendParserBase):
 
         self.update_axis_labels_with_units(mpl_axes, signal)
 
-        # Check for annotations if the labels are currently enabled
+        # Check for annotations if the marker labels are visible
         if isinstance(signal, SignalXY):
+            if mpl_axes.get_lines()[0].get_marker() == 'None':
+                return
             if signal.markers_list:
+                annotations_names = [child.get_text() for child in mpl_axes.get_children() if
+                                     isinstance(child, plt.Annotation)]
                 for marker in signal.markers_list:
                     if marker.visible:
-                        x = self.transform_value(mpl_axes, 0, marker.xy[0], inverse=True)
-                        y = marker.xy[1]
-                        mpl_axes.annotate(text=marker.name,
-                                          xy=(x, y),
-                                          xytext=(x, y + 0.1),
-                                          bbox=dict(boxstyle="round,pad=0.3", edgecolor="black",
-                                                    facecolor=marker.color))
+                        # Check if the marker is already drawn
+                        if marker.name not in annotations_names:
+                            x = self.transform_value(mpl_axes, 0, marker.xy[0], inverse=True)
+                            y = marker.xy[1]
+                            mpl_axes.annotate(text=marker.name,
+                                              xy=(x, y),
+                                              xytext=(x, y + 0.1),
+                                              bbox=dict(boxstyle="round,pad=0.3", edgecolor="black",
+                                                        facecolor=marker.color))
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         """This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
@@ -837,7 +843,7 @@ class MatplotlibParser(BackendParserBase):
 
                 # If the number of samples per signal is less than 50 we continue, if not the user shall keep zooming
                 if len(x_zoom) > 50:
-                    return
+                    return None, len(x_zoom)
 
                 # Get the points (x,y)
                 points = list(zip(x_zoom, y_zoom))

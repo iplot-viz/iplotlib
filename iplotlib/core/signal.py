@@ -43,6 +43,7 @@ class Signal(ABC):
     lines = []
     _type: str = None
     parent = None
+    id: int = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -131,9 +132,6 @@ class SignalXY(Signal, IplotSignalAdapter):
 
     def delete_marker(self, index):
         self.markers_list.pop(index)
-
-    def get_marker(self, index):
-        return self.markers_list[index]
 
 
 @dataclass

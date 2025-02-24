@@ -30,9 +30,10 @@ class PlotItem(QStandardItem):
         # process signals..
         for stack_id, stack in enumerate(value.signals.values()):
             for signal_id, signal in enumerate(stack):
-                signal_item = SignalItem(f'Signal {signal_id+1} | stack {stack_id+1}', self.auto_name)
+                signal_item = SignalItem(f'Signal {signal_id + 1} | stack {stack_id + 1}', self.auto_name)
                 signal_item.setEditable(False)
                 signal_item.setData(signal, Qt.UserRole)
+                signal.id = stack_id + 1
                 if self.auto_name and signal.title:
                     signal_item.setText(signal.title)
                 self.appendRow(signal_item)

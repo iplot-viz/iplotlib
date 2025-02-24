@@ -22,7 +22,7 @@ from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, Mouse
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
-from iplotlib.core import PlotContour
+from iplotlib.core import PlotContour, SignalXY
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
@@ -143,32 +143,65 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Gets current iplotlib canvas"""
         return self._parser.canvas
 
-    def draw_marker_label(self, marker_name, signal, xy, color):
-        ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
-        if ax:
+    def get_signal_marker(self, plot_id, signal_uid):
+        # Get signal and ax
+        for idxCol, col in enumerate(self._parser.canvas.plots):
+            for idxPlot, plot in enumerate(col):
+                if plot.id == plot_id:
+                    # Get signal
+                    for signals in plot.signals.values():
+                        for signal in signals:
+                            if signal.uid == signal_uid and isinstance(signal, SignalXY):
+                                ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
+                                return signal, ax
+
+    def get_marker_row(self, signal: SignalXY, marker_name: str):
+        for i, marker in enumerate(signal.markers_list):
+            if marker.name == marker_name:
+                return i
+
+    def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color):
+        signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: MPLAxes
+
+        # Creation of the annotations
+        if isinstance(signal, SignalXY) and ax:
             x = self._parser.transform_value(ax, 0, xy[0], inverse=True)
             y = xy[1]
             ax.annotate(text=marker_name,
                         xy=(x, y),
                         xytext=(x, y + 0.1),
                         bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=color))
-            # Show labels
+
+            # Get marker row
+            row = self.get_marker_row(signal, marker_name)
+
+            # Set marker visibility
+            signal.markers_list[row].visible = True
+            signal.markers_list[row].color = color
             self._parser.figure.canvas.draw()
 
-    def delete_marker_label(self, marker_name, signal):
-        ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
+    def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
+        signal, ax = self.get_signal_marker(plot_id, signal_uid)
 
         # Get annotations from the axis
         annotations = [child for child in ax.get_children() if isinstance(child, plt.Annotation)]
+
+        # Get marker row
+        row = self.get_marker_row(signal, marker_name)
+
+        # Indicate if the marker will be removed or hidden
+        if delete:
+            signal.delete_marker(row)
+        else:
+            signal.markers_list[row].visible = False
 
         # Remove annotations
         if annotations:
             for annotation in annotations:
                 if annotation.get_text() == marker_name:
                     annotation.remove()
-
-            # Hide labels
-            self._parser.figure.canvas.draw()
+                    self._parser.figure.canvas.draw()
+                    return
 
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
@@ -294,18 +327,29 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 plot = ci.plot()
                 x_value = event.xdata
                 y_value = event.ydata
-                new_marker, marker_signal = self._parser.add_marker_scaled(mpl_axes, plot, x_value, y_value)
 
-                # Check if the coordinates of the marker are correct and if the marker has not already been created
-                if new_marker is not None and new_marker not in self._marker_window.get_markers():
-                    self._marker_window.add_marker(marker_signal, new_marker)
-                    if not self._marker_window.isVisible():
-                        self._marker_window.show()
-                    elif self._marker_window.isMinimized():
-                        self._marker_window.showNormal()
+                # Markers can only be created if the property 'marker' is not None
+                if mpl_axes.get_lines()[0].get_marker() != 'None':
+                    # Check if the marker coordinates are correct and if the marker has not already been created
+                    new_marker, marker_signal = self._parser.add_marker_scaled(mpl_axes, plot, x_value, y_value)
+                    if new_marker is not None:
+                        if new_marker not in self._marker_window.get_markers():
+                            self._marker_window.add_marker(marker_signal, new_marker)
+                            if not self._marker_window.isVisible():
+                                self._marker_window.show()
+                            elif self._marker_window.isMinimized():
+                                self._marker_window.showNormal()
+                            else:
+                                self._marker_window.raise_()
+                                self._marker_window.activateWindow()
+                        else:
+                            logger.warning(f"The marker {new_marker} is already created")
                     else:
-                        self._marker_window.raise_()
-                        self._marker_window.activateWindow()
+                        logger.warning(
+                            f"Cannot add marker {new_marker}: found {marker_signal} samples, but the maximum allowed"
+                            f" is 50")
+                else:
+                    logger.warning("Markers must be enabled in the plot to create signal markers")
             else:
                 self._parser.set_focus_plot(None)
                 self._refresh_original_ranges = False
