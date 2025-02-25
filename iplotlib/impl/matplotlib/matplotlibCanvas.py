@@ -823,10 +823,9 @@ class MatplotlibParser(BackendParserBase):
         """
 
         ranges = []
-        points = []
-        x_zoom = []
-        y_zoom = []
         marker_signal = None
+        nearest_point = None
+        minor_dist = float('inf')
 
         for ax_idx, ax in enumerate(plot.axes):
             if isinstance(ax, RangeAxis):
@@ -845,27 +844,30 @@ class MatplotlibParser(BackendParserBase):
                 if len(x_zoom) > 50:
                     return None, len(x_zoom)
 
-                # Get the points (x,y)
+                # Get the points (x,y) for each signal
                 points = list(zip(x_zoom, y_zoom))
-                marker_signal = signal
 
-        # Normalization of the points
-        x_min, x_max = min(x_zoom), max(x_zoom)
-        y_min, y_max = min(y_zoom), max(y_zoom)
+                # Normalization of the points
+                x_min, x_max = min(x_zoom), max(x_zoom)
+                y_min, y_max = min(y_zoom), max(y_zoom)
 
-        x_range = x_max - x_min if x_max != x_min else 1
-        y_range = y_max - y_min if y_max != y_min else 1
-        scaled_points = [((px - x_min) / x_range, (py - y_min) / y_range) for px, py in points]
+                x_range = x_max - x_min if x_max != x_min else 1
+                y_range = y_max - y_min if y_max != y_min else 1
+                scaled_points = [((px - x_min) / x_range, (py - y_min) / y_range) for px, py in points]
 
-        # Normalization of the coordinates where the user clicked
-        x_coord_transform = self.transform_value(mpl_axes, 0, x_coord)
-        scaled_x = (x_coord_transform - x_min) / x_range
-        scaled_y = (y_coord - y_min) / y_range
+                # Normalization of the coordinates where the user clicked
+                x_coord_transform = self.transform_value(mpl_axes, 0, x_coord)
+                scaled_x = (x_coord_transform - x_min) / x_range
+                scaled_y = (y_coord - y_min) / y_range
 
-        # Get the nearest point using the Euclidian distance
-        distances = [np.sqrt((px - scaled_x) ** 2 + (py - scaled_y) ** 2) for px, py in scaled_points]
-        idx_result = np.argmin(distances)
-        nearest_point = points[idx_result]
+                # Get the nearest point using the Euclidian distance
+                distances = [np.sqrt((px - scaled_x) ** 2 + (py - scaled_y) ** 2) for px, py in scaled_points]
+                idx_result = np.argmin(distances)
+
+                if distances[idx_result] < minor_dist:
+                    minor_dist = distances[idx_result]
+                    nearest_point = points[idx_result]
+                    marker_signal = signal
 
         return nearest_point, marker_signal
 
