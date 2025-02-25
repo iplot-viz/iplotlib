@@ -16,7 +16,7 @@ class IplotQtMarker(QWidget):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.resize(800, 500)
+        self.resize(850, 500)
         self.setWindowTitle("Markers window")
 
         self.markers = []
