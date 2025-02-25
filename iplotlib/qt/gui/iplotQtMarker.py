@@ -16,7 +16,7 @@ class IplotQtMarker(QWidget):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.resize(700, 500)
+        self.resize(800, 500)
         self.setWindowTitle("Markers window")
 
         self.markers = []
@@ -208,7 +208,7 @@ class IplotQtMarker(QWidget):
                     dx_str += f"+{dx.components.milliseconds}m"
                 if dx.components.microseconds:
                     dx_str += f"+{dx.components.microseconds}m"
-        dy = y2 - y1
+        dy = abs(y2 - y1)
 
         # Show distance
         msg_result = (f"The precise distance between the markers {x1_name} and {x2_name} is:\n"
@@ -225,7 +225,6 @@ class IplotQtMarker(QWidget):
         return self.markers
 
     def clear_info(self):
-        self.table.clear()
         self.table.setRowCount(0)
         self.markers.clear()
         self.count = 0
