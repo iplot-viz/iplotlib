@@ -674,7 +674,7 @@ class MatplotlibParser(BackendParserBase):
                             y = marker.xy[1]
                             mpl_axes.annotate(text=marker.name,
                                               xy=(x, y),
-                                              xytext=(x, y + 0.1),
+                                              xytext=(x, y),
                                               bbox=dict(boxstyle="round,pad=0.3", edgecolor="black",
                                                         facecolor=marker.color))
 

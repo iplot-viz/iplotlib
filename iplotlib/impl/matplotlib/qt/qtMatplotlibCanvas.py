@@ -169,7 +169,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             y = xy[1]
             ax.annotate(text=marker_name,
                         xy=(x, y),
-                        xytext=(x, y + 0.1),
+                        xytext=(x, y),
                         bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=color))
 
             # Get marker row
