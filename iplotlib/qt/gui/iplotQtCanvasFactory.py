@@ -36,3 +36,27 @@ class IplotQtCanvasFactory:
         else:
             logger.error(f"Unrecognized or unsupported backend: {backend}. Available backend: matplotlib, vtk")
             raise InvalidBackend
+
+        # supported_backends = {}
+        #
+        # try:
+        #     file_path = str(files('mint').joinpath('mybackends.cfg'))
+        #     with open(file_path, 'r') as file:
+        #         backends = json.load(file)
+        #         for key, value in backends.items():
+        #             try:
+        #                 module = importlib.import_module(value['pymodule'])
+        #                 imported_class = getattr(module, value['class'])
+        #                 supported_backends[imported_class.alias] = imported_class
+        #             except Exception as e:
+        #                 logger.error(f"Error loading Backend {key} -> {e}")
+        #
+        # except Exception as e:
+        #     logger.error(f"Error loading Backends config file ->{e}")
+        #
+        # qt_backend = supported_backends.get(impl.lower())
+        #
+        # if qt_backend is not None:
+        #
+        # else:
+        #     raise Exception(f"'{impl}' is not a valid backend")

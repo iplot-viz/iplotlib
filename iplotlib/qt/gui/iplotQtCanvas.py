@@ -25,6 +25,7 @@ class IplotQtCanvas(QWidget):
     Base class for all Qt related canvas implementations
     """
     cmdDone = Signal(IplotCommand)
+    alias = None
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent)

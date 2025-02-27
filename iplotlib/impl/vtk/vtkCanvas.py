@@ -59,6 +59,7 @@ LEGEND_POS_MAP = {'upper right': (vtkChartLegend.TOP, vtkChartLegend.RIGHT),
 class VTKParser(BackendParserBase):
     """This class parses the core iplotlib classes into a VTK charts pipeline.
     """
+    alias = "vtk"
 
     def __init__(self, canvas: Canvas = None, focus_plot=None, focus_plot_stack_key=None,
                  impl_flush_method: Callable = None) -> None:
