@@ -11,7 +11,7 @@ logger = Sl.get_logger(__name__)
 
 
 class IplotQtMarker(QWidget):
-    dropMarker = Signal(object, object, object, object, object)
+    dropMarker = Signal(object, object, object, object, object, object)
     deleteMarker = Signal(object, object, object, object)
 
     def __init__(self, *args, **kwargs):
@@ -20,6 +20,7 @@ class IplotQtMarker(QWidget):
         self.setWindowTitle("Markers window")
 
         self.markers = []
+        self.signals = []
         self.selection_history = []
         self.count = 0
         self.markers_visible = False
@@ -86,11 +87,15 @@ class IplotQtMarker(QWidget):
         # Add marker
         self.markers.append(marker_coordinates)
 
+        # Add signal
+        self.signals.append(signal.uid)
+
         "Creation of QTableWidgetItem for each column"
         # 1- Marker name
         marker_name = ascii_uppercase[self.count % len(ascii_uppercase)]
+        is_date = signal.parent.axes[0].is_date
         marker_data = QTableWidgetItem(marker_name)
-        marker_data.setData(Qt.UserRole, signal.parent.axes[0].is_date)
+        marker_data.setData(Qt.UserRole, is_date)
 
         # 2- Signal stack
         id_plot = signal.parent.id
@@ -105,7 +110,10 @@ class IplotQtMarker(QWidget):
         signal_data.setData(Qt.UserRole, signal.uid)
 
         # 4- Marker coordinates
-        coord_data = QTableWidgetItem(f"({pd.Timestamp(marker_coordinates[0])}, {marker_coordinates[1]})")
+        if is_date:
+            coord_data = QTableWidgetItem(f"({pd.Timestamp(marker_coordinates[0])}, {marker_coordinates[1]})")
+        else:
+            coord_data = QTableWidgetItem(f"({marker_coordinates[0]}, {marker_coordinates[1]})")
         coord_data.setData(Qt.UserRole, marker_coordinates)
 
         # 5- Visibility checkbox
@@ -141,6 +149,15 @@ class IplotQtMarker(QWidget):
             new_marker_color = new_color.name()
             button.setStyleSheet(f"background-color: {new_marker_color}; border: 1px solid black")
 
+            # If marker is visible
+            visible = self.table.cellWidget(row, 4)
+            if visible.isChecked():
+                marker_name = self.table.item(row, 0).text()
+                plot_id = self.table.item(row, 1).data(Qt.UserRole)
+                signal = self.table.item(row, 2).data(Qt.UserRole)
+                xy = self.table.item(row, 3).data(Qt.UserRole)
+                self.dropMarker.emit(marker_name, plot_id[:2], signal, xy, new_marker_color, True)
+
     def remove_markers(self):
         # Remove the selected markers from the table
         ordered_rows = sorted(self.selection_history, reverse=True)
@@ -154,6 +171,8 @@ class IplotQtMarker(QWidget):
             # Delete from table and from markers list
             self.table.removeRow(row)
             self.markers.pop(row)
+            # Delete signal
+            self.signals.remove(signal)
 
     def toggle_marker_visibility(self, row, state):
         is_visible = state == Qt.Checked.value
@@ -164,7 +183,7 @@ class IplotQtMarker(QWidget):
         if is_visible:
             xy = self.table.item(row, 3).data(Qt.UserRole)
             marker_color = self.table.cellWidget(row, 5).palette().button().color().name()
-            self.dropMarker.emit(marker_name, plot_id[:2], signal, xy, marker_color)
+            self.dropMarker.emit(marker_name, plot_id[:2], signal, xy, marker_color, False)
         else:
             self.deleteMarker.emit(marker_name, plot_id[:2], signal, False)
 
@@ -192,7 +211,6 @@ class IplotQtMarker(QWidget):
         x2_name = self.table.item(row2, 0).text()
 
         # Compute distance
-        dx_str = None
         is_date = self.table.item(row1, 0).data(Qt.UserRole)
         if is_date:
             # Absolute difference for X axis
@@ -208,6 +226,11 @@ class IplotQtMarker(QWidget):
                     dx_str += f"+{dx.components.milliseconds}m"
                 if dx.components.microseconds:
                     dx_str += f"+{dx.components.microseconds}m"
+        else:
+            # Relative markers coordinates
+            dx = abs(x2 - x1)
+            dx_str = f"{dx}"
+
         dy = abs(y2 - y1)
 
         # Show distance
@@ -227,7 +250,36 @@ class IplotQtMarker(QWidget):
     def clear_info(self):
         self.table.setRowCount(0)
         self.markers.clear()
+        self.signals.clear()
         self.count = 0
+
+    def get_markers_signal(self):
+        return set(self.signals)
+
+    def remove_signal(self, signal):
+        delete_rows = []
+
+        for row in range(self.table.rowCount()):
+            if self.table.item(row, 2).data(Qt.UserRole) == signal:
+                delete_rows.append(row)
+
+        for row in sorted(delete_rows, reverse=True):
+            self.table.removeRow(row)
+
+    def get_stack(self, signal):
+        for row in range(self.table.rowCount()):
+            if self.table.item(row, 2).data(Qt.UserRole) == signal:
+                return self.table.item(row, 1).text()
+
+    def refresh_stack(self, signal: SignalXY, stack: str):
+        # New Signal stack
+        marker_id = [signal.parent.id[0], signal.parent.id[1], signal.id]
+
+        for row in range(self.table.rowCount()):
+            if self.table.item(row, 2).data(Qt.UserRole) == signal.uid:
+                plot_data = self.table.item(row, 1)
+                plot_data.setText(stack)
+                plot_data.setData(Qt.UserRole, marker_id)
 
     def import_table(self, signal):
         if not isinstance(signal, SignalXY):
@@ -246,6 +298,9 @@ class IplotQtMarker(QWidget):
             # Add marker
             self.markers.append(marker.xy)
 
+            # Add signal
+            self.signals.append(signal.uid)
+
             "Creation of QTableWidgetItem for each column"
             # 1- Marker name
             marker_data = QTableWidgetItem(marker.name)
@@ -260,7 +315,10 @@ class IplotQtMarker(QWidget):
             signal_data.setData(Qt.UserRole, signal.uid)
 
             # 4- Marker coordinates
-            coord_data = QTableWidgetItem(f"({pd.Timestamp(marker.xy[0])}, {marker.xy[1]})")
+            if is_date:
+                coord_data = QTableWidgetItem(f"({pd.Timestamp(marker.xy[0])}, {marker.xy[1]})")
+            else:
+                coord_data = QTableWidgetItem(f"({marker.xy[0]}, {marker.xy[1]})")
             coord_data.setData(Qt.UserRole, marker.xy)
 
             # 5- Visibility checkbox
@@ -274,7 +332,8 @@ class IplotQtMarker(QWidget):
             color_button = QPushButton("Select color")
             color_button.setStyleSheet(f"background-color: {marker.color}; border: 1px solid black")
             color_button.clicked.connect(
-                lambda: self.change_marker_color(self.table.indexAt(color_button.pos()).row(), color_button))
+                lambda checked=True, btn=color_button: self.change_marker_color(self.table.indexAt(btn.pos()).row(),
+                                                                                btn))
 
             # Set data in table
             self.table.setItem(row_pos, 0, marker_data)

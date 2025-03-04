@@ -143,42 +143,85 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Gets current iplotlib canvas"""
         return self._parser.canvas
 
+    def check_markers(self, canvas: Canvas):
+        # Check if there are signals in the table that are no longer used
+        markers_signals = self.get_signals(canvas)
+        markers_signals_uid = [signal.uid for signal in markers_signals]
+
+        for signal_uid in self._marker_window.get_markers_signal():
+            if signal_uid not in markers_signals_uid:
+                self._marker_window.remove_signal(signal_uid)
+            else:
+                # Check signal markers stack
+                prev_stack = self._marker_window.get_stack(signal_uid)
+                idx = markers_signals_uid.index(signal_uid)
+                signal_element = markers_signals[idx]
+                current_stack = f"{signal_element.parent.id[0]}.{signal_element.parent.id[1]}.{signal_element.id}"
+                if prev_stack != current_stack:
+                    self._marker_window.refresh_stack(signal_element, current_stack)
+
+    def get_signals(self, canvas: Canvas):
+        signal_list = []
+        for row_idx, col in enumerate(canvas.plots, start=1):
+            for col_idx, plot in enumerate(col, start=1):
+                if plot:
+                    for stack in plot.signals.values():
+                        for signal in stack:
+                            if isinstance(signal, SignalXY):
+                                signal_list.append(signal)
+        return signal_list
+
     def get_signal_marker(self, plot_id, signal_uid):
         # Get signal and ax
         for idxCol, col in enumerate(self._parser.canvas.plots):
             for idxPlot, plot in enumerate(col):
-                if plot.id == plot_id:
-                    # Get signal
-                    for signals in plot.signals.values():
-                        for signal in signals:
-                            if signal.uid == signal_uid and isinstance(signal, SignalXY):
-                                ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
-                                return signal, ax
+                if plot:
+                    if plot.id == plot_id:
+                        # Get signal
+                        for signals in plot.signals.values():
+                            for signal in signals:
+                                if signal.uid == signal_uid and isinstance(signal, SignalXY):
+                                    ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
+                                    return signal, ax
 
     def get_marker_row(self, signal: SignalXY, marker_name: str):
         for i, marker in enumerate(signal.markers_list):
             if marker.name == marker_name:
                 return i
 
-    def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color):
+    def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: MPLAxes
 
         # Creation of the annotations
         if isinstance(signal, SignalXY) and ax:
-            x = self._parser.transform_value(ax, 0, xy[0], inverse=True)
-            y = xy[1]
-            ax.annotate(text=marker_name,
-                        xy=(x, y),
-                        xytext=(x, y),
-                        bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=color))
+            if not modify:
+                # Create and draw marker
+                x = self._parser.transform_value(ax, 0, xy[0], inverse=True)
+                y = xy[1]
+                ax.annotate(text=marker_name,
+                            xy=(x, y),
+                            xytext=(x, y),
+                            bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=color))
 
-            # Get marker row
-            row = self.get_marker_row(signal, marker_name)
+                # Get marker row
+                row = self.get_marker_row(signal, marker_name)
 
-            # Set marker visibility
-            signal.markers_list[row].visible = True
-            signal.markers_list[row].color = color
-            self._parser.figure.canvas.draw()
+                # Set marker visibility
+                signal.markers_list[row].visible = True
+                signal.markers_list[row].color = color
+                self._parser.figure.canvas.draw()
+            else:
+                # Change marker color when it is visible
+                annotations = [child for child in ax.get_children() if isinstance(child, plt.Annotation)]
+                if annotations:
+                    for annotation in annotations:
+                        if annotation.get_text() == marker_name:
+                            # Set new color property
+                            annotation.set_bbox(dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=color))
+                            # Get marker row
+                            row = self.get_marker_row(signal, marker_name)
+                            signal.markers_list[row].color = color
+                            self._parser.figure.canvas.draw()
 
     def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
         signal, ax = self.get_signal_marker(plot_id, signal_uid)
