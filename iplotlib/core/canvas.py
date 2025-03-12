@@ -371,3 +371,8 @@ class Canvas(ABC):
                                 x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
                                 x[f"{col_name}.data"] = pd.Series(pl_signal.y_data, name=f"{col_name}.data")
         return x.to_csv(index=False)
+
+    def update_canvas_properties(self, properties: dict):
+        for property_name, value in properties.items():
+            if hasattr(self, property_name):
+                setattr(self, property_name, value)

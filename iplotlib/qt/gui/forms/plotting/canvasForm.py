@@ -11,12 +11,22 @@ Map properties of a Canvas object to a form.
 import typing
 
 from PySide6.QtCore import QModelIndex, Qt, Slot
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QFileDialog
+import os
+import json
 from iplotlib.core.canvas import Canvas
 
 from iplotlib.qt.models.beanItemModel import BeanItemModel
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
 from iplotlib.qt.utils.color_picker import ColorPicker
+
+from iplotLogging import setupLogger as Sl
+
+logger = Sl.get_logger(__name__)
+
+EXEC_PATH = __file__
+ROOT = os.path.dirname(EXEC_PATH)
+DEFAULT_DATA_DIR = os.path.join(ROOT, 'data')
 
 
 class CanvasForm(IplotPreferencesForm):
@@ -87,3 +97,53 @@ class CanvasForm(IplotPreferencesForm):
 
         self.widgetMapper.revert()
         super().reset_prefs()
+
+    def get_canvas_properties(self):
+        # Get the current canvas properties and returns them as a dictionary
+        return {field["property"]: self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole).__dict__.get(
+            field["property"], None) for field in self.fields}
+
+    @Slot()
+    def export_canvas_preferences(self):
+        data_dir = os.path.join(DEFAULT_DATA_DIR, 'canvas_properties')
+        file = QFileDialog.getSaveFileName(self, "Save canvas properties as ..", dir=data_dir, filter='*.json')
+        if file and file[0]:
+            if not file[0].endswith('.json'):
+                file_name = file[0] + '.json'
+            else:
+                file_name = file[0]
+
+            try:
+                with open(file_name, mode="w") as f:
+                    f.write(json.dumps(self.get_canvas_properties()))
+            except Exception as e:
+                logger.error(f"Error exporting Canvas preferences: {e}")
+
+    @Slot()
+    def import_canvas_preferences(self):
+        data_dir = os.path.join(DEFAULT_DATA_DIR, 'canvas_properties')
+        file = QFileDialog.getOpenFileName(self, "Import canvas preferences ..", dir=data_dir)
+
+        if not file:
+            return
+
+        file_path = file[0]
+        try:
+            with open(file_path, mode='r') as f:
+                payload = f.read()
+                canvas_dict = json.loads(payload, object_hook=lambda d: {int(k) if k.lstrip('-').isdigit() else k: v
+                                                                         for k, v in d.items()})
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Error importing Canvas preferences from {file_path}: {e}")
+            return
+
+        # Proceed to update the Canvas with the imported preferences
+        py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+
+        if isinstance(py_object, Canvas):
+            py_object.update_canvas_properties(canvas_dict)
+        else:
+            return
+
+        self.widgetMapper.revert()
+        super().import_canvas_preferences()
