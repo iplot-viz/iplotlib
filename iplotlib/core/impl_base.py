@@ -26,7 +26,7 @@ from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits
-from iplotlib.core.plot import Plot
+from iplotlib.core.plot import Plot, PlotXYWithSlider
 from iplotlib.core.signal import Signal
 import iplotLogging.setupLogger as Sl
 
@@ -420,13 +420,17 @@ class BackendParserBase(ABC):
                 for axis in axes:
                     if isinstance(axis, RangeAxis):
                         impl_plot = self._axis_impl_plot_lut.get(id(axis))
-                        if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
+                        if not self.set_impl_plot_limits(impl_plot, ax_idx,
+                                                         (ax_limits[i].begin, ax_limits[i].end)) or isinstance(plot,
+                                                                                                               PlotXYWithSlider):
                             axis.set_limits(*ax_limits[i].get_limits())
                         i += 1
             elif isinstance(axes, RangeAxis):
                 axis = axes
                 impl_plot = self._axis_impl_plot_lut.get(id(axis))
-                if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
+                if not self.set_impl_plot_limits(impl_plot, ax_idx,
+                                                 (ax_limits[i].begin, ax_limits[i].end)) or isinstance(plot,
+                                                                                                       PlotXYWithSlider):
                     axis.set_limits(*ax_limits[i].get_limits())
                 i += 1
         self.refresh_data()
