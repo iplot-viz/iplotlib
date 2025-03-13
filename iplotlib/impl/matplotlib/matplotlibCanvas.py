@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis
 from matplotlib.axis import Axis as MPLAxis
+from matplotlib.collections import PolyCollection
 from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
@@ -150,7 +151,7 @@ class MatplotlibParser(BackendParserBase):
                                    x_data, y_data, z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
 
-        plot.slider.valtext.set_text(pandas.Timestamp(z_data[plot.slider.val]))
+        # plot.slider.valtext.set_text(pandas.Timestamp(z_data[plot.slider.val]))
         ysub_data = y_data[plot.slider.val]
 
         # Review to implement directly in PlotXY class
@@ -407,32 +408,54 @@ class MatplotlibParser(BackendParserBase):
 
         if not self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None:
             stack_sz = 1
-            heights = [0.03, 1.0]
+            heights = [1.0, 0.03]
         else:
             stack_sz = len(plot.signals.keys())
-            heights = [0.03 * self.canvas.rows] + [1.0] * stack_sz
+            heights = [1.0] * stack_sz + [0.03 * self.canvas.rows]
 
         if isinstance(plot, PlotXYWithSlider):
             plot_with_slider: PlotXYWithSlider = plot
-            # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
-            subgrid_item = grid_item.subgridspec(stack_sz + 1, 1, hspace=0, height_ratios=heights)
-            sub_subgrid_item = subgrid_item[0, 0].subgridspec(1, 2, hspace=0, width_ratios=[0.9, 0.15])
+            # In case of PlotXYWithSlider, create a vertical layout with `stack_sz` + 1 (slider) rows and 1 column
+            # inside grid_item
+            subgrid_item = grid_item.subgridspec(stack_sz + 1, 1, height_ratios=heights)
+            sub_subgrid_item = subgrid_item[1, 0].subgridspec(1, 1, hspace=0)
+
             # Add Slider
             slider_ax = self.figure.add_subplot(sub_subgrid_item[0, 0])
+
+            # Get data for the slider
+            slider_values = plot_with_slider.signals[1][0].z_data
+            min_value = pandas.Timestamp(slider_values[0])
+            max_value = pandas.Timestamp(slider_values[-1])
+
+            # Add text for slider labels
+            slider_ax.annotate(f'{min_value}', xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=8)
+            current_label = slider_ax.annotate(f'{min_value}', xy=(0.425, -0.3), xycoords='axes fraction', ha='left',
+                                               va='center', fontsize=8)
+            slider_ax.annotate(f'{max_value}', xy=(0.85, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=8)
 
             def update_slider(val):
                 for c_row in plot.signals.values():
                     for c_signal in c_row:
                         self.process_ipl_signal(c_signal)
-                plot_with_slider.slider.valtext.set_text(pandas.Timestamp(plot_with_slider.signals[1][0].z_data[val]))
+                # plot_with_slider.slider.valtext.set_text(pandas.Timestamp(plot_with_slider.signals[1][0].z_data[val]))
+                current_value = pandas.Timestamp(slider_values[int(val)])
+                current_label.set_text(f'{current_value}')
+
+            # Check if there was a previous plot_with_slider with a value
+            if plot_with_slider.slider is not None:
+                value = plot_with_slider.slider.val
+            else:
+                value = 0
 
             plot_with_slider.slider = Slider(slider_ax, '', 0, plot_with_slider.signals[1][0].y_data.shape[0] - 1,
-                                             valinit=0, valstep=1)
+                                             valinit=value, valstep=1)
             plot_with_slider.slider.on_changed(update_slider)
-            add_slider = 1
         else:
+            # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
             subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
-            add_slider = 0
 
         mpl_axes = None
         mpl_axes_prev = None
@@ -447,7 +470,7 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     row_id = stack_id
 
-                mpl_axes = self.figure.add_subplot(subgrid_item[row_id + add_slider:, 0], sharex=mpl_axes_prev)
+                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0], sharex=mpl_axes_prev)
                 mpl_axes_prev = mpl_axes
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
                 # Keep references to iplotlib instances for ease of access in callbacks.
@@ -511,7 +534,20 @@ class MatplotlibParser(BackendParserBase):
                 # Set limits for processed signals
                 if isinstance(x_axis, RangeAxis) and x_axis.begin is None and x_axis.end is None:
                     self.update_range_axis(x_axis, 0, mpl_axes, which='current')
-                    self.update_range_axis(x_axis, 0, mpl_axes, which='original')
+                    if isinstance(plot, PlotXYWithSlider):
+                        # In the case of PlotXYWithSlider, the 'original' limits must correspond to the dates stored
+                        # in the z_data
+                        limits = plot.signals[1][0].z_data[0], plot.signals[1][0].z_data[-1]
+                        x_axis.set_limits(*limits, 'original')
+                    else:
+                        self.update_range_axis(x_axis, 0, mpl_axes, which='original')
+
+                # In the case of Plots of type PlotXYWithSlider, the limits for the Y axis must be initialized because
+                # for this type of plot no refreshing of the data is carried out and therefore no new data is fetched
+                if isinstance(plot, PlotXYWithSlider):
+                    y_axis = plot.axes[1]
+                    self.update_multi_range_axis(y_axis, 1, mpl_axes)
+                    # self.update_range_axis(y_axis, 1, mpl_axes, which='current')
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value(plot, 'legend')
@@ -591,7 +627,14 @@ class MatplotlibParser(BackendParserBase):
                 cur_x_limits = self.get_oaw_axis_limits(mpl_axes, 0)
                 other_x_limits = self.get_oaw_axis_limits(other_axis, 0)
                 if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
-                    self.set_oaw_axis_limits(other_axis, 0, cur_x_limits)
+                    # In case of PlotXYWithSlider, update the slider limits
+                    ci = self._impl_plot_cache_table.get_cache_item(other_axis)
+                    if not hasattr(ci, 'plot'):
+                        continue
+                    if isinstance(ci.plot(), PlotXYWithSlider):
+                        self.update_slider_limits(ci.plot(), *cur_x_limits)
+                    else:
+                        self.set_oaw_axis_limits(other_axis, 0, cur_x_limits)
 
         for a in affected_axes:
             ranges_hash = hash((*a.get_xlim(), *a.get_ylim()))
@@ -770,6 +813,45 @@ class MatplotlibParser(BackendParserBase):
                 top = new_top
         if lines:
             self.set_oaw_axis_limits(impl_plot, 1, (bot, top))
+
+    def update_slider_plot(self, mpl_axes: MPLAxes, plot: PlotXYWithSlider):
+        """
+        Update PlotXYWithSlider axis limits
+        """
+        x_axis = plot.axes[0]
+        y_axis = plot.axes[1][0]
+        self.update_range_axis(x_axis, 0, mpl_axes, which='current')
+        self.update_range_axis(y_axis, 1, mpl_axes, which='current')
+
+    def update_slider_limits(self, plot, begin, end):
+        """
+        Function that updates the slider's minimum and maximum values and creates a rectangle to indicate the area
+        """
+        new_start = np.searchsorted(plot.signals[1][0].z_data, begin)
+        new_end = np.searchsorted(plot.signals[1][0].z_data, end)
+
+        # Ensure indices are within the valid range of the signal's time data
+        new_start = max(0, min(new_start, len(plot.signals[1][0].z_data) - 1))
+        new_end = max(0, min(new_end, len(plot.signals[1][0].z_data) - 1))
+
+        # Update slider limits
+        plot.slider.valmin = new_start
+        plot.slider.valmax = new_end
+        plot.slider.val = new_start
+
+        # Update the labels for the slider limits
+        annotations = [label for label in plot.slider.ax.get_children() if isinstance(label, plt.Annotation)]
+        min_annotation, current_annotation, max_annotation = annotations[:3]
+        min_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_start])}')
+        max_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_end])}')
+
+        # Rectangulo del zoom en el slider
+        # plot.slider.ax.axvspan(new_start, new_end, color='red', alpha=0.3)
+
+        # Highlight the selected area in the slider
+        verts = [[(new_start, 0), (new_start, 1), (new_end, 1), (new_end, 0)]]
+        highlight = PolyCollection(verts, color="red", alpha=0.3)
+        plot.slider.ax.add_collection(highlight)
 
     def enable_tight_layout(self):
         self.figure.set_layout_engine("tight")
