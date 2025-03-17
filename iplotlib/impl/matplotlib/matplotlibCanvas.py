@@ -589,7 +589,7 @@ class MatplotlibParser(BackendParserBase):
 
             label_props = dict(color=fc)
             # Set ticks on the top and right axis
-            if self.canvas.ticks_position:
+            if self._pm.get_value(self.canvas, 'ticks_position'):
                 tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
             else:
                 tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
@@ -603,7 +603,6 @@ class MatplotlibParser(BackendParserBase):
             mpl_axis.set_tick_params(**tick_props)
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
-            # autoscale = self._pm.get_value('autoscale', axis)
             if self._pm.get_value(axis, 'autoscale') and ax_idx == 1:
                 self.autoscale_y_axis(impl_plot)
             else:
@@ -761,10 +760,10 @@ class MatplotlibParser(BackendParserBase):
 
             self._cursors.append(
                 IplotMultiCursor(self.figure.canvas, axes_group,
-                                 x_label=self.canvas.enable_x_label_crosshair,
-                                 y_label=self.canvas.enable_y_label_crosshair,
-                                 val_label=self.canvas.enable_val_label_crosshair,
-                                 color=self.canvas.crosshair_color,
+                                 x_label=self._pm.get_value(self.canvas, 'enable_x_label_crosshair'),
+                                 y_label=self._pm.get_value(self.canvas, 'enable_y_label_crosshair'),
+                                 val_label=self._pm.get_value(self.canvas, 'enable_val_label_crosshair'),
+                                 color=self._pm.get_value(self.canvas, 'crosshair_color'),
                                  lw=self.canvas.crosshair_line_width,
                                  horiz_on=False or self.canvas.crosshair_horizontal,
                                  vert_on=self.canvas.crosshair_vertical,
