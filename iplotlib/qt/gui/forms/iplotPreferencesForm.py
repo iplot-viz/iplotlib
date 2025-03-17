@@ -25,7 +25,6 @@ class IplotPreferencesForm(QWidget):
     """
     onApply = Signal()
     onReset = Signal()
-    onImport = Signal()
 
     def __init__(self, fields: Optional[List[dict]] = None, label: str = "Preferences",
                  parent: Optional[QWidget] = None,
@@ -48,10 +47,8 @@ class IplotPreferencesForm(QWidget):
         self.resetButton.pressed.connect(self.reset_prefs)
 
         if label == 'Canvas':
-            self.exportButton = QPushButton("Export Canvas Preferences")
+            self.exportButton = QPushButton("Save properties")
             self.exportButton.pressed.connect(self.export_canvas_preferences)
-            self.importButton = QPushButton("Import Canvas Preferences")
-            self.importButton.pressed.connect(self.import_canvas_preferences)
         self._modifiedTime = time.time_ns()
 
         vlayout = QVBoxLayout()
@@ -70,7 +67,6 @@ class IplotPreferencesForm(QWidget):
 
             second_hlayout = QHBoxLayout()
             second_hlayout.addWidget(self.exportButton)
-            second_hlayout.addWidget(self.importButton)
 
             self.layout().addLayout(main_hlayout)
             self.layout().addLayout(second_hlayout)
@@ -134,10 +130,6 @@ class IplotPreferencesForm(QWidget):
     @Slot()
     def export_canvas_preferences(self):
         return
-
-    @Slot()
-    def import_canvas_preferences(self):
-        self.onImport.emit()
 
     @staticmethod
     def create_spinbox(**params):

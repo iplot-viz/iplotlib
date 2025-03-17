@@ -40,7 +40,6 @@ class IplotQtPreferencesWindow(QMainWindow):
     onReset = QtSignal()
     onDiscard = QtSignal()
     canvasSelected = QtSignal(int)
-    onImport = QtSignal()
 
     def __init__(self, canvas_assembly: QStandardItemModel = None, parent: typing.Optional[QWidget] = None,
                  flags: Qt.WindowType = Qt.WindowType.Widget):
@@ -70,7 +69,6 @@ class IplotQtPreferencesWindow(QMainWindow):
             if isinstance(form, IplotPreferencesForm):
                 form.onApply.connect(self.onApply.emit)
                 form.onReset.connect(self.onReset.emit)
-                form.onImport.connect(self.onImport.emit)
 
         index = list(self._forms.keys()).index(Canvas)
         self.formsStack.setCurrentIndex(index)

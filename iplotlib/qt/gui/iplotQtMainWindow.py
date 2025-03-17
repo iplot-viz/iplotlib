@@ -44,7 +44,6 @@ class IplotQtMainWindow(QMainWindow):
         self.prefWindow.onApply.connect(self.update_canvas_preferences)
         self.prefWindow.onReset.connect(self.reset_prefs)
         self.prefWindow.onDiscard.connect(self.discard_prefs)
-        self.prefWindow.onImport.connect(self.reset_prefs)
 
         self.addToolBar(self.toolBar)
         self.setCentralWidget(self.canvasStack)
