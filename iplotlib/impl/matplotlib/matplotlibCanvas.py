@@ -335,10 +335,13 @@ class MatplotlibParser(BackendParserBase):
                 limits = self.get_plot_limits(plot, which='original')
                 begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
                 # Check if it is date and the max difference is 1 second
-                max_diff_ns = self.canvas.max_diff * 1e9
-                if ((begin, end) == (base_begin, base_end) or
-                        ((5e17 < begin < 1e19) and abs(begin - base_begin) <= max_diff_ns and
-                         abs(end - base_end) <= max_diff_ns)):
+                # Need to differentiate if it is absolute or relative
+                if plot.axes[0].is_date:
+                    max_diff_ns = self.canvas.max_diff * 1e9
+                else:
+                    max_diff_ns = self.canvas.max_diff
+                if ((begin, end) == (base_begin, base_end) or (
+                        abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
                     shared.append(axes)
         return shared
 
@@ -528,7 +531,8 @@ class MatplotlibParser(BackendParserBase):
                         self.process_ipl_axis(x_axis, ax_idx, plot, mpl_axes)
 
                 for signal in signals:
-                    self._signal_impl_plot_lut.update({id(signal): mpl_axes})
+                    # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
+                    self._signal_impl_plot_lut.update({signal.uid: mpl_axes})
                     self.process_ipl_signal(signal)
 
                 # Set limits for processed signals
@@ -752,7 +756,8 @@ class MatplotlibParser(BackendParserBase):
         if not isinstance(signal, Signal):
             return
 
-        mpl_axes = self._signal_impl_plot_lut.get(id(signal))  # type: MPLAxes
+        # mpl_axes = self._signal_impl_plot_lut.get(id(signal))  # type: MPLAxes
+        mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
         if not isinstance(mpl_axes, MPLAxes):
             logger.error(f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
@@ -778,6 +783,25 @@ class MatplotlibParser(BackendParserBase):
             self.do_mpl_line_plot(signal, mpl_axes, data)
 
         self.update_axis_labels_with_units(mpl_axes, signal)
+
+        # Check for annotations if the marker labels are visible
+        if isinstance(signal, SignalXY):
+            if mpl_axes.get_lines()[0].get_marker() == 'None':
+                return
+            if signal.markers_list:
+                annotations_names = [child.get_text() for child in mpl_axes.get_children() if
+                                     isinstance(child, plt.Annotation)]
+                for marker in signal.markers_list:
+                    if marker.visible:
+                        # Check if the marker is already drawn
+                        if marker.name not in annotations_names:
+                            x = self.transform_value(mpl_axes, 0, marker.xy[0], inverse=True)
+                            y = marker.xy[1]
+                            mpl_axes.annotate(text=marker.name,
+                                              xy=(x, y),
+                                              xytext=(x, y),
+                                              bbox=dict(boxstyle="round,pad=0.3", edgecolor="black",
+                                                        facecolor=marker.color))
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         """This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
@@ -954,6 +978,62 @@ class MatplotlibParser(BackendParserBase):
         style["drawstyle"] = STEP_MAP[step]
 
         return style
+
+    def add_marker_scaled(self, mpl_axes: MPLAxes, plot: PlotXY, x_coord, y_coord):
+        """
+        Function that returns the nearest point of the plot to create the corresponding marker.
+        As the scale of the axes is very different, a normalization of the data is done to adjust the data to a
+        common scale.
+        """
+
+        ranges = []
+        marker_signal = None
+        nearest_point = None
+        minor_dist = float('inf')
+
+        for ax_idx, ax in enumerate(plot.axes):
+            if isinstance(ax, RangeAxis):
+                ranges = ax.get_limits()
+
+        # With the new X axis limits, we obtain the points within that range
+        for stack in plot.signals.values():
+            for signal in stack:
+                idx1 = np.searchsorted(signal.x_data, ranges[0])
+                idx2 = np.searchsorted(signal.x_data, ranges[1])
+
+                x_zoom = signal.data_store[0][idx1:idx2]
+                y_zoom = signal.data_store[1][idx1:idx2]
+
+                # If the number of samples per signal is less than 50 we continue, if not the user shall keep zooming
+                if len(x_zoom) > 50:
+                    return None, len(x_zoom)
+
+                # Get the points (x,y) for each signal
+                points = list(zip(x_zoom, y_zoom))
+
+                # Normalization of the points
+                x_min, x_max = min(x_zoom), max(x_zoom)
+                y_min, y_max = min(y_zoom), max(y_zoom)
+
+                x_range = x_max - x_min if x_max != x_min else 1
+                y_range = y_max - y_min if y_max != y_min else 1
+                scaled_points = [((px - x_min) / x_range, (py - y_min) / y_range) for px, py in points]
+
+                # Normalization of the coordinates where the user clicked
+                x_coord_transform = self.transform_value(mpl_axes, 0, x_coord)
+                scaled_x = (x_coord_transform - x_min) / x_range
+                scaled_y = (y_coord - y_min) / y_range
+
+                # Get the nearest point using the Euclidian distance
+                distances = [np.sqrt((px - scaled_x) ** 2 + (py - scaled_y) ** 2) for px, py in scaled_points]
+                idx_result = np.argmin(distances)
+
+                if distances[idx_result] < minor_dist:
+                    minor_dist = distances[idx_result]
+                    nearest_point = points[idx_result]
+                    marker_signal = signal
+
+        return nearest_point, marker_signal
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):

@@ -16,16 +16,18 @@ from PySide6.QtCore import QMargins, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
 
+import matplotlib.pyplot as plt
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
-from iplotlib.core import PlotContour, PlotXYWithSlider
+from iplotlib.core import PlotContour, PlotXYWithSlider, SignalXY
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
+from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
@@ -41,6 +43,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
+        self._marker_window = IplotQtMarker()
+        self._marker_window.dropMarker.connect(self.draw_marker_label)
+        self._marker_window.deleteMarker.connect(self.delete_marker_label)
 
         self.info_shared_x_dialog = False
 
@@ -95,15 +100,22 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if canvas.shared_x_axis:
             if not self.info_shared_x_dialog:
                 self.info_shared_x_dialog = True
+                relative = False
                 for row_idx, col in enumerate(canvas.plots, start=1):
                     for col_idx, plot in enumerate(col, start=1):
                         if plot:
                             axis = plot.axes[0]
+                            if not axis.is_date:
+                                relative = True
                             ranges.append((axis.original_begin, axis.original_end))
                             plot_stack.append(f"{col_idx}.{row_idx}")
 
                 dict_ranges = defaultdict(list)
-                max_diff_ns = canvas.max_diff * 1e9
+                # Need to differentiate if it is absolute or relative
+                if relative:
+                    max_diff_ns = canvas.max_diff
+                else:
+                    max_diff_ns = canvas.max_diff * 1e9
                 for idx, uniq_range in enumerate(ranges):
                     if uniq_range == ranges[0]:
                         dict_ranges[uniq_range].append(plot_stack[idx])
@@ -133,6 +145,109 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Gets current iplotlib canvas"""
         return self._parser.canvas
 
+    def check_markers(self, canvas: Canvas):
+        # Check if there are signals in the table that are no longer used
+        markers_signals = self.get_signals(canvas)
+        markers_signals_uid = [signal.uid for signal in markers_signals]
+
+        for signal_uid in self._marker_window.get_markers_signal():
+            if signal_uid not in markers_signals_uid:
+                self._marker_window.remove_signal(signal_uid)
+            else:
+                # Check signal markers stack
+                prev_stack = self._marker_window.get_stack(signal_uid)
+                idx = markers_signals_uid.index(signal_uid)
+                signal_element = markers_signals[idx]
+                current_stack = f"{signal_element.parent.id[0]}.{signal_element.parent.id[1]}.{signal_element.id}"
+                if prev_stack != current_stack:
+                    self._marker_window.refresh_stack(signal_element, current_stack)
+
+    def get_signals(self, canvas: Canvas):
+        signal_list = []
+        for row_idx, col in enumerate(canvas.plots, start=1):
+            for col_idx, plot in enumerate(col, start=1):
+                if plot:
+                    for stack in plot.signals.values():
+                        for signal in stack:
+                            if isinstance(signal, SignalXY):
+                                signal_list.append(signal)
+        return signal_list
+
+    def get_signal_marker(self, plot_id, signal_uid):
+        # Get signal and ax
+        for idxCol, col in enumerate(self._parser.canvas.plots):
+            for idxPlot, plot in enumerate(col):
+                if plot:
+                    if plot.id == plot_id:
+                        # Get signal
+                        for signals in plot.signals.values():
+                            for signal in signals:
+                                if signal.uid == signal_uid and isinstance(signal, SignalXY):
+                                    ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
+                                    return signal, ax
+
+    def get_marker_row(self, signal: SignalXY, marker_name: str):
+        for i, marker in enumerate(signal.markers_list):
+            if marker.name == marker_name:
+                return i
+
+    def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
+        signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: MPLAxes
+
+        # Creation of the annotations
+        if isinstance(signal, SignalXY) and ax:
+            if not modify:
+                # Create and draw marker
+                x = self._parser.transform_value(ax, 0, xy[0], inverse=True)
+                y = xy[1]
+                ax.annotate(text=marker_name,
+                            xy=(x, y),
+                            xytext=(x, y),
+                            bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=color))
+
+                # Get marker row
+                row = self.get_marker_row(signal, marker_name)
+
+                # Set marker visibility
+                signal.markers_list[row].visible = True
+                signal.markers_list[row].color = color
+                self._parser.figure.canvas.draw()
+            else:
+                # Change marker color when it is visible
+                annotations = [child for child in ax.get_children() if isinstance(child, plt.Annotation)]
+                if annotations:
+                    for annotation in annotations:
+                        if annotation.get_text() == marker_name:
+                            # Set new color property
+                            annotation.set_bbox(dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=color))
+                            # Get marker row
+                            row = self.get_marker_row(signal, marker_name)
+                            signal.markers_list[row].color = color
+                            self._parser.figure.canvas.draw()
+
+    def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
+        signal, ax = self.get_signal_marker(plot_id, signal_uid)
+
+        # Get annotations from the axis
+        annotations = [child for child in ax.get_children() if isinstance(child, plt.Annotation)]
+
+        # Get marker row
+        row = self.get_marker_row(signal, marker_name)
+
+        # Indicate if the marker will be removed or hidden
+        if delete:
+            signal.delete_marker(row)
+        else:
+            signal.markers_list[row].visible = False
+
+        # Remove annotations
+        if annotations:
+            for annotation in annotations:
+                if annotation.get_text() == marker_name:
+                    annotation.remove()
+                    self._parser.figure.canvas.draw()
+                    return
+
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
 
@@ -153,6 +268,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self._mpl_toolbar.pan()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
             self._mpl_toolbar.zoom()
+        elif mode == Canvas.MOUSE_MODE_MARKER:
+            if not self._marker_window.isVisible():
+                self._marker_window.show()
+            elif self._marker_window.isMinimized():
+                self._marker_window.showNormal()
+            else:
+                self._marker_window.raise_()
+                self._marker_window.activateWindow()
 
     def undo(self):
         self._parser.undo()
@@ -211,7 +334,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 self._refresh_original_ranges = False
                 self.refresh()
                 self._refresh_original_ranges = True
-            elif self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+            elif self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN] and event.button == MouseButton.RIGHT:
                 mpl_axes = event.inaxes
                 if not isinstance(mpl_axes, MPLAxes):
                     return
@@ -238,6 +361,40 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self.push_view_lim_cmd()
 
                 self.render()
+            elif self._mmode in [Canvas.MOUSE_MODE_CROSSHAIR, Canvas.MOUSE_MODE_ZOOM,
+                                 Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER] and event.button == MouseButton.LEFT:
+                mpl_axes = event.inaxes
+                if not isinstance(mpl_axes, MPLAxes):
+                    return
+                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+                if not hasattr(ci, 'plot'):
+                    return
+                plot = ci.plot()
+                x_value = event.xdata
+                y_value = event.ydata
+
+                # Markers can only be created if the property 'marker' is not None
+                if mpl_axes.get_lines()[0].get_marker() != 'None':
+                    # Check if the marker coordinates are correct and if the marker has not already been created
+                    new_marker, marker_signal = self._parser.add_marker_scaled(mpl_axes, plot, x_value, y_value)
+                    if new_marker is not None:
+                        if new_marker not in self._marker_window.get_markers():
+                            self._marker_window.add_marker(marker_signal, new_marker)
+                            if not self._marker_window.isVisible():
+                                self._marker_window.show()
+                            elif self._marker_window.isMinimized():
+                                self._marker_window.showNormal()
+                            else:
+                                self._marker_window.raise_()
+                                self._marker_window.activateWindow()
+                        else:
+                            logger.warning(f"The marker {new_marker} is already created")
+                    else:
+                        logger.warning(
+                            f"Cannot add marker {new_marker}: found {marker_signal} samples, but the maximum allowed"
+                            f" is 50")
+                else:
+                    logger.warning("Markers must be enabled in the plot to create signal markers")
             else:
                 self._parser.set_focus_plot(None)
                 self._refresh_original_ranges = False
@@ -378,5 +535,5 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         all_plots = self._parser.canvas.plots
         for column, col_plots in enumerate(all_plots):
             for row, row_plot in enumerate(col_plots):
-                if row_plot == plot:
+                if row_plot.id == plot.id:
                     return row + 1, column + 1

@@ -126,7 +126,7 @@ class BackendParserBase(ABC):
         self._layout = None
         self._axis_impl_plot_lut = weakref.WeakValueDictionary()  # type: Dict[int, Any] # key is id(Axis)
         self._plot_impl_plot_lut = defaultdict(list)  # type: Dict[int, List[Any]] # key is id(Plot)
-        self._signal_impl_plot_lut = weakref.WeakValueDictionary()  # type: Dict[int, Any] # key is id(Signal)
+        self._signal_impl_plot_lut = weakref.WeakValueDictionary()  # type: Dict[str, Any] # key is (Signal.uid)
         self._signal_impl_shape_lut = dict()  # type: Dict[int, Any] # key is id(Signal)
         self._stale_citems = list()  # type: List[ImplementationPlotCacheItem]
         self._impl_plot_ranges_hash = defaultdict(

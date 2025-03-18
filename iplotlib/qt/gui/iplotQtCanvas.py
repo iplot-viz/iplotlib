@@ -93,6 +93,8 @@ class IplotQtCanvas(QWidget):
             self.setCursor(Qt.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_DIST:
             self.setCursor(Qt.PointingHandCursor)
+        elif self._mmode == Canvas.MOUSE_MODE_MARKER:
+            self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_PAN:
             self.setCursor(Qt.OpenHandCursor)
         elif self._mmode == Canvas.MOUSE_MODE_SELECT:

@@ -10,7 +10,7 @@ one might want to use when plotting data.
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, List, Collection, Union
+from typing import Dict, List, Collection, Union, Tuple
 
 from iplotlib.core.axis import Axis, LinearAxis
 from matplotlib.widgets import Slider
@@ -52,6 +52,7 @@ class Plot(ABC):
 
     row_span: int = 1
     col_span: int = 1
+    id: Tuple[int, int] = None
     plot_title: str = None
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None

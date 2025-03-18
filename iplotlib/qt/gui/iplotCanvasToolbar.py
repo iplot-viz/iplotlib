@@ -45,7 +45,8 @@ class IplotQtCanvasToolbar(QToolBar):
                           Canvas.MOUSE_MODE_CROSSHAIR,
                           Canvas.MOUSE_MODE_PAN,
                           Canvas.MOUSE_MODE_ZOOM,
-                          Canvas.MOUSE_MODE_DIST]:
+                          Canvas.MOUSE_MODE_DIST,
+                          Canvas.MOUSE_MODE_MARKER]:
             tool_action = QAction(tool_name[3:], parent=self)
             tool_action.setCheckable(True)
             tool_action.setActionGroup(self._actions)
@@ -70,7 +71,7 @@ class IplotQtCanvasToolbar(QToolBar):
 
         # Draw..
         self.redrawAction = QAction(create_icon('rotate180'), '&Redraw', self)
-        #self.addAction(self.redrawAction)
+        # self.addAction(self.redrawAction)
 
         # Configuration..
         self.configureAction = QAction(create_icon('options', 'svg'), '&Preferences')
