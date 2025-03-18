@@ -26,6 +26,7 @@ from vtkmodules.vtkChartsCore import vtkChart, vtkAxis
 
 # iplot utilities
 from iplotLogging import setupLogger as Sl
+from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 
 vtkmodules.qt.PyQtImpl = 'PySide6'
 
@@ -72,6 +73,8 @@ class QtVTKCanvas(IplotQtCanvas):
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
+
+        self._marker_window = IplotQtMarker()
 
         self._vtk_size_pol = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._vtk_renderer = IplotQVTKRwi(self, **kwargs)
