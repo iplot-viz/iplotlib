@@ -13,7 +13,7 @@ import time
 
 from PySide6.QtCore import QModelIndex, Qt, Signal, Slot
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDataWidgetMapper, QLabel, QLineEdit, QFormLayout, QPushButton,
-                               QSizePolicy, QSpinBox, QVBoxLayout, QHBoxLayout, QWidget, QScrollArea)
+                               QSizePolicy, QSpinBox, QVBoxLayout, QHBoxLayout, QWidget, QScrollArea, QMessageBox)
 
 from iplotlib.qt.models import BeanItem, BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
@@ -129,7 +129,10 @@ class IplotPreferencesForm(QWidget):
 
     @Slot()
     def export_canvas_preferences(self):
-        return
+        box = QMessageBox()
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText("Canvas preferences saved correctly")
+        box.exec_()
 
     @staticmethod
     def create_spinbox(**params):

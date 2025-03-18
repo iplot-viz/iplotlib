@@ -125,3 +125,4 @@ class CanvasForm(IplotPreferencesForm):
                 logger.info(f"Default Canvas preferences updated")
         except Exception as e:
             logger.error(f"Error exporting Canvas preferences: {e}")
+        super().export_canvas_preferences()
