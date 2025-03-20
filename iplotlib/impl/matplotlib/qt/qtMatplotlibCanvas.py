@@ -105,7 +105,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     for col_idx, plot in enumerate(col, start=1):
                         if plot:
                             axis = plot.axes[0]
-                            if not axis.is_date:
+                            if not axis.is_date and not isinstance(plot, PlotXYWithSlider):
                                 relative = True
                             ranges.append((axis.original_begin, axis.original_end))
                             plot_stack.append(f"{col_idx}.{row_idx}")
@@ -459,9 +459,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 if not hasattr(ci, 'plot'):
                     return
                 plot = ci.plot()
-                if isinstance(plot, PlotXYWithSlider):
-                    self._parser.update_slider_plot(mpl_axes, plot)
-
                 # commit commands from staging.
                 while len(self._staging_cmds):
                     self.commit_view_lim_cmd()

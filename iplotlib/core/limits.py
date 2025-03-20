@@ -42,6 +42,21 @@ class IplAxisLimits:
 
 
 @dataclass
+class IplSliderLimits:
+    begin: Any = None  #: the begin value.
+    end: Any = None  #: the end value.
+    plot_ref: ref = None  #: a weak reference to the core iplotlib axis object.
+
+    def get_limits(self):
+        return self.begin, self.end
+
+    def set_limits(self, begin, end):
+        self.begin = begin
+        self.end = end
+
+
+
+@dataclass
 class IplPlotViewLimits:
     """
     A container for a plot and its view limits.

@@ -30,7 +30,7 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.create_lineedit()},
             {"label": "Font size", "property": "font_size",
              "widget": self.default_fontsize_widget()},
-            {"label": "Shared x axis", "property": "shared_x_axis",
+            {"label": "Share time", "property": "shared_x_axis",
              "widget": self.create_checkbox()},
             {"label": "Time range difference (s)", "property": "max_diff",
              "widget": self.default_canvas_max_diff()},
