@@ -219,8 +219,8 @@ class IplotQtMarker(QWidget):
             dx_str += f"T{dx.components.hours}H{dx.components.minutes}M{dx.components.seconds}S"
             if dx.components.nanoseconds:
                 dx_str += f"+{dx.components.milliseconds}m"
-                dx_str += f"+{dx.components.nanoseconds}n"
-                dx_str += f"+{dx.components.microseconds}u"
+                dx_str += f"+{dx.components.microseconds}n"
+                dx_str += f"+{dx.components.nanoseconds}u"
             else:
                 if dx.components.milliseconds:
                     dx_str += f"+{dx.components.milliseconds}m"
