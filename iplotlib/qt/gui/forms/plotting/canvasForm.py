@@ -12,7 +12,6 @@ import typing
 
 from PySide6.QtCore import QModelIndex, Qt, Slot
 from PySide6.QtWidgets import QWidget
-import os
 import json
 from iplotlib.core.canvas import Canvas
 
@@ -21,7 +20,7 @@ from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
 from iplotlib.qt.utils.color_picker import ColorPicker
 from iplotlib.core.property_manager import PropertyManager
 
-from mint.app.dirs import DEFAULT_DATA_DIR
+from pathlib import Path
 
 from iplotLogging import setupLogger as Sl
 
@@ -115,14 +114,18 @@ class CanvasForm(IplotPreferencesForm):
 
     @Slot()
     def export_canvas_preferences(self):
-        data_dir = os.path.join(DEFAULT_DATA_DIR, 'canvas_properties')
-        os.makedirs(data_dir, exist_ok=True)
-        file_name = os.path.join(data_dir, "default_properties.json")
+        # Define folder path
+        path = Path.home() / ".local" / "1DPreferences"
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Define file path
+        file_name = path / "default_properties.json"
 
         try:
-            with open(file_name, mode="w") as f:
-                f.write(json.dumps(self.get_canvas_properties()))
+            with file_name.open(mode="w", encoding="utf-8") as f:
+                json.dump(self.get_canvas_properties(), f, ensure_ascii=False, indent=4)
                 logger.info(f"Default Canvas preferences updated")
         except Exception as e:
             logger.error(f"Error exporting Canvas preferences: {e}")
+
         super().export_canvas_preferences()
