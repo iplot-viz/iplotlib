@@ -2,6 +2,42 @@
 requires = ["setuptools>=42.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "iplotlib"
+description = "ITER plotting library"
+authors = [{ name = "Panchumarti Jaswant EXT", email = "jaswant.panchumarti@iter.org" }]
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">= 3.8"
+license = "MIT"
+keywords = ["IDS", "CBS", "Interface Data Structures", "Control Breakdown Structure"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    # "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "iplotProcessing >= 0.4.0",
+    "packaging>=20.0",
+    "matplotlib >= 3.5.1",
+    "pandas >= 1.2.0",
+    "PySide6 >= 6.2.3",
+    "vtk >= 9.1.0",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://git.iter.org/scm/vis/iplotlib.git"
+
+[project.scripts]
+iplotlib-qt-canvas = "iplotlib.qt.gui.iplotQtStandaloneCanvas:main"
+
+[tool.setuptools]
+packages = ["iplotlib"]
+package-dir = { "" = "." }
+
+[tool.setuptools.package-data]
+"iplotlib.qt" = ["icons/*.png", "icons/*.svg"]
+
 [tool.versioneer]
 VCS = "git"
 style = "pep440"
