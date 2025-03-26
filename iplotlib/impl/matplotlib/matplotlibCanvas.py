@@ -90,6 +90,16 @@ class MatplotlibParser(BackendParserBase):
     def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
 
+        # Update the legend to indicate if the signal is downsampled ("*" is added/removed)
+        if mpl_axes.get_legend():
+            pos = mpl_axes.get_lines().index(plot_lines[0][0])
+            legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
+
+            if legend_text.endswith('*') and not signal.isDownsampled:
+                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
+            elif not legend_text.endswith('*') and signal.isDownsampled:
+                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
+
         # Review to implement directly in PlotXY class
         if signal.color is None:
             # It means that the color has been reset but must keep the original color
@@ -496,6 +506,10 @@ class MatplotlibParser(BackendParserBase):
                             legend_lines[ix_legend].set_picker(3)
                             legend_lines[ix_legend].set_visible(True)
                             legend_lines[ix_legend].set_alpha(alpha)
+                            # Check if signal is downsampled at the start
+                            if signal.isDownsampled:
+                                legend_label = leg.texts[ix_legend].get_text() + '*'
+                                leg.texts[ix_legend].set_text(legend_label)
                             ix_legend += 1
 
         # Observe the axis limit change events
