@@ -47,7 +47,7 @@ class IplotPreferencesForm(QWidget):
         self.resetButton.pressed.connect(self.reset_prefs)
 
         if label == 'Canvas':
-            self.exportButton = QPushButton("Save properties")
+            self.exportButton = QPushButton("Save preferences")
             self.exportButton.pressed.connect(self.export_canvas_preferences)
         self._modifiedTime = time.time_ns()
 
