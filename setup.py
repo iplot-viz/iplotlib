@@ -46,5 +46,8 @@ setuptools.setup(
             "iplotlib-qt-canvas = iplotlib.qt.gui.iplotQtStandaloneCanvas:main"
         ]
     },
-    package_data={"iplotlib.qt": ["icons/*.png", "icons/*.svg"]},
+    package_data={
+        "iplotlib.core": ["data/default_properties.json"],
+        "iplotlib.qt": ["icons/*.png", "icons/*.svg"]
+    },
 )
