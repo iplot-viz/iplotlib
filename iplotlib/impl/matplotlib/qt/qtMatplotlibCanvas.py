@@ -95,7 +95,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         plot_stack = []
 
         if canvas:
-            if canvas.shared_x_axis:
+            if self._parser._pm.get_value(canvas, 'shared_x_axis'):
                 if not self.info_shared_x_dialog:
                     self.info_shared_x_dialog = True
                     relative = False
@@ -111,9 +111,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     dict_ranges = defaultdict(list)
                     # Need to differentiate if it is absolute or relative
                     if relative:
-                        max_diff_ns = canvas.max_diff
+                        max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff')
                     else:
-                        max_diff_ns = canvas.max_diff * 1e9
+                        max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff') * 1e9
                     for idx, uniq_range in enumerate(ranges):
                         if uniq_range == ranges[0]:
                             dict_ranges[uniq_range].append(plot_stack[idx])

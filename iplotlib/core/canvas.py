@@ -95,25 +95,25 @@ class Canvas(ABC):
     rows: int = 1
     cols: int = 1
     title: str = None
-    ticks_position: bool = False
+    ticks_position: bool = None
     mouse_mode: str = MOUSE_MODE_SELECT
-    enable_x_label_crosshair: bool = True
-    enable_y_label_crosshair: bool = True
-    enable_val_label_crosshair: bool = True
+    enable_x_label_crosshair: bool = None
+    enable_y_label_crosshair: bool = None
+    enable_val_label_crosshair: bool = None
     plots: List[List[Union[Plot, None]]] = None
     focus_plot: Plot = None
     crosshair_enabled: bool = False
-    crosshair_color: str = "red"
+    crosshair_color: str = None
     crosshair_line_width: int = 1
     crosshair_horizontal: bool = True
     crosshair_vertical: bool = True
     crosshair_per_plot: bool = False
     streaming: bool = False
-    shared_x_axis: bool = False
-    full_mode_all_stack: bool = True
+    shared_x_axis: bool = None
+    full_mode_all_stack: bool = None
     auto_refresh: int = 0
     undo_redo: bool = False
-    max_diff: int = 1
+    max_diff: int = None
     _type: str = None
     font_size: int = None
     font_color: str = None
@@ -126,7 +126,7 @@ class Canvas(ABC):
     marker: str = None
     marker_size: int = None
     step: str = None
-    legend: bool = True
+    legend: bool = None
     legend_position: str = None
     legend_layout: str = None
     grid: bool = None
@@ -372,3 +372,8 @@ class Canvas(ABC):
                                 x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
                                 x[f"{col_name}.data"] = pd.Series(pl_signal.y_data, name=f"{col_name}.data")
         return x.to_csv(index=False)
+
+    def update_canvas_properties(self, properties: dict):
+        for property_name, value in properties.items():
+            if hasattr(self, property_name):
+                setattr(self, property_name, value)

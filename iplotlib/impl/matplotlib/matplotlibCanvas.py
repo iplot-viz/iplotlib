@@ -285,9 +285,9 @@ class MatplotlibParser(BackendParserBase):
                 # Check if it is date and the max difference is 1 second
                 # Need to differentiate if it is absolute or relative
                 if plot.axes[0].is_date:
-                    max_diff_ns = self.canvas.max_diff * 1e9
+                    max_diff_ns = self._pm.get_value(self.canvas, 'max_diff') * 1e9
                 else:
-                    max_diff_ns = self.canvas.max_diff
+                    max_diff_ns = self._pm.get_value(self.canvas, 'max_diff')
                 if ((begin, end) == (base_begin, base_end) or (
                         abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
                     shared.append(axes)
@@ -337,10 +337,11 @@ class MatplotlibParser(BackendParserBase):
                 break
 
         # 4. Update the title at the top of canvas.
-        if canvas.title is not None:
+        if self._pm.get_value(self.canvas, 'title') is not None:
             if not self._pm.get_value(self.canvas, 'font_size'):
                 canvas.font_size = None
-            self.figure.suptitle(canvas.title, size=self._pm.get_value(self.canvas, 'font_size'),
+            self.figure.suptitle(self._pm.get_value(self.canvas, 'title'),
+                                 size=self._pm.get_value(self.canvas, 'font_size'),
                                  color=self._pm.get_value(self.canvas, 'font_color') or 'black')
 
     def process_ipl_plot_xy(self):
@@ -521,7 +522,7 @@ class MatplotlibParser(BackendParserBase):
     def _axis_update_callback(self, mpl_axes):
 
         affected_axes = mpl_axes.get_shared_x_axes().get_siblings(mpl_axes)
-        if self.canvas.shared_x_axis and not self.canvas.undo_redo:
+        if self._pm.get_value(self.canvas, 'shared_x_axis') and not self.canvas.undo_redo:
             other_axes = self._get_all_shared_axes(mpl_axes)
             for other_axis in other_axes:
                 cur_x_limits = self.get_oaw_axis_limits(mpl_axes, 0)
@@ -604,7 +605,7 @@ class MatplotlibParser(BackendParserBase):
 
             label_props = dict(color=fc)
             # Set ticks on the top and right axis
-            if self.canvas.ticks_position:
+            if self._pm.get_value(self.canvas, 'ticks_position'):
                 tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
             else:
                 tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
@@ -618,7 +619,6 @@ class MatplotlibParser(BackendParserBase):
             mpl_axis.set_tick_params(**tick_props)
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
-            # autoscale = self._pm.get_value('autoscale', axis)
             if self._pm.get_value(axis, 'autoscale') and ax_idx == 1:
                 self.autoscale_y_axis(impl_plot)
             else:
@@ -627,7 +627,8 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(axis, LinearAxis) and axis.is_date:
             ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
             mpl_axis.set_major_formatter(
-                NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, roundh=self.canvas.round_hour))
+                NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets,
+                                        roundh=self._pm.get_value(self.canvas, 'round_hour')))
 
         # Configurate number of ticks and labels
         tick_number = self._pm.get_value(axis, 'tick_number')
@@ -757,8 +758,8 @@ class MatplotlibParser(BackendParserBase):
         logger.debug(f"Focusing on plot: {id(plot)}, stack_key: {stack_key}")
 
         if self._focus_plot is not None and plot is None:
-            if self.canvas.shared_x_axis and len(self._focus_plot.axes) > 0 and isinstance(self._focus_plot.axes[0],
-                                                                                           RangeAxis):
+            if self._pm.get_value(self.canvas, 'shared_x_axis') and len(self._focus_plot.axes) > 0 and isinstance(
+                    self._focus_plot.axes[0], RangeAxis):
                 begin, end = get_x_axis_range(self._focus_plot)
 
                 for columns in self.canvas.plots:
@@ -796,10 +797,10 @@ class MatplotlibParser(BackendParserBase):
 
             self._cursors.append(
                 IplotMultiCursor(self.figure.canvas, axes_group,
-                                 x_label=self.canvas.enable_x_label_crosshair,
-                                 y_label=self.canvas.enable_y_label_crosshair,
-                                 val_label=self.canvas.enable_val_label_crosshair,
-                                 color=self.canvas.crosshair_color,
+                                 x_label=self._pm.get_value(self.canvas, 'enable_x_label_crosshair'),
+                                 y_label=self._pm.get_value(self.canvas, 'enable_y_label_crosshair'),
+                                 val_label=self._pm.get_value(self.canvas, 'enable_val_label_crosshair'),
+                                 color=self._pm.get_value(self.canvas, 'crosshair_color'),
                                  lw=self.canvas.crosshair_line_width,
                                  horiz_on=False or self.canvas.crosshair_horizontal,
                                  vert_on=self.canvas.crosshair_vertical,
