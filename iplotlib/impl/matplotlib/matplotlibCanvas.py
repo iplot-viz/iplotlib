@@ -955,41 +955,46 @@ class MatplotlibParser(BackendParserBase):
         """
         Function that updates the slider's minimum and maximum values and creates a rectangle to indicate the area
         """
-        new_start = np.searchsorted(plot.signals[1][0].z_data, begin)
-        new_end = np.searchsorted(plot.signals[1][0].z_data, end)
 
-        # Ensure indices are within the valid range of the signal's time data
-        new_start = max(0, min(new_start, len(plot.signals[1][0].z_data) - 1))
-        new_end = max(0, min(new_end, len(plot.signals[1][0].z_data) - 1))
+        if bool(begin > (1 << 53)):
+            new_start = np.searchsorted(plot.signals[1][0].z_data, begin)
+            new_end = np.searchsorted(plot.signals[1][0].z_data, end)
 
-        # Check for current value
-        if plot.slider.val < new_start:
-            val = new_start
-        elif plot.slider.val > new_end:
-            val = new_end
-        else:
-            val = plot.slider.val
+            # Ensure indices are within the valid range of the signal's time data
+            new_start = max(0, min(new_start, len(plot.signals[1][0].z_data) - 1))
+            new_end = max(0, min(new_end, len(plot.signals[1][0].z_data) - 1))
 
-        # Update slider limits
-        plot.slider.valmin = new_start
-        plot.slider.valmax = new_end
-        plot.slider.val = val
-        plot.slider.set_val(val)
+            # Check for current value
+            if plot.slider.val < new_start:
+                val = new_start
+            elif plot.slider.val > new_end:
+                val = new_end
+            else:
+                val = plot.slider.val
 
-        # Update the labels for the slider limits
-        annotations = [label for label in plot.slider.ax.get_children() if isinstance(label, plt.Annotation)]
-        min_annotation, current_annotation, max_annotation = annotations[:3]
-        min_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_start])}')
-        current_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[val])}')
-        max_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_end])}')
+            # Update slider limits
+            plot.slider.valmin = new_start
+            plot.slider.valmax = new_end
+            plot.slider.val = val
+            plot.slider.set_val(val)
 
-        # Eliminar region previa antes de añadir una nueva
-        for child in plot.slider.ax.get_children():
-            if isinstance(child, Patch) and child.get_facecolor()[:3] == (1.0, 0.0, 0.0):
-                child.remove()
+            # Update the labels for the slider limits
+            annotations = [label for label in plot.slider.ax.get_children() if isinstance(label, plt.Annotation)]
+            min_annotation, current_annotation, max_annotation = annotations[:3]
+            min_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_start])}')
+            current_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[val])}')
+            max_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_end])}')
 
-        # Highlight the selected area in the slider
-        plot.slider.ax.axvspan(new_start, new_end, color='red', alpha=0.3)
+            # Eliminar region previa antes de añadir una nueva
+            for child in plot.slider.ax.get_children():
+                if isinstance(child, Patch) and child.get_facecolor()[:3] == (1.0, 0.0, 0.0):
+                    child.remove()
+
+            # Highlight the selected area in the slider
+            plot.slider.ax.axvspan(new_start, new_end, color='red', alpha=0.3)
+
+    def update_slider_limits_undo_redo(self):
+        pass
 
     def enable_tight_layout(self):
         self.figure.set_layout_engine("tight")
