@@ -25,7 +25,7 @@ import weakref
 from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits
+from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits, IplSliderLimits
 from iplotlib.core.plot import Plot, PlotXYWithSlider
 from iplotlib.core.signal import Signal
 import iplotLogging.setupLogger as Sl
@@ -331,6 +331,12 @@ class BackendParserBase(ABC):
         """
 
     @abstractmethod
+    def set_impl_plot_slider_limits(self, plot, start, end):
+        """
+        TODO: comentar
+        """
+
+    @abstractmethod
     def set_focus_plot(self, impl_plot: Any):
         """Sets the focus plot."""
 
@@ -393,12 +399,18 @@ class BackendParserBase(ABC):
                     if not isinstance(axis, RangeAxis):
                         continue
                     begin, end = axis.get_limits(which)
-                    plot_lims.axes_ranges.append(
-                        IplAxisLimits(begin, end, weakref.ref(axis)))
+                    plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
             elif isinstance(axes, RangeAxis):
                 axis = axes  # singular name is easier to read for single axis
                 begin, end = axis.get_limits(which)
                 plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
+
+        # En el caso de PlotXYWithSlider, se debe guardar los limites del slider
+        if isinstance(plot, PlotXYWithSlider):
+            min_val = plot.slider.valmin
+            max_val = plot.slider.valmax
+            plot_lims.sliders_ranges.append(IplSliderLimits(min_val, max_val))
+
         return plot_lims
 
     def set_plot_limits(self, limits: IplPlotViewLimits):
@@ -433,6 +445,11 @@ class BackendParserBase(ABC):
                                                                                                        PlotXYWithSlider):
                     axis.set_limits(*ax_limits[i].get_limits())
                 i += 1
+
+        # Actualizar limites slider en el caso de que hayan
+        if isinstance(plot, PlotXYWithSlider):
+            self.set_impl_plot_slider_limits(plot, *limits.sliders_ranges[0].get_limits())
+
         self.refresh_data()
 
     @staticmethod

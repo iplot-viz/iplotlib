@@ -105,7 +105,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     for col_idx, plot in enumerate(col, start=1):
                         if plot:
                             axis = plot.axes[0]
-                            if not axis.is_date:
+                            if not axis.is_date and not isinstance(plot, PlotXYWithSlider):
                                 relative = True
                             ranges.append((axis.original_begin, axis.original_end))
                             plot_stack.append(f"{col_idx}.{row_idx}")
@@ -261,6 +261,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         if mode == Canvas.MOUSE_MODE_SELECT:
             self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
+            self._parser.activate_cursor_slider()
         elif mode == Canvas.MOUSE_MODE_CROSSHAIR:
             self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
             self._parser.activate_cursor()
@@ -459,9 +460,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 if not hasattr(ci, 'plot'):
                     return
                 plot = ci.plot()
-                if isinstance(plot, PlotXYWithSlider):
-                    self._parser.update_slider_plot(mpl_axes, plot)
-
                 # commit commands from staging.
                 while len(self._staging_cmds):
                     self.commit_view_lim_cmd()
@@ -471,7 +469,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             if event.inaxes is None:
                 return
             if self._parser._impl_plot_cache_table.get_cache_item(event.inaxes):
-                return
+                if event.inaxes.get_label() == "slider":
+                    print("Slider soltado")
+                else:
+                    return
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.text() == 'n':
