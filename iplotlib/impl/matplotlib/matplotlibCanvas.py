@@ -470,58 +470,21 @@ class MatplotlibParser(BackendParserBase):
                     x_pos = slider_values[int(val)]
                     other_axes = self._get_all_shared_axes(mpl_axes, True)
                     other_axes.remove(mpl_axes)
+
                     # value = self.transform_value(other_axes[0], 0, x_pos, inverse=True)
-                    self._cursors[0].on_move_slider(x_pos)
+                    ci = self._impl_plot_cache_table.get_cache_item(other_axes[0])
+                    if hasattr(ci, 'plot'):
+                        for signal_ref in ci.signals:
+                            signal = signal_ref()
 
-                    """
-                    other_axes = self._get_all_shared_axes(mpl_axes)
-                    other_axes.remove(mpl_axes)
+                            if x_pos < signal.x_data[0]:
+                                x_pos = signal.x_data[0]
+                            if x_pos > signal.x_data[-1]:
+                                x_pos = signal.x_data[-1]
 
-                    # Una vez tenemos los ejes compartidos, para cada plot se movera el crosshair
-                    # despues de realizar la transformacion necesaria
-                    for ax in other_axes:
-                        ci = self._impl_plot_cache_table.get_cache_item(ax)
-                        if not hasattr(ci, 'plot'):
-                            continue
-                        plt = ci.plot()
-
-
-                    for axes_group in self.figure.axes:
-                        ci = self._impl_plot_cache_table.get_cache_item(axes_group)
-                        if not hasattr(ci, 'plot'):
-                            continue
-                        plt = ci.plot()
-                        if isinstance(plt, PlotXYWithSlider):
-                            continue
-
-
-
-                    pass
-                    x_pos = slider_values[int(val)]
-
-                    for axes_group in self.figure.axes:
-                        ci = self._impl_plot_cache_table.get_cache_item(axes_group)
-                        if not hasattr(ci, 'plot'):
-                            continue
-                        plt = ci.plot()
-                        if isinstance(plt, PlotXYWithSlider):
-                            continue
-
-                        if axes_group not in self._crosshairs:
-                            self._crosshairs[axes_group] = IplotMultiCursor(self.figure.canvas, [axes_group],
-                                                                            x_label=self.canvas.enable_x_label_crosshair,
-                                                                            y_label=False,
-                                                                            val_label=False,
-                                                                            color=self.canvas.crosshair_color,
-                                                                            lw=self.canvas.crosshair_line_width,
-                                                                            vert_on=self.canvas.crosshair_vertical,
-                                                                            use_blit=True,
-                                                                            cache_table=self._impl_plot_cache_table)
-
-                        for vline in self._crosshairs[axes_group].v_lines:
-                            vline.set_xdata([self.transform_value(axes_group, 0, x_pos)])
-                            vline.set_visible(True)
-                        """
+                        # result = self.transform_value(other_axes[0], 0, x_pos, inverse=True)
+                        result = other_axes[0].transData.transform((x_pos, 0))[0]
+                        self._cursors[0].on_move_slider(result)
 
             # Check if there was a previous plot_with_slider with a value
             if plot_with_slider.slider_last_val is not None:
