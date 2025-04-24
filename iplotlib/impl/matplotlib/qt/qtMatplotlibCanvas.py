@@ -26,6 +26,7 @@ from iplotlib.core import PlotContour, SignalXY
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
+from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
@@ -46,6 +47,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._marker_window = IplotQtMarker()
         self._marker_window.dropMarker.connect(self.draw_marker_label)
         self._marker_window.deleteMarker.connect(self.delete_marker_label)
+
+        # Statistics
+        self._stats_table = IplotQtStatistics()
 
         self.info_shared_x_dialog = False
 
@@ -246,6 +250,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self._parser.figure.canvas.draw()
                     return
 
+    def stats(self, canvas: Canvas):
+        signals = self.get_signals(canvas)
+        self._stats_table.fill_table(signals)
+
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
 
@@ -274,6 +282,15 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             else:
                 self._marker_window.raise_()
                 self._marker_window.activateWindow()
+
+    def show_stats(self):
+        if not self._stats_table.isVisible():
+            self._stats_table.show()
+        elif self._stats_table.isMinimized():
+            self._stats_table.showNormal()
+        else:
+            self._stats_table.raise_()
+            self._stats_table.activateWindow()
 
     def undo(self):
         self._parser.undo()
@@ -451,6 +468,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # push uncommitted changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
+                # Update statistics
+                self.stats(self.get_canvas())
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.text() == 'n':
