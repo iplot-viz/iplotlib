@@ -619,7 +619,7 @@ class MatplotlibParser(BackendParserBase):
             mpl_axis.set_tick_params(**tick_props)
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
-            if self._pm.get_value(axis, 'autoscale') and ax_idx == 1:
+            if self._pm.get_value(self.canvas, 'autoscale') and ax_idx == 1:
                 self.autoscale_y_axis(impl_plot)
             else:
                 logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
@@ -703,16 +703,17 @@ class MatplotlibParser(BackendParserBase):
             yd = x_line.get_ydata()
             lo, hi = impl_plot.get_xlim()
             y_displayed = yd[((xd > lo) & (xd < hi))]
+
+            # Check if the visible Y data contains valid values
             if len(y_displayed) > 0:
                 # Check if there exist NaN values in the y_displayed array
                 if np.isnan(y_displayed).any():
                     y_displayed = y_displayed[~np.isnan(y_displayed)]
-                h = np.max(y_displayed) - np.min(y_displayed)
-                min_bot = np.min(y_displayed) - margin * h
-                max_top = np.max(y_displayed) + margin * h
+                min_bot = np.min(y_displayed)
+                max_top = np.max(y_displayed)
             else:
-                min_bot = 0
-                max_top = 1
+                min_bot = np.inf
+                max_top = -np.inf
             return min_bot, max_top
 
         lines = impl_plot.get_lines()
@@ -725,8 +726,19 @@ class MatplotlibParser(BackendParserBase):
                 bot = new_bot
             if new_top > top:
                 top = new_top
+
+        # Apply default Y limits in case of missing or invalid data
+        if bot == np.inf and top == -np.inf:
+            bot, top = 0, 1
+
+        # Compute final margin
+        h = (top - bot)
+        n_new_bot = bot - margin * h
+        n_new_top = top + margin * h
+
+        # Set new Y axis limits
         if lines:
-            self.set_oaw_axis_limits(impl_plot, 1, (bot, top))
+            self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
 
     def enable_tight_layout(self):
         self.figure.set_tight_layout("True")

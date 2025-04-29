@@ -14,7 +14,7 @@ from collections import defaultdict
 
 from PySide6.QtCore import QMargins, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout
+from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QMenu
 
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes as MPLAxes
@@ -22,7 +22,7 @@ from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, Mouse
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
-from iplotlib.core import PlotContour, SignalXY
+from iplotlib.core import PlotContour, SignalXY, PlotXY
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
@@ -246,6 +246,22 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self._parser.figure.canvas.draw()
                     return
 
+    def autoscale_y(self, impl_plot):
+        self._parser.autoscale_y_axis(impl_plot)
+        self._parser.figure.canvas.draw()
+
+    def autoscale_all_y(self):
+        axes = self._parser.figure.axes
+        for ax in axes:
+            ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
+            if not hasattr(ci, 'plot'):
+                continue
+            plot = ci.plot()
+            if not isinstance(plot, PlotXY):
+                continue
+            self._parser.autoscale_y_axis(ax)
+        self._parser.figure.canvas.draw()
+
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
 
@@ -412,6 +428,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     return
                 self.stage_view_lim_cmd()
                 return
+            if self._mmode == Canvas.MOUSE_MODE_SELECT:
+                if event.button == MouseButton.RIGHT:
+                    # Create menu with autoscale options
+                    autoscale_menu = QMenu(self)
+                    autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
+                    autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+                    autoscale_menu.popup(event.guiEvent.globalPos())
+
             if event.button != MouseButton.LEFT:
                 return
             if not plot:
