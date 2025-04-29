@@ -1,5 +1,7 @@
 import numpy as np
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, \
+    QAbstractItemView, QPushButton, QMenu
 import iplotLogging.setupLogger as Sl
 from iplotlib.core import SignalXY
 
@@ -13,16 +15,12 @@ class IplotQtStatistics(QWidget):
         self.resize(1050, 500)
         self.setWindowTitle("Statistics table")
 
-        self.markers = []
-        self.signals = []
-        self.selection_history = []
-        self.count = 0
-        self.markers_visible = False
+        self.column_names = ['Min', 'Avg', 'Max', 'First', 'Last', 'Points']
 
         # Marker table creation
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(['Min', 'Avg', 'Max', 'First', 'Last'])
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(self.column_names)
 
         # Disable cell modification
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -35,12 +33,29 @@ class IplotQtStatistics(QWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         # header.setStretchLastSection(True)
 
-        # Connect selection event
-        # self.table.selectionModel().selectionChanged.connect(self.update_selection_history)
-
         # Layout
         main_v_layout = QVBoxLayout()
         top_v_layout = QVBoxLayout()
+        top_layout_with_button = QHBoxLayout()
+
+        # Button and menu to toggle column visibility
+        self.column_menu_button = QPushButton("Hide/Show Columns")
+        self.column_menu = QMenu()
+
+        for i, name in enumerate(self.column_names):
+            action = QAction(name, self)
+            action.setCheckable(True)
+            action.setChecked(True)
+            action.toggled.connect(lambda checked, col=i: self.table.setColumnHidden(col, not checked))
+            self.column_menu.addAction(action)
+
+        self.column_menu_button.setMenu(self.column_menu)
+
+        # Add button and table to layout
+        top_layout_with_button.addWidget(self.column_menu_button)
+        top_layout_with_button.addStretch()
+
+        top_v_layout.addLayout(top_layout_with_button)
         top_v_layout.addWidget(self.table)
 
         main_v_layout.addLayout(top_v_layout)
@@ -70,11 +85,13 @@ class IplotQtStatistics(QWidget):
                     max_data = QTableWidgetItem(f"{np.max(y_max)}")
                     first_data = QTableWidgetItem(f"({y_min[0]}, {y_mean[0]}, {y_max[0]})")
                     last_data = QTableWidgetItem(f"({y_min[-1]}, {y_mean[-1]}, {y_max[-1]})")
+                    points_data = QTableWidgetItem(f"{np.size(y_mean)}")
                     self.table.setItem(idx, 0, min_data)
                     self.table.setItem(idx, 1, avg_data)
                     self.table.setItem(idx, 2, max_data)
                     self.table.setItem(idx, 3, first_data)
                     self.table.setItem(idx, 4, last_data)
+                    self.table.setItem(idx, 5, points_data)
 
                 else:
                     min_data = QTableWidgetItem(f"{np.min(signal.y_data)[0]}")
@@ -82,10 +99,12 @@ class IplotQtStatistics(QWidget):
                     max_data = QTableWidgetItem(f"{np.max(signal.y_data)[0]}")
                     first_data = QTableWidgetItem(f"{signal.y_data[0]}")
                     last_data = QTableWidgetItem(f"{signal.y_data[-1]}")
+                    points_data = QTableWidgetItem(f"{np.size(signal.y_data)}")
                     self.table.setItem(idx, 0, min_data)
                     self.table.setItem(idx, 1, avg_data)
                     self.table.setItem(idx, 2, max_data)
                     self.table.setItem(idx, 3, first_data)
                     self.table.setItem(idx, 4, last_data)
+                    self.table.setItem(idx, 5, points_data)
 
         self.table.setVerticalHeaderLabels(signal_labels)
