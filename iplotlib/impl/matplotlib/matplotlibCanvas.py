@@ -203,6 +203,22 @@ class MatplotlibParser(BackendParserBase):
         except AttributeError:
             plot = None
 
+        # Update the legend to indicate if the signal is downsampled ("*" is added/removed)
+        if mpl_axes.get_legend():
+            valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith('_child')]
+            pos = valid_lines.index(shapes[0][0])
+            legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
+
+            # In case of envelope, if the min,max,avg are the same it means that it is not downsampled
+            no_downsampled = (
+                    np.allclose(signal.data_store[1], signal.data_store[2]) and np.allclose(signal.data_store[2],
+                                                                                            signal.data_store[3]))
+
+            if legend_text.endswith('*') and no_downsampled:
+                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
+            elif not legend_text.endswith('*') and not no_downsampled:
+                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
+
         style = dict()
         if isinstance(signal, SignalXY):
             style = self.get_signal_style(signal)
