@@ -14,7 +14,7 @@ class IplotQtStatistics(QWidget):
         self.resize(1050, 500)
         self.setWindowTitle("Statistics table")
 
-        self.column_names = ['Min', 'Avg', 'Max', 'First', 'Last', 'Points']
+        self.column_names = ['Min', 'Avg', 'Max', 'First', 'Last', 'Samples']
 
         # Marker table creation
         self.table = QTableWidget()
