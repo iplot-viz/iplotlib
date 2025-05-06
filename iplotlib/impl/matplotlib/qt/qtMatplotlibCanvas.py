@@ -251,8 +251,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     return
 
     def stats(self, canvas: Canvas):
+        info_stats = []
         signals = self.get_signals(canvas)
-        self._stats_table.fill_table(signals)
+        if signals:
+            for signal in signals:
+                if isinstance(signal, SignalXY):
+                    info_stats.append((signal, self._parser._signal_impl_plot_lut.get(signal.uid)))
+            self._stats_table.fill_table(info_stats)
 
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)

@@ -81,6 +81,8 @@ class IplotQtMainWindow(QMainWindow):
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         w.undo()
+        # Computation of the statistics after undo operation
+        w.stats(w.get_canvas())
         QApplication.restoreOverrideCursor()
         self.check_history(w)
 
@@ -90,6 +92,8 @@ class IplotQtMainWindow(QMainWindow):
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         w.redo()
+        # Computation of the statistics after redo operation
+        w.stats(w.get_canvas())
         QApplication.restoreOverrideCursor()
         self.check_history(w)
 

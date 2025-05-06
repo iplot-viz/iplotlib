@@ -56,8 +56,7 @@ class IplotQtCanvasToolbar(QToolBar):
         self.addSeparator()
 
         # Statistics
-        # self.statistics = QAction(create_icon('export'), '&Statistics', self)
-        self.statistics = QAction('STATISTICS', self)
+        self.statistics = QAction(create_icon('stats_icon'), 'Statistics', self)
         self.addAction(self.statistics)
         self.addSeparator()
 
