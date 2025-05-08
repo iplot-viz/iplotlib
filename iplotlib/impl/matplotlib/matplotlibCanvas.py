@@ -71,6 +71,25 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
+    def legend_downsampled_signal(self, signal, mpl_axes, plot_lines):
+        """
+        Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
+        """
+        if mpl_axes.get_legend():
+            if np.size(signal.data_store[2]) > 0 and np.size(signal.data_store[3].shape) > 0:
+                # Envelope case
+                valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
+                pos = valid_lines.index(plot_lines[0][0])
+            else:
+                # Base case
+                pos = mpl_axes.get_lines().index(plot_lines[0][0])
+
+            legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
+            if legend_text.endswith('*') and not signal.isDownsampled:
+                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
+            elif not legend_text.endswith('*') and signal.isDownsampled:
+                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
+
     def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, data: List[BufferObject]):
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
@@ -90,15 +109,8 @@ class MatplotlibParser(BackendParserBase):
     def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
 
-        # Update the legend to indicate if the signal is downsampled ("*" is added/removed)
-        if mpl_axes.get_legend():
-            pos = mpl_axes.get_lines().index(plot_lines[0][0])
-            legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
-
-            if legend_text.endswith('*') and not signal.isDownsampled:
-                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
-            elif not legend_text.endswith('*') and signal.isDownsampled:
-                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
+        # Reflect downsampling in legend
+        self.legend_downsampled_signal(signal, mpl_axes, plot_lines)
 
         # Review to implement directly in PlotXY class
         if signal.color is None:
@@ -203,21 +215,8 @@ class MatplotlibParser(BackendParserBase):
         except AttributeError:
             plot = None
 
-        # Update the legend to indicate if the signal is downsampled ("*" is added/removed)
-        if mpl_axes.get_legend():
-            valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith('_child')]
-            pos = valid_lines.index(shapes[0][0])
-            legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
-
-            # In case of envelope, if the min,max,avg are the same it means that it is not downsampled
-            no_downsampled = (
-                    np.allclose(signal.data_store[1], signal.data_store[2]) and np.allclose(signal.data_store[2],
-                                                                                            signal.data_store[3]))
-
-            if legend_text.endswith('*') and no_downsampled:
-                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
-            elif not legend_text.endswith('*') and not no_downsampled:
-                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
+        # Reflect downsampling in legend
+        self.legend_downsampled_signal(signal, mpl_axes, shapes)
 
         style = dict()
         if isinstance(signal, SignalXY):
