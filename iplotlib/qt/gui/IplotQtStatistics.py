@@ -1,7 +1,9 @@
 import numpy as np
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, \
-    QAbstractItemView, QPushButton, QMenu
+    QAbstractItemView, QPushButton, QMenu, QSpinBox, QLabel, QFrame
+
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
@@ -14,11 +16,11 @@ class IplotQtStatistics(QWidget):
         self.resize(1050, 500)
         self.setWindowTitle("Statistics table")
 
-        self.column_names = ['Min', 'Avg', 'Max', 'First', 'Last', 'Samples']
+        self.column_names = ['Signal name', 'Min', 'Avg', 'Max', 'First', 'Last', 'Samples']
 
         # Marker table creation
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(self.column_names)
 
         # Disable cell modification
@@ -29,8 +31,7 @@ class IplotQtStatistics(QWidget):
 
         # Adjust column width dynamically
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        # header.setStretchLastSection(True)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
 
         # Layout
         main_v_layout = QVBoxLayout()
@@ -41,7 +42,7 @@ class IplotQtStatistics(QWidget):
         self.column_menu_button = QPushButton("Hide/Show Columns")
         self.column_menu = QMenu()
 
-        for i, name in enumerate(self.column_names):
+        for i, name in enumerate(self.column_names[1:], start=1):
             action = QAction(name, self)
             action.setCheckable(True)
             action.setChecked(True)
@@ -50,89 +51,156 @@ class IplotQtStatistics(QWidget):
 
         self.column_menu_button.setMenu(self.column_menu)
 
+        # Add button to adjust decimals
+        self.decimals = QLabel("Number of decimals: ")
+        self.adjust_decimals = QSpinBox()
+        self.adjust_decimals.setRange(2, 17)
+        self.adjust_decimals.setValue(2)
+        self.apply_decimals_button = QPushButton("Apply")
+        self.apply_decimals_button.clicked.connect(self.update_table_format)
+
         # Add button and table to layout
         top_layout_with_button.addWidget(self.column_menu_button)
+        top_layout_with_button.addWidget(self.decimals)
+        top_layout_with_button.addWidget(self.adjust_decimals)
+        top_layout_with_button.addWidget(self.apply_decimals_button)
         top_layout_with_button.addStretch()
 
+        # Add controllers to vertical layout
         top_v_layout.addLayout(top_layout_with_button)
+
+        # Add separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setLineWidth(1)
+        top_v_layout.addWidget(separator)
+
+        # Add table to vertical layout
         top_v_layout.addWidget(self.table)
 
         main_v_layout.addLayout(top_v_layout)
         self.setLayout(main_v_layout)
 
-    def fill_table(self, info_stats: list):
-        self.table.setRowCount(0)
-        signal_labels = []
-        for idx, signal_impl in enumerate(info_stats):
-            signal = signal_impl[0]
-            impl_plot = signal_impl[1]
+    def _format_float(self, value):
+        """
+            Format float: show as integer if no decimals
+        """
+        return int(value) if value.is_integer() else value
 
-            # Insert row
+    def _create_item(self, value):
+        """
+            Creates QTableWidgetItem and set data
+        """
+        if isinstance(value, float):
+            item = QTableWidgetItem(f"{self._format_float(value)}")
+            item.setData(Qt.UserRole, value)
+        elif isinstance(value, tuple):
+            val = f"({self._format_float(value[0])},{self._format_float(value[1])},{self._format_float(value[2])})"
+            item = QTableWidgetItem(val)
+            item.setData(Qt.UserRole, value)
+        else:
+            item = QTableWidgetItem(f"{value}")
+            item.setData(Qt.UserRole, float(value))
+
+        return item
+
+    def _set_stats(self, idx, min_data, avg_data, max_data, first, last, samples):
+        """
+            Set statistic row
+        """
+        self.table.setItem(idx, 1, self._create_item(min_data))
+        self.table.setItem(idx, 2, self._create_item(avg_data))
+        self.table.setItem(idx, 3, self._create_item(max_data))
+        self.table.setItem(idx, 4, self._create_item(first))
+        self.table.setItem(idx, 5, self._create_item(last))
+        self.table.setItem(idx, 6, self._create_item(samples))
+
+    def fill_table(self, info_stats: list):
+        """
+            Fill the statistics table with data for each signal
+        """
+        self.table.setRowCount(0)
+
+        for idx, (signal, impl_plot) in enumerate(info_stats):
+            # Insert new row
             self.table.insertRow(idx)
 
             # The rows correspond to the signals and their corresponding stacks
             stack = f"{signal.parent.id[0]}.{signal.parent.id[1]}.{signal.id}"
             signal_name = f"{signal.label}, {stack}"
-            signal_labels.append(signal_name)
+            self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
-            if signal.data_store[2].size > 0 and signal.data_store[3].size > 0:
-                # Envelope case
-                line = signal.lines[0][0]
-                x_data = line.get_xdata()
-                lo, hi = impl_plot.get_xlim()
+            # Add Statistics to the table
+            has_envelope = signal.data_store[2].size > 0 and signal.data_store[3].size > 0
+            line = signal.lines[0][0]
+            x_data = line.get_xdata()
+            lo, hi = impl_plot.get_xlim()
+
+            if has_envelope > 0:
                 y_min = np.array(signal.data_store[1])
                 y_max = np.array(signal.data_store[2])
                 y_mean = np.array(signal.data_store[3])
-                y_min_displayed = y_min[((x_data > lo) & (x_data < hi))]
-                y_max_displayed = y_max[((x_data > lo) & (x_data < hi))]
-                y_mean_displayed = y_mean[((x_data > lo) & (x_data < hi))]
 
-                if np.size(y_min_displayed) > 0:
-                    min_data = QTableWidgetItem(f"{np.min(y_min_displayed)}")
-                    avg_data = QTableWidgetItem(f"{np.mean(y_mean_displayed)}")
-                    max_data = QTableWidgetItem(f"{np.max(y_max_displayed)}")
-                    first_data = QTableWidgetItem(
-                        f"({y_min_displayed[0]}, {y_mean_displayed[0]}, {y_max_displayed[0]})")
-                    last_data = QTableWidgetItem(
-                        f"({y_min_displayed[-1]}, {y_mean_displayed[-1]}, {y_max_displayed[-1]})")
-                    points_data = QTableWidgetItem(f"{np.size(y_mean)}")
-                    self.table.setItem(idx, 0, min_data)
-                    self.table.setItem(idx, 1, avg_data)
-                    self.table.setItem(idx, 2, max_data)
-                    self.table.setItem(idx, 3, first_data)
-                    self.table.setItem(idx, 4, last_data)
-                    self.table.setItem(idx, 5, points_data)
+                # Filter values
+                mask = (x_data > lo) & (x_data < hi)
+                y_min_displayed = y_min[mask]
+                y_max_displayed = y_max[mask]
+                y_mean_displayed = y_mean[mask]
+                samples = np.size(y_mean_displayed)
+
+                if samples > 0:
+                    min_val, avg_val, max_val = np.min(y_min_displayed), np.mean(y_mean_displayed), np.max(
+                        y_max_displayed)
+                    first = (y_min_displayed[0], y_mean_displayed[0], y_max_displayed[0])
+                    last = (y_min_displayed[-1], y_mean_displayed[-1], y_max_displayed[-1])
+                    self._set_stats(idx, min_val, avg_val, max_val, first, last, samples)
                 else:
                     # Indicate that there is no data
-                    points_data = QTableWidgetItem(f"{np.size(y_min_displayed)}")
-                    self.table.setItem(idx, 5, points_data)
+                    self.table.setItem(idx, 6, self._create_item(samples))
 
             else:
                 # Base case
-                line = signal.lines[0][0]
-                x_data = line.get_xdata()
                 y_data = line.get_ydata()
-                lo, hi = impl_plot.get_xlim()
                 y_displayed = y_data[((x_data > lo) & (x_data < hi))]
+                samples = np.size(y_displayed)
 
-                if np.size(y_displayed) > 0:
-                    min_data = QTableWidgetItem(f"{np.min(y_displayed)[0]}")
-                    avg_data = QTableWidgetItem(f"{np.mean(y_displayed)[0]}")
-                    max_data = QTableWidgetItem(f"{np.max(y_displayed)[0]}")
-                    first_data = QTableWidgetItem(f"{y_displayed[0]}")
-                    last_data = QTableWidgetItem(f"{y_displayed[-1]}")
-                    points_data = QTableWidgetItem(f"{np.size(y_displayed)}")
-                    self.table.setItem(idx, 0, min_data)
-                    self.table.setItem(idx, 1, avg_data)
-                    self.table.setItem(idx, 2, max_data)
-                    self.table.setItem(idx, 3, first_data)
-                    self.table.setItem(idx, 4, last_data)
-                    self.table.setItem(idx, 5, points_data)
+                if samples > 0:
+                    min_val, avg_val, max_val = np.min(y_displayed)[0], np.mean(y_displayed)[0], np.max(y_displayed)[0]
+                    first_val, last_val = y_displayed[0], y_displayed[-1]
+                    samples = np.size(y_displayed)
 
+                    self._set_stats(idx, min_val, avg_val, max_val, first_val, last_val, samples)
                 else:
                     # Indicate that there is no data
-                    points_data = QTableWidgetItem(f"{np.size(y_displayed)}")
-                    self.table.setItem(idx, 5, points_data)
+                    self.table.setItem(idx, 6, self._create_item(samples))
 
-        if signal_labels:
-            self.table.setVerticalHeaderLabels(signal_labels)
+    def update_table_format(self):
+        """
+            Updates the float value format based on the selected number of decimals
+        """
+        decimals = self.adjust_decimals.value()
+        rows = self.table.rowCount()
+        cols = self.table.columnCount()
+
+        for row in range(rows):
+            for col in range(1, cols):
+                item = self.table.item(row, col)
+                if item is not None:
+                    data = item.data(Qt.UserRole)
+
+                    # Format tuple of value in case of envelope
+                    if isinstance(data, tuple):
+                        text_parts = []
+                        for val in data:
+                            if not val.is_integer():
+                                text_parts.append(f"{val:.{decimals}f}")
+                            else:
+                                text_parts.append(f"{int(val)}")
+                        text = f"({', '.join(text_parts)})"
+                        item.setText(text)
+
+                    # Format single float value
+                    else:
+                        if not data.is_integer():
+                            item.setText(f"{data:.{decimals}f}")
