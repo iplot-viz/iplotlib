@@ -30,6 +30,9 @@ from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
 
+from types import MethodType
+
+
 logger = Sl.get_logger(__name__)
 
 
@@ -54,6 +57,32 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_renderer = FigureCanvas(self._parser.figure)
         self._mpl_renderer.setParent(self)
         self._mpl_renderer.setSizePolicy(self._mpl_size_pol)
+
+        # Monkey-patch grab_mouse on the FigureCanvas instance to prevent
+        # RuntimeError when another Axes already has the mouse grab.
+        original_grab = self._mpl_renderer.grab_mouse
+
+        def safe_grab(self, ax):
+            """
+            Wrap the original grab_mouse to catch and log the 'Another Axes
+            already grabs mouse input' RuntimeError, then release the grab
+            so future interactions continue to work correctly.
+            """
+            try:
+                # Attempt the original mouse grab
+                original_grab(ax)
+            except RuntimeError as e:
+                # Log the conflict without interrupting the event loop
+                logger.warning(f"Canvas grab_mouse conflict: {e}")
+            finally:
+                # Always release the grab to avoid blocking future grabs
+                try:
+                    self.release_mouse(ax)
+                except Exception:
+                    pass
+
+        # Bind our safe_grab as the new instance method
+        self._mpl_renderer.grab_mouse = MethodType(safe_grab, self._mpl_renderer)
         self._mpl_toolbar = NavigationToolbar(self._mpl_renderer, self)
         self._mpl_toolbar.setVisible(False)
 
@@ -324,6 +353,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
 
+        # If the mouse event is inside the slider axes, do nothing here
+        if event.inaxes and event.inaxes.get_label() == "slider":
+            return
+
         # If the mouse is over the legend it ignores it
         if event.inaxes and event.inaxes.get_legend() and event.inaxes.get_legend().contains(event)[0]:
             return
@@ -448,6 +481,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _mpl_mouse_release_handler(self, event: MouseEvent):
         self._debug_log_event(event, "Mouse released")
+
+        # If the mouse event is inside the slider axes, do nothing here
+        if event.inaxes and event.inaxes.get_label() == "slider":
+            return
         if event.dblclick:
             pass
         else:
