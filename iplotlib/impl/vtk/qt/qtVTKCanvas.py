@@ -13,6 +13,7 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.vtk import VTKParser
 from iplotlib.impl.vtk.tools.queryMatrix import find_root_plot
+from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 
 # Maintain consistent qt api across vtk and iplotlib
@@ -76,6 +77,9 @@ class QtVTKCanvas(IplotQtCanvas):
 
         self._marker_window = IplotQtMarker()
 
+        # Statistics
+        self._stats_table = IplotQtStatistics()
+
         self._vtk_size_pol = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._vtk_renderer = IplotQVTKRwi(self, **kwargs)
         self._vtk_renderer._Timer.stop()
@@ -118,6 +122,9 @@ class QtVTKCanvas(IplotQtCanvas):
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
         return self._parser.canvas
+
+    def stats(self, canvas: Canvas):
+        return
 
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""

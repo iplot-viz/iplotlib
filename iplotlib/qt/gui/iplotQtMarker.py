@@ -27,7 +27,6 @@ class IplotQtMarker(QWidget):
 
         # Marker table creation
         self.table = QTableWidget()
-        # self.table = QTableView()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(['Marker', 'Stack', 'Signal name', '(X,Y) values', 'Visible', 'Color'])
 
