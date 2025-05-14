@@ -206,6 +206,16 @@ class MatplotlibParser(BackendParserBase):
             # auto-rescale Y axis so that any peaks remain visible
             self.autoscale_y_axis(mpl_axes)
 
+            # if the plot is in log scale, recompute limits and minor ticks
+            if mpl_axes.get_yscale() == 'log':
+                try:
+                    mpl_axes.relim()  # recompute data limits
+                    mpl_axes.autoscale_view(scalex=False, scaley=True)  # autoscale only the Y axis
+                    mpl_axes.yaxis.set_minor_locator(LogLocator(base=10, subs=(1.0,)))
+                except ValueError:
+                    # skip if data has no positive values
+                    pass
+
             # trigger a non-blocking redraw
             self.figure.canvas.draw_idle()
 
@@ -225,6 +235,15 @@ class MatplotlibParser(BackendParserBase):
             # cache the new lines and update signal.lines
             self._signal_impl_shape_lut.update({id(signal): lines})
             signal.lines = lines
+
+            # if the plot is in log scale on first draw, apply log autoscaling
+            if mpl_axes.get_yscale() == 'log':
+                try:
+                    mpl_axes.relim()
+                    mpl_axes.autoscale_view(scalex=False, scaley=True)
+                    mpl_axes.yaxis.set_minor_locator(LogLocator(base=10, subs=(1.0,)))
+                except ValueError:
+                    pass
 
         return signal.lines
 
@@ -374,11 +393,16 @@ class MatplotlibParser(BackendParserBase):
         return shared
 
     def process_ipl_canvas(self, canvas: Canvas):
+        """
+        Process/redraw the entire canvas, including the sliders and grid layout.
+        If no focus_plot is set, all plots are drawn. If a focus_plot is set, only
+        that specific plot is redrawn.
+        """
         super().process_ipl_canvas(canvas)
         self.canvas = canvas
 
         if canvas is None:
-            # no canvas → clear and exit
+            # No canvas → clear and exit
             self.clear()
             return
 
@@ -401,7 +425,7 @@ class MatplotlibParser(BackendParserBase):
         self.clear()
         self._layout = self.figure.add_gridspec(1, 1)
 
-        # force slider recreation on focus
+        # Force slider recreation on focus
         if isinstance(self._focus_plot, PlotXYWithSlider):
             self._focus_plot._slider_initialized = False
 
@@ -427,48 +451,72 @@ class MatplotlibParser(BackendParserBase):
         if not isinstance(plot, Plot):
             return
 
-        # Determine how many rows above the slider
+        # Determine number of signal rows above the slider
         stack_sz = 1 if (not self.canvas.full_mode_all_stack and self._focus_plot_stack_key) else len(plot.signals)
-
-        # Reserve space ratios for plot rows + slider row
-        height_ratios = [1.0] * stack_sz + [0.05]
         grid_cell = self._layout[row:row + plot.row_span, column:column + plot.col_span]
 
         if isinstance(plot, PlotXYWithSlider):
-            # Only remove old slider when doing a full redraw (not when we're already focusing)
+            # Remove old slider only on full redraw (not in focus mode)
             if self._focus_plot is None:
                 self._remove_existing_slider(plot)
-            subgrid = grid_cell.subgridspec(stack_sz + 1, 1, height_ratios=height_ratios, hspace=0.4)
 
-            # 1) Add stacked axes, collect last mpl_axes
-            mpl_axes_list, last_axes = self._add_stack_axes(plot, subgrid, stack_sz, slider_mode=True)
+            # Choose height ratios and spacing for home vs focus
+            if plot is self._focus_plot:
+                # Focused slider: allocate more vertical space to the plot
+                height_ratios = [0.95] * stack_sz + [0.05]
+                hspace = 0.15
+            else:
+                # Standard slider layout for home
+                height_ratios = [1.0] * stack_sz + [0.05]
+                hspace = 0.4
 
-            # 1.1) store axes list on the plot
-            plot._mpl_axes_list = mpl_axes_list
-
-            # 2) Initialize Y limits for slider plots
-            y_axis = plot.axes[1]
-            self.update_multi_range_axis(y_axis, 1, last_axes)
-
-            # 3) Draw legend on the *last* axes
-            if self._pm.get_value(plot, 'legend') and last_axes.get_lines():
-                self._draw_plot_legend(plot, last_axes, signals=sum(plot.signals.values(), []))
-
-            # 4) Finally, create the slider widget
-            self._initialize_slider(plot, subgrid[stack_sz, 0])
-
-        else:
-            # Standard (no-slider) plot
-            subgrid = grid_cell.subgridspec(stack_sz, 1, hspace=0)
-            mpl_axes_list, last_axes = self._add_stack_axes(
-                plot, subgrid, stack_sz, slider_mode=False
+            # Create a subgrid: stack_sz plot rows + 1 slider row
+            subgrid = grid_cell.subgridspec(
+                nrows=stack_sz + 1,
+                ncols=1,
+                height_ratios=height_ratios,
+                hspace=hspace
             )
 
-            # For standard plots we also draw legend on the *last* axes
+            # 1) Add stacked axes and get the last axes object
+            mpl_axes_list, last_axes = self._add_stack_axes(plot, subgrid, stack_sz, slider_mode=True)
+            plot._mpl_axes_list = mpl_axes_list
+
+            # 2) Initialize Y-axis limits for slider-driven plots
+            self.update_multi_range_axis(plot.axes[1], 1, last_axes)
+
+            # 3) Draw legend on the last axes if enabled
             if self._pm.get_value(plot, 'legend') and last_axes.get_lines():
                 self._draw_plot_legend(plot, last_axes, signals=sum(plot.signals.values(), []))
 
-        # 5) Hook up xlim callbacks for shared axes sync
+            # 4) Create or update the slider widget
+            self._initialize_slider(plot, subgrid[stack_sz, 0])
+
+            # 5) Fine-tune X-label and slider positions
+            slider_ax = plot.slider.ax
+            x0, y0, w, h = slider_ax.get_position().bounds
+
+            # Shift the slider down so the label can sit just above it
+            slider_ax.set_position([x0, y0 - 0.02, w, h])
+
+            # Position the X-axis label immediately above the slider
+            if plot is self._focus_plot:
+                last_axes.xaxis.set_label_coords(0.5, -0.03)
+                last_axes.xaxis.labelpad = 4
+            else:
+                last_axes.xaxis.set_label_coords(0.5, -0.1)
+                last_axes.xaxis.labelpad = 4
+
+        else:
+            # Standard (no-slider) plot: single grid row, no slider
+            subgrid = grid_cell.subgridspec(nrows=stack_sz, ncols=1, hspace=0.0)
+            mpl_axes_list, last_axes = self._add_stack_axes(plot, subgrid, stack_sz, slider_mode=False)
+
+            # Draw legend if enabled
+            if self._pm.get_value(plot, 'legend') and last_axes.get_lines():
+                self._draw_plot_legend(plot, last_axes, signals=sum(plot.signals.values(), []))
+
+        # Connect x-limits callback for shared-axis synchronization
         self._connect_limit_callbacks(last_axes)
 
     def _remove_existing_slider(self, plot: PlotXYWithSlider):
@@ -579,7 +627,7 @@ class MatplotlibParser(BackendParserBase):
                 self.process_ipl_axis(ax, ax_idx, plot, mpl_axes)
                 if isinstance(plot, PlotXYWithSlider):
                     mpl_axes.xaxis.set_label_coords(0.5, -0.1)
-                    mpl_axes.xaxis.labelpad = 5
+                    mpl_axes.xaxis.labelpad = 3
 
         # initialize x-limits if needed
         if isinstance(x_axis, RangeAxis) and x_axis.begin is None and x_axis.end is None:
@@ -737,57 +785,47 @@ class MatplotlibParser(BackendParserBase):
 
     # Slider updater!
     def _on_slider_change(self, plot, times, label, val, axes_list):
-        """
-        Handle slider movement:
-         - redraw all signals
-         - sync other sliders
-         - restore user's x-zoom on primary axis
-         - update y-limits within that zoom
-         - update the timestamp label
-         - move shared crosshair if enabled
-        """
-        # prevent recursive loops triggered by set_val from shared sliders
+        # prevent re-entry into this handler
         if getattr(plot, "_in_slider_update", False):
             return
         plot._in_slider_update = True
 
         try:
-            # redraw every signal in this plot
+            # 1) redraw this plot's signals
             for signal in sum(plot.signals.values(), []):
                 self.process_ipl_signal(signal)
 
-            # propagate slider value to any shared sliders
+            # 2) propagate to other sliders if Shared Time is active
             if self.canvas.shared_x_axis:
                 for other in self._slider_plots:
-                    if other is not plot and getattr(other, 'slider', None):
-                        # prevent triggering another round of set_val
-                        if getattr(other, "_in_slider_update", False):
-                            continue
-                        other.slider.set_val(val)
+                    if other is not plot and getattr(other, "slider", None):
+                        # only propagate if the value actually differs
+                        if other.slider.val != val:
+                            other.slider.set_val(val)
+                        # also update their internal last-value, para que al volver a dibujar usen este valor
+                        other.slider_last_val = val
 
-            # pick the primary axis from the list we stored earlier
+            # 3) restore user zoom, etc...
             primary_ax = axes_list[0]
             try:
-                # restore the user's zoom range if defined
                 x0, x1 = plot.axes[0].begin, plot.axes[0].end
                 if x0 is not None and x1 is not None:
                     primary_ax.set_xlim(x0, x1)
-                    # update Y-limits to fit new data slice under that zoom
                     self.update_multi_range_axis(plot.axes[1], 1, primary_ax)
             except Exception:
                 pass
 
-            # update the current timestamp label
+            # 4) update timestamp label
             ts = pandas.Timestamp(times[int(val)])
             fmt = NanosecondDateFormatter(ax_idx=0)
-            label.set_text(fmt.date_fmt(ts.value, fmt.cut_start + 3, fmt.NANOSECOND, postfix_end=True))
+            label.set_text(
+                fmt.date_fmt(ts.value, fmt.cut_start + 3, fmt.NANOSECOND, postfix_end=True)
+            )
             plot.slider_last_val = val
 
-            # move the crosshair on shared axes
+            # 5) move shared crosshair...
             if self.canvas.shared_x_axis and self._cursors:
-                # convert pandas.Timestamp to Matplotlib float
-                dt64 = ts.to_datetime64().astype("datetime64[us]").astype("O")
-                x_num = mdates.date2num(dt64)
+                x_num = mdates.date2num(ts.round('us').to_pydatetime())
                 siblings = self._get_all_shared_axes(primary_ax, slider=True)
                 if primary_ax in siblings:
                     siblings.remove(primary_ax)
@@ -796,7 +834,7 @@ class MatplotlibParser(BackendParserBase):
                     self._cursors[0].on_move_slider(px)
 
         finally:
-            # always clear flag to allow future updates
+            # clear the guard flag
             plot._in_slider_update = False
 
     def _connect_limit_callbacks(self, mpl_axes):
@@ -1008,9 +1046,6 @@ class MatplotlibParser(BackendParserBase):
         Update the slider's min/max bounds and its annotations.
         Also re-set the slider position AND trigger redraw.
         """
-        import matplotlib.pyplot as plt
-        from matplotlib.patches import Patch
-
         slider = getattr(plot, 'slider', None)
         if slider is None:
             return
@@ -1125,25 +1160,37 @@ class MatplotlibParser(BackendParserBase):
 
     def set_focus_plot(self, mpl_axes):
         """
-        Handle focus/unfocus transitions: reset slider flags when leaving focus,
-        and clear slider list when entering focus.
+        Handle focus/unfocus transitions for slider synchronization.
         """
+        # Identify the newly focused plot
         new_plot, new_key = None, None
         if isinstance(mpl_axes, MPLAxes):
             ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             new_plot, new_key = ci.plot(), ci.stack_key
 
-        # when unfocusing (clicking outside), clear all slider init flags
+        # If unfocusing, propagate last slider position to all other sliders
         if self._focus_plot is not None and new_plot is None:
-            for col in self.canvas.plots:
-                for p in col:
-                    setattr(p, '_slider_initialized', False)
-            self._slider_plots.clear()
+            last_val = getattr(self._focus_plot, 'slider_last_val', None)
+            if last_val is not None:
+                for other in self._slider_plots:
+                    if other is not self._focus_plot and getattr(other, 'slider', None):
+                        # Reuse existing slider widget by updating its value
+                        other.slider.set_val(last_val)
+                        other.slider_last_val = last_val
+                        # Update the slider's timestamp annotation
+                        annotations = [
+                            child for child in other.slider.ax.get_children()
+                            if isinstance(child, Annotation)
+                        ]
+                        if len(annotations) >= 3:
+                            timestamps = other.signals[1][0].z_data
+                            annotations[1].set_text(str(pandas.Timestamp(timestamps[last_val])))
 
-        # when focusing a new plot, also clear any tracked sliders
-        if self._focus_plot is None and new_plot is not None:
-            self._slider_plots.clear()
+        # Reset initialization flags for all tracked sliders to force redraw
+        for slider_plot in self._slider_plots:
+            slider_plot._slider_initialized = False
 
+        # Delegate focus handling to the base class
         super().set_focus_plot(mpl_axes)
         self._focus_plot = new_plot
         self._focus_plot_stack_key = new_key
