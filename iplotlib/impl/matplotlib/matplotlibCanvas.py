@@ -107,8 +107,24 @@ class MatplotlibParser(BackendParserBase):
         self._signal_impl_shape_lut.update({id(signal): plot_lines})
 
     def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data):
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
 
+        def _get_visible_data(xd, yd, lo, hi):
+            x_displayed = xd[((xd > lo) & (xd < hi))]
+            y_displayed = yd[((xd > lo) & (xd < hi))]
+            return x_displayed, y_displayed
+
+        def _update_marker_by_point_count(marker_line: Line2D, signal_x_data, signal_style: dict):
+            if len(signal_x_data) == 1:
+                marker_line.set_marker('x')
+                marker_line.set_markersize(5)
+            else:
+                marker_line.set_marker(signal_style.get('marker') or "")
+                marker_line.set_markersize(signal_style.get('markersize'))
+
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+        style = self.get_signal_style(signal)
+        params = dict(**style)
+        draw_fn = mpl_axes.plot
         # Reflect downsampling in legend
         self.legend_downsampled_signal(signal, mpl_axes, plot_lines)
 
@@ -117,15 +133,20 @@ class MatplotlibParser(BackendParserBase):
             # It means that the color has been reset but must keep the original color
             signal.color = signal.original_color
 
+        if not signal.extremities:
+            x_data, y_data = _get_visible_data(x_data, y_data, *mpl_axes.get_xlim())
+
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
                 line = plot_lines[0][0]
                 line.set_xdata(x_data)
                 line.set_ydata(y_data)
+                _update_marker_by_point_count(line, x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):
                     line[0].set_xdata(x_data)
                     line[0].set_ydata(y_data[:, i])
+                    _update_marker_by_point_count(line[0], x_data, style)
 
             # Put this out in a method only for streaming
             if self.canvas.streaming:
@@ -147,16 +168,15 @@ class MatplotlibParser(BackendParserBase):
                 for n, o in zip(new, old):
                     n.set_visible(o.get_visible())
         else:
-            style = self.get_signal_style(signal)
-            params = dict(**style)
-            draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
                 plot_lines = [draw_fn(x_data, y_data, **params)]
+                _update_marker_by_point_count(plot_lines[0][0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 lines = draw_fn(x_data, y_data, **params)
                 plot_lines = [[line] for line in lines]
                 for i, line in enumerate(plot_lines):
                     line[0].set_label(f"{signal.label}[{i}]")
+                    _update_marker_by_point_count(line[0], x_data, style)
 
         signal.lines = plot_lines
 
