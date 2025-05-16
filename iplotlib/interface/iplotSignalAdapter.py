@@ -758,8 +758,12 @@ class AccessHelper:
         if (ts_s is not None and ts_e is not None) or pulse is not None:
 
             if envelope:
-                da_params.update({'nbp': AccessHelper.num_samples})
                 (d_env) = AccessHelper.da.get_envelope(**da_params)
+                if d_env.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval,' \
+                                    ' use decimation or read data by chunks.':
+                    da_params.update({'nbp': AccessHelper.num_samples})
+                    (d_env) = AccessHelper.da.get_envelope(**da_params)
+                    ds = True
                 if d_env.errcode < 0:
                     if d_env.errcode < 0:
                         message = f"ErrCode: {d_env.errcode} | getEnvelope (minimum) failed for -1 and" \
@@ -782,7 +786,7 @@ class AccessHelper:
                 result['d1_unit'] = d_env.yunit if d_env else ''
                 result['d2_unit'] = d_env.yunit if d_env else ''
                 result['d3_unit'] = d_env.yunit if d_env else ''
-                result['isds'] = True
+                result['isds'] = ds
                 logger.debug(f"[UDA ] nbsMIN={len(d_env.ydata_min)} nbsMAX={len(d_env.ydata_max)}")
 
             else:
