@@ -107,8 +107,16 @@ class MatplotlibParser(BackendParserBase):
         self._signal_impl_shape_lut.update({id(signal): plot_lines})
 
     def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data):
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
 
+        def _get_visible_data(xd, yd, lo, hi):
+            x_displayed = xd[((xd > lo) & (xd < hi))]
+            y_displayed = yd[((xd > lo) & (xd < hi))]
+            return x_displayed, y_displayed
+
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+        style = self.get_signal_style(signal)
+        params = dict(**style)
+        draw_fn = mpl_axes.plot
         # Reflect downsampling in legend
         self.legend_downsampled_signal(signal, mpl_axes, plot_lines)
 
@@ -116,6 +124,9 @@ class MatplotlibParser(BackendParserBase):
         if signal.color is None:
             # It means that the color has been reset but must keep the original color
             signal.color = signal.original_color
+
+        if not signal.extremities:
+            x_data, y_data = _get_visible_data(x_data, y_data, *mpl_axes.get_xlim())
 
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
@@ -147,9 +158,6 @@ class MatplotlibParser(BackendParserBase):
                 for n, o in zip(new, old):
                     n.set_visible(o.get_visible())
         else:
-            style = self.get_signal_style(signal)
-            params = dict(**style)
-            draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
                 plot_lines = [draw_fn(x_data, y_data, **params)]
             elif x_data.ndim == 1 and y_data.ndim == 2:

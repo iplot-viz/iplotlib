@@ -159,11 +159,20 @@ class IplotQtCanvas(QWidget):
 
     def commit_view_lim_cmd(self):
         """commit a view command"""
-
         cmd = self._staging_cmds.pop()
-        cmd.new_lim = self._parser.get_all_plot_limits()
+        cmd.new_lim = self._parser.get_all_plot_limits()  # New limits based on the current view
         assert len(cmd.new_lim) == len(cmd.old_lim)
+
+        # Check if any limit actually changed
         if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            QApplication.processEvents()
+            self._parser.refresh_data()
+            QApplication.restoreOverrideCursor()
+
+            # Update new limits after data refresh
+            cmd.new_lim = self._parser.get_all_plot_limits()
+
             self._commitd_cmds.append(cmd)
             logger.debug(f"Committed {cmd}")
         else:
@@ -176,10 +185,6 @@ class IplotQtCanvas(QWidget):
             self._parser._hm.done(cmd)
             logger.debug(f"Pushed {cmd}")
             self.cmdDone.emit(cmd)
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            QApplication.processEvents()
-            self._parser.refresh_data()
-            QApplication.restoreOverrideCursor()
         except IndexError:
             return
 
