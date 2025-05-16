@@ -76,13 +76,9 @@ class MatplotlibParser(BackendParserBase):
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
         if mpl_axes.get_legend():
-            if np.size(signal.data_store[2]) > 0 and np.size(signal.data_store[3].shape) > 0:
-                # Envelope case
-                valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
-                pos = valid_lines.index(plot_lines[0][0])
-            else:
-                # Base case
-                pos = mpl_axes.get_lines().index(plot_lines[0][0])
+            # Get line position
+            valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
+            pos = valid_lines.index(plot_lines[0][0])
 
             legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
             if legend_text.endswith('*') and not signal.isDownsampled:
@@ -297,12 +293,13 @@ class MatplotlibParser(BackendParserBase):
                     continue
                 limits = self.get_plot_limits(plot, which='original')
                 begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                # Check if it is date and the max difference is 1 second
-                # Need to differentiate if it is absolute or relative
-                if plot.axes[0].is_date:
-                    max_diff_ns = self._pm.get_value(self.canvas, 'max_diff') * 1e9
-                else:
-                    max_diff_ns = self._pm.get_value(self.canvas, 'max_diff')
+
+                # Check if the axis is date and check the max difference
+                # Need to differentiate if it is absolute or relative time
+                max_diff = self._pm.get_value(self.canvas, 'max_diff')
+                max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date else max_diff
+
+                # Check if the time range is exactly the same or within the allowed difference
                 if ((begin, end) == (base_begin, base_end) or (
                         abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
                     shared.append(axes)

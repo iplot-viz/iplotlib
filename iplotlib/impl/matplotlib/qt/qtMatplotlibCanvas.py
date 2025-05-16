@@ -52,6 +52,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._stats_table = IplotQtStatistics()
 
         self.info_shared_x_dialog = False
+        self.last_max_diff = None
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
@@ -100,8 +101,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         if canvas:
             if self._parser._pm.get_value(canvas, 'shared_x_axis'):
-                if not self.info_shared_x_dialog:
+                max_diff = self._parser._pm.get_value(canvas, 'max_diff')
+                if not self.info_shared_x_dialog or self.last_max_diff != max_diff:
                     self.info_shared_x_dialog = True
+                    self.last_max_diff = max_diff
                     relative = False
                     for row_idx, col in enumerate(canvas.plots, start=1):
                         for col_idx, plot in enumerate(col, start=1):
@@ -113,19 +116,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                                 plot_stack.append(f"{col_idx}.{row_idx}")
 
                     dict_ranges = defaultdict(list)
-                    # Need to differentiate if it is absolute or relative
-                    if relative:
-                        max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff')
-                    else:
-                        max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff') * 1e9
+                    # Need to differentiate if it is absolute or relative time
+                    max_diff_ns = max_diff if relative else max_diff * 1e9
                     for idx, uniq_range in enumerate(ranges):
-                        if uniq_range == ranges[0]:
-                            dict_ranges[uniq_range].append(plot_stack[idx])
-                        # If the difference of the ranges is less than 1 second, we consider them equal
-                        elif abs(uniq_range[0] - ranges[0][0]) <= max_diff_ns and abs(
-                                uniq_range[1] - ranges[0][1]) <= max_diff_ns:
-                            dict_ranges[ranges[0]].append(plot_stack[idx])
-                        else:
+                        added = False
+                        for existing_range in dict_ranges.keys():
+                            if abs(uniq_range[0] - existing_range[0]) <= max_diff_ns and abs(uniq_range[1] - existing_range[1]) <= max_diff_ns:
+                                dict_ranges[existing_range].append(plot_stack[idx])
+                                added = True
+                                break
+                        if not added:
                             dict_ranges[uniq_range].append(plot_stack[idx])
 
                     # If there is more than one element in the dictionary it means that there is more than one time
