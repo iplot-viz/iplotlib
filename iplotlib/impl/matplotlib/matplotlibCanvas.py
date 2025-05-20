@@ -35,6 +35,7 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
+import warnings
 
 logger = setupLogger.get_logger(__name__)
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
@@ -57,17 +58,19 @@ class MatplotlibParser(BackendParserBase):
         self.legend_size = 8
         self._cursors = []
         self._crosshairs = {}
+
         # Sync all the sliders for shared time
         self._slider_plots: List[PlotXYWithSlider] = []
 
         register_matplotlib_converters()
+        # Use constrained_layout by default; switch to tight only if explicitly requested
         self.figure = Figure(constrained_layout=True)
-        self._impl_plot_ranges_hash = dict()
-
-        if tight_layout:
+        if canvas and getattr(canvas, 'tight_layout', False):
             self.enable_tight_layout()
         else:
             self.disable_tight_layout()
+
+        self._impl_plot_ranges_hash = dict()
 
     def export_image(self, filename: str, **kwargs):
         super().export_image(filename, **kwargs)
@@ -394,42 +397,65 @@ class MatplotlibParser(BackendParserBase):
 
     def process_ipl_canvas(self, canvas: Canvas):
         """
-        Process/redraw the entire canvas, including the sliders and grid layout.
-        If no focus_plot is set, all plots are drawn. If a focus_plot is set, only
-        that specific plot is redrawn.
+        Process/redraw the entire canvas, including layout and slider state.
+        Depending on focus state, either redraws the full grid or a single plot.
         """
         super().process_ipl_canvas(canvas)
         self.canvas = canvas
 
         if canvas is None:
-            # No canvas → clear and exit
             self.clear()
             return
 
-        # 1) Without focus: clear + full grid redraw
+        self.clear()
+
+        # Explicitly set layout engine based on canvas attribute
+        if getattr(canvas, 'tight_layout', False):
+            self.enable_tight_layout()
+        else:
+            self.disable_tight_layout()
+
+        # === CASE 1: Full grid (no focus) ===
         if self._focus_plot is None:
-            self.clear()
             self._layout = self.figure.add_gridspec(canvas.rows, canvas.cols)
+
             for col_idx, col in enumerate(canvas.plots):
                 for row_idx, plot in enumerate(col):
                     self.process_ipl_plot(plot, col_idx, row_idx)
+
+                    # Ensure slider axes don't hide avxspan
+                    if isinstance(plot, PlotXYWithSlider) and getattr(plot, 'slider', None):
+                        plot.slider.ax.set_facecolor('none')
+                        plot.slider.ax.patch.set_alpha(0.0)
+
             if canvas.title:
                 self.figure.suptitle(
                     canvas.title,
                     size=self._pm.get_value(canvas, 'font_size') or None,
                     color=self._pm.get_value(canvas, 'font_color') or 'black'
                 )
+
+
+            # Tight layout for canvas
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                self.figure.tight_layout()
+            self.figure.canvas.draw_idle()
+
             return
 
-        # 2) With focus (slider or not): clear + redraw only the focused plot
-        self.clear()
+        # === CASE 2: Focus mode ===
         self._layout = self.figure.add_gridspec(1, 1)
 
-        # Force slider recreation on focus
         if isinstance(self._focus_plot, PlotXYWithSlider):
             self._focus_plot._slider_initialized = False
 
         self.process_ipl_plot(self._focus_plot, 0, 0)
+
+        if self._focus_plot and isinstance(self._focus_plot, PlotXYWithSlider):
+            if getattr(self._focus_plot, 'slider', None):
+                self._focus_plot.slider.ax.set_facecolor('none')
+                self._focus_plot.slider.ax.patch.set_alpha(0.0)
 
         if canvas.title:
             self.figure.suptitle(
@@ -437,6 +463,8 @@ class MatplotlibParser(BackendParserBase):
                 size=self._pm.get_value(canvas, 'font_size') or None,
                 color=self._pm.get_value(canvas, 'font_color') or 'black'
             )
+
+        self.figure.canvas.draw_idle()
 
     def process_ipl_plot_xy(self):
         pass
@@ -499,13 +527,10 @@ class MatplotlibParser(BackendParserBase):
             # Shift the slider down so the label can sit just above it
             slider_ax.set_position([x0, y0 - 0.02, w, h])
 
-            # Position the X-axis label immediately above the slider
-            if plot is self._focus_plot:
-                last_axes.xaxis.set_label_coords(0.5, -0.03)
-                last_axes.xaxis.labelpad = 4
-            else:
-                last_axes.xaxis.set_label_coords(0.5, -0.1)
-                last_axes.xaxis.labelpad = 4
+            # Shift X label just above the slider in a smart way
+            y_offset = -0.03 if plot is self._focus_plot else -0.08
+            last_axes.xaxis.set_label_coords(0.5, y_offset)
+            last_axes.xaxis.labelpad = 4
 
         else:
             # Standard (no-slider) plot: single grid row, no slider
@@ -516,8 +541,15 @@ class MatplotlibParser(BackendParserBase):
             if self._pm.get_value(plot, 'legend') and last_axes.get_lines():
                 self._draw_plot_legend(plot, last_axes, signals=sum(plot.signals.values(), []))
 
+
         # Connect x-limits callback for shared-axis synchronization
         self._connect_limit_callbacks(last_axes)
+
+        # Restore red-highlight range for shared X if needed
+        if isinstance(plot, PlotXYWithSlider) and self.canvas.shared_x_axis:
+            x_axis = plot.axes[0]
+            if isinstance(x_axis, RangeAxis) and x_axis.begin is not None and x_axis.end is not None:
+                self.update_slider_limits(plot, x_axis.begin, x_axis.end)
 
     def _remove_existing_slider(self, plot: PlotXYWithSlider):
         """
@@ -542,11 +574,16 @@ class MatplotlibParser(BackendParserBase):
         if plot in self._slider_plots:
             self._slider_plots.remove(plot)
 
-        # delete the slider axes
-        try:
-            self.figure.delaxes(slider.ax)
-        except Exception:
-            pass
+        slider_ax = slider.ax
+        for child in list(slider_ax.get_children()):
+            if isinstance(child, Slider):
+                child.remove()
+            elif isinstance(child, Patch) and child.get_label() == 'slider_red_range':
+                child.remove()
+            elif isinstance(child, plt.Annotation):
+                child.remove()
+            elif isinstance(child, Line2D):
+                child.remove()
 
         # mark as uninitialized for future recreation
         plot._slider_initialized = False
@@ -647,27 +684,37 @@ class MatplotlibParser(BackendParserBase):
         pos = self._pm.get_value(self.canvas, 'legend_position') if pos == 'same as canvas' else pos
         layout = canvas_layout if layout == 'same as canvas' else layout
 
-        # determine column trial range
-        ver = (1, 3);
+        # Determine the range of columns to try depending on the layout orientation
+        ver = (1, 3)
         hor = (len(signals), 1)
         case = ver if layout == 'vertical' else hor
+
         for ncol in range(case[0], case[1] + (1 if case[0] < case[1] else -1), (1 if case[0] < case[1] else -1)):
             leg = mpl_axes.legend(prop=dict(size=self.legend_size), loc=pos, ncol=ncol)
-            if self.figure.get_tight_layout():
+
+            # If using tight_layout, exclude the legend from layout calculation
+            if self.figure.get_layout_engine().__class__.__name__.lower() == "tightlayoutengine":
                 leg.set_in_layout(False)
-            # break if fully inside
+
+            # Break once the legend fully fits inside the axes area
             bb_leg = leg.get_window_extent().transformed(self.figure.transFigure.inverted())
             bb_ax = mpl_axes.get_window_extent().transformed(self.figure.transFigure.inverted())
             if not (
-                    bb_leg.xmin < bb_ax.xmin or bb_leg.xmax > bb_ax.xmax or bb_leg.ymin < bb_ax.ymin or bb_leg.ymax > bb_ax.ymax):
+                    bb_leg.xmin < bb_ax.xmin or
+                    bb_leg.xmax > bb_ax.xmax or
+                    bb_leg.ymin < bb_ax.ymin or
+                    bb_leg.ymax > bb_ax.ymax
+            ):
                 break
 
-        # escape dollar signs and map legend picks
+        # Escape dollar signs for LaTeX-like strings
         for txt in leg.texts:
             txt.set_text(txt.get_text().replace("$", r"\$"))
+
+        # Map legend lines to corresponding signals for click handling
         legend_lines = leg.get_lines()
         for idx, sig in enumerate(signals):
-            for line in self._signal_impl_shape_lut[id(sig)]:
+            for line in self._signal_impl_shape_lut.get(id(sig), []):
                 proxy = legend_lines[idx]
                 self.map_legend_to_ax[proxy] = [line, sig]
                 proxy.set_picker(3)
@@ -684,6 +731,15 @@ class MatplotlibParser(BackendParserBase):
         # create slider axes and disable pan/zoom on them
         slider_ax = self.figure.add_subplot(slider_spec)
         slider_ax.set_label("slider")
+        slider_ax.text(
+            0.5, 0.5, "",
+            color="black", fontsize=12, ha="center", va="center",
+            transform=slider_ax.transAxes
+        )
+        # Ensure the slider axis is rendered above other plots and background is transparent
+        slider_ax.set_zorder(10)
+        slider_ax.patch.set_alpha(0.0)
+
         slider_ax.set_navigate(False)
 
         # build time labels for min, current and max
@@ -753,7 +809,8 @@ class MatplotlibParser(BackendParserBase):
         def slider_click(event):
             if event.inaxes == slider_ax and event.button == MouseButton.LEFT:
                 idx = int(round(event.xdata))
-                idx = max(0, min(idx, len(times) - 1))
+                # clamp to the red‐zone limits
+                idx = max(int(plot.slider.valmin), min(idx, int(plot.slider.valmax)))
                 plot.slider.set_val(idx)
 
         cid = self.figure.canvas.mpl_connect('button_press_event', slider_click)
@@ -780,32 +837,41 @@ class MatplotlibParser(BackendParserBase):
         # remember this slider for shared‐axis sync
         self._slider_plots.append(plot)
 
+        # begin added for persisting red range on focus/unfocus
+        if self.canvas.shared_x_axis:
+            x_axis = plot.axes[0]
+            if isinstance(x_axis, RangeAxis) and x_axis.begin is not None and x_axis.end is not None:
+                self.update_slider_limits(plot, x_axis.begin, x_axis.end)
+
+        slider_bounds = slider_ax.get_position().bounds
+        if axes_list:
+            main_ax_bounds = axes_list[0].get_position().bounds
+
         # mark as initialized so _remove_existing_slider will act correctly next time
         plot._slider_initialized = True
 
     # Slider updater!
     def _on_slider_change(self, plot, times, label, val, axes_list):
-        # prevent re-entry into this handler
+        """Handle slider movement and update both real and pseudo crosshairs."""
+        # Prevent re-entry into this handler
         if getattr(plot, "_in_slider_update", False):
             return
         plot._in_slider_update = True
 
         try:
-            # 1) redraw this plot's signals
+            # 1) Redraw this plot's signals
             for signal in sum(plot.signals.values(), []):
                 self.process_ipl_signal(signal)
 
-            # 2) propagate to other sliders if Shared Time is active
+            # 2) Propagate to other sliders if Shared Time is active
             if self.canvas.shared_x_axis:
                 for other in self._slider_plots:
                     if other is not plot and getattr(other, "slider", None):
-                        # only propagate if the value actually differs
                         if other.slider.val != val:
                             other.slider.set_val(val)
-                        # also update their internal last-value, para que al volver a dibujar usen este valor
                         other.slider_last_val = val
 
-            # 3) restore user zoom, etc...
+            # 3) Restore user zoom, etc
             primary_ax = axes_list[0]
             try:
                 x0, x1 = plot.axes[0].begin, plot.axes[0].end
@@ -815,26 +881,15 @@ class MatplotlibParser(BackendParserBase):
             except Exception:
                 pass
 
-            # 4) update timestamp label
+            # 4) Update timestamp label on the slider itself
             ts = pandas.Timestamp(times[int(val)])
             fmt = NanosecondDateFormatter(ax_idx=0)
-            label.set_text(
-                fmt.date_fmt(ts.value, fmt.cut_start + 3, fmt.NANOSECOND, postfix_end=True)
-            )
+            label.set_text(fmt.date_fmt(ts.value, fmt.cut_start + 3, fmt.NANOSECOND, postfix_end=True))
             plot.slider_last_val = val
 
-            # 5) move shared crosshair...
-            if self.canvas.shared_x_axis and self._cursors:
-                x_num = mdates.date2num(ts.round('us').to_pydatetime())
-                siblings = self._get_all_shared_axes(primary_ax, slider=True)
-                if primary_ax in siblings:
-                    siblings.remove(primary_ax)
-                if siblings:
-                    px = siblings[0].transData.transform((x_num, 0))[0]
-                    self._cursors[0].on_move_slider(px)
+            x_num = mdates.date2num(ts.round('us').to_pydatetime())
 
         finally:
-            # clear the guard flag
             plot._in_slider_update = False
 
     def _connect_limit_callbacks(self, mpl_axes):
@@ -914,6 +969,20 @@ class MatplotlibParser(BackendParserBase):
 
                     logger.debug(f"callback update {ranges[0]} axis range to {ranges[1]}")
 
+        # Once all the normal x-limits sync has run, we also force-clamp every slider
+        if self.canvas.shared_x_axis:
+            # Iterate over every PlotXYWithSlider we track
+            for slider_plot in self._slider_plots:
+                # Get the current zoom on the corresponding RangeAxis
+                x_begin, x_end = slider_plot.axes[0].begin, slider_plot.axes[0].end
+                if x_begin is None or x_end is None:
+                    continue
+                # Clamp and redraw the red highlight span
+                self.update_slider_limits(slider_plot, x_begin, x_end)
+            # Finally, trigger a redraw so the red spans actually se vean
+            self.figure.canvas.draw_idle()
+
+
     def process_ipl_axis(self, axis: Axis, ax_idx, plot: Plot, impl_plot: MPLAxes):
         super().process_ipl_axis(axis, ax_idx, plot, impl_plot)
         mpl_axis = self.get_impl_axis(impl_plot, ax_idx)  # type: MPLAxis
@@ -992,6 +1061,11 @@ class MatplotlibParser(BackendParserBase):
         # apply axis labels
         self.update_axis_labels_with_units(mpl_axes, signal)
 
+        # remove only previous marker annotations, not other slider/cursor elements
+        for ann in mpl_axes.texts:
+            if getattr(ann, "_is_marker_annotation", False):
+                ann.remove()
+
         # draw markers if any, regardless of line count
         for marker in signal.markers_list:
             if marker.visible:
@@ -1000,44 +1074,46 @@ class MatplotlibParser(BackendParserBase):
                 if marker.name not in existing:
                     x = self.transform_value(mpl_axes, 0, marker.xy[0], inverse=True)
                     y = marker.xy[1]
-                    mpl_axes.annotate(
+                    annot = mpl_axes.annotate(
                         text=marker.name,
                         xy=(x, y), xytext=(x, y),
                         bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=marker.color)
                     )
+                    annot._is_marker_annotation = True
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
-        """This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
-        ax -- a matplotlib axes object
-        margin -- the fraction of the total height of the y-data to pad the upper and lower ylims"""
+        """This function rescales the y-axis based on the data that is visible given the current xlim of the axis."""
 
         def get_bottom_top(x_line):
-            xd = x_line.get_xdata()
-            yd = x_line.get_ydata()
+            # Convert data to numpy arrays to support boolean masking
+            xd = np.asarray(x_line.get_xdata())
+            yd = np.asarray(x_line.get_ydata())
             lo, hi = impl_plot.get_xlim()
-            y_displayed = yd[((xd > lo) & (xd < hi))]
-            if len(y_displayed) > 0:
-                # Check if there exist NaN values in the y_displayed array
-                if np.isnan(y_displayed).any():
-                    y_displayed = y_displayed[~np.isnan(y_displayed)]
-                h = np.max(y_displayed) - np.min(y_displayed)
-                min_bot = np.min(y_displayed) - margin * h
-                max_top = np.max(y_displayed) + margin * h
+            # Create mask for points within current x limits
+            mask = (xd > lo) & (xd < hi)
+            # Filter y values using mask
+            y_displayed = yd[mask] if mask.any() else np.array([])
+            if y_displayed.size > 0:
+                # Remove NaN values
+                y_clean = y_displayed[~np.isnan(y_displayed)]
+                # Compute padded bounds
+                height = np.max(y_clean) - np.min(y_clean)
+                return np.min(y_clean) - margin * height, np.max(y_clean) + margin * height
             else:
-                min_bot = 0
-                max_top = 1
-            return min_bot, max_top
+                # Default bounds when no data in view
+                return 0, 1
 
+        # Gather all visible data lines except crosshair artifacts
         lines = impl_plot.get_lines()
-        lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY"]]
-        bot, top = np.inf, -np.inf
+        lines = [ln for ln in lines if ln.get_label() not in ["CrossX", "CrossY"]]
 
+        bot, top = np.inf, -np.inf
+        # Compute overall min/max across all lines
         for line in lines:
             new_bot, new_top = get_bottom_top(line)
-            if new_bot < bot:
-                bot = new_bot
-            if new_top > top:
-                top = new_top
+            bot, top = min(bot, new_bot), max(top, new_top)
+
+        # Apply the new limits if any lines exist
         if lines:
             self.set_oaw_axis_limits(impl_plot, 1, (bot, top))
 
@@ -1091,43 +1167,45 @@ class MatplotlibParser(BackendParserBase):
 
     def update_slider_limits(self, plot, begin, end):
         """
-        Function that updates the slider's minimum and maximum values and creates a rectangle to indicate the area
+        Update the slider's minimum and maximum values and create a red rectangle
+        to indicate the zoomed time range.
         """
-        # prevent recursive re-entry
+        # Prevent recursive re-entry
         if getattr(plot, "_updating_range", False):
             return
         plot._updating_range = True
 
         try:
+            # If timestamp values are large (nanoseconds)
             if bool(begin > (1 << 53)):
+                # Find the index range matching the new begin and end values
                 new_start = np.searchsorted(plot.signals[1][0].z_data, begin)
                 new_end = np.searchsorted(plot.signals[1][0].z_data, end)
 
-                # Ensure indices are within the valid range of the signal's time data
+                # Clamp indices within the valid range
                 new_start = max(0, min(new_start, len(plot.signals[1][0].z_data) - 1))
                 new_end = max(0, min(new_end, len(plot.signals[1][0].z_data) - 1))
 
-                # Determine the clamped slider value
-                if plot.slider.val < new_start:
-                    val = new_start
-                elif plot.slider.val > new_end:
-                    val = new_end
-                else:
-                    val = plot.slider.val
-
-                # Update slider bounds and current value
+                # Set slider range limits
                 plot.slider.valmin = new_start
                 plot.slider.valmax = new_end
-                plot.slider.val = val
 
-                # prevent triggering recursive _on_slider_change
+                # Clamp current value if outside limits
+                val = int(plot.slider.val)
+                if val < new_start:
+                    val = new_start
+                elif val > new_end:
+                    val = new_end
+                plot.slider_last_val = val
+
+                # Temporarily prevent slider event firing
                 plot._in_slider_update = True
                 try:
-                    plot.slider.set_val(val)
+                    plot.slider.set_val(val)  # Move slider to clamped value
                 finally:
                     plot._in_slider_update = False
 
-                # Update the text labels for min, current and max
+                # Update the min/current/max timestamp annotations
                 annotations = [
                     label for label in plot.slider.ax.get_children()
                     if isinstance(label, plt.Annotation)
@@ -1138,15 +1216,25 @@ class MatplotlibParser(BackendParserBase):
                     current_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[val])}')
                     max_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_end])}')
 
-                # Remove any existing highlight patch (only from slider axis)
+                # Remove old red patches (if any)
                 for child in plot.slider.ax.get_children():
-                    if isinstance(child, Patch) and child.get_facecolor()[:3] == (1.0, 0.0, 0.0):
+                    if isinstance(child, Patch) and getattr(child, "get_label", lambda: None)() == 'slider_red_range':
                         child.remove()
 
-                # Highlight the selected range ONLY in the slider axis
-                plot.slider.ax.axvspan(new_start, new_end, color='red', alpha=0.3)
+                # Set x-limits explicitly in slider axis
+                plot.slider.ax.set_xmargin(0)
+                plot.slider.ax.set_xlim(0, len(plot.signals[1][0].z_data) - 1)
+
+                # Draw the red highlight area with higher zorder
+                plot.slider.ax.axvspan(
+                    float(new_start), float(new_end),
+                    color='red', alpha=0.3, label='slider_red_range', zorder=6)
+
+                # Final redraw to make sure patch appears
+                plot.slider.ax.figure.canvas.draw_idle()
+
         finally:
-            # restore flag to allow future updates
+            # Restore flag to allow future updates
             plot._updating_range = False
 
     def update_slider_limits_undo_redo(self):
@@ -1160,24 +1248,34 @@ class MatplotlibParser(BackendParserBase):
 
     def set_focus_plot(self, mpl_axes):
         """
-        Handle focus/unfocus transitions for slider synchronization.
+        Handle focus/unfocus transitions for slider synchronization,
+        ensuring the red zoomed slider range persists across redraws.
         """
-        # Identify the newly focused plot
+
+        # Identify the new focus target
         new_plot, new_key = None, None
         if isinstance(mpl_axes, MPLAxes):
             ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             new_plot, new_key = ci.plot(), ci.stack_key
 
-        # If unfocusing, propagate last slider position to all other sliders
-        if self._focus_plot is not None and new_plot is None:
+        # Store red zone limits before redraw
+        red_zones = {}
+        if self.canvas.shared_x_axis:
+            for plot in self._slider_plots:
+                x_axis = plot.axes[0]
+                if isinstance(x_axis, RangeAxis) and x_axis.begin is not None and x_axis.end is not None:
+                    red_zones[id(plot)] = (x_axis.begin, x_axis.end)
+
+        # If unfocusing, propagate current slider value to all other sliders
+        if self._focus_plot is not None and new_plot is None and self.canvas.shared_x_axis:
             last_val = getattr(self._focus_plot, 'slider_last_val', None)
             if last_val is not None:
                 for other in self._slider_plots:
                     if other is not self._focus_plot and getattr(other, 'slider', None):
-                        # Reuse existing slider widget by updating its value
                         other.slider.set_val(last_val)
                         other.slider_last_val = last_val
-                        # Update the slider's timestamp annotation
+
+                        # Actualizar etiqueta de timestamp
                         annotations = [
                             child for child in other.slider.ax.get_children()
                             if isinstance(child, Annotation)
@@ -1186,14 +1284,30 @@ class MatplotlibParser(BackendParserBase):
                             timestamps = other.signals[1][0].z_data
                             annotations[1].set_text(str(pandas.Timestamp(timestamps[last_val])))
 
-        # Reset initialization flags for all tracked sliders to force redraw
+        # Reset slider init flag to force full redraw
         for slider_plot in self._slider_plots:
             slider_plot._slider_initialized = False
 
-        # Delegate focus handling to the base class
+        # Redraw using superclass logic
         super().set_focus_plot(mpl_axes)
         self._focus_plot = new_plot
         self._focus_plot_stack_key = new_key
+
+        # Re-apply red zones safely after sliders are recreated
+        self.reapply_red_zones(red_zones)
+
+    def reapply_red_zones(self, red_zones: dict):
+        """
+        Reapply red highlight zones directly after sliders are recreated.
+        This avoids relying on draw_event, which may be too early or too late.
+        """
+        if not self.canvas.shared_x_axis:
+            return
+
+        for plot in self._slider_plots:
+            if id(plot) in red_zones:
+                begin, end = red_zones[id(plot)]
+                self.update_slider_limits(plot, begin, end)
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
@@ -1216,7 +1330,7 @@ class MatplotlibParser(BackendParserBase):
             if not axes_group:
                 continue
 
-            # Check for slider axes
+            # Exclude slider axes
             filtered_axes_group = [ax for ax in axes_group if ax.get_label() != "slider"]
 
             self._cursors.append(
@@ -1242,21 +1356,24 @@ class MatplotlibParser(BackendParserBase):
                     continue
                 plt = ci.plot()
                 if isinstance(plt, PlotXYWithSlider):
-                    other_axes = self._get_all_shared_axes(ax, True)
-                    # Eliminamos el propio axes para evitar que se repita
-                    other_axes.remove(ax)
-                    self._cursors.append(
-                        IplotMultiCursor(self.figure.canvas, other_axes,
-                                         x_label=self.canvas.enable_x_label_crosshair,
-                                         y_label=False,
-                                         val_label=False,
-                                         color=self.canvas.crosshair_color,
-                                         lw=self.canvas.crosshair_line_width,
-                                         horiz_on=False,
-                                         vert_on=self.canvas.crosshair_vertical,
-                                         use_blit=True,
-                                         cache_table=self._impl_plot_cache_table,
-                                         slider=True))
+                    other_axes = self._get_all_shared_axes(ax, True) or []
+                    # Solo eliminamos si está
+                    if ax in other_axes:
+                        other_axes.remove(ax)
+                    # Solo si hay ejes válidos
+                    if other_axes:
+                        self._cursors.append(
+                            IplotMultiCursor(self.figure.canvas, other_axes,
+                                             x_label=self.canvas.enable_x_label_crosshair,
+                                             y_label=False,
+                                             val_label=False,
+                                             color=self.canvas.crosshair_color,
+                                             lw=self.canvas.crosshair_line_width,
+                                             horiz_on=False,
+                                             vert_on=self.canvas.crosshair_vertical,
+                                             use_blit=True,
+                                             cache_table=self._impl_plot_cache_table,
+                                             slider=True))
                 else:
                     continue
 
