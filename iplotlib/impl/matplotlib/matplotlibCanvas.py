@@ -442,6 +442,10 @@ class MatplotlibParser(BackendParserBase):
                 self.figure.tight_layout()
             self.figure.canvas.draw_idle()
 
+            # Reapply red zones
+            if self.canvas.shared_x_axis:
+                self.reapply_red_zones()
+
             return
 
         # === CASE 2: Focus mode ===
@@ -465,6 +469,10 @@ class MatplotlibParser(BackendParserBase):
             )
 
         self.figure.canvas.draw_idle()
+
+        # Reapply red zones
+        if self.canvas.shared_x_axis:
+            self.reapply_red_zones()
 
     def process_ipl_plot_xy(self):
         pass
@@ -1296,18 +1304,58 @@ class MatplotlibParser(BackendParserBase):
         # Re-apply red zones safely after sliders are recreated
         self.reapply_red_zones(red_zones)
 
-    def reapply_red_zones(self, red_zones: dict):
+    def reapply_red_zones(self, red_zones: dict = None):
         """
-        Reapply red highlight zones directly after sliders are recreated.
-        This avoids relying on draw_event, which may be too early or too late.
+        Re-apply red highlight zones (zoom areas) to all sliders, but ONLY if:
+        - shared_x_axis is enabled
+        - AND a plot without slider has a zoom applied (begin != None and end != None)
+
+        Optionally accepts a `red_zones` dict to explicitly use provided ranges instead.
         """
-        if not self.canvas.shared_x_axis:
+        logger.debug("[reapply_red_zones] Start")
+
+        if not self.canvas or not self.canvas.shared_x_axis:
+            logger.debug("[reapply_red_zones] Skipped: shared_x_axis is False or no canvas")
             return
 
+        # Step 1: Check if any plot WITHOUT slider has active zoom
+        zoom_range = None
+        for col in self.canvas.plots:
+            for plot in col:
+                if not isinstance(plot, PlotXYWithSlider):
+                    x_axis = plot.axes[0]
+                    if isinstance(x_axis, RangeAxis) and x_axis.begin is not None and x_axis.end is not None:
+                        zoom_range = (x_axis.begin, x_axis.end)
+                        logger.debug(
+                            f"[reapply_red_zones] Found zoomed non-slider plot: begin={x_axis.begin}, end={x_axis.end}")
+                        break
+            if zoom_range:
+                break
+
+        if not zoom_range:
+            logger.debug("[reapply_red_zones] Skipped: no zoom in non-slider plot")
+            return
+
+        # Step 2: Reapply to all sliders (either from red_zones if passed, or inferred)
         for plot in self._slider_plots:
-            if id(plot) in red_zones:
+            if not isinstance(plot, PlotXYWithSlider):
+                continue
+
+            begin, end = None, None
+
+            # Use explicit red_zones if provided
+            if red_zones and id(plot) in red_zones:
                 begin, end = red_zones[id(plot)]
-                self.update_slider_limits(plot, begin, end)
+                logger.debug(f"[reapply_red_zones] Using explicit red_zones for plot id {id(plot)}: {begin} → {end}")
+            else:
+                begin, end = zoom_range
+                logger.debug(f"[reapply_red_zones] Applying inferred zoom_range to plot id {id(plot)}: {begin} → {end}")
+
+            self.update_slider_limits(plot, begin, end)
+
+
+        self.figure.canvas.draw_idle()
+        logger.debug("[reapply_red_zones] Done")
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
