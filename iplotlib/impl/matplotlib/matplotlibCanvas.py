@@ -435,16 +435,28 @@ class MatplotlibParser(BackendParserBase):
                     color=self._pm.get_value(canvas, 'font_color') or 'black'
                 )
 
+            # Step: Re-synchronize sliders if shared_x_axis is active
+            if self.canvas.shared_x_axis:
+                logger.debug("[process_ipl_canvas] Sync sliders after full redraw")
+                shared_val = None
+                for plot in self._slider_plots:
+                    if isinstance(plot, PlotXYWithSlider):
+                        if shared_val is None:
+                            shared_val = getattr(plot, 'slider_last_val', None)
+                        elif plot.slider and shared_val is not None:
+                            plot.slider.set_val(shared_val)
+                            plot.slider_last_val = shared_val
+
+            # Reapply red zones
+            if self.canvas.shared_x_axis:
+                self.reapply_red_zones()
 
             # Tight layout for canvas
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
                 self.figure.tight_layout()
-            self.figure.canvas.draw_idle()
 
-            # Reapply red zones
-            if self.canvas.shared_x_axis:
-                self.reapply_red_zones()
+            self.figure.canvas.draw_idle()
 
             return
 
@@ -553,10 +565,23 @@ class MatplotlibParser(BackendParserBase):
         # Connect x-limits callback for shared-axis synchronization
         self._connect_limit_callbacks(last_axes)
 
-        # Restore red-highlight range for shared X if needed
+        # Restore red-highlight range for shared X if needed — but only if a non-slider plot is zoomed
         if isinstance(plot, PlotXYWithSlider) and self.canvas.shared_x_axis:
             x_axis = plot.axes[0]
-            if isinstance(x_axis, RangeAxis) and x_axis.begin is not None and x_axis.end is not None:
+
+            # Check if any non-slider plot has active zoom (as in reapply_red_zones)
+            zoom_active = False
+            for col in self.canvas.plots:
+                for p in col:
+                    if not isinstance(p, PlotXYWithSlider):
+                        xa = p.axes[0]
+                        if isinstance(xa, RangeAxis) and xa.begin is not None and xa.end is not None:
+                            zoom_active = True
+                            break
+                if zoom_active:
+                    break
+
+            if zoom_active and isinstance(x_axis, RangeAxis) and x_axis.begin is not None and x_axis.end is not None:
                 self.update_slider_limits(plot, x_axis.begin, x_axis.end)
 
     def _remove_existing_slider(self, plot: PlotXYWithSlider):
@@ -845,11 +870,14 @@ class MatplotlibParser(BackendParserBase):
         # remember this slider for shared‐axis sync
         self._slider_plots.append(plot)
 
-        # begin added for persisting red range on focus/unfocus
+        # only apply red zone highlight if a zoom was done (i.e. range != full)
         if self.canvas.shared_x_axis:
             x_axis = plot.axes[0]
-            if isinstance(x_axis, RangeAxis) and x_axis.begin is not None and x_axis.end is not None:
-                self.update_slider_limits(plot, x_axis.begin, x_axis.end)
+            if isinstance(x_axis, RangeAxis):
+                begin, end = x_axis.begin, x_axis.end
+                original = x_axis.get_limits('original')
+                if begin is not None and end is not None and (begin != original[0] or end != original[1]):
+                    self.update_slider_limits(plot, begin, end)
 
         slider_bounds = slider_ax.get_position().bounds
         if axes_list:
@@ -1224,21 +1252,35 @@ class MatplotlibParser(BackendParserBase):
                     current_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[val])}')
                     max_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_end])}')
 
-                # Remove old red patches (if any)
+                # Remove old red patches and vertical lines from slider axis
                 for child in plot.slider.ax.get_children():
+                    # Clean red span patch
                     if isinstance(child, Patch) and getattr(child, "get_label", lambda: None)() == 'slider_red_range':
                         child.remove()
 
-                # Set x-limits explicitly in slider axis
-                plot.slider.ax.set_xmargin(0)
-                plot.slider.ax.set_xlim(0, len(plot.signals[1][0].z_data) - 1)
+                    # Clean red vertical line — make sure it matches slider handle indicator
+                    if isinstance(child, Line2D):
+                        color = child.get_color()
+                        xdata = child.get_xdata()
+                        # If line is pure vertical (x0 == x1) and red-colored
+                        if color == 'red' and len(xdata) == 2 and xdata[0] == xdata[1]:
+                            child.remove()
 
-                # Draw the red highlight area with higher zorder
-                plot.slider.ax.axvspan(
-                    float(new_start), float(new_end),
-                    color='red', alpha=0.3, label='slider_red_range', zorder=6)
+                # Extract z_data safely
+                z_data = plot.signals[1][0].z_data
+                full_range = len(z_data)
 
-                # Final redraw to make sure patch appears
+                # Only draw the red zone if the limits differ from full range
+                if new_start != 0 or new_end != full_range - 1:
+                    plot.slider.ax.set_xmargin(0)
+                    plot.slider.ax.set_xlim(0, full_range - 1)
+                    plot.slider.ax.axvspan(
+                        float(new_start), float(new_end),
+                        color='red', alpha=0.3, label='slider_red_range', zorder=6)
+                    logger.debug(f"[update_slider_limits] Draw red zone: {new_start} → {new_end}")
+                else:
+                    logger.debug("[update_slider_limits] Skip red zone: full range")
+
                 plot.slider.ax.figure.canvas.draw_idle()
 
         finally:
@@ -1308,14 +1350,14 @@ class MatplotlibParser(BackendParserBase):
         """
         Re-apply red highlight zones (zoom areas) to all sliders, but ONLY if:
         - shared_x_axis is enabled
-        - AND a plot without slider has a zoom applied (begin != None and end != None)
+        - AND a plot without slider has an active zoom (begin != None and end != None)
 
         Optionally accepts a `red_zones` dict to explicitly use provided ranges instead.
         """
         logger.debug("[reapply_red_zones] Start")
 
         if not self.canvas or not self.canvas.shared_x_axis:
-            logger.debug("[reapply_red_zones] Skipped: shared_x_axis is False or no canvas")
+            logger.debug("[reapply_red_zones] Skipped: shared_x_axis is False or canvas is None")
             return
 
         # Step 1: Check if any plot WITHOUT slider has active zoom
@@ -1326,24 +1368,32 @@ class MatplotlibParser(BackendParserBase):
                     x_axis = plot.axes[0]
                     if isinstance(x_axis, RangeAxis) and x_axis.begin is not None and x_axis.end is not None:
                         zoom_range = (x_axis.begin, x_axis.end)
-                        logger.debug(
-                            f"[reapply_red_zones] Found zoomed non-slider plot: begin={x_axis.begin}, end={x_axis.end}")
+                        logger.debug(f"[reapply_red_zones] Found zoomed non-slider plot: {zoom_range}")
                         break
             if zoom_range:
                 break
 
+        # Step 2: If no zoom, remove red zones from all sliders
         if not zoom_range:
-            logger.debug("[reapply_red_zones] Skipped: no zoom in non-slider plot")
+            logger.debug("[reapply_red_zones] No zoom found – cleaning red zones")
+            for plot in self._slider_plots:
+                if not isinstance(plot, PlotXYWithSlider):
+                    continue
+                for child in plot.slider.ax.get_children():
+                    if isinstance(child, Patch) and getattr(child, "get_label", lambda: None)() == 'slider_red_range':
+                        logger.debug(f"[reapply_red_zones] Removing red range from plot id {id(plot)}")
+                        child.remove()
+                plot.slider.ax.figure.canvas.draw_idle()
+            logger.debug("[reapply_red_zones] Done (cleaned)")
             return
 
-        # Step 2: Reapply to all sliders (either from red_zones if passed, or inferred)
+        # Step 3: Reapply to all sliders (either from red_zones or inferred from zoom_range)
         for plot in self._slider_plots:
             if not isinstance(plot, PlotXYWithSlider):
                 continue
 
             begin, end = None, None
 
-            # Use explicit red_zones if provided
             if red_zones and id(plot) in red_zones:
                 begin, end = red_zones[id(plot)]
                 logger.debug(f"[reapply_red_zones] Using explicit red_zones for plot id {id(plot)}: {begin} → {end}")
@@ -1353,9 +1403,8 @@ class MatplotlibParser(BackendParserBase):
 
             self.update_slider_limits(plot, begin, end)
 
-
         self.figure.canvas.draw_idle()
-        logger.debug("[reapply_red_zones] Done")
+        logger.debug("[reapply_red_zones] Done (applied)")
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
@@ -1542,10 +1591,19 @@ class MatplotlibParser(BackendParserBase):
             impl_plot.set_xlim(limits[0], limits[1])
 
     def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
+        """
+        Safely set y-axis limits. If limits are identical or invalid, apply small padding
+        to avoid singular transformation warnings.
+        """
         if isinstance(impl_plot, MPLAxes):
-            impl_plot.set_ylim(limits[0], limits[1])
-        else:
-            return None
+            ymin, ymax = limits
+            if ymin is None or ymax is None:
+                return  # Invalid limits, silently skip
+            if ymin == ymax:
+                delta = 1.0 if ymin == 0 else abs(ymin) * 0.01
+                ymin -= delta
+                ymax += delta
+            impl_plot.set_ylim(ymin, ymax)
 
     def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits) -> None:
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)

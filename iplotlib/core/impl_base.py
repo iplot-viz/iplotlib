@@ -446,11 +446,16 @@ class BackendParserBase(ABC):
                     axis.set_limits(*ax_limits[i].get_limits())
                 i += 1
 
-        # Actualizar limites slider en el caso de que hayan
+        # Restore slider-specific limits, if the plot has one
         if isinstance(plot, PlotXYWithSlider):
             self.set_impl_plot_slider_limits(plot, *limits.sliders_ranges[0].get_limits())
 
+        # Refresh signal content and crosshairs if needed
         self.refresh_data()
+
+        # Apply or clean red zoom zone based on zoom state
+        # We use reapply_red_zones() to infer current zoom logic and update red area accordingly
+        self.reapply_red_zones()
 
     @staticmethod
     def create_offset(vals: Union[List, BufferObject]) -> Union[int, np.int64, np.uint64, None]:
