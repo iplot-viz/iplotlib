@@ -147,6 +147,12 @@ class IplotQtStatistics(QWidget):
                 y_min_displayed = y_min[mask]
                 y_max_displayed = y_max[mask]
                 y_mean_displayed = y_mean[mask]
+
+                # Filtered y vectors in case it exists NaN values
+                y_min_displayed = y_min_displayed[~np.isnan(y_min_displayed)]
+                y_max_displayed = y_max_displayed[~np.isnan(y_max_displayed)]
+                y_mean_displayed = y_mean_displayed[~np.isnan(y_mean_displayed)]
+
                 samples = np.size(y_mean_displayed)
 
                 if samples > 0:
@@ -163,13 +169,13 @@ class IplotQtStatistics(QWidget):
                 # Base case
                 y_data = line.get_ydata()
                 y_displayed = y_data[((x_data > lo) & (x_data < hi))]
+                # Filtered y_displayed if case it exists NaN values
+                y_displayed = y_displayed[~np.isnan(y_displayed)]
                 samples = np.size(y_displayed)
 
                 if samples > 0:
                     min_val, avg_val, max_val = np.min(y_displayed)[0], np.mean(y_displayed)[0], np.max(y_displayed)[0]
                     first_val, last_val = y_displayed[0], y_displayed[-1]
-                    samples = np.size(y_displayed)
-
                     self._set_stats(idx, min_val, avg_val, max_val, first_val, last_val, samples)
                 else:
                     # Indicate that there is no data
