@@ -260,11 +260,38 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self._stats_table.fill_table(info_stats)
 
     def autoscale_y(self, impl_plot):
-        self._parser.autoscale_y_axis(impl_plot)
-        self._parser.figure.canvas.draw()
+        """
+            Autoscale the Y axis of a single PlotXY and store the action for undo/redo
+        """
+        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        if hasattr(ci, 'plot'):
+            plot = ci.plot()
+            if isinstance(plot, PlotXY):
+                # Stage a command to obtain original view limits
+                self.stage_view_lim_cmd()
+
+                # Autoscale on Y axis for the given plot
+                self._parser.autoscale_y_axis(impl_plot)
+
+                # Commit staged command
+                while len(self._staging_cmds):
+                    self.commit_view_lim_cmd()
+
+                # Push committed command
+                while len(self._commitd_cmds):
+                    self.push_view_lim_cmd()
+
+                # Redraw canvas to reflect changes
+                self._parser.figure.canvas.draw()
 
     def autoscale_all_y(self):
+        """
+            Autoscale the Y axis of all PlotXY instances in the figure and store the action for undo/redo
+        """
         axes = self._parser.figure.axes
+        # Stage a command to obtain original view limits
+        self.stage_view_lim_cmd()
+
         for ax in axes:
             ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
             if not hasattr(ci, 'plot'):
@@ -272,7 +299,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             plot = ci.plot()
             if not isinstance(plot, PlotXY):
                 continue
+
+            # Autoscale on Y axis for the given plot
             self._parser.autoscale_y_axis(ax)
+
+        # Commit staged command
+        while len(self._staging_cmds):
+            self.commit_view_lim_cmd()
+
+        # Push committed command
+        while len(self._commitd_cmds):
+            self.push_view_lim_cmd()
+
+        # Redraw canvas to reflect changes
         self._parser.figure.canvas.draw()
 
     def set_mouse_mode(self, mode: str):
@@ -355,6 +394,18 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         legend_line.set_alpha(1.0 if visible else 0.2)
         self._parser.figure.canvas.draw()
 
+    def _full_screen_mode_on(self, impl_plot):
+        self._parser.set_focus_plot(impl_plot)
+        self._refresh_original_ranges = False
+        self.refresh()
+        self._refresh_original_ranges = True
+
+    def _full_screen_mode_off(self):
+        self._parser.set_focus_plot(None)
+        self._refresh_original_ranges = False
+        self.refresh()
+        self._refresh_original_ranges = True
+
     def _mpl_mouse_press_handler(self, event: MouseEvent):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
@@ -364,13 +415,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             return
 
         if event.dblclick:
-            if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT and \
-                    event.inaxes is not None:
-                self._parser.set_focus_plot(event.inaxes)
-                self._refresh_original_ranges = False
-                self.refresh()
-                self._refresh_original_ranges = True
-            elif self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN] and event.button == MouseButton.RIGHT:
+            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN] and event.button == MouseButton.RIGHT:
                 mpl_axes = event.inaxes
                 if not isinstance(mpl_axes, MPLAxes):
                     return
@@ -431,11 +476,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                             f" is 50")
                 else:
                     logger.warning("Markers must be enabled in the plot to create signal markers")
-            else:
-                self._parser.set_focus_plot(None)
-                self._refresh_original_ranges = False
-                self.refresh()
-                self._refresh_original_ranges = True
         else:
             if event.inaxes is None:
                 return
@@ -450,13 +490,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     return
                 self.stage_view_lim_cmd()
                 return
-            if self._mmode == Canvas.MOUSE_MODE_SELECT:
-                if event.button == MouseButton.RIGHT:
-                    # Create menu with autoscale options
-                    autoscale_menu = QMenu(self)
-                    autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
-                    autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
-                    autoscale_menu.popup(event.guiEvent.globalPos())
+            if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.RIGHT:
+                # Create menu with autoscale options
+                autoscale_menu = QMenu(self)
+                autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
+                autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+                if self._parser.canvas.focus_plot is None:
+                    autoscale_menu.addAction("Focus on plot", lambda: self._full_screen_mode_on(event.inaxes))
+                else:
+                    autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+                autoscale_menu.popup(event.guiEvent.globalPos())
 
             if event.button != MouseButton.LEFT:
                 return
