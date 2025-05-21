@@ -553,6 +553,8 @@ class MatplotlibParser(BackendParserBase):
 
         # Determine number of signal rows above the slider
         stack_sz = 1 if (not self.canvas.full_mode_all_stack and self._focus_plot_stack_key) else len(plot.signals)
+        logger.debug(
+            f"[process_ipl_plot] stack keys: {list(plot.signals.keys())}, focus_plot_stack_key: {self._focus_plot_stack_key}")
         grid_cell = self._layout[row:row + plot.row_span, column:column + plot.col_span]
 
         if isinstance(plot, PlotXYWithSlider):
@@ -706,11 +708,13 @@ class MatplotlibParser(BackendParserBase):
             self._impl_plot_cache_table.register(ax, self.canvas, plot, key, signals)
 
             # clear any old line‐cache for each signal and draw it
-            for sig in signals:
-                sig.lines = None
-                self._signal_impl_shape_lut.pop(id(sig), None)
-                self._signal_impl_plot_lut[sig.uid] = ax
-                self.process_ipl_signal(sig)
+            for sig_ref in signals:
+                sig = sig_ref() if callable(sig_ref) else sig_ref
+                if sig is not None:
+                    sig.lines = None
+                    self._signal_impl_shape_lut.pop(id(sig), None)
+                    self._signal_impl_plot_lut[sig.uid] = ax
+                    self.process_ipl_signal(sig)
 
             # apply title, grid, colors, ticks…
             self._configure_axes_properties(plot, ax, stack_id, signals)
@@ -1449,13 +1453,26 @@ class MatplotlibParser(BackendParserBase):
         for slider_plot in self._slider_plots:
             slider_plot._slider_initialized = False
 
-        # Redraw using superclass logic
+        # Perform the actual focus redraw
         super().set_focus_plot(mpl_axes)
         self._focus_plot = new_plot
         self._focus_plot_stack_key = new_key
+
+        # Ensure all signals in focused plot are properly registered before data refresh
+        if self._focus_plot is not None:
+            for ax in self.figure.axes:
+                ci = self._impl_plot_cache_table.get_cache_item(ax)
+                if hasattr(ci, 'plot') and ci.plot() is self._focus_plot:
+                    for sig_ref in ci.signals:
+                        sig = sig_ref() if callable(sig_ref) else sig_ref
+                        if not isinstance(sig, Signal):
+                            continue  # Skip dead or invalid weakrefs
+                        self._signal_impl_plot_lut[sig.uid] = ax
+
+        # Now it's safe to request a full signal refresh
         self.refresh_data()
 
-        # Redraw axvspan if proceed
+        # Restore red highlight zones after changing focus
         if self.canvas.shared_x_axis:
             self.reapply_red_zones()
 
@@ -1480,12 +1497,12 @@ class MatplotlibParser(BackendParserBase):
                 if not isinstance(plot, PlotXYWithSlider):
                     x_axis = plot.axes[0]
                     if isinstance(x_axis, RangeAxis):
-                        if x_axis.begin is not None and x_axis.end is not None:
-                            original = x_axis.get_limits('original')
-                            if (x_axis.begin != original[0]) or (x_axis.end != original[1]):
-                                zoom_range = (x_axis.begin, x_axis.end)
-                                logger.debug(f"[reapply_red_zones] Found zoomed non-slider plot: {zoom_range}")
-                                break
+                        orig = x_axis.get_limits('original')
+                        curr = x_axis.get_limits()
+                        if orig != curr:
+                            zoom_range = (x_axis.begin, x_axis.end)
+                            logger.debug(f"[reapply_red_zones] Found zoomed non-slider plot: {zoom_range}")
+                            break
             if zoom_range:
                 break
 
@@ -1495,12 +1512,6 @@ class MatplotlibParser(BackendParserBase):
             for plot in self._slider_plots:
                 if not isinstance(plot, PlotXYWithSlider):
                     continue
-
-                x_axis = plot.axes[0]
-                if not isinstance(x_axis, RangeAxis) or x_axis.begin is None or x_axis.end is None:
-                    logger.debug(f"[reapply_red_zones] Skipping plot id {id(plot)}: x_axis incomplete")
-                    continue
-
                 for child in plot.slider.ax.get_children():
                     if isinstance(child, Patch) and getattr(child, "get_label", lambda: None)() == 'slider_red_range':
                         logger.debug(f"[reapply_red_zones] Removing red range from plot id {id(plot)}")
@@ -1509,13 +1520,12 @@ class MatplotlibParser(BackendParserBase):
             logger.debug("[reapply_red_zones] Done (cleaned)")
             return
 
-        # Step 3: Reapply to all sliders (either from red_zones or inferred from zoom_range)
+        # Step 3: Reapply red zone highlight to all slider plots
         for plot in self._slider_plots:
             if not isinstance(plot, PlotXYWithSlider):
                 continue
 
             begin, end = None, None
-
             if red_zones and id(plot) in red_zones:
                 begin, end = red_zones[id(plot)]
                 logger.debug(f"[reapply_red_zones] Using explicit red_zones for plot id {id(plot)}: {begin} → {end}")
@@ -1523,23 +1533,22 @@ class MatplotlibParser(BackendParserBase):
                 begin, end = zoom_range
                 logger.debug(f"[reapply_red_zones] Applying inferred zoom_range to plot id {id(plot)}: {begin} → {end}")
 
-        if self._focus_plot is not None and plot is None:
-            if self._pm.get_value(self.canvas, 'shared_x_axis') and len(self._focus_plot.axes) > 0 and isinstance(
-                    self._focus_plot.axes[0], RangeAxis):
-                begin, end = get_x_axis_range(self._focus_plot)
             self.update_slider_limits(plot, begin, end)
 
-                for columns in self.canvas.plots:
-                    for plot_temp in columns:
-                        if plot_temp and plot_temp != self._focus_plot:  # Avoid None plots
-                            logger.debug(
-                                f"Setting range on plot {id(plot_temp)} focused= {id(self._focus_plot)} begin={begin}")
-                            if plot_temp.axes[0].original_begin == self._focus_plot.axes[0].original_begin and \
-                                    plot_temp.axes[0].original_end == self._focus_plot.axes[0].original_end:
-                                set_x_axis_range(plot_temp, begin, end)
+        # Step 4: Propagate limits to other plots with same base range (excluding focus)
+        if self._focus_plot:
+            base_orig = self._focus_plot.axes[0].get_limits('original')
+            begin, end = self._focus_plot.axes[0].get_limits()
 
-        self._focus_plot = plot
-        self._focus_plot_stack_key = stack_key
+            for col in self.canvas.plots:
+                for other_plot in col:
+                    if other_plot is self._focus_plot:
+                        continue
+                    if not other_plot.axes:
+                        continue
+                    x_axis = other_plot.axes[0]
+                    if isinstance(x_axis, RangeAxis) and x_axis.get_limits('original') == base_orig:
+                        x_axis.set_limits(begin, end, which='current')
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):

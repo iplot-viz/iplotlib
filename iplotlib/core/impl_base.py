@@ -423,6 +423,7 @@ class BackendParserBase(ABC):
         plot = limits.plot_ref()
         ax_limits = limits.axes_ranges
 
+        # Restore signal-level xrange values
         for signal_limit in limits.signals_ranges:
             signal = signal_limit.signal_ref()
             signal.set_xranges(signal_limit.get_limits())
@@ -462,15 +463,16 @@ class BackendParserBase(ABC):
         # Refresh signal content and crosshairs if needed
         self.refresh_data()
 
-        # If in focus mode, manually reapply axis limits for consistency
+        # Reapply visible axis limits for focused plot
         if self._focus_plot:
             for ax_idx, axis in enumerate(self._focus_plot.axes):
                 if isinstance(axis, RangeAxis):
-                    mpl_ax = self._signal_impl_plot_lut.get(id(axis))
-                    if mpl_ax:
-                        self.set_oaw_axis_limits(mpl_ax, ax_idx, axis.get_limits())
+                    for ax in self.figure.axes:
+                        ci = self._impl_plot_cache_table.get_cache_item(ax)
+                        if hasattr(ci, 'plot') and ci.plot() is self._focus_plot:
+                            self.set_oaw_axis_limits(ax, ax_idx, axis.get_limits())
 
-            # Restore Y axis for focused slider plots
+            # f focus is on a slider plot, ensure Y axis is updated
             if isinstance(self._focus_plot, PlotXYWithSlider):
                 axes_list = getattr(self._focus_plot, "_mpl_axes_list", [])
                 if axes_list:
@@ -478,7 +480,8 @@ class BackendParserBase(ABC):
 
         # Apply or clean red zoom zone based on zoom state
         # We use reapply_red_zones() to infer current zoom logic and update red area accordingly
-        self.reapply_red_zones()
+        if self.canvas.shared_x_axis:
+            self.reapply_red_zones()
 
     @staticmethod
     def create_offset(vals: Union[List, BufferObject]) -> Union[int, np.int64, np.uint64, None]:
