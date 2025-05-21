@@ -138,6 +138,13 @@ class IplotQtCanvas(QWidget):
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
 
+    @abstractmethod
+    def stats(self, canvas: Canvas):
+        """
+        Computes and displays statistics for each signal in the current iplotlib canvas.
+        Envelope data is used if available (min, max, mean arrays); otherwise, raw y-data is used.
+        """
+
     @contextmanager
     def view_retainer(self):
         try:

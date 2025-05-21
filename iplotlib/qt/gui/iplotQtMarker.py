@@ -27,7 +27,6 @@ class IplotQtMarker(QWidget):
 
         # Marker table creation
         self.table = QTableWidget()
-        # self.table = QTableView()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(['Marker', 'Stack', 'Signal name', '(X,Y) values', 'Visible', 'Color'])
 
@@ -219,13 +218,13 @@ class IplotQtMarker(QWidget):
             dx_str += f"T{dx.components.hours}H{dx.components.minutes}M{dx.components.seconds}S"
             if dx.components.nanoseconds:
                 dx_str += f"+{dx.components.milliseconds}m"
-                dx_str += f"+{dx.components.nanoseconds}n"
                 dx_str += f"+{dx.components.microseconds}u"
+                dx_str += f"+{dx.components.nanoseconds}n"
             else:
                 if dx.components.milliseconds:
                     dx_str += f"+{dx.components.milliseconds}m"
                 if dx.components.microseconds:
-                    dx_str += f"+{dx.components.microseconds}m"
+                    dx_str += f"+{dx.components.microseconds}u"
         else:
             # Relative markers coordinates
             dx = abs(x2 - x1)
@@ -281,10 +280,7 @@ class IplotQtMarker(QWidget):
                 plot_data.setText(stack)
                 plot_data.setData(Qt.UserRole, marker_id)
 
-    def import_table(self, signal):
-        if not isinstance(signal, SignalXY):
-            return
-
+    def import_table(self, signal: SignalXY):
         id_plot = signal.parent.id
         id_signal = signal.id
         id_marker = [id_plot[0], id_plot[1], id_signal]

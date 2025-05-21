@@ -82,6 +82,25 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
+    def legend_downsampled_signal(self, signal, mpl_axes, plot_lines):
+        """
+        Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
+        """
+        if mpl_axes.get_legend():
+            if np.size(signal.data_store[2]) > 0 and np.size(signal.data_store[3].shape) > 0:
+                # Envelope case
+                valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
+                pos = valid_lines.index(plot_lines[0][0])
+            else:
+                # Base case
+                pos = mpl_axes.get_lines().index(plot_lines[0][0])
+
+            legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
+            if legend_text.endswith('*') and not signal.isDownsampled:
+                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
+            elif not legend_text.endswith('*') and signal.isDownsampled:
+                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
+
     def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, data: List[BufferObject]):
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
@@ -103,22 +122,46 @@ class MatplotlibParser(BackendParserBase):
         self._signal_impl_shape_lut.update({id(signal): plot_lines})
 
     def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data):
+
+        def _get_visible_data(xd, yd, lo, hi):
+            x_displayed = xd[((xd > lo) & (xd < hi))]
+            y_displayed = yd[((xd > lo) & (xd < hi))]
+            return x_displayed, y_displayed
+
+        def _update_marker_by_point_count(marker_line: Line2D, signal_x_data, signal_style: dict):
+            if len(signal_x_data) == 1:
+                marker_line.set_marker('x')
+                marker_line.set_markersize(5)
+            else:
+                marker_line.set_marker(signal_style.get('marker') or "")
+                marker_line.set_markersize(signal_style.get('markersize'))
+
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+        style = self.get_signal_style(signal)
+        params = dict(**style)
+        draw_fn = mpl_axes.plot
+        # Reflect downsampling in legend
+        self.legend_downsampled_signal(signal, mpl_axes, plot_lines)
 
         # Review to implement directly in PlotXY class
         if signal.color is None:
             # It means that the color has been reset but must keep the original color
             signal.color = signal.original_color
 
+        if not signal.extremities:
+            x_data, y_data = _get_visible_data(x_data, y_data, *mpl_axes.get_xlim())
+
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
                 line = plot_lines[0][0]
                 line.set_xdata(x_data)
                 line.set_ydata(y_data)
+                _update_marker_by_point_count(line, x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):
                     line[0].set_xdata(x_data)
                     line[0].set_ydata(y_data[:, i])
+                    _update_marker_by_point_count(line[0], x_data, style)
 
             # Put this out in a method only for streaming
             if self.canvas.streaming:
@@ -140,16 +183,15 @@ class MatplotlibParser(BackendParserBase):
                 for n, o in zip(new, old):
                     n.set_visible(o.get_visible())
         else:
-            style = self.get_signal_style(signal)
-            params = dict(**style)
-            draw_fn = mpl_axes.plot
             if x_data.ndim == 1 and y_data.ndim == 1:
                 plot_lines = [draw_fn(x_data, y_data, **params)]
+                _update_marker_by_point_count(plot_lines[0][0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 lines = draw_fn(x_data, y_data, **params)
                 plot_lines = [[line] for line in lines]
                 for i, line in enumerate(plot_lines):
                     line[0].set_label(f"{signal.label}[{i}]")
+                    _update_marker_by_point_count(line[0], x_data, style)
 
         signal.lines = plot_lines
 
@@ -303,6 +345,9 @@ class MatplotlibParser(BackendParserBase):
         except AttributeError:
             plot = None
 
+        # Reflect downsampling in legend
+        self.legend_downsampled_signal(signal, mpl_axes, shapes)
+
         style = dict()
         if isinstance(signal, SignalXY):
             style = self.get_signal_style(signal)
@@ -387,9 +432,9 @@ class MatplotlibParser(BackendParserBase):
                 # Check if it is date and the max difference is 1 second
                 # Need to differentiate if it is absolute or relative
                 if plot.axes[0].is_date or isinstance(plot, PlotXYWithSlider):
-                    max_diff_ns = self.canvas.max_diff * 1e9
+                    max_diff_ns = self._pm.get_value(self.canvas, 'max_diff') * 1e9
                 else:
-                    max_diff_ns = self.canvas.max_diff
+                    max_diff_ns = self._pm.get_value(self.canvas, 'max_diff')
                 if ((begin, end) == (base_begin, base_end) or (
                         abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
                     shared.append(axes)
@@ -480,6 +525,13 @@ class MatplotlibParser(BackendParserBase):
                 color=self._pm.get_value(canvas, 'font_color') or 'black'
             )
 
+        # 4. Update the title at the top of canvas.
+        if self._pm.get_value(self.canvas, 'title') is not None:
+            if not self._pm.get_value(self.canvas, 'font_size'):
+                canvas.font_size = None
+            self.figure.suptitle(self._pm.get_value(self.canvas, 'title'),
+                                 size=self._pm.get_value(self.canvas, 'font_size'),
+                                 color=self._pm.get_value(self.canvas, 'font_color') or 'black')
         self.figure.canvas.draw_idle()
 
         # Reapply red zones
@@ -748,6 +800,20 @@ class MatplotlibParser(BackendParserBase):
         for txt in leg.texts:
             txt.set_text(txt.get_text().replace("$", r"\$"))
 
+        legend_lines = leg.get_lines()
+        ix_legend = 0
+        for signal in signals:
+            for line in self._signal_impl_shape_lut.get(id(signal)):
+                self.map_legend_to_ax[legend_lines[ix_legend]] = [line, signal]
+                alpha = 1 if legend_lines[ix_legend].get_visible() else 0.2
+                legend_lines[ix_legend].set_picker(3)
+                legend_lines[ix_legend].set_visible(True)
+                legend_lines[ix_legend].set_alpha(alpha)
+                # Check if signal is downsampled at the start
+                if signal.isDownsampled:
+                    legend_label = leg.texts[ix_legend].get_text() + '*'
+                    leg.texts[ix_legend].set_text(legend_label)
+                ix_legend += 1
         # Map legend lines to corresponding signals for click handling
         legend_lines = leg.get_lines()
         for idx, sig in enumerate(signals):
@@ -941,7 +1007,7 @@ class MatplotlibParser(BackendParserBase):
     def _axis_update_callback(self, mpl_axes):
 
         affected_axes = mpl_axes.get_shared_x_axes().get_siblings(mpl_axes)
-        if self.canvas.shared_x_axis and not self.canvas.undo_redo:
+        if self._pm.get_value(self.canvas, 'shared_x_axis') and not self.canvas.undo_redo:
             other_axes = self._get_all_shared_axes(mpl_axes)
             for other_axis in other_axes:
                 cur_x_limits = self.get_oaw_axis_limits(mpl_axes, 0)
@@ -1051,7 +1117,7 @@ class MatplotlibParser(BackendParserBase):
 
             label_props = dict(color=fc)
             # Set ticks on the top and right axis
-            if self.canvas.ticks_position:
+            if self._pm.get_value(self.canvas, 'ticks_position'):
                 tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
             else:
                 tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
@@ -1065,7 +1131,6 @@ class MatplotlibParser(BackendParserBase):
             mpl_axis.set_tick_params(**tick_props)
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
-            # autoscale = self._pm.get_value('autoscale', axis)
             if self._pm.get_value(axis, 'autoscale') and ax_idx == 1:
                 self.autoscale_y_axis(impl_plot)
             else:
@@ -1074,7 +1139,8 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(axis, LinearAxis) and axis.is_date:
             ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
             mpl_axis.set_major_formatter(
-                NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets, roundh=self.canvas.round_hour))
+                NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets,
+                                        roundh=self._pm.get_value(self.canvas, 'round_hour')))
 
         # Configurate number of ticks and labels
         tick_number = self._pm.get_value(axis, 'tick_number')
@@ -1092,74 +1158,98 @@ class MatplotlibParser(BackendParserBase):
             return
         mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
         if not isinstance(mpl_axes, MPLAxes):
+            logger.error(f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
 
-        # draw the line data
+        # All good, make a data access request.
+        # logger.debug(f"\tprocessipsignal before ts_start {signal.ts_start} ts_end {signal.ts_end}
+        # status: {signal.status_info.result} ")
         signal_data = signal.get_data()
+
         data = self.transform_data(mpl_axes, signal_data)
+
         if hasattr(signal, 'envelope') and signal.envelope:
-            self.do_mpl_envelope_plot(signal, mpl_axes, *data)
+            if len(data) != 3:
+                logger.error(f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data"
+                             f" arrays (==3). {signal}")
+                return
+            self.do_mpl_envelope_plot(signal, mpl_axes, data[0], data[1], data[2])
         else:
+            if len(data) < 2:
+                logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
+                             f"arrays (<2). {signal}")
+                return
             self.do_mpl_line_plot(signal, mpl_axes, data)
 
         # apply axis labels
         self.update_axis_labels_with_units(mpl_axes, signal)
 
-        # remove only previous marker annotations, not other slider/cursor elements
-        for ann in mpl_axes.texts:
-            if getattr(ann, "_is_marker_annotation", False):
-                ann.remove()
-
-        # draw markers if any, regardless of line count
-        for marker in signal.markers_list:
-            if marker.visible:
-                existing = [child.get_text() for child in mpl_axes.get_children()
-                            if isinstance(child, plt.Annotation)]
-                if marker.name not in existing:
-                    x = self.transform_value(mpl_axes, 0, marker.xy[0], inverse=True)
-                    y = marker.xy[1]
-                    annot = mpl_axes.annotate(
-                        text=marker.name,
-                        xy=(x, y), xytext=(x, y),
-                        bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=marker.color)
-                    )
-                    annot._is_marker_annotation = True
+        # Check for annotations if the marker labels are visible
+        if isinstance(signal, SignalXY):
+            if mpl_axes.get_lines()[0].get_marker() == 'None':
+                return
+            if signal.markers_list:
+                annotations_names = [child.get_text() for child in mpl_axes.get_children() if
+                                     isinstance(child, plt.Annotation)]
+                for marker in signal.markers_list:
+                    if marker.visible:
+                        # Check if the marker is already drawn
+                        if marker.name not in annotations_names:
+                            x = self.transform_value(mpl_axes, 0, marker.xy[0], inverse=True)
+                            y = marker.xy[1]
+                            mpl_axes.annotate(text=marker.name,
+                                              xy=(x, y),
+                                              xytext=(x, y),
+                                              bbox=dict(boxstyle="round,pad=0.3", edgecolor="black",
+                                                        facecolor=marker.color))
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
-        """This function rescales the y-axis based on the data that is visible given the current xlim of the axis."""
+        """This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
+        ax -- a matplotlib axes object
+        margin -- the fraction of the total height of the y-data to pad the upper and lower ylims"""
 
         def get_bottom_top(x_line):
-            # Convert data to numpy arrays to support boolean masking
-            xd = np.asarray(x_line.get_xdata())
-            yd = np.asarray(x_line.get_ydata())
+            xd = x_line.get_xdata()
+            yd = x_line.get_ydata()
             lo, hi = impl_plot.get_xlim()
-            # Create mask for points within current x limits
-            mask = (xd > lo) & (xd < hi)
-            # Filter y values using mask
-            y_displayed = yd[mask] if mask.any() else np.array([])
-            if y_displayed.size > 0:
-                # Remove NaN values
-                y_clean = y_displayed[~np.isnan(y_displayed)]
-                # Compute padded bounds
-                height = np.max(y_clean) - np.min(y_clean)
-                return np.min(y_clean) - margin * height, np.max(y_clean) + margin * height
+            y_displayed = yd[((xd > lo) & (xd < hi))]
+
+            # Check if the visible Y data contains valid values
+            if len(y_displayed) > 0:
+                # Check if there exist NaN values in the y_displayed array
+                if np.isnan(y_displayed).any():
+                    y_displayed = y_displayed[~np.isnan(y_displayed)]
+                min_bot = np.min(y_displayed)
+                max_top = np.max(y_displayed)
             else:
-                # Default bounds when no data in view
-                return 0, 1
+                min_bot = np.inf
+                max_top = -np.inf
+            return min_bot, max_top
 
         # Gather all visible data lines except crosshair artifacts
         lines = impl_plot.get_lines()
-        lines = [ln for ln in lines if ln.get_label() not in ["CrossX", "CrossY"]]
-
+        lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY"]]
         bot, top = np.inf, -np.inf
         # Compute overall min/max across all lines
         for line in lines:
             new_bot, new_top = get_bottom_top(line)
-            bot, top = min(bot, new_bot), max(top, new_top)
+            if new_bot < bot:
+                bot = new_bot
+            if new_top > top:
+                top = new_top
 
-        # Apply the new limits if any lines exist
+        # Apply default Y limits in case of missing or invalid data
+        if bot == np.inf and top == -np.inf:
+            bot, top = 0, 1
+
+        # Compute final margin
+        h = (top - bot)
+        n_new_bot = bot - margin * h
+        n_new_top = top + margin * h
+
+        # Set new Y axis limits
         if lines:
-            self.set_oaw_axis_limits(impl_plot, 1, (bot, top))
+            self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
 
     def set_impl_plot_slider_limits(self, plot, start, end):
         """
@@ -1346,7 +1436,7 @@ class MatplotlibParser(BackendParserBase):
                         other.slider.set_val(last_val)
                         other.slider_last_val = last_val
 
-                        # Actualizar etiqueta de timestamp
+                        # Update timestamp label
                         annotations = [
                             child for child in other.slider.ax.get_children()
                             if isinstance(child, Annotation)
@@ -1433,10 +1523,23 @@ class MatplotlibParser(BackendParserBase):
                 begin, end = zoom_range
                 logger.debug(f"[reapply_red_zones] Applying inferred zoom_range to plot id {id(plot)}: {begin} → {end}")
 
+        if self._focus_plot is not None and plot is None:
+            if self._pm.get_value(self.canvas, 'shared_x_axis') and len(self._focus_plot.axes) > 0 and isinstance(
+                    self._focus_plot.axes[0], RangeAxis):
+                begin, end = get_x_axis_range(self._focus_plot)
             self.update_slider_limits(plot, begin, end)
 
-        self.figure.canvas.draw_idle()
-        logger.debug("[reapply_red_zones] Done (applied)")
+                for columns in self.canvas.plots:
+                    for plot_temp in columns:
+                        if plot_temp and plot_temp != self._focus_plot:  # Avoid None plots
+                            logger.debug(
+                                f"Setting range on plot {id(plot_temp)} focused= {id(self._focus_plot)} begin={begin}")
+                            if plot_temp.axes[0].original_begin == self._focus_plot.axes[0].original_begin and \
+                                    plot_temp.axes[0].original_end == self._focus_plot.axes[0].original_end:
+                                set_x_axis_range(plot_temp, begin, end)
+
+        self._focus_plot = plot
+        self._focus_plot_stack_key = stack_key
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
@@ -1464,10 +1567,10 @@ class MatplotlibParser(BackendParserBase):
 
             self._cursors.append(
                 IplotMultiCursor(self.figure.canvas, filtered_axes_group,
-                                 x_label=self.canvas.enable_x_label_crosshair,
-                                 y_label=self.canvas.enable_y_label_crosshair,
-                                 val_label=self.canvas.enable_val_label_crosshair,
-                                 color=self.canvas.crosshair_color,
+                                 x_label=self._pm.get_value(self.canvas, 'enable_x_label_crosshair'),
+                                 y_label=self._pm.get_value(self.canvas, 'enable_y_label_crosshair'),
+                                 val_label=self._pm.get_value(self.canvas, 'enable_val_label_crosshair'),
+                                 color=self._pm.get_value(self.canvas, 'crosshair_color'),
                                  lw=self.canvas.crosshair_line_width,
                                  horiz_on=False or self.canvas.crosshair_horizontal,
                                  vert_on=self.canvas.crosshair_vertical,
@@ -1628,14 +1731,9 @@ class MatplotlibParser(BackendParserBase):
         to avoid singular transformation warnings.
         """
         if isinstance(impl_plot, MPLAxes):
-            ymin, ymax = limits
-            if ymin is None or ymax is None:
-                return  # Invalid limits, silently skip
-            if ymin == ymax:
-                delta = 1.0 if ymin == 0 else abs(ymin) * 0.01
-                ymin -= delta
-                ymax += delta
-            impl_plot.set_ylim(ymin, ymax)
+            impl_plot.set_ylim(limits[0], limits[1])
+        else:
+            return None
 
     def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits) -> None:
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)

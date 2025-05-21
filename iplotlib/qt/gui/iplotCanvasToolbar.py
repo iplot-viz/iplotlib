@@ -55,6 +55,11 @@ class IplotQtCanvasToolbar(QToolBar):
 
         self.addSeparator()
 
+        # Statistics
+        self.statistics = QAction(create_icon('stats_icon'), 'Statistics', self)
+        self.addAction(self.statistics)
+        self.addSeparator()
+
         # Command-history management
         self.undoAction = QAction(create_icon('undo'), '&Undo', self)
         self.redoAction = QAction(create_icon('redo'), '&Redo', self)

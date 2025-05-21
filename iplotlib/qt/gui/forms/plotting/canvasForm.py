@@ -12,11 +12,19 @@ import typing
 
 from PySide6.QtCore import QModelIndex, Qt, Slot
 from PySide6.QtWidgets import QWidget
+import json
 from iplotlib.core.canvas import Canvas
 
 from iplotlib.qt.models.beanItemModel import BeanItemModel
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
 from iplotlib.qt.utils.color_picker import ColorPicker
+from iplotlib.core.property_manager import PropertyManager
+
+from pathlib import Path
+
+from iplotLogging import setupLogger as Sl
+
+logger = Sl.get_logger(__name__)
 
 
 class CanvasForm(IplotPreferencesForm):
@@ -74,6 +82,7 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.default_contour_levels_widget()},
             {"label": "Contour Filled", "property": "contour_filled",
              "widget": self.create_checkbox()}]
+        self._pm = PropertyManager()
         super().__init__(fields=prototype, label="Canvas", parent=parent, f=f)
 
     @Slot()
@@ -87,3 +96,36 @@ class CanvasForm(IplotPreferencesForm):
 
         self.widgetMapper.revert()
         super().reset_prefs()
+
+    def get_canvas_properties(self):
+        # Get the current canvas properties and returns them as a dictionary
+        canvas_properties = {
+            field["property"]: self._pm.get_value(self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole),
+                                                  field["property"]) for field in self.fields}
+
+        extra_properties = {
+            "autoscale": True,
+            "legend_format": "color_bar",
+            "equivalent_units": False,
+            "color_map": "viridis",
+            "color": None}
+
+        return {**canvas_properties, **extra_properties}
+
+    @Slot()
+    def export_canvas_preferences(self):
+        # Define folder path
+        path = Path.home() / ".local" / "1DPreferences"
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Define file path
+        file_name = path / "default_properties.json"
+
+        try:
+            with file_name.open(mode="w", encoding="utf-8") as f:
+                json.dump(self.get_canvas_properties(), f, ensure_ascii=False, indent=4)
+                logger.info(f"Default Canvas preferences updated")
+        except Exception as e:
+            logger.error(f"Error exporting Canvas preferences: {e}")
+
+        super().export_canvas_preferences()
