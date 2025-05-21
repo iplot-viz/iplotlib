@@ -169,8 +169,10 @@ class IplotQtStatistics(QWidget):
                 # Base case
                 y_data = line.get_ydata()
                 y_displayed = y_data[((x_data > lo) & (x_data < hi))]
+
                 # Filtered y_displayed if case it exists NaN values
                 y_displayed = y_displayed[~np.isnan(y_displayed)]
+
                 samples = np.size(y_displayed)
 
                 if samples > 0:
