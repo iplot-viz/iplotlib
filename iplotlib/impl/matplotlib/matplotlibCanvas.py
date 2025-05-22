@@ -1562,10 +1562,13 @@ class MatplotlibParser(BackendParserBase):
             for plot in self._slider_plots:
                 if not isinstance(plot, PlotXYWithSlider):
                     continue
-                for child in plot.slider.ax.get_children():
+                for child in list(plot.slider.ax.get_children()):
                     if isinstance(child, Patch) and getattr(child, "get_label", lambda: None)() == 'slider_red_range':
-                        logger.debug(f"[reapply_red_zones] Removing red range from plot id {id(plot)}")
-                        child.remove()
+                        if child in plot.slider.ax.patches:
+                            child.remove()
+                        else:
+                            logger.debug(f"[reapply_red_zones] Skipped removing red patch — not in ax.patches")
+
                 plot.slider.ax.figure.canvas.draw_idle()
             logger.debug("[reapply_red_zones] Done (cleaned)")
             return
