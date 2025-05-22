@@ -133,7 +133,9 @@ class MatplotlibParser(BackendParserBase):
             # It means that the color has been reset but must keep the original color
             signal.color = signal.original_color
 
-        if not signal.extremities:
+        # Visible data is adjusted based on extremities, but only for unprocessed signals, as processed ones already
+        # use the visible range
+        if not signal.extremities and signal.x_expr == "${self}.time":
             x_data, y_data = _get_visible_data(x_data, y_data, *mpl_axes.get_xlim())
 
         if isinstance(plot_lines, list):
