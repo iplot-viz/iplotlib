@@ -393,8 +393,7 @@ class BackendParserBase(ABC):
                     if not isinstance(axis, RangeAxis):
                         continue
                     begin, end = axis.get_limits(which)
-                    plot_lims.axes_ranges.append(
-                        IplAxisLimits(begin, end, weakref.ref(axis)))
+                    plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
             elif isinstance(axes, RangeAxis):
                 axis = axes  # singular name is easier to read for single axis
                 begin, end = axis.get_limits(which)

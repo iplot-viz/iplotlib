@@ -52,7 +52,8 @@ class HistoryManager:
         try:
             cmd = self._undo_stack.pop()  # type: IplotCommand
             cmd.undo()
-            self._redo_stack.append(cmd)
+            if cmd.name == 'Zoom' or cmd.name == 'Select':
+                self._redo_stack.append(cmd)
             logger.debug(f"Undo {cmd.name}")
             logger.debug(f"UndoStack: {self._undo_stack}")
             logger.debug(f"RedoStack: {self._redo_stack}")
