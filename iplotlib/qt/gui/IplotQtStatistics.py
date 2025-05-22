@@ -113,7 +113,7 @@ class IplotQtStatistics(QWidget):
 
     def _set_stats(self, idx, min_data, avg_data, max_data, first, last, samples):
         """
-            Set statistic row
+            Set statistics row
         """
         self.table.setItem(idx, 1, self._create_item(min_data))
         self.table.setItem(idx, 2, self._create_item(avg_data))
