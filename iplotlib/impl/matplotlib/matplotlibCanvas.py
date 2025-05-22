@@ -58,6 +58,8 @@ class MatplotlibParser(BackendParserBase):
         self.legend_size = 8
         self._cursors = []
         self._crosshairs = {}
+        # Track if the last focus plot was None (i.e., we were in full grid mode)
+        self._last_focus_plot_was_none = True
 
         # Sync all the sliders for shared time
         self._slider_plots: List[PlotXYWithSlider] = []
@@ -480,7 +482,16 @@ class MatplotlibParser(BackendParserBase):
                     color=self._pm.get_value(canvas, 'font_color') or 'black'
                 )
 
-            # Step: Re-synchronize sliders if shared_x_axis is active
+            # Reset all sliders to zero only if the previous state was also full grid
+            if getattr(self, "_last_focus_plot_was_none", True):
+                logger.debug(
+                    "[process_ipl_canvas] Detected full redraw (not from focus/unfocus) → resetting sliders to 0")
+                for plot in self._slider_plots:
+                    if isinstance(plot, PlotXYWithSlider) and getattr(plot, 'slider', None):
+                        plot.slider.set_val(0)
+                        plot.slider_last_val = 0
+
+            # Re-synchronize sliders if shared_x_axis is active
             if self.canvas.shared_x_axis:
                 logger.debug("[process_ipl_canvas] Sync sliders after full redraw")
                 shared_val = None
@@ -502,6 +513,8 @@ class MatplotlibParser(BackendParserBase):
                 self.reapply_red_zones()
 
             self.figure.canvas.draw_idle()
+            # Update the tracker for focus state to use in the next draw
+            self._last_focus_plot_was_none = self._focus_plot is None
 
             return
 
@@ -533,6 +546,9 @@ class MatplotlibParser(BackendParserBase):
                                  size=self._pm.get_value(self.canvas, 'font_size'),
                                  color=self._pm.get_value(self.canvas, 'font_color') or 'black')
         self.figure.canvas.draw_idle()
+
+        # Update the tracker for focus state to use in the next draw
+        self._last_focus_plot_was_none = self._focus_plot is None
 
         # Reapply red zones
         if self.canvas.shared_x_axis:
