@@ -615,6 +615,14 @@ class MatplotlibParser(BackendParserBase):
             if self._pm.get_value(plot, 'legend') and last_axes.get_lines():
                 self._draw_plot_legend(plot, last_axes, signals=sum(plot.signals.values(), []))
 
+        # Ensure all signals are registered to their correct mpl_axes
+        for ax in mpl_axes_list:
+            ci = self._impl_plot_cache_table.get_cache_item(ax)
+            if hasattr(ci, 'signals') and ci.signals:
+                for sig_ref in ci.signals:
+                    sig = sig_ref() if callable(sig_ref) else sig_ref
+                    if isinstance(sig, Signal):
+                        self._signal_impl_plot_lut[sig.uid] = ax
 
         # Connect x-limits callback for shared-axis synchronization
         self._connect_limit_callbacks(last_axes)
@@ -969,6 +977,20 @@ class MatplotlibParser(BackendParserBase):
         plot._in_slider_update = True
 
         try:
+
+            # 0) Ensure each signal has a mapped MPLAxes before drawing
+            for signal in sum(plot.signals.values(), []):
+                ax_found = self._signal_impl_plot_lut.get(signal.uid)
+                if not isinstance(ax_found, MPLAxes) or ax_found not in self.figure.axes:
+                    for ax in self.figure.axes:
+                        ci = self._impl_plot_cache_table.get_cache_item(ax)
+                        if hasattr(ci, 'plot'):
+                            ci_signals = [s() if callable(s) else s for s in ci.signals]
+                            if signal in ci_signals:
+                                self._signal_impl_plot_lut[signal.uid] = ax
+                                logger.debug(f"[on_slider_change] Remapped signal {signal.uid} to axes")
+                                break
+
             # 1) Redraw this plot's signals
             for signal in sum(plot.signals.values(), []):
                 self.process_ipl_signal(signal)
@@ -1162,7 +1184,19 @@ class MatplotlibParser(BackendParserBase):
             return
         mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
         if not isinstance(mpl_axes, MPLAxes):
-            logger.error(f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
+            for ax in self.figure.axes:
+                ci = self._impl_plot_cache_table.get_cache_item(ax)
+                if hasattr(ci, 'plot'):
+                    signals = [s() if callable(s) else s for s in ci.signals]
+                    if signal in signals:
+                        self._signal_impl_plot_lut[signal.uid] = ax
+                        mpl_axes = ax
+                        logger.debug(f"[process_ipl_signal] Recovered missing mpl_axes for signal {signal.uid}")
+                        break
+
+        # Final check before aborting
+        if not isinstance(mpl_axes, MPLAxes):
+            logger.error(f"[process_ipl_signal] Failed to find MPLAxes for signal {signal.uid} ({signal.label})")
             return
 
         # All good, make a data access request.
@@ -1458,16 +1492,16 @@ class MatplotlibParser(BackendParserBase):
         self._focus_plot = new_plot
         self._focus_plot_stack_key = new_key
 
-        # Ensure all signals in focused plot are properly registered before data refresh
+        # Ensure all signals in the focused plot are registered before data refresh
         if self._focus_plot is not None:
-            for ax in self.figure.axes:
-                ci = self._impl_plot_cache_table.get_cache_item(ax)
-                if hasattr(ci, 'plot') and ci.plot() is self._focus_plot:
-                    for sig_ref in ci.signals:
-                        sig = sig_ref() if callable(sig_ref) else sig_ref
-                        if not isinstance(sig, Signal):
-                            continue  # Skip dead or invalid weakrefs
-                        self._signal_impl_plot_lut[sig.uid] = ax
+            for key, signal_stack in self._focus_plot.signals.items():
+                for sig_ref in signal_stack:
+                    sig = sig_ref() if callable(sig_ref) else sig_ref
+                    if isinstance(sig, Signal):
+                        for ax in self.figure.axes:
+                            ci = self._impl_plot_cache_table.get_cache_item(ax)
+                            if ci and ci.plot() is self._focus_plot and ci.stack_key == key:
+                                self._signal_impl_plot_lut[sig.uid] = ax
 
         # Now it's safe to request a full signal refresh
         self.refresh_data()
