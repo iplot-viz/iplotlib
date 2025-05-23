@@ -405,7 +405,7 @@ class BackendParserBase(ABC):
                 begin, end = axis.get_limits(which)
                 plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
 
-        # En el caso de PlotXYWithSlider, se debe guardar los limites del slider
+        # Save slider limits for PlotXYWithSlider
         if isinstance(plot, PlotXYWithSlider):
             min_val = plot.slider.valmin
             max_val = plot.slider.valmax
@@ -472,7 +472,7 @@ class BackendParserBase(ABC):
                         if hasattr(ci, 'plot') and ci.plot() is self._focus_plot:
                             self.set_oaw_axis_limits(ax, ax_idx, axis.get_limits())
 
-            # f focus is on a slider plot, ensure Y axis is updated
+            # If focus is on a slider plot, ensure Y axis is updated
             if isinstance(self._focus_plot, PlotXYWithSlider):
                 axes_list = getattr(self._focus_plot, "_mpl_axes_list", [])
                 if axes_list:

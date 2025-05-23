@@ -61,7 +61,6 @@ class IplotMultiCursor(Widget):
                  text_color: str = "white",
                  font_size: int = 8,
                  cache_table: ImplementationPlotCacheTable = None,
-                 slider: bool = False,
                  **line_props):
 
         self.canvas = canvas
@@ -76,7 +75,6 @@ class IplotMultiCursor(Widget):
         self._cache_table = cache_table
         # Tolerance for showing label with value on signal in %
         self.val_tolerance = val_tolerance
-        self.slider = slider
 
         x_min, x_max = axes[-1].get_xlim()
         y_min, y_max = axes[-1].get_ylim()
@@ -219,8 +217,6 @@ class IplotMultiCursor(Widget):
             return
         if not self.canvas.widgetlock.available(self):
             return
-        if self.slider:
-            return
         self.need_clear = True
         if self.vert_on:
             for line in self.v_lines:
@@ -274,27 +270,6 @@ class IplotMultiCursor(Widget):
                         annotation.set_visible(False)
                 else:
                     annotation.set_visible(False)
-        self._update()
-
-    def on_move_slider(self, value):
-        if not self.canvas.widgetlock.available(self):
-            return
-        self.need_clear = True
-        if self.vert_on:
-            for line in self.v_lines:
-                line.set_xdata([value])
-                line.set_visible(True)
-
-        if self.x_label:
-            for arrow, ax in zip(self.x_arrows, self.axes):
-                x_min, x_max = ax.get_xbound()
-                if x_min < value < x_max and ax.get_xaxis().get_visible():
-                    arrow.set_position((value, arrow.get_position()[1]))
-                    arrow.set_text(ax.format_xdata(value))
-                    arrow.set_visible(True)
-                else:
-                    arrow.set_visible(False)
-
         self._update()
 
     def _update(self):
