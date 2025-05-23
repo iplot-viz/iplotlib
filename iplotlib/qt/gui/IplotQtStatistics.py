@@ -55,7 +55,8 @@ class IplotQtStatistics(QWidget):
         self.decimals = QLabel("Number of decimals: ")
         self.adjust_decimals = QSpinBox()
         self.adjust_decimals.setRange(2, 17)
-        self.adjust_decimals.setValue(2)
+        self.adjust_decimals.setValue(17)
+        self.decimal_digits = self.adjust_decimals.value()
         self.apply_decimals_button = QPushButton("Apply")
         self.apply_decimals_button.clicked.connect(self.update_table_format)
 
@@ -90,24 +91,29 @@ class IplotQtStatistics(QWidget):
 
     def _create_item(self, value):
         """
-            Creates QTableWidgetItem and set data
+        Creates QTableWidgetItem and set data with formatting applied
         """
+        digits = self.decimal_digits
+
+        def fmt(val):
+            return f"{val:.{digits}f}" if not float(val).is_integer() else str(int(val))
+
         if isinstance(value, float):
-            item = QTableWidgetItem(f"{self._format_float(value)}")
+            item = QTableWidgetItem(fmt(value))
             item.setData(Qt.UserRole, value)
         elif isinstance(value, tuple):
-            val = f"({self._format_float(value[0])},{self._format_float(value[1])},{self._format_float(value[2])})"
+            val = f"({', '.join(fmt(v) for v in value)})"
             item = QTableWidgetItem(val)
             item.setData(Qt.UserRole, value)
         else:
-            item = QTableWidgetItem(f"{value}")
+            item = QTableWidgetItem(fmt(value))
             item.setData(Qt.UserRole, float(value))
 
         return item
 
     def _set_stats(self, idx, min_data, avg_data, max_data, first, last, samples):
         """
-            Set statistic row
+            Set statistics row
         """
         self.table.setItem(idx, 1, self._create_item(min_data))
         self.table.setItem(idx, 2, self._create_item(avg_data))
@@ -121,6 +127,7 @@ class IplotQtStatistics(QWidget):
             Fill the statistics table with data for each signal
         """
         self.table.setRowCount(0)
+        self._current_info_stats = info_stats
 
         for idx, (signal, impl_plot) in enumerate(info_stats):
             # Insert new row
@@ -174,12 +181,14 @@ class IplotQtStatistics(QWidget):
                 else:
                     # Indicate that there is no data
                     self.table.setItem(idx, 6, self._create_item(samples))
+        # Apply formatting with the current decimal setting
+        self.update_table_format()
 
     def update_table_format(self):
         """
             Updates the float value format based on the selected number of decimals
         """
-        decimals = self.adjust_decimals.value()
+        self.decimal_digits = self.adjust_decimals.value()
         rows = self.table.rowCount()
         cols = self.table.columnCount()
 
@@ -193,8 +202,8 @@ class IplotQtStatistics(QWidget):
                     if isinstance(data, tuple):
                         text_parts = []
                         for val in data:
-                            if not val.is_integer():
-                                text_parts.append(f"{val:.{decimals}f}")
+                            if not float(val).is_integer():
+                                text_parts.append(f"{val:.{self.decimal_digits}f}")
                             else:
                                 text_parts.append(f"{int(val)}")
                         text = f"({', '.join(text_parts)})"
@@ -202,5 +211,7 @@ class IplotQtStatistics(QWidget):
 
                     # Format single float value
                     else:
-                        if not data.is_integer():
-                            item.setText(f"{data:.{decimals}f}")
+                        if not float(data).is_integer():
+                            item.setText(f"{data:.{self.decimal_digits}f}")
+                        else:
+                            item.setText(str(int(data)))
