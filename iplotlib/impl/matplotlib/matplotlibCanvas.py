@@ -76,13 +76,10 @@ class MatplotlibParser(BackendParserBase):
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
         if mpl_axes.get_legend():
-            if np.size(signal.data_store[2]) > 0 and np.size(signal.data_store[3].shape) > 0:
-                # Envelope case
-                valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
-                pos = valid_lines.index(plot_lines[0][0])
-            else:
-                # Base case
-                pos = mpl_axes.get_lines().index(plot_lines[0][0])
+            # Filter out '_child' lines from mpl_axes, which are automatically added in envelope plots
+            # These auxiliary lines should not be considered when matching lines to legend entries
+            valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
+            pos = valid_lines.index(plot_lines[0][0])
 
             legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
             if legend_text.endswith('*') and not signal.isDownsampled:
@@ -599,7 +596,7 @@ class MatplotlibParser(BackendParserBase):
                 continue
             for signal_ref in ci.signals:
                 signal = signal_ref()
-                if hasattr(signal, "set_xranges"):
+                if hasattr(signal, "set_xranges") and isinstance(signal, SignalXY):
                     if signal.x_expr != '${self}.time' and len(signal.data_store[0]) > 0 and len(signal.x_data) > 0:
                         idx1 = np.searchsorted(signal.x_data, ranges[0])
                         idx2 = np.searchsorted(signal.x_data, ranges[1])
