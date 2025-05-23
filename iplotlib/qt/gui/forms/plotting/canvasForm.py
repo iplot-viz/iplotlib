@@ -44,6 +44,8 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.default_canvas_max_diff()},
             {"label": "Round hours", "property": "round_hour",
              "widget": self.create_checkbox()},
+            {"label": "Auto scale", "property": "autoscale",
+             "widget": self.create_checkbox()},
             {"label": "Log scale", "property": "log_scale",
              "widget": self.create_checkbox()},
             {"label": "Grid", "property": "grid",

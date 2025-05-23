@@ -85,6 +85,8 @@ class Canvas(ABC):
         type of the canvas
     max_diff: int
         Maximum allowed difference for comparing axis ranges between different plots
+    autoscale : bool
+        enables automatic scaling of the axis range to fit displayed data if set to True
     """
 
     MOUSE_MODE_SELECT = "MM_SELECT"

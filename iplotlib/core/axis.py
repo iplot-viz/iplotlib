@@ -30,8 +30,6 @@ class Axis:
         color applies to an axis label and axis tick labels
     tick_number : int
         number of ticks and labels to be shown in the axis
-    autoscale : bool
-        enables automatic scaling of the axis range to fit displayed data if set to True
     """
 
     _type: str = None
@@ -39,7 +37,6 @@ class Axis:
     font_size: int = None
     font_color: str = None
     tick_number: int = None
-    autoscale: bool = None
     parent = None
 
     def __post_init__(self):
@@ -57,14 +54,12 @@ class Axis:
         self.font_size = Axis.font_size
         self.font_color = Axis.font_color
         self.tick_number = Axis.tick_number
-        self.autoscale = Axis.autoscale
 
     def merge(self, old_axis: 'Axis'):
         self.label = old_axis.label
         self.font_size = old_axis.font_size
         self.font_color = old_axis.font_color
         self.tick_number = old_axis.tick_number
-        self.autoscale = old_axis.autoscale
 
 
 @dataclass

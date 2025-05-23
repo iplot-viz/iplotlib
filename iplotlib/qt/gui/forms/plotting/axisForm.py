@@ -31,7 +31,6 @@ class AxisForm(IplotPreferencesForm):
             {"label": "Font color", "property": "font_color", "widget": ColorPicker("font_color")},
             {"label": "Min value", "property": "begin", "widget": self.create_lineedit()},
             {"label": "Max value", "property": "end", "widget": self.create_lineedit()},
-            {"label": "Auto scale", "property": "autoscale", "widget": self.create_checkbox()},
             {"label": "Number of ticks and labels", "property": "tick_number",
              "widget": self.default_ticknumber_widget()}
         ]

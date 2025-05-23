@@ -173,8 +173,8 @@ class BackendParserBase(ABC):
             for signal_ref in signals:
                 self.process_ipl_signal(signal_ref())
             plot = ci.plot()
-            mpl_axes = self._plot_impl_plot_lut[id(ci.plot())][0]
             for stack_id, key in enumerate(sorted(plot.signals.keys())):
+                mpl_axes = self._plot_impl_plot_lut[id(ci.plot())][stack_id]
                 for ax_idx in range(len(plot.axes)):
                     if isinstance(plot.axes[ax_idx], Collection):
                         axis = plot.axes[ax_idx][stack_id]

@@ -150,7 +150,9 @@ class MatplotlibParser(BackendParserBase):
             # It means that the color has been reset but must keep the original color
             signal.color = signal.original_color
 
-        if not signal.extremities:
+        # Visible data is adjusted based on extremities, but only for unprocessed signals, as processed ones already
+        # use the visible range
+        if not signal.extremities and signal.x_expr == "${self}.time":
             x_data, y_data = _get_visible_data(x_data, y_data, *mpl_axes.get_xlim())
 
         if isinstance(plot_lines, list):
@@ -1043,6 +1045,9 @@ class MatplotlibParser(BackendParserBase):
     def _connect_limit_callbacks(self, mpl_axes):
         """Attach xlim_changed to synchronize shared axes (except streaming mode)."""
         if not self.canvas.streaming:
+            for axes in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
+                axes.callbacks.connect('xlim_changed', self._axis_update_callback)
+                axes.callbacks.connect('ylim_changed', self._axis_update_callback)
             for ax in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
                 ax.callbacks.connect('xlim_changed', self._axis_update_callback)
 
@@ -1173,7 +1178,7 @@ class MatplotlibParser(BackendParserBase):
             mpl_axis.set_tick_params(**tick_props)
 
         if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
-            if self._pm.get_value(axis, 'autoscale') and ax_idx == 1:
+            if self._pm.get_value(self.canvas, 'autoscale') and ax_idx == 1:
                 self.autoscale_y_axis(impl_plot)
             else:
                 logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
@@ -1788,10 +1793,6 @@ class MatplotlibParser(BackendParserBase):
             impl_plot.set_xlim(limits[0], limits[1])
 
     def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
-        """
-        Safely set y-axis limits. If limits are identical or invalid, apply small padding
-        to avoid singular transformation warnings.
-        """
         if isinstance(impl_plot, MPLAxes):
             impl_plot.set_ylim(limits[0], limits[1])
         else:
