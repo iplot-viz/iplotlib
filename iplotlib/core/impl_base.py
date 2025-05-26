@@ -474,9 +474,9 @@ class BackendParserBase(ABC):
 
             # If focus is on a slider plot, ensure Y axis is updated
             if isinstance(self._focus_plot, PlotXYWithSlider):
-                axes_list = getattr(self._focus_plot, "_mpl_axes_list", [])
-                if axes_list:
-                    self.update_multi_range_axis(self._focus_plot.axes[1], 1, axes_list[0])
+                mpl_axes_list = getattr(self._focus_plot, "_mpl_axes_list", [])
+                if mpl_axes_list:
+                    self.update_multi_range_axis(self._focus_plot.axes[1], 1, mpl_axes_list[0])
 
         # Apply or clean red zoom zone based on zoom state
         # We use reapply_red_zones() to infer current zoom logic and update red area accordingly

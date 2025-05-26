@@ -634,13 +634,13 @@ class MatplotlibParser(BackendParserBase):
                 self._draw_plot_legend(plot, last_axes, signals=sum(plot.signals.values(), []))
 
         # Ensure all signals are registered to their correct mpl_axes
-        for ax in mpl_axes_list:
-            ci = self._impl_plot_cache_table.get_cache_item(ax)
+        for mpl_axes in mpl_axes_list:
+            ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             if hasattr(ci, 'signals') and ci.signals:
                 for sig_ref in ci.signals:
                     sig = sig_ref() if callable(sig_ref) else sig_ref
                     if isinstance(sig, Signal):
-                        self._signal_impl_plot_lut[sig.uid] = ax
+                        self._signal_impl_plot_lut[sig.uid] = mpl_axes
 
         # Connect x-limits callback for shared-axis synchronization
         self._connect_limit_callbacks(last_axes)
@@ -708,10 +708,10 @@ class MatplotlibParser(BackendParserBase):
     def _add_stack_axes(self, plot, subgrid, stack_sz, slider_mode):
         """
         Always create fresh stacked axes (one row per signal stack), clear any old
-        shape‐LUT entries, and draw every signal anew. Returns (axes_list, last_ax).
+        shape‐LUT entries, and draw every signal anew. Returns (mpl_axes_list, last_mpl_axes).
         """
-        axes_list = []
-        prev_ax = None  # for shared x-axis
+        mpl_axes_list = []
+        mpl_axes_prev = None  # for shared x-axis
 
         # Create one axes per signal‐stack
         for stack_id, key in enumerate(sorted(plot.signals.keys())):
@@ -720,18 +720,18 @@ class MatplotlibParser(BackendParserBase):
                 continue
 
             # row 0 if focused single‐stack, else incremental
-            row = 0 if (self._focus_plot_stack_key and not self.canvas.full_mode_all_stack) else stack_id
+            row_id = 0 if (self._focus_plot_stack_key and not self.canvas.full_mode_all_stack) else stack_id
 
-            # always fresh subplot, sharing x if prev_ax
-            ax = self.figure.add_subplot(subgrid[row, 0], sharex=prev_ax)
-            ax.set_navigate(True)
-            axes_list.append(ax)
-            prev_ax = ax
+            # always fresh subplot, sharing x if mpl_axes_prev
+            mpl_axes = self.figure.add_subplot(subgrid[row_id, 0], sharex=mpl_axes_prev)
+            mpl_axes.set_navigate(True)
+            mpl_axes_list.append(mpl_axes)
+            mpl_axes_prev = mpl_axes
 
             # register this axes
             signals = plot.signals.get(key, []) or []
-            self._plot_impl_plot_lut[id(plot)].append(ax)
-            self._impl_plot_cache_table.register(ax, self.canvas, plot, key, signals)
+            self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
+            self._impl_plot_cache_table.register(mpl_axes, self.canvas, plot, key, signals)
 
             # clear any old line‐cache for each signal and draw it
             for sig_ref in signals:
@@ -739,16 +739,16 @@ class MatplotlibParser(BackendParserBase):
                 if sig is not None:
                     sig.lines = None
                     self._signal_impl_shape_lut.pop(id(sig), None)
-                    self._signal_impl_plot_lut[sig.uid] = ax
+                    self._signal_impl_plot_lut[sig.uid] = mpl_axes
                     self.process_ipl_signal(sig)
 
             # apply title, grid, colors, ticks…
-            self._configure_axes_properties(plot, ax, stack_id, signals)
+            self._configure_axes_properties(plot, mpl_axes, stack_id, signals)
 
         # store for future reference (not reuse)
-        plot._mpl_axes_list = axes_list
-        last_ax = axes_list[-1] if axes_list else None
-        return axes_list, last_ax
+        plot._mpl_axes_list = mpl_axes_list
+        last_mpl_axes = mpl_axes_list[-1] if mpl_axes_list else None
+        return mpl_axes_list, last_mpl_axes
 
     def _configure_axes_properties(self, plot, mpl_axes, stack_id, signals):
         """Apply title, facecolor, tick visibility, grid, and process axes."""
@@ -775,12 +775,12 @@ class MatplotlibParser(BackendParserBase):
 
         # process each Axis object (labels, formatting, etc.)
         x_axis = None
-        for ax_idx, ax in enumerate(plot.axes):
-            if isinstance(ax, Collection):
-                self.process_ipl_axis(ax[stack_id], ax_idx, plot, mpl_axes)
+        for ax_idx, axis in enumerate(plot.axes):
+            if isinstance(axis, Collection):
+                self.process_ipl_axis(axis[stack_id], ax_idx, plot, mpl_axes)
             else:
-                x_axis = ax
-                self.process_ipl_axis(ax, ax_idx, plot, mpl_axes)
+                x_axis = axis
+                self.process_ipl_axis(axis, ax_idx, plot, mpl_axes)
                 if isinstance(plot, PlotXYWithSlider):
                     mpl_axes.xaxis.set_label_coords(0.5, -0.1)
                     mpl_axes.xaxis.labelpad = 3
@@ -853,7 +853,7 @@ class MatplotlibParser(BackendParserBase):
                 proxy.set_picker(3)
                 proxy.set_alpha(1.0 if proxy.get_visible() else 0.2)
 
-    def _initialize_slider(self, plot: PlotXYWithSlider, slider_spec, axes_list=None):
+    def _initialize_slider(self, plot: PlotXYWithSlider, slider_spec, mpl_axes_list=None):
         """Add slider axes, widget, formatter and callbacks."""
         from matplotlib.backend_bases import MouseButton
 
@@ -950,21 +950,30 @@ class MatplotlibParser(BackendParserBase):
         plot._cid_click = cid
 
         # capture axes for callback
-        axes_list = list(getattr(plot, '_mpl_axes_list', []))
+        mpl_axes_list = list(getattr(plot, '_mpl_axes_list', []))
 
         # Align slider horizontally with the primary axes
-        if axes_list:
-            main_ax = axes_list[0]
+        if mpl_axes_list:
+            main_ax = mpl_axes_list[0]
             # get positions: [x0, y0, width, height]
             mx0, my0, mwidth, mheight = main_ax.get_position().bounds
             sx0, sy0, swidth, sheight = slider_ax.get_position().bounds
             # keep slider's y0 and height, but adopt main_ax's x0 and width
             slider_ax.set_position([mx0, sy0, mwidth, sheight])
 
+        # Register all signals to their corresponding mpl_axes BEFORE connecting the on_changed callback
+        for mpl_ax in mpl_axes_list:
+            ci = self._impl_plot_cache_table.get_cache_item(mpl_ax)
+            if hasattr(ci, 'signals') and ci.signals:
+                for sig_ref in ci.signals:
+                    sig = sig_ref() if callable(sig_ref) else sig_ref
+                    if isinstance(sig, Signal):
+                        self._signal_impl_plot_lut[sig.uid] = mpl_ax
+
         # connect change handler
         plot.slider.on_changed(
-            lambda v, t=times, lbl=current_label, axlist=axes_list:
-            self._on_slider_change(plot, t, lbl, v, axes_list)
+            lambda v, t=times, lbl=current_label, axlist=mpl_axes_list:
+            self._on_slider_change(plot, t, lbl, v, mpl_axes_list)
         )
 
         # remember this slider for shared‐axis sync
@@ -980,14 +989,14 @@ class MatplotlibParser(BackendParserBase):
                     self.update_slider_limits(plot, begin, end)
 
         slider_bounds = slider_ax.get_position().bounds
-        if axes_list:
-            main_ax_bounds = axes_list[0].get_position().bounds
+        if mpl_axes_list:
+            main_ax_bounds = mpl_axes_list[0].get_position().bounds
 
         # mark as initialized so _remove_existing_slider will act correctly next time
         plot._slider_initialized = True
 
     # Slider updater!
-    def _on_slider_change(self, plot, times, label, val, axes_list):
+    def _on_slider_change(self, plot, times, label, val, mpl_axes_list):
         """Handle slider movement and update both real and pseudo crosshairs."""
         # Prevent re-entry into this handler
         if getattr(plot, "_in_slider_update", False):
@@ -1000,12 +1009,12 @@ class MatplotlibParser(BackendParserBase):
             for signal in sum(plot.signals.values(), []):
                 ax_found = self._signal_impl_plot_lut.get(signal.uid)
                 if not isinstance(ax_found, MPLAxes) or ax_found not in self.figure.axes:
-                    for ax in self.figure.axes:
-                        ci = self._impl_plot_cache_table.get_cache_item(ax)
+                    for mpl_axes in self.figure.axes:
+                        ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
                         if hasattr(ci, 'plot'):
                             ci_signals = [s() if callable(s) else s for s in ci.signals]
                             if signal in ci_signals:
-                                self._signal_impl_plot_lut[signal.uid] = ax
+                                self._signal_impl_plot_lut[signal.uid] = mpl_axes
                                 logger.debug(f"[on_slider_change] Remapped signal {signal.uid} to axes")
                                 break
 
@@ -1022,7 +1031,7 @@ class MatplotlibParser(BackendParserBase):
                         other.slider_last_val = val
 
             # 3) Restore user zoom, etc
-            primary_ax = axes_list[0]
+            primary_ax = mpl_axes_list[0]
             try:
                 x0, x1 = plot.axes[0].begin, plot.axes[0].end
                 if x0 is not None and x1 is not None:
@@ -1045,11 +1054,9 @@ class MatplotlibParser(BackendParserBase):
     def _connect_limit_callbacks(self, mpl_axes):
         """Attach xlim_changed to synchronize shared axes (except streaming mode)."""
         if not self.canvas.streaming:
-            for axes in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
-                axes.callbacks.connect('xlim_changed', self._axis_update_callback)
-                axes.callbacks.connect('ylim_changed', self._axis_update_callback)
-            for ax in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
-                ax.callbacks.connect('xlim_changed', self._axis_update_callback)
+            for mpl_axes_sibling in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
+                mpl_axes_sibling.callbacks.connect('xlim_changed', self._axis_update_callback)
+                mpl_axes_sibling.callbacks.connect('ylim_changed', self._axis_update_callback)
 
     def _axis_update_callback(self, mpl_axes):
 
@@ -1205,13 +1212,13 @@ class MatplotlibParser(BackendParserBase):
             return
         mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
         if not isinstance(mpl_axes, MPLAxes):
-            for ax in self.figure.axes:
-                ci = self._impl_plot_cache_table.get_cache_item(ax)
+            for mpl_axes_candidate in self.figure.axes:
+                ci = self._impl_plot_cache_table.get_cache_item(mpl_axes_candidate)
                 if hasattr(ci, 'plot'):
                     signals = [s() if callable(s) else s for s in ci.signals]
                     if signal in signals:
-                        self._signal_impl_plot_lut[signal.uid] = ax
-                        mpl_axes = ax
+                        self._signal_impl_plot_lut[signal.uid] = mpl_axes_candidate
+                        mpl_axes = mpl_axes_candidate
                         logger.debug(f"[process_ipl_signal] Recovered missing mpl_axes for signal {signal.uid}")
                         break
 
@@ -1354,9 +1361,9 @@ class MatplotlibParser(BackendParserBase):
         # Force full signal redraw using current slider state
         if hasattr(plot, '_mpl_axes_list') and plot._mpl_axes_list:
             label = annotations[1]
-            axes_list = plot._mpl_axes_list
+            mpl_axes_list = plot._mpl_axes_list
             times = plot.signals[1][0].z_data
-            self._on_slider_change(plot, times, label, val, axes_list)
+            self._on_slider_change(plot, times, label, val, mpl_axes_list)
 
     def update_slider_limits(self, plot, begin, end):
         """
@@ -1469,16 +1476,29 @@ class MatplotlibParser(BackendParserBase):
     def set_focus_plot(self, mpl_axes):
         """
         Handle focus/unfocus transitions for slider synchronization,
-        ensuring the red zoomed slider range persists across redraws.
+        ensuring red zoomed slider range and axis limits persist across redraws.
         """
+
+        def get_x_axis_range(focus_plot):
+            if focus_plot is not None and focus_plot.axes and isinstance(focus_plot.axes[0], RangeAxis):
+                return focus_plot.axes[0].begin, focus_plot.axes[0].end
+
+        def set_x_axis_range(focus_plot, x_begin, x_end):
+            if focus_plot is not None and focus_plot.axes and isinstance(focus_plot.axes[0], RangeAxis):
+                focus_plot.axes[0].begin = x_begin
+                focus_plot.axes[0].end = x_end
 
         # Identify the new focus target
         new_plot, new_key = None, None
         if isinstance(mpl_axes, MPLAxes):
             ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             new_plot, new_key = ci.plot(), ci.stack_key
+        else:
+            new_plot, new_key = None, None
 
-        # Store red zone limits before redraw
+        logger.debug(f"Focusing on plot: {id(new_plot)}, stack_key: {new_key}")
+
+        # Save red zone ranges before redraw
         red_zones = {}
         if self.canvas.shared_x_axis:
             for plot in self._slider_plots:
@@ -1486,7 +1506,7 @@ class MatplotlibParser(BackendParserBase):
                 if isinstance(x_axis, RangeAxis) and x_axis.begin is not None and x_axis.end is not None:
                     red_zones[id(plot)] = (x_axis.begin, x_axis.end)
 
-        # If unfocusing, propagate current slider value to all other sliders
+        # Propagate slider state if unfocusing
         if self._focus_plot is not None and new_plot is None and self.canvas.shared_x_axis:
             last_val = getattr(self._focus_plot, 'slider_last_val', None)
             if last_val is not None:
@@ -1495,7 +1515,6 @@ class MatplotlibParser(BackendParserBase):
                         other.slider.set_val(last_val)
                         other.slider_last_val = last_val
 
-                        # Update timestamp label
                         annotations = [
                             child for child in other.slider.ax.get_children()
                             if isinstance(child, Annotation)
@@ -1504,30 +1523,41 @@ class MatplotlibParser(BackendParserBase):
                             timestamps = other.signals[1][0].z_data
                             annotations[1].set_text(str(pandas.Timestamp(timestamps[last_val])))
 
-        # Reset slider init flag to force full redraw
+        # Propagate X axis range across shared plots
+        if self._focus_plot is not None and new_plot is None and self.canvas.shared_x_axis:
+            begin, end = get_x_axis_range(self._focus_plot)
+            for columns in self.canvas.plots:
+                for plot_temp in columns:
+                    if plot_temp and plot_temp != self._focus_plot:
+                        logger.debug(f"Propagating range to plot {id(plot_temp)} from focused={id(self._focus_plot)}")
+                        if plot_temp.axes[0].original_begin == self._focus_plot.axes[0].original_begin and \
+                                plot_temp.axes[0].original_end == self._focus_plot.axes[0].original_end:
+                            set_x_axis_range(plot_temp, begin, end)
+
+        # Force full redraw of sliders
         for slider_plot in self._slider_plots:
             slider_plot._slider_initialized = False
 
-        # Perform the actual focus redraw
+        # Super call to base handler
         super().set_focus_plot(mpl_axes)
         self._focus_plot = new_plot
         self._focus_plot_stack_key = new_key
 
-        # Ensure all signals in the focused plot are registered before data refresh
+        # Register signals in LUT
         if self._focus_plot is not None:
             for key, signal_stack in self._focus_plot.signals.items():
                 for sig_ref in signal_stack:
                     sig = sig_ref() if callable(sig_ref) else sig_ref
                     if isinstance(sig, Signal):
-                        for ax in self.figure.axes:
-                            ci = self._impl_plot_cache_table.get_cache_item(ax)
+                        for mpl_axes in self.figure.axes:
+                            ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
                             if ci and ci.plot() is self._focus_plot and ci.stack_key == key:
-                                self._signal_impl_plot_lut[sig.uid] = ax
+                                self._signal_impl_plot_lut[sig.uid] = mpl_axes
 
-        # Now it's safe to request a full signal refresh
+        # Trigger signal data refresh
         self.refresh_data()
 
-        # Restore red highlight zones after changing focus
+        # Restore red zone highlights
         if self.canvas.shared_x_axis:
             self.reapply_red_zones()
 
@@ -1613,27 +1643,27 @@ class MatplotlibParser(BackendParserBase):
 
         if self.canvas.crosshair_per_plot:
             plots = {}
-            for ax in self.figure.axes:
-                ci = self._impl_plot_cache_table.get(ax)
+            for mpl_axes in self.figure.axes:
+                ci = self._impl_plot_cache_table.get(mpl_axes)
                 if hasattr(ci, 'plot') and ci.plot():
                     plot = ci.plot()
                     if not plots.get(id(plot)):
-                        plots[id(plot)] = [ax]
+                        plots[id(plot)] = [mpl_axes]
                     else:
-                        plots[id(plot)].append(ax)
-            axes = list(plots.values())
+                        plots[id(plot)].append(mpl_axes)
+            mpl_axes_list = list(plots.values())
         else:
-            axes = [self.figure.axes]
+            mpl_axes_list = [self.figure.axes]
 
-        for axes_group in axes:
-            if not axes_group:
+        for mpl_axes_group in mpl_axes_list:
+            if not mpl_axes_group:
                 continue
 
             # Exclude slider axes
-            filtered_axes_group = [ax for ax in axes_group if ax.get_label() != "slider"]
+            filtered_mpl_axes_group = [mpl_axes for mpl_axes in mpl_axes_group if mpl_axes.get_label() != "slider"]
 
             self._cursors.append(
-                IplotMultiCursor(self.figure.canvas, filtered_axes_group,
+                IplotMultiCursor(self.figure.canvas, filtered_mpl_axes_group,
                                  x_label=self._pm.get_value(self.canvas, 'enable_x_label_crosshair'),
                                  y_label=self._pm.get_value(self.canvas, 'enable_y_label_crosshair'),
                                  val_label=self._pm.get_value(self.canvas, 'enable_val_label_crosshair'),
@@ -1643,23 +1673,24 @@ class MatplotlibParser(BackendParserBase):
                                  vert_on=self.canvas.crosshair_vertical,
                                  use_blit=True,
                                  cache_table=self._impl_plot_cache_table,
-                                 slider=False))
+                                 slider=False)
+            )
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor_slider(self):
         if self.canvas.shared_x_axis:
-            axes = self.figure.axes
-            for ax in axes:
-                ci = self._impl_plot_cache_table.get_cache_item(ax)
+            for mpl_axes in self.figure.axes:
+                ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
                 if not hasattr(ci, 'plot'):
                     continue
                 plt = ci.plot()
                 if isinstance(plt, PlotXYWithSlider):
-                    other_axes = self._get_all_shared_axes(ax, True) or []
-                    # Solo eliminamos si está
-                    if ax in other_axes:
-                        other_axes.remove(ax)
-                    # Solo si hay ejes válidos
+                    other_axes = self._get_all_shared_axes(mpl_axes, True) or []
+
+                    # Remove the current axes if already in the list
+                    if mpl_axes in other_axes:
+                        other_axes.remove(mpl_axes)
+                    # Only proceed if there are valid axes to draw cursors on
                     if other_axes:
                         self._cursors.append(
                             IplotMultiCursor(self.figure.canvas, other_axes,
