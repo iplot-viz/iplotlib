@@ -60,19 +60,19 @@ class MatplotlibParser(BackendParserBase):
         self._crosshairs = {}
         # Track if the last focus plot was None (i.e., we were in full grid mode)
         self._last_focus_plot_was_none = True
-
         # Sync all the sliders for shared time
         self._slider_plots: List[PlotXYWithSlider] = []
 
         register_matplotlib_converters()
-        # Use constrained_layout by default; switch to tight only if explicitly requested
-        self.figure = Figure(constrained_layout=True)
-        if canvas and getattr(canvas, 'tight_layout', False):
+        self.figure = Figure()
+        self._impl_plot_ranges_hash = dict()
+
+        if tight_layout:
             self.enable_tight_layout()
         else:
             self.disable_tight_layout()
 
-        self._impl_plot_ranges_hash = dict()
+
 
     def export_image(self, filename: str, **kwargs):
         super().export_image(filename, **kwargs)
@@ -401,6 +401,23 @@ class MatplotlibParser(BackendParserBase):
         super().clear()
         self.figure.clear()
 
+    def _set_all_axes_visibility(self, visible: bool):
+        """
+        Set visibility for all subplot axes and sliders in the figure
+        without deleting or clearing them.
+
+        Parameters:
+            visible (bool): Whether axes and sliders should be visible.
+        """
+        # Show/hide all subplot axes
+        for ax in self.figure.axes:
+            ax.set_visible(visible)  # Make each axes object visible/invisible
+
+        # Show/hide all slider axes
+        for child in self.figure.get_children():
+            if hasattr(child, "get_label") and child.get_label() == "slider":
+                child.set_visible(visible)  # Toggle visibility of slider axes
+
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, MPLAxes):
             return False
@@ -446,8 +463,9 @@ class MatplotlibParser(BackendParserBase):
 
     def process_ipl_canvas(self, canvas: Canvas):
         """
-        Process/redraw the entire canvas, including layout and slider state.
-        Depending on focus state, either redraws the full grid or a single plot.
+        Process/redraw the entire canvas and layout, depending on focus mode.
+        Restores the classic layout logic: constrained_layout by default,
+        with optional tight_layout() applied if explicitly requested.
         """
         super().process_ipl_canvas(canvas)
         self.canvas = canvas
@@ -456,27 +474,21 @@ class MatplotlibParser(BackendParserBase):
             self.clear()
             return
 
-        self.clear()
-
-        # Explicitly set layout engine based on canvas attribute
-        if getattr(canvas, 'tight_layout', False):
-            self.enable_tight_layout()
-        else:
-            self.disable_tight_layout()
-
-        # === CASE 1: Full grid (no focus) ===
+        # CASE 1: Full Grid Redraw
         if self._focus_plot is None:
+            self.clear()
             self._layout = self.figure.add_gridspec(canvas.rows, canvas.cols)
 
             for col_idx, col in enumerate(canvas.plots):
                 for row_idx, plot in enumerate(col):
                     self.process_ipl_plot(plot, col_idx, row_idx)
 
-                    # Ensure slider axes don't hide avxspan
+                    # Ensure slider background is transparent
                     if isinstance(plot, PlotXYWithSlider) and getattr(plot, 'slider', None):
                         plot.slider.ax.set_facecolor('none')
                         plot.slider.ax.patch.set_alpha(0.0)
 
+            # Set canvas title
             if canvas.title:
                 self.figure.suptitle(
                     canvas.title,
@@ -484,16 +496,15 @@ class MatplotlibParser(BackendParserBase):
                     color=self._pm.get_value(canvas, 'font_color') or 'black'
                 )
 
-            # Reset all sliders to zero only if the previous state was also full grid
+            # Reset all sliders only when doing full redraw
             if getattr(self, "_last_focus_plot_was_none", True):
-                logger.debug(
-                    "[process_ipl_canvas] Detected full redraw (not from focus/unfocus) → resetting sliders to 0")
+                logger.debug("[process_ipl_canvas] Detected full redraw → resetting sliders to 0")
                 for plot in self._slider_plots:
                     if isinstance(plot, PlotXYWithSlider) and getattr(plot, 'slider', None):
                         plot.slider.set_val(0)
                         plot.slider_last_val = 0
 
-            # Re-synchronize sliders if shared_x_axis is active
+            # Re-synchronize all sliders if shared x-axis is active
             if self.canvas.shared_x_axis:
                 logger.debug("[process_ipl_canvas] Sync sliders after full redraw")
                 shared_val = None
@@ -505,56 +516,62 @@ class MatplotlibParser(BackendParserBase):
                             plot.slider.set_val(shared_val)
                             plot.slider_last_val = shared_val
 
-            # Tight layout for canvas
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)
-                self.figure.tight_layout()
-
-            # Reapply red zones
+            # Reapply red highlight ranges if applicable
             if self.canvas.shared_x_axis:
                 self.reapply_red_zones()
 
-            self.figure.canvas.draw_idle()
-            # Update the tracker for focus state to use in the next draw
-            self._last_focus_plot_was_none = self._focus_plot is None
-
+            self._last_focus_plot_was_none = True
             return
 
-        # === CASE 2: Focus mode ===
-        self._layout = self.figure.add_gridspec(1, 1)
+        else:
 
-        if isinstance(self._focus_plot, PlotXYWithSlider):
-            self._focus_plot._slider_initialized = False
+            # CASE 2: Focus Mode
+            # Hide all axes
+            self._set_all_axes_visibility(False)
 
-        self.process_ipl_plot(self._focus_plot, 0, 0)
+            # Then create layout slot for the focused plot
+            self._layout = self.figure.add_gridspec(1, 1)
 
-        if self._focus_plot and isinstance(self._focus_plot, PlotXYWithSlider):
-            if getattr(self._focus_plot, 'slider', None):
-                self._focus_plot.slider.ax.set_facecolor('none')
-                self._focus_plot.slider.ax.patch.set_alpha(0.0)
+            # Disable any previous slider so it can be recreated cleanly
+            if isinstance(self._focus_plot, PlotXYWithSlider):
+                self._focus_plot._slider_initialized = False
 
-        if canvas.title:
-            self.figure.suptitle(
-                canvas.title,
-                size=self._pm.get_value(canvas, 'font_size') or None,
-                color=self._pm.get_value(canvas, 'font_color') or 'black'
-            )
+            # Draw the focused plot using the full available area
+            self.process_ipl_plot(self._focus_plot, 0, 0)
 
-        # 4. Update the title at the top of canvas.
-        if self._pm.get_value(self.canvas, 'title') is not None:
-            if not self._pm.get_value(self.canvas, 'font_size'):
-                canvas.font_size = None
-            self.figure.suptitle(self._pm.get_value(self.canvas, 'title'),
-                                 size=self._pm.get_value(self.canvas, 'font_size'),
-                                 color=self._pm.get_value(self.canvas, 'font_color') or 'black')
+            # If the slider exists, make its background fully transparent
+            if isinstance(self._focus_plot, PlotXYWithSlider):
+                if getattr(self._focus_plot, 'slider', None):
+                    self._focus_plot.slider.ax.set_facecolor('none')
+                    self._focus_plot.slider.ax.patch.set_alpha(0.0)
+
+            # Set canvas title (suptitle)
+            if canvas.title:
+                self.figure.suptitle(
+                    canvas.title,
+                    size=self._pm.get_value(canvas, 'font_size') or None,
+                    color=self._pm.get_value(canvas, 'font_color') or 'black'
+                )
+
+            # If title is explicitly set in plot metadata, override it
+            if self._pm.get_value(self.canvas, 'title') is not None:
+                if not self._pm.get_value(self.canvas, 'font_size'):
+                    canvas.font_size = None
+                self.figure.suptitle(
+                    self._pm.get_value(self.canvas, 'title'),
+                    size=self._pm.get_value(self.canvas, 'font_size'),
+                    color=self._pm.get_value(self.canvas, 'font_color') or 'black'
+                )
+
+            # Mark that we're no longer in "full grid" mode
+            self._last_focus_plot_was_none = False
+
+            # Restore red-highlight zoomed range if shared_x_axis is active
+            if self.canvas.shared_x_axis:
+                self.reapply_red_zones()
+
+            # Final canvas redraw
         self.figure.canvas.draw_idle()
-
-        # Update the tracker for focus state to use in the next draw
-        self._last_focus_plot_was_none = self._focus_plot is None
-
-        # Reapply red zones
-        if self.canvas.shared_x_axis:
-            self.reapply_red_zones()
 
     def process_ipl_plot_xy(self):
         pass
@@ -812,7 +829,7 @@ class MatplotlibParser(BackendParserBase):
             leg = mpl_axes.legend(prop=dict(size=self.legend_size), loc=pos, ncol=ncol)
 
             # If using tight_layout, exclude the legend from layout calculation
-            if self.figure.get_layout_engine().__class__.__name__.lower() == "tightlayoutengine":
+            if self.figure.get_tight_layout():
                 leg.set_in_layout(False)
 
             # Break once the legend fully fits inside the axes area
@@ -1468,10 +1485,10 @@ class MatplotlibParser(BackendParserBase):
         pass
 
     def enable_tight_layout(self):
-        self.figure.set_layout_engine("tight")
+        self.figure.set_tight_layout("True")
 
     def disable_tight_layout(self):
-        self.figure.set_layout_engine("constrained")
+        self.figure.set_tight_layout("")
 
     def set_focus_plot(self, mpl_axes):
         """
