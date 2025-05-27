@@ -170,8 +170,13 @@ class IplotQtCanvas(QWidget):
             self._parser.refresh_data()
             QApplication.restoreOverrideCursor()
 
-            # Update new limits after data refresh
-            cmd.new_lim = self._parser.get_all_plot_limits()
+            # Update new limits after data refresh.
+            # Focus case: If focus plot is active and X-axis is shared, retrieve synchronized limits across
+            # all shared plots.
+            if self._parser.canvas.focus_plot and self._parser.canvas.shared_x_axis:
+                cmd.new_lim = self._parser.get_all_plot_limits_focus()
+            else:
+                cmd.new_lim = self._parser.get_all_plot_limits()
 
             self._commitd_cmds.append(cmd)
             logger.debug(f"Committed {cmd}")
