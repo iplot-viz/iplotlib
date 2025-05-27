@@ -360,6 +360,72 @@ class BackendParserBase(ABC):
         """
         self._stale_citems.clear()
 
+    def get_shared_plots(self, which='original'):
+        """
+        Return a list of plots that share the same X-axis range as the focus plot.
+        Two plots are considered shared if:
+            - Their X-axis range (begin, end) is exactly the same, or
+            - The difference in their X-axis range is smaller than a configurable threshold (`max_diff`)
+        """
+        shared_plots = []
+
+        # Get original limits of the base plot (focus plot)
+        limits = self.get_plot_limits(self._focus_plot, which)
+        base_begin, base_end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
+
+        for col in self.canvas.plots:
+            for plot in col:
+                if plot == self._focus_plot:
+                    continue
+
+                limits = self.get_plot_limits(plot, which)
+                begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
+
+                max_diff = self._pm.get_value(self.canvas, 'max_diff')
+                max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date else max_diff
+
+                if ((begin, end) == (base_begin, base_end) or (
+                        abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
+                    shared_plots.append(plot)
+
+        return shared_plots
+
+    def get_all_plot_limits_focus(self, which='current'):
+        """
+        Return limits of all plots, synchronizing shared plots with the focus plot.
+        Shared plots are updated to match the focus plot’s X-axis and signal ranges. This ensures consistency across
+        synchronized plots, which is useful for linked zooming or panning behaviors.
+        """
+        all_limits = []
+        if not isinstance(self.canvas, Canvas):
+            return all_limits
+
+        shared = self.get_shared_plots()
+        base_limits = self.get_plot_limits(self._focus_plot, which)
+        axes_limits = base_limits.axes_ranges
+        signal_limits = base_limits.signals_ranges
+
+        for col in self.canvas.plots:
+            for plot in col:
+                plot_lims = self.get_plot_limits(plot, which)
+                if not isinstance(plot_lims, IplPlotViewLimits):
+                    continue
+                if plot in shared:  # The focus plot is not included in 'shared'
+                    # Synchronize X-axis limits
+                    plot_lims.axes_ranges[0].begin = axes_limits[0].begin
+                    plot_lims.axes_ranges[0].end = axes_limits[0].end
+
+                    # Synchronize signal value limits
+                    for signal_limit in plot_lims.signals_ranges:
+                        signal_limit.begin = signal_limits[-1].begin
+                        signal_limit.end = signal_limits[-1].end
+
+                    # Set new limits for each shared plot
+                    self.set_plot_limits(plot_lims)
+
+                all_limits.append(plot_lims)
+        return all_limits
+
     def get_all_plot_limits(self, which='current') -> List[IplPlotViewLimits]:
         """
         Return limits of all plots. The `which` argument can be `original` or `current`
