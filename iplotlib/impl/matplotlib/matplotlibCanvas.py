@@ -35,7 +35,8 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
-import warnings
+
+
 
 logger = setupLogger.get_logger(__name__)
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
@@ -208,6 +209,14 @@ class MatplotlibParser(BackendParserBase):
         Draw or update an XY plot driven by a slider.
         Creates Line2D objects only on first call, then updates their data.
         """
+
+        # Validate data shapes early to prevent runtime matplotlib crashes
+        if y_data.ndim < 2 or x_data.shape[0] != y_data.shape[-1]:
+            raise ValueError(
+                f"[do_mpl_line_plot_xy_slider] Incompatible shapes: "
+                f"x_data shape = {x_data.shape}, y_data shape = {y_data.shape}"
+            )
+
         # retrieve existing line groups if any
         existing = getattr(signal, 'lines', None)
         # determine current frame index, default to zero
