@@ -103,7 +103,7 @@ class Canvas(ABC):
     enable_y_label_crosshair: bool = None
     enable_val_label_crosshair: bool = None
     plots: List[List[Union[Plot, None]]] = None
-    focus_plot: Plot = None
+    focus_plot: [Plot|None] = None
     crosshair_enabled: bool = False
     crosshair_color: str = None
     crosshair_line_width: int = 1

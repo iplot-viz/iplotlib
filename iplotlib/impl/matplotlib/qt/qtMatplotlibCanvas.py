@@ -256,7 +256,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if signals:
             for signal in signals:
                 if isinstance(signal, SignalXY):
-                    info_stats.append((signal, self._parser._signal_impl_plot_lut.get(signal.uid)))
+                    mpl_axes = self._parser._signal_impl_plot_lut.get(signal.uid)
+                    if mpl_axes is None:
+                        continue
+                    info_stats.append((signal, mpl_axes))
             self._stats_table.fill_table(info_stats)
 
     def autoscale_y(self, impl_plot):
@@ -398,12 +401,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._parser.set_focus_plot(impl_plot)
         self._refresh_original_ranges = False
         self.refresh()
+        self.stats(self.get_canvas())
         self._refresh_original_ranges = True
 
     def _full_screen_mode_off(self):
         self._parser.set_focus_plot(None)
         self._refresh_original_ranges = False
         self.refresh()
+        self.stats(self.get_canvas())
         self._refresh_original_ranges = True
 
     def _mpl_mouse_press_handler(self, event: MouseEvent):
