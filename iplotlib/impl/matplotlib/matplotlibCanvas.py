@@ -130,9 +130,10 @@ class MatplotlibParser(BackendParserBase):
             # It means that the color has been reset but must keep the original color
             signal.color = signal.original_color
 
-        # Visible data is adjusted based on extremities, but only for unprocessed signals, as processed ones already
-        # use the visible range
-        if not signal.extremities and signal.x_expr == "${self}.time":
+        # Visible data is adjusted based on extremities, but only for unprocessed signals.
+        # Processed signals already use the visible range.
+        # Skip this step in case of streaming mode, as x_data and y_data may be empty and lead to errors.
+        if not signal.extremities and signal.x_expr == "${self}.time" and not self.canvas.streaming:
             x_data, y_data = _get_visible_data(x_data, y_data, *mpl_axes.get_xlim())
 
         if isinstance(plot_lines, list):
