@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
-from iplotlib.core.plot import Plot, PlotXY, PlotContour
+from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider
 from iplotlib.qt.gui.forms import (IplotPreferencesForm, AxisForm, CanvasForm, PlotXYForm, PlotContourForm,
                                    SignalXYForm, SignalContourForm)
 
@@ -57,6 +57,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         self._forms = {
             Canvas: CanvasForm(self),
             PlotXY: PlotXYForm(self),
+            PlotXYWithSlider: PlotXYForm(self),
             PlotContour: PlotContourForm(self),
             LinearAxis: AxisForm(self),
             SignalXY: SignalXYForm(self),

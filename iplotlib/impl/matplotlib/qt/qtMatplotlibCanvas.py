@@ -22,7 +22,7 @@ from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, Mouse
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
-from iplotlib.core import PlotContour, SignalXY, PlotXY
+from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
@@ -66,7 +66,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._vlayout.setContentsMargins(QMargins())
         self._vlayout.addWidget(self._mpl_renderer)
 
-        # GUI event handlers 
+        # GUI event handlers
         self._mpl_renderer.mpl_connect('draw_event', self._mpl_draw_finish)
         self._mpl_renderer.mpl_connect('button_press_event', self._mpl_mouse_press_handler)
         self._mpl_renderer.mpl_connect('button_release_event', self._mpl_mouse_release_handler)
@@ -79,6 +79,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     # Implement basic superclass functionality
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
+        super().set_canvas(canvas)
 
         prev_canvas = self._parser.canvas
 
@@ -90,9 +91,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
+        else:
+            self.render()
+            return
 
         self.render()
-        super().set_canvas(canvas)
 
         # Check if plots share time axis
         ranges = []
@@ -107,7 +110,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                         for col_idx, plot in enumerate(col, start=1):
                             if plot:
                                 axis = plot.axes[0]
-                                if not axis.is_date:
+                                if not axis.is_date and not isinstance(plot, PlotXYWithSlider):
                                     relative = True
                                 ranges.append((axis.original_begin, axis.original_end))
                                 plot_stack.append(f"{col_idx}.{row_idx}")
@@ -539,6 +542,18 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             pass
         else:
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                # Check if it has Slider
+                mpl_axes = event.inaxes
+                if not isinstance(mpl_axes, MPLAxes):
+                    return
+                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+                if not hasattr(ci, 'plot'):
+                    return
+                plot = ci.plot()
+                """
+                if isinstance(plot, PlotXYWithSlider):
+                    self._parser.update_slider_plot(mpl_axes, plot)
+                """
                 # commit commands from staging.
                 while len(self._staging_cmds):
                     self.commit_view_lim_cmd()

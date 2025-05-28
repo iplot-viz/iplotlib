@@ -9,8 +9,8 @@ from typing import Collection, List
 from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication, QWidget
 from iplotlib.core.axis import RangeAxis
-
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.plot import PlotXYWithSlider
 from iplotlib.core.command import IplotCommand
 from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
@@ -125,7 +125,14 @@ class IplotQtCanvas(QWidget):
                         elif isinstance(axes, RangeAxis) and axes.original_begin is None and axes.original_end is None:
                             axis = axes
                             impl_plot = self._parser._axis_impl_plot_lut.get(id(axis))
-                            self._parser.update_range_axis(axis, ax_idx, impl_plot, which='original')
+
+                            if isinstance(plot, PlotXYWithSlider):
+                                if not isinstance(axis, RangeAxis) or impl_plot is None:
+                                    continue
+                                limits = plot.signals[1][0].z_data[0], plot.signals[1][0].z_data[-1]
+                                axis.set_limits(*limits, 'original')
+                            else:
+                                self._parser.update_range_axis(axis, ax_idx, impl_plot, which='original')
 
     @abstractmethod
     def get_canvas(self) -> Canvas:

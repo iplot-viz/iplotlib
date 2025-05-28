@@ -25,8 +25,8 @@ import weakref
 from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits
-from iplotlib.core.plot import Plot
+from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits, IplSliderLimits
+from iplotlib.core.plot import Plot, PlotXYWithSlider
 from iplotlib.core.signal import Signal
 import iplotLogging.setupLogger as Sl
 
@@ -100,10 +100,9 @@ class ImplementationPlotCacheTable:
                 value = int(value)
         return value - base if inverse else value + base
 
-
 class BackendParserBase(ABC):
     """
-    An abstract graphics parser for iplotlib. 
+    An abstract graphics parser for iplotlib.
     Graphics implementations should subclass this base class.
 
     This class does many convenient things that do not require direct access
@@ -195,7 +194,7 @@ class BackendParserBase(ABC):
     @abstractmethod
     def clear(self):
         """
-        Clear the lookup tables. 
+        Clear the lookup tables.
         Implementations can and should clean up any other helper LUTs they might create.
         It is also a good idea to clear your layout in the implementation.
         """
@@ -328,6 +327,12 @@ class BackendParserBase(ABC):
         """
         Implementation must set the view limits on `ax_idx` axis to the tuple `limits`
         Returns True if the limits were successfully set, False otherwise
+        """
+
+    @abstractmethod
+    def set_impl_plot_slider_limits(self, plot, start, end):
+        """
+        TODO: comentar
         """
 
     @abstractmethod
@@ -464,6 +469,13 @@ class BackendParserBase(ABC):
                 axis = axes  # singular name is easier to read for single axis
                 begin, end = axis.get_limits(which)
                 plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
+
+        # Save slider limits for PlotXYWithSlider
+        if isinstance(plot, PlotXYWithSlider):
+            min_val = plot.slider.valmin
+            max_val = plot.slider.valmax
+            plot_lims.sliders_ranges.append(IplSliderLimits(min_val, max_val))
+
         return plot_lims
 
     def set_plot_limits(self, limits: IplPlotViewLimits):
@@ -476,6 +488,7 @@ class BackendParserBase(ABC):
         plot = limits.plot_ref()
         ax_limits = limits.axes_ranges
 
+        # Restore signal-level xrange values
         for signal_limit in limits.signals_ranges:
             signal = signal_limit.signal_ref()
             signal.set_xranges(signal_limit.get_limits())
@@ -485,15 +498,24 @@ class BackendParserBase(ABC):
                 for axis in axes:
                     if isinstance(axis, RangeAxis):
                         impl_plot = self._axis_impl_plot_lut.get(id(axis))
-                        if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
+                        if not self.set_impl_plot_limits(impl_plot, ax_idx,
+                                                         (ax_limits[i].begin, ax_limits[i].end)) or isinstance(plot,
+                                                                                                               PlotXYWithSlider):
                             axis.set_limits(*ax_limits[i].get_limits())
                         i += 1
             elif isinstance(axes, RangeAxis):
                 axis = axes
                 impl_plot = self._axis_impl_plot_lut.get(id(axis))
-                if not self.set_impl_plot_limits(impl_plot, ax_idx, (ax_limits[i].begin, ax_limits[i].end)):
+                if not self.set_impl_plot_limits(impl_plot, ax_idx,
+                                                 (ax_limits[i].begin, ax_limits[i].end)) or isinstance(plot,
+                                                                                                       PlotXYWithSlider):
                     axis.set_limits(*ax_limits[i].get_limits())
                 i += 1
+
+        # Restore slider-specific limits, if the plot has one
+        if isinstance(plot, PlotXYWithSlider):
+            self.set_impl_plot_slider_limits(plot, *limits.sliders_ranges[0].get_limits())
+
         self.refresh_data()
 
     @staticmethod

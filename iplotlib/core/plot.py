@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Collection, Union, Tuple
 
 from iplotlib.core.axis import Axis, LinearAxis
+from matplotlib.widgets import Slider
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 
 
@@ -246,3 +247,27 @@ class PlotImage(Plot):
 
     def merge(self, old_plot: 'PlotImage'):
         super().merge(old_plot)
+
+
+@dataclass
+class PlotXYWithSlider(PlotXY):
+    """
+    A concrete Plot class specialized for 2D plottling with slider.
+    """
+
+    slider: Slider = None
+    slider_last_val: int = None
+
+    def __post_init__(self):
+        super().__post_init__()
+
+    def reset_preferences(self):
+        super().reset_preferences()
+        # self.slider = PlotXYWithSlider.slider
+        # self.slider_last_val = PlotXYWithSlider.slider_last_val
+
+    def merge(self, old_plot: 'PlotXYWithSlider'):
+        super().merge(old_plot)
+        self.slider = old_plot.slider
+        self.slider_last_val = 0
+        # self.slider_last_val = old_plot.slider_last_val

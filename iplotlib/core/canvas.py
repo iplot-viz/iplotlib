@@ -11,7 +11,7 @@ from typing import List, Union, Dict
 
 from iplotLogging import setupLogger
 from iplotlib.core.persistence import JSONExporter
-from iplotlib.core.plot import Plot, PlotXY, PlotContour
+from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider
 from iplotlib.core.signal import Signal
 import pandas as pd
 
@@ -103,7 +103,7 @@ class Canvas(ABC):
     enable_y_label_crosshair: bool = None
     enable_val_label_crosshair: bool = None
     plots: List[List[Union[Plot, None]]] = None
-    focus_plot: [Plot|None] = None
+    focus_plot: [Plot | None] = None
     crosshair_enabled: bool = False
     crosshair_color: str = None
     crosshair_line_width: int = 1
@@ -343,22 +343,26 @@ class Canvas(ABC):
                             # Now when using pulses, if no start time or end time are specified, the default is set to
                             # 0 and None respectively. For that reason, it is necessary to check the ts_end of the
                             # different signals and create the mask depending on the circumstances.
-                            if pl_signal.ts_end is None:
-                                mask = pl_signal.x_data >= pl_signal.ts_start
+                            if isinstance(row, PlotXYWithSlider):
+                                timerange = pl_signal.time
+                                y_data = pl_signal.y_data
                             else:
-                                mask = (pl_signal.x_data >= pl_signal.ts_start) & (pl_signal.x_data <= pl_signal.ts_end)
-                            pl_signal.x_data = pl_signal.x_data[mask]
-                            pl_signal.y_data = pl_signal.y_data[mask]
+                                if pl_signal.ts_end is None:
+                                    mask = pl_signal.x_data >= pl_signal.ts_start
+                                else:
+                                    mask = (pl_signal.x_data >= pl_signal.ts_start) & (
+                                            pl_signal.x_data <= pl_signal.ts_end)
+                                timerange = pl_signal.x_data[mask]
+                                y_data = pl_signal.y_data[mask]
 
                             # Check min and max dates
-                            if pl_signal.x_data.size > 0 and bool(min(pl_signal.x_data) > (1 << 53) and
-                                                                  max(pl_signal.x_data) < pd.Timestamp.max.value):
-
-                                timestamps = [pd.Timestamp(value) for value in pl_signal.x_data]
+                            if timerange.size > 0 and bool(min(timerange) > (1 << 53) and
+                                                           max(timerange) < pd.Timestamp.max.value):
+                                timestamps = [pd.Timestamp(value) for value in timerange]
                                 format_ts = [ts.strftime("%Y-%m-%dT%H:%M:%S.%f") + "{:03d}".format(ts.nanosecond) + "Z"
                                              for ts in timestamps]
                             else:
-                                format_ts = pl_signal.x_data
+                                format_ts = timerange
 
                             if pl_signal.envelope:
                                 result = []
@@ -370,9 +374,13 @@ class Canvas(ABC):
                                 x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
                                 x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
                             else:
-
-                                x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
-                                x[f"{col_name}.data"] = pd.Series(pl_signal.y_data, name=f"{col_name}.data")
+                                timeframe = pd.Series(format_ts, name=f"{col_name}.time")
+                                if len(y_data[0]) > 1:
+                                    dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data.{i}" for i in range(
+                                        len(y_data[0]))])  # we could use x data in header
+                                else:
+                                    dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data"])
+                                x = pd.concat([x, timeframe, dataframe], axis=1)
         return x.to_csv(index=False)
 
     def update_canvas_properties(self, properties: dict):
