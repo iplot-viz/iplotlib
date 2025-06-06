@@ -333,7 +333,9 @@ class BackendParserBase(ABC):
     @abstractmethod
     def set_impl_plot_slider_limits(self, plot, start, end):
         """
-        TODO: comentar
+        This method updates the slider's range and annotations, and highlights the
+        selected region if it does not span the full available range. Used during
+        Undo/Redo actions to restore previous slider limits.
         """
 
     @abstractmethod
