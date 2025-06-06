@@ -9,6 +9,7 @@ one might want to use when plotting data.
 #   Jan 2023:   -Added legend position and layout properties [Alberto Luengo]
 
 from abc import ABC
+import typing
 from dataclasses import dataclass
 from typing import Dict, List, Collection, Union, Tuple
 
@@ -255,19 +256,20 @@ class PlotXYWithSlider(PlotXY):
     A concrete Plot class specialized for 2D plottling with slider.
     """
 
-    slider: Slider = None
+    slider: typing.Optional[Slider] = None
     slider_last_val: int = None
+    slider_last_min: int = None
+    slider_last_max: int = None
 
     def __post_init__(self):
         super().__post_init__()
 
     def reset_preferences(self):
         super().reset_preferences()
-        # self.slider = PlotXYWithSlider.slider
-        # self.slider_last_val = PlotXYWithSlider.slider_last_val
 
     def merge(self, old_plot: 'PlotXYWithSlider'):
         super().merge(old_plot)
-        self.slider = old_plot.slider
         self.slider_last_val = 0
-        # self.slider_last_val = old_plot.slider_last_val
+
+    def clean_slider(self):
+        self.slider = None

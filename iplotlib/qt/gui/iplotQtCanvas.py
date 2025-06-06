@@ -200,10 +200,21 @@ class IplotQtCanvas(QWidget):
         except IndexError:
             return
 
+    def clean_canvas(self):
+        """
+        Resets the slider attribute of all PlotXYWithSlider instances in the canvas to None in preparation
+        for serialization
+        """
+        for col in self.get_canvas().plots:
+            for plot in col:
+                if isinstance(plot, PlotXYWithSlider):
+                    plot.clean_slider()
+
     def sizeHint(self):
         return QSize(900, 400)
 
     def export_dict(self):
+        self.clean_canvas()
         return self.get_canvas().to_dict() if self.get_canvas() else None
 
     def import_dict(self, input_dict):
