@@ -542,18 +542,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             pass
         else:
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                # Check if it has Slider
-                mpl_axes = event.inaxes
-                if not isinstance(mpl_axes, MPLAxes):
-                    return
-                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
-                if not hasattr(ci, 'plot'):
-                    return
-                plot = ci.plot()
-                """
-                if isinstance(plot, PlotXYWithSlider):
-                    self._parser.update_slider_plot(mpl_axes, plot)
-                """
                 # commit commands from staging.
                 while len(self._staging_cmds):
                     self.commit_view_lim_cmd()
