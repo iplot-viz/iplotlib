@@ -290,7 +290,7 @@ class BackendParserBase(ABC):
         if put_label and hasattr(signal, 'x_data'):
             if hasattr(signal.x_data, 'unit'):
                 label = f"[{signal.x_data.unit or '?'}]"
-                if label:
+                if label and not isinstance(ci.plot(), PlotXYWithSlider):
                     self.set_impl_x_axis_label_text(impl_plot, label)
         # label from preferences takes precedence.
         if hasattr(xaxis, "_label") and xaxis._label:
@@ -367,6 +367,28 @@ class BackendParserBase(ABC):
         Call it manually should you want to discard the stale plots.
         """
         self._stale_citems.clear()
+
+    def get_shared_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider):
+        """
+        Returns a list of PlotXYWithSlider instances that share the same time range with the given PlotXYWithSlider
+        """
+        shared = []
+        limits = self.get_plot_limits(plot_with_slider, 'original')
+        base_begin, base_end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
+        for col in self.canvas.plots:
+            for plot in col:
+                if not isinstance(plot, PlotXYWithSlider) or plot == plot_with_slider:
+                    continue
+                limits = self.get_plot_limits(plot, 'original')
+                begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
+
+                max_diff = self._pm.get_value(self.canvas, 'max_diff')
+                max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot, PlotXYWithSlider) else max_diff
+
+                if ((begin, end) == (base_begin, base_end) or (
+                        abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
+                    shared.append(plot)
+        return shared
 
     def get_shared_plots(self, which='original'):
         """
