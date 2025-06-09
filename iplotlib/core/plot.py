@@ -260,6 +260,7 @@ class PlotXYWithSlider(PlotXY):
     slider_last_val: int = None
     slider_last_min: int = None
     slider_last_max: int = None
+    sync_slider: bool = None
 
     def __post_init__(self):
         super().__post_init__()
