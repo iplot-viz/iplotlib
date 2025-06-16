@@ -462,6 +462,7 @@ class IplotSignalAdapter(ProcessingSignal):
                     self.data_store[0] = p.result.data_store[0]
                     self.data_store[1] = p.result.data_store[1]
                     self.data_store[2] = p.result.data_store[2]
+                    self.data_store[3] = p.result.data_store[3]
                 else:
                     self.set_proc_fail(f"Result of expression={self.name} is not an instance of {type(self).__name__}")
                     return
