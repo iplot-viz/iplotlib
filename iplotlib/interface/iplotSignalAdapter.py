@@ -942,9 +942,11 @@ class ParserHelper:
         p.substitute_var(tmp_local_env)
         p.eval_expr()
         if p.has_time_units:
-            return p.result.astype('int64')
+            result =  p.result.astype('int64')
         else:
-            return p.result
+            result =  p.result
+        p.clear_expr()
+        return result
 
     @staticmethod
     def get_dependencies(expr_list: list) -> set:
