@@ -14,6 +14,7 @@ from iplotlib.core.persistence import JSONExporter
 from iplotlib.core.plot import Plot, PlotXY, PlotContour
 from iplotlib.core.signal import Signal
 import pandas as pd
+import weakref
 
 logger = setupLogger.get_logger(__name__)
 
@@ -149,7 +150,7 @@ class Canvas(ABC):
         Add a plot to this canvas.
         """
         if plot:
-            plot.parent = self
+            plot.parent = weakref.ref(self)
         if col >= len(self.plots):
             raise Exception("Cannot add plot to column {}: Canvas has only {} column(s)".format(col, len(self.plots)))
         if len(self.plots[col]) >= self.rows:
