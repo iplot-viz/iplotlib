@@ -98,50 +98,52 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         ranges = []
         plot_stack = []
 
-        if canvas:
-            if self._parser._pm.get_value(canvas, 'shared_x_axis'):
-                if not self.info_shared_x_dialog:
-                    self.info_shared_x_dialog = True
-                    relative = False
-                    for row_idx, col in enumerate(canvas.plots, start=1):
-                        for col_idx, plot in enumerate(col, start=1):
-                            if plot:
-                                axis = plot.axes[0]
-                                if not axis.is_date:
-                                    relative = True
-                                ranges.append((axis.original_begin, axis.original_end))
-                                plot_stack.append(f"{col_idx}.{row_idx}")
+        if not canvas:
+            return
+        if not self._parser._pm.get_value(canvas, 'shared_x_axis'):
+            self.info_shared_x_dialog = False
+        else:
+            if self.info_shared_x_dialog:
+                return
+            self.info_shared_x_dialog = True
+            relative = False
+            for row_idx, col in enumerate(canvas.plots, start=1):
+                for col_idx, plot in enumerate(col, start=1):
+                    if plot:
+                        axis = plot.axes[0]
+                        if not axis.is_date:
+                            relative = True
+                        ranges.append((axis.original_begin, axis.original_end))
+                        plot_stack.append(f"{col_idx}.{row_idx}")
 
-                    dict_ranges = defaultdict(list)
-                    # Need to differentiate if it is absolute or relative
-                    if relative:
-                        max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff')
-                    else:
-                        max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff') * 1e9
-                    for idx, uniq_range in enumerate(ranges):
-                        if uniq_range == ranges[0]:
-                            dict_ranges[uniq_range].append(plot_stack[idx])
-                        # If the difference of the ranges is less than 1 second, we consider them equal
-                        elif abs(uniq_range[0] - ranges[0][0]) <= max_diff_ns and abs(
-                                uniq_range[1] - ranges[0][1]) <= max_diff_ns:
-                            dict_ranges[ranges[0]].append(plot_stack[idx])
-                        else:
-                            dict_ranges[uniq_range].append(plot_stack[idx])
-
-                    # If there is more than one element in the dictionary it means that there is more than one time
-                    # range
-                    if len(dict_ranges) > 1:
-                        box = QMessageBox()
-                        box.setIcon(QMessageBox.Icon.Information)
-                        message = "There are plots with different time range:\n"
-                        for i, stacks in enumerate(dict_ranges.values(), start=1):
-                            plots_str = ", ".join(stacks)
-                            message += f"Time range {i}: Plots {plots_str}\n"
-
-                        box.setText(message)
-                        box.exec_()
+            dict_ranges = defaultdict(list)
+            # Need to differentiate if it is absolute or relative
+            if relative:
+                max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff')
             else:
-                self.info_shared_x_dialog = False
+                max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff') * 1e9
+            for idx, uniq_range in enumerate(ranges):
+                if uniq_range == ranges[0]:
+                    dict_ranges[uniq_range].append(plot_stack[idx])
+                # If the difference of the ranges is less than 1 second, we consider them equal
+                elif abs(uniq_range[0] - ranges[0][0]) <= max_diff_ns and abs(
+                        uniq_range[1] - ranges[0][1]) <= max_diff_ns:
+                    dict_ranges[ranges[0]].append(plot_stack[idx])
+                else:
+                    dict_ranges[uniq_range].append(plot_stack[idx])
+
+            # If there is more than one element in the dictionary it means that there is more than one time
+            # range
+            if len(dict_ranges) > 1:
+                box = QMessageBox()
+                box.setIcon(QMessageBox.Icon.Information)
+                message = "There are plots with different time range:\n"
+                for i, stacks in enumerate(dict_ranges.values(), start=1):
+                    plots_str = ", ".join(stacks)
+                    message += f"Time range {i}: Plots {plots_str}\n"
+
+                box.setText(message)
+                box.exec_()
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
@@ -253,14 +255,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def stats(self, canvas: Canvas):
         info_stats = []
         signals = self.get_signals(canvas)
-        if signals:
-            for signal in signals:
-                if isinstance(signal, SignalXY):
-                    mpl_axes = self._parser._signal_impl_plot_lut.get(signal.uid)
-                    if mpl_axes is None:
-                        continue
-                    info_stats.append((signal, mpl_axes))
-            self._stats_table.fill_table(info_stats)
+        for signal in signals:
+            if isinstance(signal, SignalXY):
+                mpl_axes = self._parser._signal_impl_plot_lut.get(signal.uid)
+                if mpl_axes is None:
+                    continue
+                info_stats.append((signal, mpl_axes))
+        self._stats_table.fill_table(info_stats)
 
     def autoscale_y(self, impl_plot):
         """
@@ -385,7 +386,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # proxy line, and toggle its visibility.
         legend_line = event.artist
 
-        ax_lines, signal = self._parser.map_legend_to_ax[legend_line]
+        ax_lines = self._parser.map_legend_to_ax[legend_line]
         visible = True
         for ax_line in ax_lines:
             visible = not ax_line.get_visible()

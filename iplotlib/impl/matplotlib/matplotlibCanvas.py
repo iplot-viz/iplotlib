@@ -537,7 +537,7 @@ class MatplotlibParser(BackendParserBase):
                     ix_legend = 0
                     for signal in signals:
                         for line in self._signal_impl_shape_lut.get(id(signal)):
-                            self.map_legend_to_ax[legend_lines[ix_legend]] = [line, signal]
+                            self.map_legend_to_ax[legend_lines[ix_legend]] = line
                             alpha = 1 if legend_lines[ix_legend].get_visible() else 0.2
                             legend_lines[ix_legend].set_picker(3)
                             legend_lines[ix_legend].set_visible(True)
