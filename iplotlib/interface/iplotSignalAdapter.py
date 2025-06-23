@@ -459,10 +459,8 @@ class IplotSignalAdapter(ProcessingSignal):
                 p.substitute_var(vm)
                 p.eval_expr()
                 if isinstance(p.result, ProcessingSignal):
-                    self.data_store[0] = p.result.data_store[0]
-                    self.data_store[1] = p.result.data_store[1]
-                    self.data_store[2] = p.result.data_store[2]
-                    self.data_store[3] = p.result.data_store[3]
+                    # Update first four buffers via slice assignment, auto-expanding as needed
+                    self.data_store[:4] = p.result.data_store[:4]
                 else:
                     self.set_proc_fail(f"Result of expression={self.name} is not an instance of {type(self).__name__}")
                     return
