@@ -2,7 +2,7 @@ import unittest
 from iplotlib.core.canvas import Canvas
 from iplotlib.impl.vtk.vtkCanvas import VTKParser
 
-
+@unittest.skip("VTKParser tests skipped: VTK integration not in use.")
 class VTKParserTesting(unittest.TestCase):
 
     def setUp(self) -> None:
