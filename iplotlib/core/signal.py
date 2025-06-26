@@ -126,6 +126,7 @@ class SignalXY(Signal, IplotSignalAdapter):
         self.marker_size = old_signal.marker_size
         self.step = old_signal.step
         self.markers_list = old_signal.markers_list
+        self.lines = []
 
     def add_marker(self, marker: Marker):
         self.markers_list.append(marker)

@@ -3,6 +3,7 @@
 
 from typing import Any, Callable, Collection, List
 
+import gc
 import numpy as np
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis
@@ -286,6 +287,8 @@ class MatplotlibParser(BackendParserBase):
     def clear(self):
         super().clear()
         self.figure.clear()
+        self.map_legend_to_ax.clear()
+        gc.collect()
 
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, MPLAxes):
@@ -1023,7 +1026,7 @@ class MatplotlibParser(BackendParserBase):
                 if ci and ci.offsets[i] is not None:
                     logger.debug(f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
                     if isinstance(d, Collection):
-                        ret.append(BufferObject([np.int64(e) - ci.offsets[i] for e in d]))
+                        ret.append(BufferObject(np.asarray(d, dtype=np.int64) - ci.offsets[i]))
                     else:
                         ret.append(np.int64(d) - ci.offsets[i])
                 else:
