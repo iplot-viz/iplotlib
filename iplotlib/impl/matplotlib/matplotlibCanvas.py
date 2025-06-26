@@ -1017,18 +1017,24 @@ class MatplotlibParser(BackendParserBase):
         Currently, it transforms data if it is a large integer which can cause overflow in matplotlib"""
         ret = []
         if isinstance(data, Collection):
+            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
             for i, d in enumerate(data):
                 logger.debug(f"\t transform data i={i} d = {d} ")
-                ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-                if ci and ci.offsets[i] is None and i == 0:
-                    ci.offsets[i] = self.create_offset(d)
 
-                if ci and ci.offsets[i] is not None:
-                    logger.debug(f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
-                    if isinstance(d, Collection):
-                        ret.append(BufferObject(np.asarray(d, dtype=np.int64) - ci.offsets[i]))
+                offset = None
+                if ci:
+                    offset = ci.offsets[i]
+                    if offset is None and i == 0:
+                        offset = self.create_offset(d)
+                        ci.offsets[i] = offset
+
+                if ci and offset is not None:
+                    logger.debug(f"\tApplying data offsets {offset} to plot {id(impl_plot)} ax_idx: {i}")
+                    if isinstance(d, Collection) and not isinstance(d, (str, bytes)):
+                        arr = np.asarray(d, dtype=np.int64)
+                        ret.append(BufferObject(arr - offset))
                     else:
-                        ret.append(np.int64(d) - ci.offsets[i])
+                        ret.append(np.int64(d) - offset)
                 else:
                     ret.append(d)
         return ret
