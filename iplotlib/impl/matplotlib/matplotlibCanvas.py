@@ -348,7 +348,8 @@ class MatplotlibParser(BackendParserBase):
 
     def clear(self):
         super().clear()
-        self.figure.clear()
+        for ax in list(self.figure.axes):
+            self.figure.delaxes(ax)
 
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, MPLAxes):
