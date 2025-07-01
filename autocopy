@@ -1,0 +1,1 @@
+autocopyright -s "#" -d iplotlib -g "*.py" -g "*.pyi" -l "./copyright.md.jinja2"
