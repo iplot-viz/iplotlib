@@ -1129,10 +1129,10 @@ class MatplotlibParser(BackendParserBase):
 
             self._cursors.append(
                 IplotMultiCursor(self.figure.canvas, filtered_axes_group,
-                                 x_label=self.canvas.enable_x_label_crosshair,
-                                 y_label=self.canvas.enable_y_label_crosshair,
-                                 val_label=self.canvas.enable_val_label_crosshair,
-                                 color=self.canvas.crosshair_color,
+                                 x_label=self._pm.get_value(self.canvas, 'enable_x_label_crosshair'),
+                                 y_label=self._pm.get_value(self.canvas, 'enable_y_label_crosshair'),
+                                 val_label=self._pm.get_value(self.canvas, 'enable_val_label_crosshair'),
+                                 color=self._pm.get_value(self.canvas, 'crosshair_color'),
                                  lw=self.canvas.crosshair_line_width,
                                  horiz_on=False or self.canvas.crosshair_horizontal,
                                  vert_on=self.canvas.crosshair_vertical,
