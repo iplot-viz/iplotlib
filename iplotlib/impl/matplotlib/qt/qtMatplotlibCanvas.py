@@ -258,7 +258,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         signals = self.get_signals(canvas)
         if signals:
             for signal in signals:
-                if isinstance(signal, SignalXY):
+                if isinstance(signal, SignalXY) and signal.status_info.result == 'Success' and signal.parent is not None:
                     mpl_axes = self._parser._signal_impl_plot_lut.get(signal.uid)
                     if mpl_axes is None:
                         continue
