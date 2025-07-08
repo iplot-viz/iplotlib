@@ -26,6 +26,7 @@
 #              - The alignment modifies the data_store. After evaluation, restore the original buffers.
 #  Feb 2023:   Changes by Alberto Luengo
 #              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
+import copy
 from collections import defaultdict
 from dataclasses import dataclass, field, fields
 import numpy as np
@@ -503,6 +504,7 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.reset()
 
         if len(self.children):
+            isDownsampled = True
             # ask child signals to fetch data
             for child in self.children:
                 if child._needs_refresh():
@@ -510,7 +512,9 @@ class IplotSignalAdapter(ProcessingSignal):
                 if child.status_info.result == Result.FAIL:
                     self.set_da_fail(msg=child.status_info.msg)  # get exact reason for failure from child.
                     break
+                isDownsampled &= child.isDownsampled
             else:  # Fell through, all children succeded
+                self.isDownsampled = isDownsampled
                 self.set_da_success()
         else:
             # submit a fetch request for ourself.
@@ -918,14 +922,25 @@ class ParserHelper:
         needs_realign = False
         dependencies = list()
         tmp_local_env = dict()
+        isDownsampled = True
+
         for var_name in signal.depends_on:
-            tmp_local_env[var_name] = local_env[var_name]
+            tmp_local_env[var_name] = copy.deepcopy(local_env[var_name])
             tmp_local_env[var_name].ts_start = signal.ts_start
             tmp_local_env[var_name].ts_end = signal.ts_end
             if var_name != "self":
                 tmp_local_env[var_name].get_data()
+                isDownsampled &= tmp_local_env[var_name].isDownsampled
             if var_name != 'self' or len(tmp_local_env[var_name].data_store[0]) != 0:
                 dependencies.append(tmp_local_env[var_name])
+
+        # Set downsampling attribute for processed signal
+        if len(signal.depends_on) > 1:
+            if signal.name != '':
+                isDownsampled &= signal.isDownsampled
+                signal.isDownsampled = isDownsampled
+            else:
+                signal.isDownsampled = isDownsampled
 
         for sig1, sig2 in zip(dependencies[:-1], dependencies[1:]):
             if not np.array_equal(sig1.data_store[0], sig2.data_store[0]):
