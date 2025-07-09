@@ -542,8 +542,9 @@ class MatplotlibParser(BackendParserBase):
             return
 
         grid_item = self._layout[row: row + plot.row_span, column: column + plot.col_span]  # type: SubplotSpec
+        full_mode_all_stack = self._pm.get_value(self.canvas, 'full_mode_all_stack')
 
-        if not self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None:
+        if not full_mode_all_stack and self._focus_plot_stack_key is not None:
             stack_sz = 1
             h_space = 0.1
         else:
@@ -561,10 +562,10 @@ class MatplotlibParser(BackendParserBase):
         for stack_id, key in enumerate(sorted(plot.signals.keys())):
             is_stack_plot_focused = self._focus_plot_stack_key == key
 
-            if self.canvas.full_mode_all_stack or self._focus_plot_stack_key is None or is_stack_plot_focused:
+            if full_mode_all_stack or self._focus_plot_stack_key is None or is_stack_plot_focused:
                 signals = plot.signals.get(key) or list()
 
-                if not self.canvas.full_mode_all_stack and self._focus_plot_stack_key is not None:
+                if not full_mode_all_stack and self._focus_plot_stack_key is not None:
                     row_id = 0
                 else:
                     row_id = stack_id
@@ -594,7 +595,7 @@ class MatplotlibParser(BackendParserBase):
                 # Hides an axis in a way that grid remains visible,
                 # By default in matplotlib the grid is treated as part of the axis
                 visible = ((stack_id + 1 == len(plot.signals.values())) or
-                           (is_stack_plot_focused and not self.canvas.full_mode_all_stack))
+                           (is_stack_plot_focused and not full_mode_all_stack))
                 for e in mpl_axes.get_xaxis().get_children():
                     if isinstance(e, Tick):
                         e.tick1line.set_visible(visible)
@@ -1178,9 +1179,13 @@ class MatplotlibParser(BackendParserBase):
             if isinstance(ax, RangeAxis):
                 ranges = ax.get_limits()
 
+        valid_lines = [line.get_label() for line in mpl_axes.get_lines()]
+
         # With the new X axis limits, we obtain the points within that range
         for stack in plot.signals.values():
             for signal in stack:
+                if signal.label not in valid_lines:
+                    continue
                 idx1 = np.searchsorted(signal.x_data, ranges[0])
                 idx2 = np.searchsorted(signal.x_data, ranges[1])
 
@@ -1190,6 +1195,10 @@ class MatplotlibParser(BackendParserBase):
                 # If the number of samples per signal is less than 50 we continue, if not the user shall keep zooming
                 if len(x_zoom) > 50:
                     return None, len(x_zoom)
+
+                # If there are no data points in the zoomed region, skip this signal
+                if not len(x_zoom):
+                    continue
 
                 # Get the points (x,y) for each signal
                 points = list(zip(x_zoom, y_zoom))
