@@ -1179,6 +1179,7 @@ class MatplotlibParser(BackendParserBase):
             if isinstance(ax, RangeAxis):
                 ranges = ax.get_limits()
 
+        # Get the lines that are actually located in the current mpl_axes
         valid_lines = [line.get_label() for line in mpl_axes.get_lines()]
 
         # With the new X axis limits, we obtain the points within that range
