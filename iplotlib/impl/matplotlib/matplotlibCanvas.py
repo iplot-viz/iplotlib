@@ -31,6 +31,7 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
+from iplotlib.core.impl_base import ImplementationPlotCacheTable
 
 logger = setupLogger.get_logger(__name__)
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
@@ -286,8 +287,21 @@ class MatplotlibParser(BackendParserBase):
 
     def clear(self):
         super().clear()
-        self.figure.clear()
+
+        # drop cache items and remove each Axes to release all artists and callbacks
+        for ax in list(self.figure.axes):
+            ImplementationPlotCacheTable.drop(ax)
+            self.figure.delaxes(ax)
+
+        # remove any active multi‑cursors
+        for c in self._cursors:
+            c.remove()
+        self._cursors.clear()
+
         self.map_legend_to_ax.clear()
+        self._impl_plot_ranges_hash.clear()
+        self._stale_citems.clear()
+
         gc.collect()
 
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
