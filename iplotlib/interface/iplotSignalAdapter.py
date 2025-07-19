@@ -222,14 +222,24 @@ class IplotSignalAdapter(ProcessingSignal):
 
     def compute(self, **kwargs) -> dict:
         data_arrays = dict()
+        correspondance = {"x": 0, "y": 1, "z": 2}
+
         # Evaluate each expression.
         for key, expr in kwargs.items():
             try:
-                logger.debug(f" in compute key={key} expr={expr}")
-                data_arrays.update({key: ParserHelper.evaluate(self, expr)})
+                if self.x_expr == '${self}.time' and self.y_expr == '${self}.data_store[1]' and self.z_expr == '${self}.data_store[2]':
+                    logger.debug(f"No processing needed to compute key={key} expr={expr}")
+                    data_arrays.update({key: self.data_store[correspondance[key]]})
+                else:
+                    logger.debug(f" in compute key={key} expr={expr}")
+                    data_arrays.update({key: ParserHelper.evaluate(self, expr)})
             except Exception as e:
                 logger.error(f"Error {e} in {expr}")
                 continue
+
+        # Clear the diccionary result
+        ParserHelper.dict_result.clear()
+
         return data_arrays
 
     @property
@@ -880,6 +890,7 @@ class ParserHelper:
     A wrapper linking iplotProcessing.Parser with a IplotSignalAdapter
     """
     env = dict()
+    dict_result = dict()
 
     @staticmethod
     def evaluate(signal: IplotSignalAdapter, expression: str):
@@ -925,12 +936,14 @@ class ParserHelper:
         isDownsampled = True
 
         for var_name in signal.depends_on:
-            tmp_local_env[var_name] = copy.deepcopy(local_env[var_name])
+            tmp_local_env[var_name] = local_env[var_name]
             tmp_local_env[var_name].ts_start = signal.ts_start
             tmp_local_env[var_name].ts_end = signal.ts_end
+
             if var_name != "self":
                 tmp_local_env[var_name].get_data()
                 isDownsampled &= tmp_local_env[var_name].isDownsampled
+
             if var_name != 'self' or len(tmp_local_env[var_name].data_store[0]) != 0:
                 dependencies.append(tmp_local_env[var_name])
 
@@ -947,13 +960,13 @@ class ParserHelper:
                 needs_realign = True
                 break
 
-        if needs_realign:
-            align(dependencies)
+        if needs_realign and not ParserHelper.dict_result:
+            ParserHelper.dict_result = align(dependencies, signal)
             signal.set_data(tmp_local_env['self'].data_store)
 
         p.clear_expr()
         p.set_expression(expression, True)
-        p.substitute_var(tmp_local_env)
+        p.substitute_var(tmp_local_env, ParserHelper.dict_result)
         p.eval_expr()
         if p.has_time_units:
             return p.result.astype('int64')
