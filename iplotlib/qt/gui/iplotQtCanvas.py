@@ -172,7 +172,7 @@ class IplotQtCanvas(QWidget):
 
         # Check if any limit actually changed
         if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
-            QApplication.setOverrideCursor(Qt.WaitCursor)
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             QApplication.processEvents()
             self._parser.refresh_data()
             QApplication.restoreOverrideCursor()
