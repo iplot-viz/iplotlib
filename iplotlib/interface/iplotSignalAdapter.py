@@ -464,7 +464,7 @@ class IplotSignalAdapter(ProcessingSignal):
             if len(self.children) > 1:
                 align(self.children)  # ,mode=self.alignment_mode, kind=self.interpolation_kind)
 
-            # 2.2 Evaluate self.name. It is an expression combining multiple other signals.
+            # 2.3 Evaluate self.name. It is an expression combining multiple other signals.
             try:
                 p = Parser().set_expression(self.name)
                 p.substitute_var(vm)
