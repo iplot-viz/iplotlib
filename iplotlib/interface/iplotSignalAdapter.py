@@ -449,25 +449,50 @@ class IplotSignalAdapter(ProcessingSignal):
         if len(self.children):
             vm = dict(self._local_env)
             vm.update(ParserHelper.env)  # makes aliases accessible to parser
+            vm['self'] = self
 
             # 2.1 Ensure all child signals have their time, data vectors (if DA enabled)
-            children_data = defaultdict(list)
-            for c, child in enumerate(self.children):
-                if child.data_access_enabled and child._needs_refresh():
-                    child._fetch_data()
-                child._process_data()
-                if len(self.children) > 1:
-                    for ds in child.data_store:
-                        children_data[c].append(ds.copy())
+            backup = []
+            for child in self.children:
+                backup.append([ds.copy() for ds in child.data_store])
 
-            # 2.2 Align all signals onto a common grid.
-            if len(self.children) > 1:
-                align(self.children)  # ,mode=self.alignment_mode, kind=self.interpolation_kind)
+            # 2.2 Align all signals onto a common grid (adaptado con logs)
+            tmp_local_env = dict(vm)
+            tmp_local_env['self'] = self
+            dependencies = []
+            for child in self.children:
+                if hasattr(child, "data_store") and len(child.data_store[0]) != 0:
+                    dependencies.append(child)
+
+            # Check if all signals are aligned in time
+            needs_realign = False
+            for sig1, sig2 in zip(dependencies[:-1], dependencies[1:]):
+                if not np.array_equal(sig1.data_store[0], sig2.data_store[0]):
+                    needs_realign = True
+                    break
+
+            if needs_realign and len(dependencies) > 1:
+                dict_result = align(dependencies, curr_signal=self) or {}
+                if dict_result and 'self' in dict_result:
+                    self.data_store[0] = dict_result['self']['time']
+                    self.data_store[1] = dict_result['self']['data']
+            else:
+                dict_result = {}
+                for sig in dependencies:
+                    key = 'self' if sig.label == self.label else sig.label
+                    dict_result[key] = {
+                        'time': sig.data_store[0],
+                        'data': sig.data_store[1]
+                    }
 
             # 2.3 Evaluate self.name. It is an expression combining multiple other signals.
             try:
-                p = Parser().set_expression(self.name)
-                p.substitute_var(vm)
+                p = Parser()
+                p.inject(Parser.get_member_list(type(self)))
+                p.inject(self.alias_map)
+                p.clear_expr()
+                p.set_expression(self.name, True)
+                p.substitute_var(tmp_local_env, dict_result=dict_result)
                 p.eval_expr()
                 if isinstance(p.result, ProcessingSignal):
                     # Update first four buffers via slice assignment, auto-expanding as needed
@@ -479,11 +504,10 @@ class IplotSignalAdapter(ProcessingSignal):
                 self.set_proc_fail(msg=str(e))
             finally:
                 # restore backup.
-                if len(self.children) > 1:
-                    for c, child in enumerate(self.children):
-                        child.data_store.clear()
-                        for ds in children_data[c]:
-                            child.data_store.append(ds)
+                for child, saved_data in zip(self.children, backup):
+                    child.data_store.clear()
+                    for ds in saved_data:
+                        child.data_store.append(ds)
 
         if self.status_info.result == Result.FAIL:
             return
