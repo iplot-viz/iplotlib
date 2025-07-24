@@ -472,15 +472,15 @@ class IplotSignalAdapter(ProcessingSignal):
                     break
 
             if needs_realign and len(dependencies) > 1:
-                dict_result = align(dependencies, curr_signal=self) or {}
-                if dict_result and 'self' in dict_result:
-                    self.data_store[0] = dict_result['self']['time']
-                    self.data_store[1] = dict_result['self']['data']
+                ParserHelper.dict_result = align(dependencies, curr_signal=self) or {}
+                if 'self' in ParserHelper.dict_result:
+                    self.data_store[0] = ParserHelper.dict_result['self']['time']
+                    self.data_store[1] = ParserHelper.dict_result['self']['data']
             else:
-                dict_result = {}
+                ParserHelper.dict_result = {}
                 for sig in dependencies:
                     key = 'self' if sig.label == self.label else sig.label
-                    dict_result[key] = {
+                    ParserHelper.dict_result[key] = {
                         'time': sig.data_store[0],
                         'data': sig.data_store[1]
                     }
@@ -492,7 +492,7 @@ class IplotSignalAdapter(ProcessingSignal):
                 p.inject(self.alias_map)
                 p.clear_expr()
                 p.set_expression(self.name, True)
-                p.substitute_var(tmp_local_env, dict_result=dict_result)
+                p.substitute_var(tmp_local_env, ParserHelper.dict_result)
                 p.eval_expr()
                 if isinstance(p.result, ProcessingSignal):
                     # Update first four buffers via slice assignment, auto-expanding as needed
