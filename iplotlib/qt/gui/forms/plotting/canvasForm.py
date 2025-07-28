@@ -117,7 +117,7 @@ class CanvasForm(IplotPreferencesForm):
     @Slot()
     def export_canvas_preferences(self):
         # Define folder path
-        path = Path.home() / ".local" / "1DPreferences"
+        path = Path.home() / ".local" / "share" / "mint" / "1DPreferences"
         path.mkdir(parents=True, exist_ok=True)
 
         # Define file path
