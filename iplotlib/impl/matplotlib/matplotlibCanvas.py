@@ -392,53 +392,13 @@ class MatplotlibParser(BackendParserBase):
                     shared.append(axes)
         return shared
 
-    def process_ipl_canvas(self, canvas: Canvas):
-        """This method analyzes the iplotlib canvas data structure and maps it
-        onto an internal matplotlib.figure.Figure instance.
+    def set_canvas_gridspec(self, rows: int, cols: int):
+        """Set the canvas gridspec to the given rows and columns."""
+        self._layout = self.figure.add_gridspec(rows, cols)
 
-        """
-        if canvas is not None:
-            logger.debug(f"ipl_canvas 1: {self._pm.get_value(canvas, 'step')}")
-        super().process_ipl_canvas(canvas)
-        if canvas is None:
-            self.canvas = canvas
-            self.clear()
-            return
+    def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
 
-        # 1. Clear layout.
-        self.clear()
-
-        # 2. Allocate
-        self.canvas = canvas
-        if self._focus_plot is None:
-            self.canvas.focus_plot = None
-            self._layout = self.figure.add_gridspec(canvas.rows, canvas.cols)
-        else:
-            self.canvas.focus_plot = self._focus_plot
-            self._layout = self.figure.add_gridspec(1, 1)
-
-        # 3. Fill the canvas with plots.
-        stop_drawing = False
-        for i, col in enumerate(canvas.plots):
-
-            for j, plot in enumerate(col):
-
-                if self._focus_plot is not None:
-                    if self._focus_plot == plot:
-                        logger.debug(f"Focusing on plot: {plot}")
-                        self.process_ipl_plot(plot, 0, 0)
-                    elif isinstance(plot, PlotXYWithSlider):
-                        plot.slider = None
-                else:
-                    self.process_ipl_plot(plot, i, j)
-
-        # 4. Update the title at the top of canvas.
-        if self._pm.get_value(self.canvas, 'title') is not None:
-            if not self._pm.get_value(self.canvas, 'font_size'):
-                canvas.font_size = None
-            self.figure.suptitle(self._pm.get_value(self.canvas, 'title'),
-                                 size=self._pm.get_value(self.canvas, 'font_size'),
-                                 color=self._pm.get_value(self.canvas, 'font_color') or 'black')
+        self.figure.suptitle(title, font_size=font_size, font_color=font_color)
 
     def process_ipl_plot_xy(self):
         pass

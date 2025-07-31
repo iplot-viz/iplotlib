@@ -204,13 +204,64 @@ class BackendParserBase(ABC):
         self._signal_impl_plot_lut.clear()
         self._signal_impl_shape_lut.clear()
 
-    @abstractmethod
     def process_ipl_canvas(self, canvas: Canvas):
         """
         Prepare the implementation canvas.
 
         :param canvas: A Canvas instance
         :type canvas: Canvas
+        """
+        if canvas is not None:
+            logger.debug(f"ipl_canvas 1: {self._pm.get_value(canvas, 'step')}")
+        if canvas is None:
+            self.canvas = canvas
+            self.clear()
+            return
+
+        # 1. Clear layout.
+        self.clear()
+
+        # 2. Allocate
+        self.canvas = canvas
+        if self._focus_plot is None:
+            self.canvas.focus_plot = None
+            self.set_canvas_gridspec(canvas.rows, canvas.cols)
+        else:
+            self.canvas.focus_plot = self._focus_plot
+            self.set_canvas_gridspec(1, 1)
+
+        # 3. Fill the canvas with plots.
+        for i, col in enumerate(canvas.plots):
+            for j, plot in enumerate(col):
+                if self._focus_plot is not None:
+                    if self._focus_plot == plot:
+                        logger.debug(f"Focusing on plot: {plot}")
+                        self.process_ipl_plot(plot, 0, 0)
+                    elif isinstance(plot, PlotXYWithSlider):
+                        plot.slider = None
+                else:
+                    self.process_ipl_plot(plot, i, j)
+
+        # 4. Update the title at the top of canvas.
+        if self._pm.get_value(self.canvas, 'title') is not None:
+            if not self._pm.get_value(self.canvas, 'font_size'):
+                canvas.font_size = None
+            self.set_suptitle(self._pm.get_value(self.canvas, 'title'),
+                              font_size=self._pm.get_value(self.canvas, 'font_size'),
+                              font_color=self._pm.get_value(self.canvas, 'font_color') or 'black')
+
+    def set_canvas_gridspec(self, rows: int, cols: int):
+        """
+        Set the canvas gridspec for the implementation.
+        This is called when the canvas is set or cleared.
+        """
+        pass
+
+    @abstractmethod
+    def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
+        """
+        Set the canvas suptitle.
+        This is called when the canvas is set or cleared.
         """
 
     @abstractmethod
