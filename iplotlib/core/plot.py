@@ -203,9 +203,9 @@ class PlotXY(Plot):
             signal.original_color = color
 
     def get_next_color(self):
-        position = self._color_index % len(self._color_cycle)
-        color_signal = self._color_cycle[position]
-        self._color_index += 1
+        position = PlotXY._color_index % len(PlotXY._color_cycle)
+        color_signal = PlotXY._color_cycle[position]
+        PlotXY._color_index += 1
 
         return color_signal
 
