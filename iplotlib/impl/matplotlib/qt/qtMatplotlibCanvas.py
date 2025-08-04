@@ -22,7 +22,7 @@ from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, Mouse
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
-from iplotlib.core import PlotContour, SignalXY, PlotXY
+from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
@@ -66,7 +66,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._vlayout.setContentsMargins(QMargins())
         self._vlayout.addWidget(self._mpl_renderer)
 
-        # GUI event handlers 
+        # GUI event handlers
         self._mpl_renderer.mpl_connect('draw_event', self._mpl_draw_finish)
         self._mpl_renderer.mpl_connect('button_press_event', self._mpl_mouse_press_handler)
         self._mpl_renderer.mpl_connect('button_release_event', self._mpl_mouse_release_handler)
@@ -79,6 +79,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     # Implement basic superclass functionality
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
+        super().set_canvas(canvas)
 
         prev_canvas = self._parser.canvas
 
@@ -90,9 +91,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
+        else:
+            self.render()
+            return
 
         self.render()
-        super().set_canvas(canvas)
 
         # Check if plots share time axis
         ranges = []
@@ -111,7 +114,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 for col_idx, plot in enumerate(col, start=1):
                     if plot:
                         axis = plot.axes[0]
-                        if not axis.is_date:
+                        if not axis.is_date and not isinstance(plot, PlotXYWithSlider):
                             relative = True
                         ranges.append((axis.original_begin, axis.original_end))
                         plot_stack.append(f"{col_idx}.{row_idx}")
@@ -255,13 +258,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def stats(self, canvas: Canvas):
         info_stats = []
         signals = self.get_signals(canvas)
-        for signal in signals:
-            if isinstance(signal, SignalXY):
-                mpl_axes = self._parser._signal_impl_plot_lut.get(signal.uid)
-                if mpl_axes is None:
-                    continue
-                info_stats.append((signal, mpl_axes))
-        self._stats_table.fill_table(info_stats)
+        if signals:
+            for signal in signals:
+                if isinstance(signal, SignalXY) and signal.status_info.result == 'Success' and signal.parent is not None:
+                    mpl_axes = self._parser._signal_impl_plot_lut.get(signal.uid)
+                    if mpl_axes is None:
+                        continue
+                    info_stats.append((signal, mpl_axes))
+            self._stats_table.fill_table(info_stats)
 
     def autoscale_y(self, impl_plot):
         """

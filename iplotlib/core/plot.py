@@ -9,11 +9,13 @@ one might want to use when plotting data.
 #   Jan 2023:   -Added legend position and layout properties [Alberto Luengo]
 
 from abc import ABC
+import typing
 from dataclasses import dataclass
 from typing import Dict, List, Collection, Union, Tuple
 import weakref
 
 from iplotlib.core.axis import Axis, LinearAxis
+from matplotlib.widgets import Slider
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 
 
@@ -247,3 +249,29 @@ class PlotImage(Plot):
 
     def merge(self, old_plot: 'PlotImage'):
         super().merge(old_plot)
+
+
+@dataclass
+class PlotXYWithSlider(PlotXY):
+    """
+    A concrete Plot class specialized for 2D plottling with slider.
+    """
+
+    slider: typing.Optional[Slider] = None
+    slider_last_val: int = None
+    slider_last_min: int = None
+    slider_last_max: int = None
+    sync_slider: bool = None
+
+    def __post_init__(self):
+        super().__post_init__()
+
+    def reset_preferences(self):
+        super().reset_preferences()
+
+    def merge(self, old_plot: 'PlotXYWithSlider'):
+        super().merge(old_plot)
+        self.slider_last_val = 0
+
+    def clean_slider(self):
+        self.slider = None

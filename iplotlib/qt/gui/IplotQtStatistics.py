@@ -150,17 +150,23 @@ class IplotQtStatistics(QWidget):
                 y_mean = np.array(signal.data_store[3])
 
                 # Filter values
-                mask = (x_data > lo) & (x_data < hi)
+                y_lo, y_hi = impl_plot.get_ylim()
+                mask = ((x_data > lo) & (x_data < hi) &
+                        (y_min > y_lo) & (y_min < y_hi) &
+                        (y_mean > y_lo) & (y_mean < y_hi) &
+                        (y_max > y_lo) & (y_max < y_hi))
                 y_min_displayed = y_min[mask]
                 y_max_displayed = y_max[mask]
                 y_mean_displayed = y_mean[mask]
-                samples = np.size(y_mean_displayed)
+                samples = y_mean_displayed.size
 
                 if samples > 0:
-                    min_val, avg_val, max_val = np.min(y_min_displayed), np.mean(y_mean_displayed), np.max(
-                        y_max_displayed)
-                    first = (y_min_displayed[0], y_mean_displayed[0], y_max_displayed[0])
-                    last = (y_min_displayed[-1], y_mean_displayed[-1], y_max_displayed[-1])
+                    # NumPy scalars → float
+                    min_val = np.min(y_min_displayed).item()
+                    avg_val = np.mean(y_mean_displayed).item()
+                    max_val = np.max(y_max_displayed).item()
+                    first = (y_min_displayed[0].item(), y_mean_displayed[0].item(), y_max_displayed[0].item())
+                    last = (y_min_displayed[-1].item(), y_mean_displayed[-1].item(), y_max_displayed[-1].item())
                     self._set_stats(idx, min_val, avg_val, max_val, first, last, samples)
                 else:
                     # Indicate that there is no data
@@ -169,13 +175,19 @@ class IplotQtStatistics(QWidget):
             else:
                 # Base case
                 y_data = line.get_ydata()
-                y_displayed = y_data[((x_data > lo) & (x_data < hi))]
-                samples = np.size(y_displayed)
+                y_lo, y_hi = impl_plot.get_ylim()
+                mask = ((x_data > lo) & (x_data < hi) &
+                        (y_data > y_lo) & (y_data < y_hi))
+                y_displayed = y_data[mask]
+                samples = y_displayed.size
 
                 if samples > 0:
-                    min_val, avg_val, max_val = np.min(y_displayed)[0], np.mean(y_displayed)[0], np.max(y_displayed)[0]
-                    first_val, last_val = y_displayed[0], y_displayed[-1]
-                    samples = np.size(y_displayed)
+                    # NumPy scalars → float
+                    min_val = np.min(y_displayed).item()
+                    avg_val = np.mean(y_displayed).item()
+                    max_val = np.max(y_displayed).item()
+                    first_val = y_displayed[0].item()
+                    last_val = y_displayed[-1].item()
 
                     self._set_stats(idx, min_val, avg_val, max_val, first_val, last_val, samples)
                 else:
