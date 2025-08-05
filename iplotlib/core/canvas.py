@@ -11,7 +11,7 @@ from typing import List, Union, Dict
 
 from iplotLogging import setupLogger
 from iplotlib.core.persistence import JSONExporter
-from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider
+from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.signal import Signal
 import pandas as pd
 
@@ -343,7 +343,7 @@ class Canvas(ABC):
                             # Now when using pulses, if no start time or end time are specified, the default is set to
                             # 0 and None respectively. For that reason, it is necessary to check the ts_end of the
                             # different signals and create the mask depending on the circumstances.
-                            if isinstance(row, PlotXYWithSlider):
+                            if isinstance(row, PlotXYWithSlider) or isinstance(row, PlotContourWithSlider):
                                 timerange = pl_signal.time
                                 y_data = pl_signal.y_data
                             else:

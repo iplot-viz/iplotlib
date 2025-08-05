@@ -26,7 +26,7 @@ from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits, IplSliderLimits
-from iplotlib.core.plot import Plot, PlotXYWithSlider
+from iplotlib.core.plot import Plot, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.signal import Signal
 import iplotLogging.setupLogger as Sl
 
@@ -290,7 +290,8 @@ class BackendParserBase(ABC):
         if put_label and hasattr(signal, 'x_data'):
             if hasattr(signal.x_data, 'unit'):
                 label = f"[{signal.x_data.unit or '?'}]"
-                if label and not isinstance(ci.plot(), PlotXYWithSlider):
+                if label and not (
+                        isinstance(ci.plot(), PlotXYWithSlider) or isinstance(ci.plot(), PlotContourWithSlider)):
                     self.set_impl_x_axis_label_text(impl_plot, label)
         # label from preferences takes precedence.
         if hasattr(xaxis, "_label") and xaxis._label:
@@ -377,7 +378,7 @@ class BackendParserBase(ABC):
         base_begin, base_end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
         for col in self.canvas.plots:
             for plot in col:
-                if not isinstance(plot, PlotXYWithSlider) or plot == plot_with_slider:
+                if not (isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider)) or plot == plot_with_slider:
                     continue
                 limits = self.get_plot_limits(plot, 'original')
                 begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
@@ -517,7 +518,7 @@ class BackendParserBase(ABC):
                 plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
 
         # Save slider limits for PlotXYWithSlider
-        if isinstance(plot, PlotXYWithSlider):
+        if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
             plot_lims.sliders_ranges.append(IplSliderLimits(plot.slider_last_min, plot.slider_last_max))
 
         return plot_lims

@@ -237,7 +237,7 @@ class IplotSignalAdapter(ProcessingSignal):
                 logger.error(f"Error {e} in {expr}")
                 continue
 
-        # Clear the diccionary result
+        # Clear the dictionary result
         ParserHelper.dict_result.clear()
 
         return data_arrays

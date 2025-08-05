@@ -250,6 +250,20 @@ class PlotImage(Plot):
         super().merge(old_plot)
 
 
+class SliderMixin:
+    slider: typing.Optional[Slider] = None
+    slider_last_val: int = None
+    slider_last_min: int = None
+    slider_last_max: int = None
+    sync_slider: bool = None
+
+    def merge(self):
+        self.slider_last_val = 0
+
+    def clean_slider(self):
+        self.slider = None
+
+
 @dataclass
 class PlotXYWithSlider(PlotXY):
     """
@@ -269,6 +283,32 @@ class PlotXYWithSlider(PlotXY):
         super().reset_preferences()
 
     def merge(self, old_plot: 'PlotXYWithSlider'):
+        super().merge(old_plot)
+        self.slider_last_val = 0
+
+    def clean_slider(self):
+        self.slider = None
+
+
+@dataclass
+class PlotContourWithSlider(PlotContour):
+    """
+    A concrete Plot class specialized for 2D plottling with slider.
+    """
+
+    slider: typing.Optional[Slider] = None
+    slider_last_val: int = None
+    slider_last_min: int = None
+    slider_last_max: int = None
+    sync_slider: bool = None
+
+    def __post_init__(self):
+        super().__post_init__()
+
+    def reset_preferences(self):
+        super().reset_preferences()
+
+    def merge(self, old_plot: 'PlotContourWithSlider'):
         super().merge(old_plot)
         self.slider_last_val = 0
 

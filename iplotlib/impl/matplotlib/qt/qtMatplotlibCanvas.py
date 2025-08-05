@@ -22,7 +22,7 @@ from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, Mouse
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
-from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider
+from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
@@ -493,8 +493,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             plot = ci.plot()
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
                 # Stage a command to obtain original view limits
-                # Disable Zoom and Pan in PlotContour
-                if isinstance(plot, PlotContour):
+                # Disable Zoom and Pan for PlotContour and for PlotContourWithSlider
+                if isinstance(plot, PlotContour) or isinstance(plot, PlotContourWithSlider):
                     return
                 self.stage_view_lim_cmd()
                 return
