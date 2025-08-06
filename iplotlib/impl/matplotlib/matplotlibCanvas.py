@@ -352,10 +352,15 @@ class MatplotlibParser(BackendParserBase):
         super().clear()
 
         # drop cache items and remove each Axes to release all artists and callbacks
-        for ax in list(self.figure.axes):
-            ImplementationPlotCacheTable.drop(ax)
-            self.figure.delaxes(ax)
-
+        # for ax in list(self.figure.axes):
+        #     self.figure.delaxes(ax)
+        self.figure.clear()
+        for col in self.canvas.plots:
+            for plot in col:
+                if not plot:
+                    continue
+                for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
+                    signal.lines.clear()
         # remove any active multi‑cursors
         for c in self._cursors:
             c.remove()
