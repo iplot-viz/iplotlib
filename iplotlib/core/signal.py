@@ -7,7 +7,7 @@ plotting XY or XYZ data.
 :data:`~iplotlib.core.signal.ArraySignal` is a commonly used concrete class 
 for when you wish to take over the data customization.
 """
-
+import dataclasses
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List
@@ -65,6 +65,18 @@ class Signal(ABC):
 
     def merge(self, old_signal: 'Signal'):
         pass
+
+    def set_properties(self, properties: dict):
+        for key, value in properties.items():
+            if hasattr(self, key) and key not in ['_type']:
+                attr = getattr(self, key)
+
+                if dataclasses.is_dataclass(attr) and isinstance(value, dict):
+                    for sub_key, sub_value in value.items():
+                        if hasattr(attr, sub_key):
+                            setattr(attr, sub_key, sub_value)
+                else:
+                    setattr(self, key, value)
 
 
 @dataclass

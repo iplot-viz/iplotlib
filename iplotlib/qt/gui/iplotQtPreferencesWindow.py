@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
-from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider
+from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.qt.gui.forms import (IplotPreferencesForm, AxisForm, CanvasForm, PlotXYForm, PlotContourForm,
                                    SignalXYForm, SignalContourForm)
 
@@ -53,12 +53,14 @@ class IplotQtPreferencesWindow(QMainWindow):
         canvas_assembly.rowsInserted.connect(self.treeView.expandAll)
         self._applyTime = time.time_ns()
         self.current_canvas = None
+        self.curr_canvas = dict()
 
         self._forms = {
             Canvas: CanvasForm(self),
             PlotXY: PlotXYForm(self),
             PlotXYWithSlider: PlotXYForm(self),
             PlotContour: PlotContourForm(self),
+            PlotContourWithSlider: PlotContourForm(self),
             LinearAxis: AxisForm(self),
             SignalXY: SignalXYForm(self),
             SignalContour: SignalContourForm(self),
@@ -98,7 +100,11 @@ class IplotQtPreferencesWindow(QMainWindow):
     def set_canvas_from_preferences(self):
         # Get the current canvas in order to preserve the preferences if these are reset
         original_canvas = self.treeView.model().item(0, 0).data(Qt.UserRole)
-        self.current_canvas = copy.deepcopy(original_canvas)
+        # self.current_canvas = copy.deepcopy(original_canvas)
+
+        self.curr_canvas = original_canvas.to_dict()
+        print(self.curr_canvas)
+
 
     def get_collective_m_time(self):
         val = 0
@@ -153,7 +159,10 @@ class IplotQtPreferencesWindow(QMainWindow):
         canvas = self.treeView.model().item(idx, 0).data(Qt.UserRole)
         if not isinstance(canvas, Canvas):
             return
-        canvas.merge(self.current_canvas)
+        # canvas.merge(self.current_canvas)
+
+        # canvas.merge(self.curr_canvas)
+        canvas.set_properties(self.curr_canvas)
 
     def manual_reset(self, idx: int):
         canvas = self.treeView.model().item(idx, 0).data(Qt.ItemDataRole.UserRole)

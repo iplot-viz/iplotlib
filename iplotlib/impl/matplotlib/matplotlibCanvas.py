@@ -311,20 +311,29 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(plot_lines, QuadContourSet):
             for tp in plot_lines.collections:
                 tp.remove()
+            """    
+            if plot.contour_legend:
+                if isinstance(plot.contour_legend, list):
+                    for clabel in plot.contour_legend:
+                        clabel.remove()
+                else:
+                    plot.contour_legend.remove()
+            """
             if contour_filled:
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
+
             if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
                 plot_lines = draw_fn(xsub_data, ysub_data, zsub_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'in_lines':
                     if not contour_filled:
                         plt.clabel(plot_lines, inline=1, fontsize=10)
-                """
-                else:
-                    color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
-                    color_bar.set_label(zsub_data.unit, size=self.legend_size)
-                """
+                        # plot.contour_legend = clabels
+                # else:
+                    # color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
+                    # color_bar.set_label(zsub_data.unit, size=self.legend_size)
+                    # plot.contour_legend = color_bar
             if equivalent_units:
                 mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
@@ -333,17 +342,17 @@ class MatplotlibParser(BackendParserBase):
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
+
             if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
                 plot_lines = draw_fn(xsub_data, ysub_data, zsub_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'color_bar':
                     color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
                     color_bar.set_label(zsub_data.unit, size=self.legend_size)
+                    # plot.contour_legend = color_bar
                 else:
                     if not contour_filled:
                         plt.clabel(plot_lines, inline=1, fontsize=10)
-                # 2 Legend in line for multiple signal contour in one plot contour
-                # plt.clabel(plot_lines, inline=True)
-                # self.proxies = [Line2D([], [], color=c) for c in ['viridis']]
+                        # plot.contour_legend = clabels
             if equivalent_units:
                 mpl_axes.set_aspect('equal', adjustable='box')
 

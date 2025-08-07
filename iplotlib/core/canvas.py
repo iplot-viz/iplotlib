@@ -387,3 +387,13 @@ class Canvas(ABC):
         for property_name, value in properties.items():
             if hasattr(self, property_name):
                 setattr(self, property_name, value)
+
+    def set_properties(self, properties: dict):
+        for key, value in properties.items():
+            if hasattr(self, key) and key not in ['plots']:
+                setattr(self, key, value)
+
+        # Plot level
+        for idxCol, col in enumerate(self.plots):
+            for idxPlot, plot in enumerate(col):
+                plot.set_properties(properties['plots'][idxCol][idxPlot])

@@ -92,7 +92,22 @@ class JSONExporter:
 class DataclassNumpyJSONEncoder(JSONEncoder):
     def default(self, o):
         if dataclasses.is_dataclass(o):
-            return dataclasses.asdict(o)
+            result = {}
+            for field in dataclasses.fields(o):
+                name = field.name
+                value = getattr(o, name)
+
+                # Evitar serializar Sliders
+                if name == "slider" or name.startswith("slider_"):
+                    result[name] = None
+                    continue
+
+                try:
+                    json.dumps(value, cls=DataclassNumpyJSONEncoder)
+                    result[name] = value
+                except Exception:
+                    result[name] = None
+            return result
         if isinstance(o, np.integer):
             return int(o)
         elif isinstance(o, np.floating):

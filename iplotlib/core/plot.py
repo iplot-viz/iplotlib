@@ -131,6 +131,25 @@ class Plot(ABC):
 
         # signals are merged at canvas level to handle move between plots
 
+    def set_properties(self, properties: dict):
+        for key, value in properties.items():
+            # Plot Properties
+            if hasattr(self, key) and key not in ['axes', 'signals', '_type']:
+                setattr(self, key, value)
+
+        # Axis properties
+        for idxAxis, axis in enumerate(self.axes):
+            if isinstance(axis, Collection) and isinstance(self.axes[idxAxis], Collection):
+                for idxSubAxis, subAxis in enumerate(axis):
+                    subAxis.set_properties(properties['axes'][1][idxSubAxis])
+            else:
+                axis.set_properties(properties['axes'][0])
+
+        # Signal properties
+        for idxSignal, signal in enumerate(list(self.signals.values())):
+            for idxSig, sig in enumerate(signal):
+                sig.set_properties(properties['signals'][str(idxSignal + 1)][idxSig])
+
 
 @dataclass
 class PlotContour(Plot):
@@ -301,6 +320,7 @@ class PlotContourWithSlider(PlotContour):
     slider_last_min: int = None
     slider_last_max: int = None
     sync_slider: bool = None
+    contour_legend = None
 
     def __post_init__(self):
         super().__post_init__()
