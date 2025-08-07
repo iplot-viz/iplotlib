@@ -179,11 +179,15 @@ class MatplotlibParser(BackendParserBase):
                 plot_lines = [draw_fn(x_data, y_data, **params)]
                 _update_marker_by_point_count(plot_lines[0][0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                lines = draw_fn(x_data, y_data, **params)
-                plot_lines = [[line] for line in lines]
-                for i, line in enumerate(plot_lines):
-                    line[0].set_label(f"{signal.label}[{i}]")
-                    _update_marker_by_point_count(line[0], x_data, style)
+                lines = []
+                for i in range(y_data.shape[1]):
+                    params_i = dict(**params)
+                    params_i['color'] = PlotXY._color_cycle[i % len(PlotXY._color_cycle)]
+                    l = draw_fn(x_data, y_data[:, i], **params_i)
+                    l[0].set_label(f"{signal.label}[{i}]")
+                    _update_marker_by_point_count(l[0], x_data, style)
+                    lines.append(l)
+                plot_lines = [[line for line in l] for l in lines]
 
         signal.lines = plot_lines
 
