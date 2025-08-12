@@ -78,16 +78,16 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         self.canvas = canvas
 
-        self._parser.figure.clear()
-        for i, col in enumerate(self.canvas.plots):
-            for j, plot in enumerate(col):
-                if not plot:
-                    continue
-                p = pg.PlotItem()
-
-                self._parser.figure.addItem(p, row=j, col=i)
-                for key, signal in plot.signals.items():
-                    print(signal)
-                    p.plot(signal[0].x_data, signal[0].y_data, pen=signal[0].color)
+        # self._parser.figure.clear()
+        # for i, col in enumerate(self.canvas.plots):
+        #     for j, plot in enumerate(col):
+        #         if not plot:
+        #             continue
+        #         p = pg.PlotItem()
+        #
+        #         self._parser.figure.addItem(p, row=j, col=i)
+        #         for key, signal in plot.signals.items():
+        #             print(signal)
+        #             p.plot(signal[0].x_data, signal[0].y_data, pen=signal[0].color)
 
 
