@@ -2,9 +2,8 @@
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 
 from typing import Any, Callable, Collection, List, Tuple
-import pandas
-import numpy as np
 import pyqtgraph as pg
+from pyqtgraph.Qt import QtCore
 
 from iplotLogging import setupLogger
 from iplotProcessing.core import BufferObject
@@ -25,8 +24,19 @@ from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem
 
 logger = setupLogger.get_logger(__name__)
-STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
-            "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
+# Mapa de estilos de línea de matplotlib → QtCore.Qt.PenStyle
+LINESTYLE_MAP = {
+    'solid': QtCore.Qt.PenStyle.SolidLine,
+    'dashed': QtCore.Qt.PenStyle.DashLine,
+    'dashdot': QtCore.Qt.PenStyle.DashDotLine,
+    'dotted': QtCore.Qt.PenStyle.DotLine,
+}
+
+# Mapa de pasos a stepMode de PlotDataItem
+STEP_MAP_PG = {
+    'linear': False,
+    'post': True
+}
 
 
 class PyQtGraphParser(BackendParserBase):
@@ -46,6 +56,7 @@ class PyQtGraphParser(BackendParserBase):
         self._cursors = []
 
         self.figure = pg.GraphicsLayoutWidget()
+        self._layout = {}
         self._impl_plot_ranges_hash = dict()
 
         if tight_layout:
@@ -78,7 +89,6 @@ class PyQtGraphParser(BackendParserBase):
 
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[PlotDataItem]]
         style = self.get_signal_style(signal)
-        params = dict(**style)
         draw_fn = plot.plot
         # Reflect downsampling in legend
         self.legend_downsampled_signal(signal, plot, plot_lines)
@@ -91,21 +101,20 @@ class PyQtGraphParser(BackendParserBase):
         # Visible data is adjusted based on extremities, but only for unprocessed signals.
         # Processed signals already use the visible range.
         # Skip this step in case of streaming mode, as x_data and y_data may be empty and lead to errors.
-        #TODO if not signal.extremities and signal.x_expr == "${self}.time" and not self.canvas.streaming:
+        # TODO if not signal.extremities and signal.x_expr == "${self}.time" and not self.canvas.streaming:
         #     x_data, y_data = _get_visible_data(x_data, y_data, *self.get_impl_x_axis_limits(plot))
 
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
                 line = plot_lines[0][0]
-                data_item.setData(x=new_x, y=new_y)
-                line.set_xdata(x_data)
-                line.set_ydata(y_data)
-                _update_marker_by_point_count(line, x_data, style)
+                self.set_line_data(style, line, x_data, y_data)
+                self.set_line_style(style, line)
+                # _update_marker_by_point_count(line, x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):
-                    line[0].set_xdata(x_data)
-                    line[0].set_ydata(y_data[:, i])
-                    _update_marker_by_point_count(line[0], x_data, style)
+                    line[0].setData(x=x_data, y=y_data[:, i])
+                    line[0].setPen(style['pen'])
+                    # _update_marker_by_point_count(line[0], x_data, style)
 
             # Put this out in a method only for streaming
             if self.canvas.streaming:
@@ -121,17 +130,16 @@ class PyQtGraphParser(BackendParserBase):
                     diff = (max(all_y_data) - min(all_y_data)) / 15
                     plot.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
                 plot.set_xlim(max(x_data) - ax_window, max(x_data))
-            self.figure.canvas.draw_idle()
             # Preserve visible status for lines
             for new, old in zip(plot_lines, signal.lines):
                 for n, o in zip(new, old):
-                    n.set_visible(o.get_visible())
+                    n.setVisible(o.isVisible())
         else:
             if x_data.ndim == 1 and y_data.ndim == 1:
-                plot_lines = [draw_fn(x_data, y_data, **params)]
+                plot_lines = [[draw_fn(x_data, y_data, **style)]]
                 # _update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                lines = draw_fn(x_data, y_data, **params)
+                lines = draw_fn(x_data, y_data, **style)
                 plot_lines = [[line] for line in lines]
                 for i, line in enumerate(plot_lines):
                     line[0].set_label(f"{signal.label}[{i}]")
@@ -141,20 +149,54 @@ class PyQtGraphParser(BackendParserBase):
 
         return plot_lines
 
+    def set_line_data(self, style: dict, line: PlotDataItem, x_data, y_data):
+        """
+        Set the data for a PlotDataItem based on the attributes of SignalXY.
+        """
+        line.setData(x=x_data, y=y_data, stepMode=style['stepMode'])
+
+        # Update the line style after setting the data
+        self.set_line_style(style, line)
+
+    @staticmethod
+    def set_line_style(style: dict, line: PlotDataItem):
+        """
+        Set the line style for a PlotDataItem based on the attributes of SignalXY.
+        """
+        line.setPen(style['pen'])
+        if 'symbol' in style and style['symbol'] is not None:
+            # Set the symbol and size if specified
+            line.setSymbol(style['symbol'])
+            line.setSymbolSize(style['symbolSize'])
+
     def get_signal_style(self, signal: SignalXY) -> dict:
-        style = dict()
-        if signal.label:
-            style['label'] = signal.label
-        if hasattr(signal, "color"):
-            style['color'] = self._pm.get_value(signal, 'color')
-        style['linewidth'] = self._pm.get_value(signal, 'line_size')
-        style['linestyle'] = (self._pm.get_value(signal, 'line_style')).lower()
-        style['marker'] = self._pm.get_value(signal, 'marker')
-        style['markersize'] = self._pm.get_value(signal, 'marker_size')
-        step = self._pm.get_value(signal, 'step')
-        if step is None:
-            step = 'linear'
-        style["drawstyle"] = STEP_MAP[step]
+        """
+        Retorna un dict de argumentos para PlotDataItem en PyQtGraph
+        a partir de los atributos de SignalXY.
+        """
+        style = {'name': signal.label}
+
+        color = self._pm.get_value(signal, 'color')
+        line_size = self._pm.get_value(signal, 'line_size')
+        line_style = (self._pm.get_value(signal, 'line_style') or 'solid').lower()
+        if line_size == 0 or line_style == 'none':
+            pen = None
+        else:
+            pen = pg.mkPen(
+                color=color,
+                width=line_size,
+                style=LINESTYLE_MAP.get(line_style, QtCore.Qt.PenStyle.SolidLine)
+            )
+        style['pen'] = pen
+
+        marker = self._pm.get_value(signal, 'marker')
+        if marker:
+            style['symbol'] = self._pm.get_value(signal, 'marker')
+            style['symbolSize'] = self._pm.get_value(signal, 'marker_size')
+
+        step = self._pm.get_value(signal, 'step') or 'linear'
+        step_mode = STEP_MAP_PG.get(step)
+        style['stepMode'] = step_mode
 
         return style
 
@@ -212,8 +254,12 @@ class PyQtGraphParser(BackendParserBase):
                 row_id = 0
             else:
                 row_id = stack_id
-            plot = PlotItem()
-            self.figure.addItem(plot, row=row, col=col, rowspan=iPlot.row_span, colspan=iPlot.col_span)
+            key = (row, col)
+            if key not in self._layout:
+                plot = pg.PlotItem()
+                self.figure.addItem(plot, row=row, col=col, rowspan=iPlot.row_span, colspan=iPlot.col_span)
+                self._layout[key] = plot
+            plot = self._layout[key]
             prev_plot = plot
             self._plot_impl_plot_lut[id(iPlot)].append(plot)
             # Keep references to iplotlib instances for ease of access in callbacks.
@@ -289,6 +335,7 @@ class PyQtGraphParser(BackendParserBase):
         self.update_axis_labels_with_units(plot, signal)
 
         # Check for annotations if the marker labels are visible
+        return  # TODO remove
         if isinstance(signal, SignalXY):
             if plot.dataItems[0].scatter.opts.get('symbol') == 'None':
                 return
