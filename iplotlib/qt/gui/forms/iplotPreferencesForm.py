@@ -181,7 +181,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_markersize_widget():
-        return IplotPreferencesForm.create_spinbox(min=0, max=10)
+        return IplotPreferencesForm.create_spinbox(min=0, max=20)
 
     @staticmethod
     def default_ticknumber_widget():
