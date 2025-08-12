@@ -134,9 +134,9 @@ class IplotQtCanvas(QWidget):
                             else:
                                 self._parser.update_range_axis(axis, ax_idx, impl_plot, which='original')
 
-    @abstractmethod
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
+        return self._parser.canvas
 
     @abstractmethod
     def stats(self, canvas: Canvas):

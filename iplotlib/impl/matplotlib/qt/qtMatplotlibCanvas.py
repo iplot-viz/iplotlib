@@ -146,10 +146,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             else:
                 self.info_shared_x_dialog = False
 
-    def get_canvas(self) -> Canvas:
-        """Gets current iplotlib canvas"""
-        return self._parser.canvas
-
     def check_markers(self, canvas: Canvas):
         # Check if there are signals in the table that are no longer used
         markers_signals = self.get_signals(canvas)
