@@ -429,6 +429,7 @@ class PyQtGraphParser(BackendParserBase):
         """
         Set the canvas gridspec for the figure.
         """
+        super().clear()
         self._layout = {}
         # TODO improve this
         for item in self.figure.items()[:]:
@@ -473,13 +474,13 @@ class PyQtGraphParser(BackendParserBase):
         pass
 
     def get_impl_x_axis(self, plot: PlotItem) -> AxisItem:
-        return plot.getAxis('left')
+        return plot.getAxis('bottom')
 
     def get_impl_x_axis_limits(self, plot: PlotItem) -> Tuple[float, float]:
         return plot.getViewBox().viewRange()[0]
 
     def get_impl_y_axis(self, plot: PlotItem) -> AxisItem:
-        return plot.getAxis('bottom')
+        return plot.getAxis('left')
 
     def get_impl_y_axis_limits(self, plot: PlotItem) -> AxisItem:
         return plot.getViewBox().viewRange()[1]
