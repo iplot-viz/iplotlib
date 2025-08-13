@@ -211,9 +211,6 @@ class PyQtGraphParser(BackendParserBase):
     def do_envelope_plot(self, signal: Signal, mpl_axes: PlotItem, x_data, y1_data, y2_data):
         pass
 
-    def clear(self):
-        pass
-
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
         suptitle = pg.LabelItem(justify='center')
         self.figure.addItem(suptitle, row=0, col=0, colspan=3)
@@ -235,20 +232,20 @@ class PyQtGraphParser(BackendParserBase):
                                    h_space: float):
         pass
 
-    def process_ipl_plot(self, iPlot: Plot, col: int, row: int):
-        if not isinstance(iPlot, Plot):
+    def process_ipl_plot(self, i_plot: Plot, col: int, row: int):
+        if not isinstance(i_plot, Plot):
             return
 
         full_mode_all_stack = self._pm.get_value(self.canvas, 'full_mode_all_stack')
 
         plot = None
         prev_plot = None
-        for stack_id, key in enumerate(sorted(iPlot.signals.keys())):
+        for stack_id, key in enumerate(sorted(i_plot.signals.keys())):
             is_stack_plot_focused = self._focus_plot_stack_key == key
 
             if not full_mode_all_stack and self._focus_plot_stack_key is not None and not is_stack_plot_focused:
                 continue
-            signals = iPlot.signals.get(key) or list()
+            signals = i_plot.signals.get(key) or list()
 
             if not full_mode_all_stack and self._focus_plot_stack_key is not None:
                 row_id = 0
@@ -257,40 +254,98 @@ class PyQtGraphParser(BackendParserBase):
             key = (row, col)
             if key not in self._layout:
                 plot = pg.PlotItem()
-                self.figure.addItem(plot, row=row, col=col, rowspan=iPlot.row_span, colspan=iPlot.col_span)
+                self.figure.addItem(plot, row=row, col=col, rowspan=i_plot.row_span, colspan=i_plot.col_span)
                 self._layout[key] = plot
             plot = self._layout[key]
             prev_plot = plot
-            self._plot_impl_plot_lut[id(iPlot)].append(plot)
+            self._plot_impl_plot_lut[id(i_plot)].append(plot)
             # Keep references to iplotlib instances for ease of access in callbacks.
-            self._impl_plot_cache_table.register(plot, self.canvas, iPlot, key, signals)
+            self._impl_plot_cache_table.register(plot, self.canvas, i_plot, key, signals)
             plot.enableAutoRange(x=True, y=True)
 
             # Set the plot title
-            if iPlot.plot_title is not None and stack_id == 0:
-                fc = self._pm.get_value(iPlot, 'font_color')
-                fs = self._pm.get_value(iPlot, 'font_size')
-                if not fs:
-                    fs = None
+            self.set_plot_title(i_plot, plot, stack_id)
 
-                plot.setTitle(iPlot.plot_title, color=fc, size=fs)
+            # Set the grid
+            grid = self._pm.get_value(i_plot, 'grid')
+            self.set_grid(plot, grid)
 
             # Set the background color
-            plot.getViewBox().setBackgroundColor(self._pm.get_value(iPlot, 'background_color'))
+            self.set_background_color(i_plot, plot)
 
+            self.process_legend_plot(plot, i_plot, signals)
             # Update properties of the plot axes
-            for ax_idx in range(len(iPlot.axes)):
-                if isinstance(iPlot.axes[ax_idx], Collection):
-                    y_axis = iPlot.axes[ax_idx][stack_id]
-                    self.process_ipl_axis(y_axis, ax_idx, iPlot, plot)
+            for ax_idx in range(len(i_plot.axes)):
+                if isinstance(i_plot.axes[ax_idx], Collection):
+                    y_axis = i_plot.axes[ax_idx][stack_id]
+                    self.process_ipl_axis(y_axis, ax_idx, i_plot, plot)
                 else:
-                    x_axis = iPlot.axes[ax_idx]
-                    self.process_ipl_axis(x_axis, ax_idx, iPlot, plot)
+                    x_axis = i_plot.axes[ax_idx]
+                    self.process_ipl_axis(x_axis, ax_idx, i_plot, plot)
 
             for signal in signals:
                 # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
                 self._signal_impl_plot_lut.update({signal.uid: plot})
                 self.process_ipl_signal(signal)
+
+    def set_plot_title(self, i_plot: Plot, plot: PlotItem, stack_id: int):
+        if i_plot.plot_title is None or stack_id != 0:
+            return
+        fc = self._pm.get_value(i_plot, 'font_color')
+        fs = self._pm.get_value(i_plot, 'font_size')
+        plot.setTitle(i_plot.plot_title, color=fc, size=fs)
+
+    def set_background_color(self, i_plot: Plot, plot: PlotItem):
+        background_color = self._pm.get_value(i_plot, 'background_color')
+        plot.getViewBox().setBackgroundColor(background_color)
+
+    def process_legend_plot(self, plot: PlotItem, i_plot: Plot, signals):
+        def set_legend_position(legend, position):
+            pos_map = {
+                'upper left': ((0, 0), (0, 0)),
+                'upper center': ((0.5, 0), (0.5, 0)),
+                'upper right': ((1, 0), (1, 0)),
+                'center left': ((0, 0.5), (0, 0.5)),
+                'center': ((0.5, 0.5), (0.5, 0.5)),
+                'center right': ((1, 0.5), (1, 0.5)),
+                'lower left': ((0, 1), (0, 1)),
+                'lower center': ((0.5, 1), (0.5, 1)),
+                'lower right': ((1, 1), (1, 1)),
+            }
+            legend.anchor(pos_map[position][0], pos_map[position][1])
+
+        def set_legend_layout(legend, layout_type: str):
+            grid = legend.layout
+            items = []
+            for row in range(grid.rowCount()):
+                for col in range(grid.columnCount()):
+                    item = grid.itemAtPosition(row, col)
+                    if item:
+                        items.append(item)
+            # limpiar
+            for item in items:
+                grid.removeItem(item)
+            # recolocar
+            if layout_type.lower() == 'vertical':
+                for i, item in enumerate(items):
+                    grid.addItem(item, i, 0)
+            else:  # horizontal
+                for i, item in enumerate(items):
+                    grid.addItem(item, 0, i)
+
+        # Show the plot legend if enabled
+        show_legend = self._pm.get_value(i_plot, 'legend')
+        if not show_legend:
+            plot.legend = None
+            return
+
+        plot.addLegend()
+        legend = plot.legend
+
+        leg_position = self._pm.get_value(i_plot, 'legend_position')
+        set_legend_position(legend, leg_position)
+        # leg_layout = self._pm.get_value(plot, 'legend_layout')
+        # set_legend_layout(legend, leg_layout)
 
     def _update_slider(self, val, plot, slider_values, current_label, formatter):
         pass
@@ -370,6 +425,27 @@ class PyQtGraphParser(BackendParserBase):
 
         self._signal_impl_shape_lut.update({id(signal): plot_lines})
 
+    def clear(self):
+        """
+        Set the canvas gridspec for the figure.
+        """
+        self._layout = {}
+        # TODO improve this
+        for item in self.figure.items()[:]:
+            try:
+                # Solo intentar remover PlotItems y LegendItems
+                if isinstance(item, (pg.PlotItem, pg.LegendItem)):
+                    self.figure.removeItem(item)
+            except Exception:
+                pass
+
+    @staticmethod
+    def set_grid(plot: PlotItem, grid: bool = True):
+        """
+        Enable or disable the grid for the given plot.
+        """
+        plot.showGrid(x=grid, y=grid)
+
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass
 
@@ -390,57 +466,23 @@ class PyQtGraphParser(BackendParserBase):
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
-
-        if self.canvas.crosshair_per_plot:
-            plots = {}
-            for ax in self.figure.axes:
-                ci = self._impl_plot_cache_table.get(ax)
-                if hasattr(ci, 'plot') and ci.plot():
-                    plot = ci.plot()
-                    if not plots.get(id(plot)):
-                        plots[id(plot)] = [ax]
-                    else:
-                        plots[id(plot)].append(ax)
-            axes = list(plots.values())
-        else:
-            axes = [self.figure.axes]
-
-        for axes_group in axes:
-            if not axes_group:
-                continue
-
-            # Check for slider axes
-            filtered_axes_group = [ax for ax in axes_group if ax.get_label() != "slider"]
-
-            self._cursors.append(
-                IplotMultiCursor(self.figure.canvas, filtered_axes_group,
-                                 x_label=self._pm.get_value(self.canvas, 'enable_x_label_crosshair'),
-                                 y_label=self._pm.get_value(self.canvas, 'enable_y_label_crosshair'),
-                                 val_label=self._pm.get_value(self.canvas, 'enable_val_label_crosshair'),
-                                 color=self._pm.get_value(self.canvas, 'crosshair_color'),
-                                 lw=self.canvas.crosshair_line_width,
-                                 horiz_on=False or self.canvas.crosshair_horizontal,
-                                 vert_on=self.canvas.crosshair_vertical,
-                                 use_blit=True,
-                                 cache_table=self._impl_plot_cache_table))
+        pass
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
-        for cursor in self._cursors:
-            cursor.remove()
-        self._cursors.clear()
+        pass
 
-    def get_impl_x_axis(self, impl_plot: PlotItem) -> AxisItem:
-        return impl_plot.getAxis('left')
+    def get_impl_x_axis(self, plot: PlotItem) -> AxisItem:
+        return plot.getAxis('left')
 
-    def get_impl_x_axis_limits(self, impl_plot: PlotItem) -> Tuple[float, float]:
-        return impl_plot.getViewBox().viewRange()[0]
+    def get_impl_x_axis_limits(self, plot: PlotItem) -> Tuple[float, float]:
+        return plot.getViewBox().viewRange()[0]
 
-    def get_impl_y_axis(self, impl_plot: PlotItem) -> AxisItem:
-        return impl_plot.getAxis('bottom')
+    def get_impl_y_axis(self, plot: PlotItem) -> AxisItem:
+        return plot.getAxis('bottom')
 
-    def get_impl_y_axis_limits(self, impl_plot: PlotItem) -> AxisItem:
-        return impl_plot.getViewBox().viewRange()[1]
+    def get_impl_y_axis_limits(self, plot: PlotItem) -> AxisItem:
+        return plot.getViewBox().viewRange()[1]
 
     def get_oaw_axis_limits(self):
         pass

@@ -218,8 +218,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_plot_legend_position_widget():
-        return IplotPreferencesForm.create_combo_box({'same as canvas': 'Same as canvas',
-                                                      'upper right': 'Upper right', 'upper left': 'Upper left',
+        return IplotPreferencesForm.create_combo_box({'upper right': 'Upper right', 'upper left': 'Upper left',
                                                       'upper center': 'Upper center', 'lower right': 'Lower right',
                                                       'lower left': 'Lower left', 'lower center': 'Lower center',
                                                       'center right': 'Center right', 'center left': 'Center left',
@@ -245,5 +244,5 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_plot_legend_layout_widget():
-        return IplotPreferencesForm.create_combo_box({'same as canvas': 'Same as canvas', 'vertical': 'Vertical',
+        return IplotPreferencesForm.create_combo_box({'vertical': 'Vertical',
                                                       'horizontal': 'Horizontal'})
