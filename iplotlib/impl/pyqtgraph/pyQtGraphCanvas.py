@@ -1,6 +1,6 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
-
+import datetime
 from typing import Any, Callable, Collection, List, Tuple
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore
@@ -39,6 +39,22 @@ STEP_MAP_PG = {
 }
 
 
+class FechaPyQtGraph(pg.AxisItem):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def tickStrings(self, values, scale, spacing):
+        formatted_dates = []
+        for val in values:
+            try:
+                timestamp = val / 1e9
+                date_str = datetime.datetime.fromtimestamp(timestamp, datetime.UTC).strftime('%Y-%m-%d %H:%M:%S')
+                formatted_dates.append(date_str)
+            except Exception:
+                formatted_dates.append(str(val))
+        return formatted_dates
+
+
 class PyQtGraphParser(BackendParserBase):
     def __init__(self,
                  canvas: Canvas = None,
@@ -56,6 +72,7 @@ class PyQtGraphParser(BackendParserBase):
         self._cursors = []
 
         self.figure = pg.GraphicsLayoutWidget()
+        self.figure.setBackground('w')
         self._layout = {}
         self._impl_plot_ranges_hash = dict()
 
@@ -89,7 +106,7 @@ class PyQtGraphParser(BackendParserBase):
 
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[PlotDataItem]]
         style = self.get_signal_style(signal)
-        draw_fn = plot.plot
+        # draw_fn = plot.plot
         # Reflect downsampling in legend
         self.legend_downsampled_signal(signal, plot, plot_lines)
 
@@ -136,10 +153,10 @@ class PyQtGraphParser(BackendParserBase):
                     n.setVisible(o.isVisible())
         else:
             if x_data.ndim == 1 and y_data.ndim == 1:
-                plot_lines = [[draw_fn(x_data, y_data, **style)]]
+                plot_lines = [[plot.plot(x=x_data, y=y_data, **style)]]
                 # _update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                lines = draw_fn(x_data, y_data, **style)
+                lines = plot.plot(x=x_data, y=y_data, **style)
                 plot_lines = [[line] for line in lines]
                 for i, line in enumerate(plot_lines):
                     line[0].set_label(f"{signal.label}[{i}]")
@@ -253,8 +270,17 @@ class PyQtGraphParser(BackendParserBase):
                 row_id = stack_id
             key = (row, col)
             if key not in self._layout:
-                plot = pg.PlotItem()
+                plot = pg.PlotItem(axisItems={'bottom': FechaPyQtGraph(orientation='bottom')})
                 self.figure.addItem(plot, row=row, col=col, rowspan=i_plot.row_span, colspan=i_plot.col_span)
+
+                """
+                import numpy as np
+                x = np.arange(1000, dtype=float)
+                y = np.random.normal(size=1000)
+                y += 5 * np.sin(x / 100)
+                plot.plot(y=y)
+                """
+
                 self._layout[key] = plot
             plot = self._layout[key]
             prev_plot = plot
@@ -273,7 +299,11 @@ class PyQtGraphParser(BackendParserBase):
             # Set the background color
             self.set_background_color(i_plot, plot)
 
+            # Set mouse interaction
+            self.set_mouse(plot)
+
             self.process_legend_plot(plot, i_plot, signals)
+
             # Update properties of the plot axes
             for ax_idx in range(len(i_plot.axes)):
                 if isinstance(i_plot.axes[ax_idx], Collection):
@@ -346,6 +376,10 @@ class PyQtGraphParser(BackendParserBase):
         set_legend_position(legend, leg_position)
         # leg_layout = self._pm.get_value(plot, 'legend_layout')
         # set_legend_layout(legend, leg_layout)
+
+        # Set aspect legend
+        legend.setBrush(pg.mkBrush('w'))
+        legend.setPen(pg.mkPen(color='k'))
 
     def _update_slider(self, val, plot, slider_values, current_label, formatter):
         pass
@@ -446,6 +480,16 @@ class PyQtGraphParser(BackendParserBase):
         Enable or disable the grid for the given plot.
         """
         plot.showGrid(x=grid, y=grid)
+
+    @staticmethod
+    def set_mouse(plot: PlotItem):
+        vb = plot.vb
+        vb.setMouseEnabled(x=False, y=False)
+
+    def set_view_box_zoom(self):
+        for plot in self._layout.values():
+            vb = plot.vb
+            vb.setMouseMode(vb.RectMode)
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass
