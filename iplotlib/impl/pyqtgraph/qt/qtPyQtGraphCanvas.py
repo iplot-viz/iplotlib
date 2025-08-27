@@ -100,15 +100,17 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         if mode == Canvas.MOUSE_MODE_SELECT:
             # self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
-            return
+            self._parser.set_view_box()
         elif mode == Canvas.MOUSE_MODE_CROSSHAIR:
-            # self._parser.activate_cursor()
-            return
+            self._parser.set_view_box()
+            self._parser.activate_cursor()
         elif mode == Canvas.MOUSE_MODE_PAN:
-            return
+            self._parser.set_view_box()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
             self._parser.set_view_box_zoom()
         elif mode == Canvas.MOUSE_MODE_MARKER:
+            self._parser.set_view_box()
+            """
             if not self._marker_window.isVisible():
                 self._marker_window.show()
             elif self._marker_window.isMinimized():
@@ -116,3 +118,4 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             else:
                 self._marker_window.raise_()
                 self._marker_window.activateWindow()
+            """
