@@ -63,7 +63,7 @@ class Signal(ABC):
         # keep label for legend plot
         self.label = self.label
 
-    def merge(self, old_signal: 'Signal'):
+    def merge(self, old_signal: dict):
         pass
 
     def set_properties(self, properties: dict):
@@ -128,16 +128,16 @@ class SignalXY(Signal, IplotSignalAdapter):
         self.marker_size = SignalXY.marker_size
         self.step = SignalXY.step
 
-    def merge(self, old_signal: 'SignalXY'):
+    def merge(self, old_signal: dict):
         super().merge(old_signal)
-        self.color = old_signal.color
-        self.original_color = old_signal.original_color
-        self.line_style = old_signal.line_style
-        self.line_size = old_signal.line_size
-        self.marker = old_signal.marker
-        self.marker_size = old_signal.marker_size
-        self.step = old_signal.step
-        self.markers_list = old_signal.markers_list
+        self.color = old_signal['color']
+        self.original_color = old_signal['original_color']
+        self.line_style = old_signal['line_style']
+        self.line_size = old_signal['line_size']
+        self.marker = old_signal['marker']
+        self.marker_size = old_signal['marker_size']
+        self.step = old_signal['step']
+        self.markers_list = old_signal['markers_list']
 
     def add_marker(self, marker: Marker):
         self.markers_list.append(marker)

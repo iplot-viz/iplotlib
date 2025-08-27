@@ -106,28 +106,28 @@ class Plot(ABC):
                 elif isinstance(signal, SignalContour):
                     signal.reset_preferences()
 
-    def merge(self, old_plot: 'Plot'):
-        self.plot_title = old_plot.plot_title
-        self.legend = old_plot.legend
-        self.legend_position = old_plot.legend_position
-        self.legend_layout = old_plot.legend_layout
-        self.font_size = old_plot.font_size
-        self.font_color = old_plot.font_color
-        self.background_color = old_plot.background_color
-        self.grid = old_plot.grid
-        self.log_scale = old_plot.log_scale
+    def merge(self, old_plot: dict):
+        self.plot_title = old_plot['plot_title']
+        self.legend = old_plot['legend']
+        self.legend_position = old_plot['legend_position']
+        self.legend_layout = old_plot['legend_layout']
+        self.font_size = old_plot['font_size']
+        self.font_color = old_plot['font_color']
+        self.background_color = old_plot['background_color']
+        self.grid = old_plot['grid']
+        self.log_scale = old_plot['log_scale']
 
         for idxAxis, axis in enumerate(self.axes):
-            if axis and idxAxis < len(old_plot.axes):
+            if axis and idxAxis < len(old_plot['axes']):
                 # Found matching axes
-                if isinstance(axis, Collection) and isinstance(old_plot.axes[idxAxis], Collection):
+                if isinstance(axis, Collection) and isinstance(old_plot['axes'][idxAxis], Collection):
                     for idxSubAxis, subAxis in enumerate(axis):
-                        if subAxis and idxSubAxis < len(old_plot.axes[idxAxis]):
-                            old_axis = old_plot.axes[idxAxis][idxSubAxis]
-                            subAxis.merge(old_axis)
+                        if subAxis and idxSubAxis < len(old_plot['axes'][idxAxis]):
+                            old_axis_properties = old_plot['axes'][idxAxis][idxSubAxis]
+                            subAxis.merge(old_axis_properties)
                 else:
-                    old_axis = old_plot.axes[idxAxis]
-                    axis.merge(old_axis)
+                    old_axis_properties = old_plot['axes'][idxAxis]
+                    axis.merge(old_axis_properties)
 
         # signals are merged at canvas level to handle move between plots
 
@@ -237,14 +237,14 @@ class PlotXY(Plot):
         self.marker_size = PlotXY.marker_size
         self.step = PlotXY.step
 
-    def merge(self, old_plot: 'PlotXY'):
+    def merge(self, old_plot: dict):
         super().merge(old_plot)
-        self._color_index = old_plot._color_index
-        self.line_style = old_plot.line_style
-        self.line_size = old_plot.line_size
-        self.marker = old_plot.marker
-        self.marker_size = old_plot.marker_size
-        self.step = old_plot.step
+        self._color_index = old_plot['_color_index']
+        self.line_style = old_plot['line_style']
+        self.line_size = old_plot['line_size']
+        self.marker = old_plot['marker']
+        self.marker_size = old_plot['marker_size']
+        self.step = old_plot['step']
 
 
 @dataclass
