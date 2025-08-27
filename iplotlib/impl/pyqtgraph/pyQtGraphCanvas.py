@@ -281,26 +281,42 @@ class PyQtGraphParser(BackendParserBase):
             else:
                 # draw_fn = mpl_axes.contour
                 img = pg.ImageItem(z_data)
+                img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
+                plot_item.addItem(img)
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
                 # plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
-                plot_item.addItem(img)
-                bar = pg.ColorBarItem(values=(np.min(z_data), np.max(z_data)),
-                                      colorMap=pg.colormap.get(color_map),
+
+                colormap_obj = pg.colormap.get('viridis')
+                bar = pg.ColorBarItem(values=(np.min(z_data)[0], np.max(z_data)[0]),
+                                      colorMap=colormap_obj,
                                       label='Z value',
                                       interactive=False)
                 bar.setImageItem(img)
+                levels = np.linspace(np.min(z_data)[0], np.max(z_data)[0], contour_levels)
 
-                for idx, v in enumerate(contour_levels):
+                for i, v in enumerate(levels):
+                    """
                     # Colores de las isocurvas
                     norm_values = (v - np.min(z_data)) / (np.max(z_data) - np.min(z_data))
-                    color = color_map.map(norm_values, mode='float')
-                    color_rgba = tuple(int(c * 255) for c in color)
+                    color = colormapp.map(norm_values, mode='float')
+                    color_rgba = tuple(int(c * 255) for c in color) 
                     pen_color = pg.mkColor(color_rgba)
                     pen = pg.mkPen(color=pen_color, width=2)
+                    """
 
-                    iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=pen)
+                    iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
+                    # Scaled data
+                    """
+                    scale_x = np.ptp(x_data) / z_data.shape[1]
+                    scale_y = np.ptp(y_data) / z_data.shape[0]
+                    iso_curve.setTransform(
+                        pg.Qt.QtGui.QTransform().scale(scale_x, scale_y).translate(np.min(x_data)[0] / scale_x,
+                                                                                   np.min(y_data)[0] / scale_y))
+                    """
                     iso_curve.setParentItem(img)
+                    iso_curve.setZValue(10)
+
                     plot_item.addItem(iso_curve)
                     curves.append(iso_curve)
 
@@ -360,24 +376,10 @@ class PyQtGraphParser(BackendParserBase):
                 row_id = stack_id
             key = (row, col)
             if key not in self._layout:
-
-                # Crear axis con offset correcto (si el eje es de fechas u otro personalizado)
-                axis_items = {}
-                for ax_idx in range(len(i_plot.axes)):
-                    if isinstance(i_plot.axes[ax_idx], Collection):
-                        axis = i_plot.axes[ax_idx][stack_id]
-                    else:
-                        axis = i_plot.axes[ax_idx]
-
-                    if ax_idx == 0:  # X axis
-                        axis_items['bottom'] = self.create_offsets_pyqt(axis, orientation='bottom')
-                    elif ax_idx == 1:  # Y axis
-                        axis_items['left'] = self.create_offsets_pyqt(axis, orientation='left')
-
-                plot = pg.PlotItem(axisItems=axis_items)  # axisItems={'bottom': FechaPyQtGraph(orientation='bottom')}
+                plot = pg.PlotItem()  # axisItems={'bottom': FechaPyQtGraph(orientation='bottom')}
                 self.figure.addItem(plot, row=row, col=col, rowspan=i_plot.row_span, colspan=i_plot.col_span)
-
                 self._layout[key] = plot
+
             plot = self._layout[key]
             prev_plot = plot
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
