@@ -90,27 +90,7 @@ class MatplotlibParser(BackendParserBase):
             elif not legend_text.endswith('*') and signal.isDownsampled:
                 mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
 
-    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, data: List[BufferObject]):
-        try:
-            cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
-            plot = cache_item.plot()
-        except AttributeError:
-            cache_item = None
-            plot = None
-
-        plot_lines = None
-        if isinstance(signal, SignalXY):
-            if isinstance(plot, PlotXYWithSlider):
-                plot_lines = self.do_mpl_line_plot_xy_slider(signal, mpl_axes, plot, cache_item, data[0], data[1],
-                                                             data[2])
-            else:
-                plot_lines = self.do_mpl_line_plot_xy(signal, mpl_axes, plot, cache_item, data[0], data[1])
-        elif isinstance(signal, SignalContour):
-            plot_lines = self.do_mpl_line_plot_contour(signal, mpl_axes, plot, data[0], data[1], data[2])
-
-        self._signal_impl_shape_lut.update({id(signal): plot_lines})
-
-    def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data):
+    def do_impl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data):
 
         def _get_visible_data(xd, yd, lo, hi):
             x_displayed = xd[((xd > lo) & (xd < hi))]
@@ -189,8 +169,8 @@ class MatplotlibParser(BackendParserBase):
 
         return plot_lines
 
-    def do_mpl_line_plot_xy_slider(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXYWithSlider, cache_item,
-                                   x_data, y_data, z_data):
+    def do_impl_line_plot_xy_slider(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXYWithSlider, cache_item,
+                                    x_data, y_data, z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
 
         # plot.slider.valtext.set_text(pandas.Timestamp(z_data[plot.slider.val]))
@@ -245,8 +225,8 @@ class MatplotlibParser(BackendParserBase):
 
         return plot_lines
 
-    def do_mpl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
-                                 z_data):
+    def do_impl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
+                                  z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
         contour_filled = self._pm.get_value(plot, 'contour_filled')
         legend_format = self._pm.get_value(plot, "legend_format")
@@ -290,7 +270,7 @@ class MatplotlibParser(BackendParserBase):
 
         return plot_lines
 
-    def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
+    def do_impl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
         shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
         try:
             cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
@@ -776,117 +756,67 @@ class MatplotlibParser(BackendParserBase):
 
                     logger.debug(f"callback update {ranges[0]} axis range to {ranges[1]}")
 
-    def process_ipl_axis(self, axis: Axis, ax_idx, plot: Plot, impl_plot: MPLAxes):
-        super().process_ipl_axis(axis, ax_idx, plot, impl_plot)
-        mpl_axis = self.get_impl_axis(impl_plot, ax_idx)  # type: MPLAxis
-        self._axis_impl_plot_lut.update({id(axis): impl_plot})
+    def process_ipl_log_axis(self, mpl_axis: MPLAxis, plot: Plot):
+        if isinstance(mpl_axis, YAxis):
+            log_scale = self._pm.get_value(plot, 'log_scale')
+            if log_scale:
+                mpl_axis.axes.set_yscale('log')
+                # Format for minor ticks
+                y_minor = LogLocator(base=10, subs=(1.0,))
+                mpl_axis.set_minor_locator(y_minor)
 
-        if isinstance(axis, Axis):
+    def process_ipl_axis_params(self, fc, fs, axis: Axis, mpl_axis: MPLAxis):
+        label_props = dict(color=fc)
 
-            if isinstance(mpl_axis, YAxis):
-                log_scale = self._pm.get_value(plot, 'log_scale')
-                if log_scale:
-                    mpl_axis.axes.set_yscale('log')
-                    # Format for minor ticks
-                    y_minor = LogLocator(base=10, subs=(1.0,))
-                    mpl_axis.set_minor_locator(y_minor)
+        # Set ticks on the top and right axis
+        if self._pm.get_value(self.canvas, 'ticks_position'):
+            tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
+        else:
+            tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
 
-            fc = self._pm.get_value(axis, 'font_color')
-            fs = self._pm.get_value(axis, 'font_size')
+        if fs is not None and fs > 0:
+            label_props.update({'fontsize': fs})
+            tick_props.update({'labelsize': fs})
+        if axis.label is not None:
+            mpl_axis.set_label_text(axis.label, **label_props)
 
-            mpl_axis._font_color = fc
-            mpl_axis._font_size = fs
-            mpl_axis._label = axis.label
+        mpl_axis.set_tick_params(**tick_props)
 
-            label_props = dict(color=fc)
-            # Set ticks on the top and right axis
-            if self._pm.get_value(self.canvas, 'ticks_position'):
-                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
-            else:
-                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
+    def process_ipl_axis_formatter(self, impl_plot: MPLAxes, mpl_axis: MPLAxis, ax_idx: int):
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx,
+                                                             offset_lut=ci.offsets,
+                                                             roundh=self._pm.get_value(self.canvas, 'round_hour')))
 
-            if fs is not None and fs > 0:
-                label_props.update({'fontsize': fs})
-                tick_props.update({'labelsize': fs})
-            if axis.label is not None:
-                mpl_axis.set_label_text(axis.label, **label_props)
-
-            mpl_axis.set_tick_params(**tick_props)
-
-        if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
-            if self._pm.get_value(self.canvas, 'autoscale') and ax_idx == 1:
-                self.autoscale_y_axis(impl_plot)
-            else:
-                logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
-                self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
-        if isinstance(axis, LinearAxis) and axis.is_date:
-            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-            mpl_axis.set_major_formatter(
-                NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets,
-                                        roundh=self._pm.get_value(self.canvas, 'round_hour')))
-
-        # Configurate number of ticks and labels
-        tick_number = self._pm.get_value(axis, 'tick_number')
+    def process_ipl_axis_ticks(self, tick_number, mpl_axis: MPLAxis):
         mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
-    @BackendParserBase.run_in_one_thread
-    def process_ipl_signal(self, signal: Signal):
-        """Refresh a specific signal. This will repaint the necessary items after the signal
-            data has changed.
-
-        Args:
-            signal (Signal): An object derived from abstract iplotlib.core.signal.Signal
-        """
-
-        if not isinstance(signal, Signal):
-            return
-
-        # mpl_axes = self._signal_impl_plot_lut.get(id(signal))  # type: MPLAxes
+    def process_ipl_signal_impl_plot(self, signal: Signal):
         mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
         if not isinstance(mpl_axes, MPLAxes):
             logger.error(f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
+        return mpl_axes
 
-        # All good, make a data access request.
-        # logger.debug(f"\tprocessipsignal before ts_start {signal.ts_start} ts_end {signal.ts_end}
-        # status: {signal.status_info.result} ")
-        signal_data = signal.get_data()
-
-        data = self.transform_data(mpl_axes, signal_data)
-
-        if hasattr(signal, 'envelope') and signal.envelope:
-            if len(data) != 3:
-                logger.error(f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data"
-                             f" arrays (==3). {signal}")
-                return
-            self.do_mpl_envelope_plot(signal, mpl_axes, data[0], data[1], data[2])
-        else:
-            if len(data) < 2:
-                logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
-                             f"arrays (<2). {signal}")
-                return
-            self.do_mpl_line_plot(signal, mpl_axes, data)
-
-        self.update_axis_labels_with_units(mpl_axes, signal)
-
-        # Check for annotations if the marker labels are visible
+    def process_ipl_signal_annotations(self, signal: Signal, impl_plot: MPLAxes):
         if isinstance(signal, SignalXY):
-            if mpl_axes.get_lines()[0].get_marker() == 'None':
+            if impl_plot.get_lines()[0].get_marker() == 'None':
                 return
             if signal.markers_list:
-                annotations_names = [child.get_text() for child in mpl_axes.get_children() if
+                annotations_names = [child.get_text() for child in impl_plot.get_children() if
                                      isinstance(child, plt.Annotation)]
                 for marker in signal.markers_list:
                     if marker.visible:
                         # Check if the marker is already drawn
                         if marker.name not in annotations_names:
-                            x = self.transform_value(mpl_axes, 0, marker.xy[0], inverse=True)
+                            x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
                             y = marker.xy[1]
-                            mpl_axes.annotate(text=marker.name,
-                                              xy=(x, y),
-                                              xytext=(x, y),
-                                              bbox=dict(boxstyle="round,pad=0.3", edgecolor="black",
-                                                        facecolor=marker.color))
+                            impl_plot.annotate(text=marker.name,
+                                               xy=(x, y),
+                                               xytext=(x, y),
+                                               bbox=dict(boxstyle="round,pad=0.3",
+                                                         edgecolor="black",
+                                                         facecolor=marker.color))
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         """This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
@@ -1212,44 +1142,15 @@ class MatplotlibParser(BackendParserBase):
         else:
             return None
 
-    def get_oaw_axis_limits(self, impl_plot, ax_idx: int):
-        """Offset-aware version of implementation's get_x_limit, get_y_limit"""
-        begin, end = (None, None)
-        if ax_idx == 0:
-            begin, end = self.get_impl_x_axis_limits(impl_plot)
-        elif ax_idx == 1:
-            begin, end = self.get_impl_y_axis_limits(impl_plot)
-        return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
-
-    def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
+    def set_impl_x_axis_limits(self, impl_plot: MPLAxes, limits: tuple):
         if isinstance(impl_plot, MPLAxes):
             impl_plot.set_xlim(limits[0], limits[1])
 
-    def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
+    def set_impl_y_axis_limits(self, impl_plot: MPLAxes, limits: tuple):
         if isinstance(impl_plot, MPLAxes):
             impl_plot.set_ylim(limits[0], limits[1])
         else:
             return None
-
-    def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits) -> None:
-        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        if ci.offsets[ax_idx] is None:
-            ci.offsets[ax_idx] = self.create_offset(limits)
-
-        if ci.offsets[ax_idx] is not None:
-            begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
-            end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
-            logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 0")
-        else:
-            begin = limits[0]
-            end = limits[1]
-            logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 1")
-        if ax_idx == 0:
-            if begin == end and begin is not None:
-                begin = end - 1
-            self.set_impl_x_axis_limits(impl_plot, (begin, end))
-        elif ax_idx == 1:
-            self.set_impl_y_axis_limits(impl_plot, (begin, end))
 
     def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
         """Implementations should set the x_axis label text"""
@@ -1263,27 +1164,6 @@ class MatplotlibParser(BackendParserBase):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
         return self._impl_plot_cache_table.transform_value(impl_plot, ax_idx, value, inverse=inverse)
-
-    def transform_data(self, impl_plot: Any, data):
-        """This function post processes data if it cannot be plotted with matplotlib directly.
-        Currently, it transforms data if it is a large integer which can cause overflow in matplotlib"""
-        ret = []
-        if isinstance(data, Collection):
-            for i, d in enumerate(data):
-                logger.debug(f"\t transform data i={i} d = {d} ")
-                ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-                if ci and ci.offsets[i] is None and i == 0:
-                    ci.offsets[i] = self.create_offset(d)
-
-                if ci and ci.offsets[i] is not None:
-                    logger.debug(f"\tApplying data offsets {ci.offsets[i]} to to plot {id(impl_plot)} ax_idx: {i}")
-                    if isinstance(d, Collection):
-                        ret.append(BufferObject([np.int64(e) - ci.offsets[i] for e in d]))
-                    else:
-                        ret.append(np.int64(d) - ci.offsets[i])
-                else:
-                    ret.append(d)
-        return ret
 
 
 def get_data_range(data, axis_idx):

@@ -26,8 +26,8 @@ from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits, IplSliderLimits
-from iplotlib.core.plot import Plot, PlotXYWithSlider
-from iplotlib.core.signal import Signal
+from iplotlib.core.plot import Plot, PlotXY, PlotXYWithSlider, PlotContour
+from iplotlib.core.signal import Signal, SignalXY, SignalContour
 import iplotLogging.setupLogger as Sl
 
 from iplotlib.core.history_manager import HistoryManager
@@ -99,6 +99,7 @@ class ImplementationPlotCacheTable:
             if isinstance(base, int) or type(base).__name__ == 'int64':
                 value = int(value)
         return value - base if inverse else value + base
+        # return value / 10000 if inverse else value * 10000
 
 
 class BackendParserBase(ABC):
@@ -278,7 +279,7 @@ class BackendParserBase(ABC):
         """
 
     @abstractmethod
-    def process_ipl_axis(self, axis: Axis, ax_idx: int, plot: Plot, impl_plot: Any):
+    def process_ipl_log_axis(self, axis: Any, plot: Plot):
         """
         Prepare the implementation axis.
 
@@ -293,14 +294,108 @@ class BackendParserBase(ABC):
         """
 
     @abstractmethod
+    def process_ipl_axis_params(self, fc, fs, axis: Axis, impl_axis: Any):
+        """
+        param
+        """
+
+    @abstractmethod
+    def process_ipl_axis_formatter(self, impl_plot: Any, axis_item: Any, ax_idx: int):
+        pass
+
+    @abstractmethod
+    def process_ipl_axis_ticks(self, tick_number, impl_plot: Any):
+        pass
+
+    def process_ipl_axis(self, axis: Axis, ax_idx: int, plot: Plot, impl_plot: Any):
+        """
+        Prepare the implementation axis.
+
+        :param axis
+        :param ax_idx
+        :param plot: An Axis instance
+        :param impl_plot
+        :type axis: Axis
+        :type ax_idx: int
+        :type plot: Plot
+        :type impl_plot: Any
+        """
+
+        axis_item = self.get_impl_axis(impl_plot, ax_idx)
+        self._axis_impl_plot_lut.update({id(axis): impl_plot})
+
+        if isinstance(axis, Axis):
+            self.process_ipl_log_axis(axis_item, plot)
+
+            fc = self._pm.get_value(axis, 'font_color')
+            fs = self._pm.get_value(axis, 'font_size')
+
+            axis_item._font_color = fc
+            axis_item._font_size = fs
+            axis_item._label = axis.label
+
+            self.process_ipl_axis_params(fc, fs, axis, axis_item)
+
+        if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
+            if self._pm.get_value(self.canvas, 'autoscale') and ax_idx == 1:
+                self.autoscale_y_axis(impl_plot)
+            else:
+                logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
+                self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
+
+        if isinstance(axis, LinearAxis) and axis.is_date:
+            self.process_ipl_axis_formatter(impl_plot, axis_item, ax_idx)
+
+        # Set number of ticks and labels
+        tick_number = self._pm.get_value(axis, 'tick_number')
+        self.process_ipl_axis_ticks(tick_number, axis_item)
+
+    @abstractmethod
+    def process_ipl_signal_impl_plot(self, signal: Signal):
+        """"""
+
+    @abstractmethod
+    def process_ipl_signal_annotations(self, signal: Signal, impl_plot: Any):
+        """
+        """
+
     @run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
         """
-        Prepare the implementation shape for the plot of a signal.
+        Refresh a specific signal. This will repaint the necessary items after the signal
+                    data has changed.
 
-        :param signal: A Signal instance
-        :type signal: Signal
+        Args:
+            signal (Signal): An object derived from abstract iplotlib.core.signal.Signal
         """
+
+        if not isinstance(signal, Signal):
+            return
+
+        impl_plot = self.process_ipl_signal_impl_plot(signal)
+
+        # All good, make a data access request
+        signal_data = signal.get_data()
+
+        data = self.transform_data(impl_plot, signal_data)
+
+        if hasattr(signal, 'envelope') and signal.envelope:
+            if len(data) != 3:
+                logger.error(f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data"
+                             f" arrays (==3). {signal}")
+                return
+            self.do_impl_envelope_plot(signal, impl_plot, data[0], data[1], data[2])
+        else:
+            if len(data) < 2:
+                logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
+                             f"arrays (<2). {signal}")
+                return
+            self.do_impl_line_plot(signal, impl_plot, data)
+
+        self.update_axis_labels_with_units(impl_plot, signal)
+
+        # Check for annotations if the marker labels are visible
+        self.process_ipl_signal_annotations(signal, impl_plot)
 
     def update_axis_labels_with_units(self, impl_plot: Any, signal: Signal):
         """
@@ -346,6 +441,45 @@ class BackendParserBase(ABC):
         # label from preferences takes precedence.
         if hasattr(xaxis, "_label") and xaxis._label:
             self.set_impl_x_axis_label_text(impl_plot, xaxis._label)
+
+    @abstractmethod
+    def do_impl_line_plot_xy(self, signal: SignalXY, impl_plot: Any, plot: PlotXY, cache_item, x_data, y_data):
+
+        """"""
+
+    @abstractmethod
+    def do_impl_line_plot_xy_slider(self, signal: SignalXY, impl_plot: Any, plot: PlotXYWithSlider, cache_item,
+                                    x_data, y_data, z_data):
+        """"""
+
+    @abstractmethod
+    def do_impl_line_plot_contour(self, signal: SignalContour, impl_plot: Any, plot: PlotContour, x_data, y_data,
+                                  z_data):
+        """"""
+
+    @abstractmethod
+    def do_impl_envelope_plot(self, signal: Signal, impl_plot: Any, x_data, y1_data, y2_data):
+        """"""
+
+    def do_impl_line_plot(self, signal: Signal, impl_plot: Any, data: List[BufferObject]):
+        try:
+            cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            plot = cache_item.plot()
+        except AttributeError:
+            cache_item = None
+            plot = None
+
+        plot_lines = None
+        if isinstance(signal, SignalXY):
+            if isinstance(plot, PlotXYWithSlider):
+                plot_lines = self.do_impl_line_plot_xy_slider(signal, impl_plot, plot, cache_item, data[0], data[1],
+                                                              data[2])
+            else:
+                plot_lines = self.do_impl_line_plot_xy(signal, impl_plot, plot, cache_item, data[0], data[1])
+        elif isinstance(signal, SignalContour):
+            plot_lines = self.do_impl_line_plot_contour(signal, impl_plot, plot, data[0], data[1], data[2])
+
+        self._signal_impl_shape_lut.update({id(signal): plot_lines})
 
     def update_range_axis(self, range_axis: RangeAxis, ax_idx: int, impl_plot: Any, which='current'):
         """
@@ -665,12 +799,17 @@ class BackendParserBase(ABC):
         Implementations should return the y range
         """
 
-    @abstractmethod
     def get_oaw_axis_limits(self, impl_plot: Any, ax_idx: int):
         """
         Offset-aware version of implementation's `get_impl_x_axis_limits`, `get_impl_y_axis_limits`
         The `oaw` in the function name stands for OffsetAWare.
         """
+        begin, end = (None, None)
+        if ax_idx == 0:
+            begin, end = self.get_impl_x_axis_limits(impl_plot)
+        elif ax_idx == 1:
+            begin, end = self.get_impl_y_axis_limits(impl_plot)
+        return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
 
     @abstractmethod
     def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
@@ -684,12 +823,29 @@ class BackendParserBase(ABC):
         Implementations should set the y range
         """
 
-    @abstractmethod
     def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
         """
         Offset-aware version of implementation's `set_impl_x_axis_limits`, `set_impl_y_axis_limits`
         The `oaw` in the function name stands for OffsetAWare.
         """
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if ci.offsets[ax_idx] is None:
+            ci.offsets[ax_idx] = self.create_offset(limits)
+
+        if ci.offsets[ax_idx] is not None:
+            begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
+            end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
+            logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 0")
+        else:
+            begin = limits[0]
+            end = limits[1]
+            logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 1")
+        if ax_idx == 0:
+            if begin == end and begin is not None:
+                begin = end - 1
+            self.set_impl_x_axis_limits(impl_plot, (begin, end))
+        elif ax_idx == 1:
+            self.set_impl_y_axis_limits(impl_plot, (begin, end))
 
     @abstractmethod
     def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
@@ -710,9 +866,31 @@ class BackendParserBase(ABC):
         float when offset is int)
         """
 
-    @abstractmethod
     def transform_data(self, impl_plot: Any, data):
         """
         This function post processes data if it cannot be plot with matplotlib directly.
         Currently, it transforms data if it is a large integer which can cause overflow in matplotlib
         """
+        ret = []
+        if isinstance(data, Collection):
+            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            for i, d in enumerate(data):
+                logger.debug(f"\t transform data i={i} d = {d} ")
+
+                offset = None
+                if ci:
+                    offset = ci.offsets[i]
+                    if offset is None and i == 0:
+                        offset = self.create_offset(d)
+                        ci.offsets[i] = offset
+
+                if ci and offset is not None:
+                    logger.debug(f"\tApplying data offsets {offset} to plot {id(impl_plot)} ax_idx: {i}")
+                    if isinstance(d, Collection) and not isinstance(d, (str, bytes)):
+                        arr = np.asarray(d, dtype=np.int64)
+                        ret.append(BufferObject(arr - offset))  # / 10000
+                    else:
+                        ret.append(np.int64(d) - offset)  # / 10000
+                else:
+                    ret.append(d)
+        return ret

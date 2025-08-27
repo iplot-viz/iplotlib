@@ -1,8 +1,10 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 import datetime
+import numpy as np
 from typing import Any, Callable, Collection, List, Tuple
 import pyqtgraph as pg
+from pyqtgraph import IsocurveItem
 from pyqtgraph.Qt import QtCore
 
 from iplotLogging import setupLogger
@@ -20,8 +22,9 @@ from iplotlib.core import (Axis,
                            SignalXY,
                            SignalContour)
 
-from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem
+
+from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 
 logger = setupLogger.get_logger(__name__)
 # Mapa de estilos de línea de matplotlib → QtCore.Qt.PenStyle
@@ -90,7 +93,7 @@ class PyQtGraphParser(BackendParserBase):
         """
         pass
 
-    def do_line_plot_xy(self, signal: SignalXY, plot: PlotItem, i_plot: PlotXY, cache_item, x_data, y_data):
+    def do_impl_line_plot_xy(self, signal: SignalXY, plot: PlotItem, i_plot: PlotXY, cache_item, x_data, y_data):
         def _get_visible_data(xd, yd, lo, hi):
             x_displayed = xd[((xd > lo) & (xd < hi))]
             y_displayed = yd[((xd > lo) & (xd < hi))]
@@ -106,7 +109,7 @@ class PyQtGraphParser(BackendParserBase):
 
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[PlotDataItem]]
         style = self.get_signal_style(signal)
-        # draw_fn = plot.plot
+        draw_fn = plot.plot
         # Reflect downsampling in legend
         self.legend_downsampled_signal(signal, plot, plot_lines)
 
@@ -153,7 +156,7 @@ class PyQtGraphParser(BackendParserBase):
                     n.setVisible(o.isVisible())
         else:
             if x_data.ndim == 1 and y_data.ndim == 1:
-                plot_lines = [[plot.plot(x=x_data, y=y_data, **style)]]
+                plot_lines = [draw_fn(x=x_data, y=y_data, **style)]
                 # _update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 lines = plot.plot(x=x_data, y=y_data, **style)
@@ -217,15 +220,102 @@ class PyQtGraphParser(BackendParserBase):
 
         return style
 
-    def do_line_plot_xy_slider(self, signal: SignalXY, mpl_axes: PlotItem, plot: PlotXYWithSlider, cache_item,
-                               x_data, y_data, z_data):
+    def do_impl_line_plot_xy_slider(self, signal: SignalXY, mpl_axes: PlotItem, plot: PlotXYWithSlider, cache_item,
+                                    x_data, y_data, z_data):
         pass
 
-    def do_line_plot_contour(self, signal: SignalContour, mpl_axes: PlotItem, plot: PlotContour, x_data, y_data,
-                             z_data):
-        pass
+    def do_impl_line_plot_contour(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContour, x_data, y_data,
+                                  z_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[IsocurveItem]
+        contour_filled = self._pm.get_value(plot, 'contour_filled')
+        legend_format = self._pm.get_value(plot, "legend_format")
+        equivalent_units = self._pm.get_value(plot, "equivalent_units")
+        contour_levels = self._pm.get_value(signal, 'contour_levels')
+        color_map = self._pm.get_value(signal, 'color_map')
 
-    def do_envelope_plot(self, signal: Signal, mpl_axes: PlotItem, x_data, y1_data, y2_data):
+        curves = []
+
+        if isinstance(plot_lines, IsocurveItem):
+            for tp in plot_lines.collections:
+                tp.remove()
+
+            if contour_filled:
+                pass
+                # draw_fn = mpl_axes.contourf
+            else:
+                img = pg.ImageItem(z_data)
+
+            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                plot_item.addItem(img)
+                bar = pg.ColorBarItem(values=(np.min(z_data), np.max(z_data)),
+                                      colorMap=pg.colormap.get(color_map),
+                                      label='Z value',
+                                      interactive=False)
+                bar.setImageItem(img)
+
+                for idx, v in enumerate(contour_levels):
+                    # Colores de las isocurvas
+                    norm_values = (v - np.min(z_data)) / (np.max(z_data) - np.min(z_data))
+                    color = color_map.map(norm_values, mode='float')
+                    color_rgba = tuple(int(c * 255) for c in color)
+                    pen_color = pg.mkColor(color_rgba)
+                    pen = pg.mkPen(color=pen_color, width=2)
+
+                    iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=pen)
+                    iso_curve.setParentItem(img)
+                    plot_item.addItem(iso_curve)
+                    curves.append(iso_curve)
+
+                # plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
+
+                # if legend_format == 'in_lines':
+                # if not contour_filled:
+                # plt.clabel(plot_lines, inline=1, fontsize=10)
+            # if equivalent_units:
+            # mpl_axes.set_aspect('equal', adjustable='box')
+            # self.figure.canvas.draw_idle()
+        else:
+            if contour_filled:
+                # draw_fn = mpl_axes.contourf
+                pass
+            else:
+                # draw_fn = mpl_axes.contour
+                img = pg.ImageItem(z_data)
+
+            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+                # plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
+                plot_item.addItem(img)
+                bar = pg.ColorBarItem(values=(np.min(z_data), np.max(z_data)),
+                                      colorMap=pg.colormap.get(color_map),
+                                      label='Z value',
+                                      interactive=False)
+                bar.setImageItem(img)
+
+                for idx, v in enumerate(contour_levels):
+                    # Colores de las isocurvas
+                    norm_values = (v - np.min(z_data)) / (np.max(z_data) - np.min(z_data))
+                    color = color_map.map(norm_values, mode='float')
+                    color_rgba = tuple(int(c * 255) for c in color)
+                    pen_color = pg.mkColor(color_rgba)
+                    pen = pg.mkPen(color=pen_color, width=2)
+
+                    iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=pen)
+                    iso_curve.setParentItem(img)
+                    plot_item.addItem(iso_curve)
+                    curves.append(iso_curve)
+
+                # if legend_format == 'color_bar':
+                # color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
+                # color_bar.set_label(z_data.unit, size=self.legend_size)
+                # else:
+                # if not contour_filled:
+                # plt.clabel(plot_lines, inline=1, fontsize=10)
+            # if equivalent_units:
+            # mpl_axes.set_aspect('equal', adjustable='box')
+
+        return curves
+
+    def do_impl_envelope_plot(self, signal: Signal, mpl_axes: PlotItem, x_data, y1_data, y2_data):
         pass
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
@@ -270,16 +360,22 @@ class PyQtGraphParser(BackendParserBase):
                 row_id = stack_id
             key = (row, col)
             if key not in self._layout:
-                plot = pg.PlotItem(axisItems={'bottom': FechaPyQtGraph(orientation='bottom')})
-                self.figure.addItem(plot, row=row, col=col, rowspan=i_plot.row_span, colspan=i_plot.col_span)
 
-                """
-                import numpy as np
-                x = np.arange(1000, dtype=float)
-                y = np.random.normal(size=1000)
-                y += 5 * np.sin(x / 100)
-                plot.plot(y=y)
-                """
+                # Crear axis con offset correcto (si el eje es de fechas u otro personalizado)
+                axis_items = {}
+                for ax_idx in range(len(i_plot.axes)):
+                    if isinstance(i_plot.axes[ax_idx], Collection):
+                        axis = i_plot.axes[ax_idx][stack_id]
+                    else:
+                        axis = i_plot.axes[ax_idx]
+
+                    if ax_idx == 0:  # X axis
+                        axis_items['bottom'] = self.create_offsets_pyqt(axis, orientation='bottom')
+                    elif ax_idx == 1:  # Y axis
+                        axis_items['left'] = self.create_offsets_pyqt(axis, orientation='left')
+
+                plot = pg.PlotItem(axisItems=axis_items)  # axisItems={'bottom': FechaPyQtGraph(orientation='bottom')}
+                self.figure.addItem(plot, row=row, col=col, rowspan=i_plot.row_span, colspan=i_plot.col_span)
 
                 self._layout[key] = plot
             plot = self._layout[key]
@@ -387,77 +483,69 @@ class PyQtGraphParser(BackendParserBase):
     def _axis_update_callback(self, mpl_axes):
         pass
 
-    def process_ipl_axis(self, axis: Axis, ax_idx, plot: Plot, impl_plot: PlotItem):
-        pass
+    def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
+        if axis_item.orientation == 'left':
+            log_scale = self._pm.get_value(plot, 'log_scale')
+            if log_scale:
+                # Set log scale for AxisItem
+                pass
 
-    @BackendParserBase.run_in_one_thread
-    def process_ipl_signal(self, signal: Signal):
-        if not isinstance(signal, Signal):
-            return
+    def process_ipl_axis_params(self, fc, fs, axis: Axis, axis_item: AxisItem):
+        label_props = dict(maxTickLevel=0)
 
-            # plot = self._signal_impl_plot_lut.get(id(signal))  # type: PlotItem
+        # Set ticks on the top and right axis
+        if self._pm.get_value(self.canvas, 'ticks_position'):
+            label_props['maxTickLevel'] = 2
+        else:
+            label_props['maxTickLevel'] = 0
+
+        if axis.label is not None:
+            axis_item.setLabel(axis.label)
+
+        # axis_item.set_tick_params(**tick_props)
+        axis_item.setStyle(**label_props)
+
+    def process_ipl_axis_formatter(self, impl_plot: PlotItem, axis_item: AxisItem, ax_idx: int):
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        """
+        mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx,
+                                                             offset_lut=ci.offsets,
+                                                             roundh=self._pm.get_value(self.canvas, 'round_hour')))
+        """
+        return
+
+    def process_ipl_axis_ticks(self, tick_number, axis_item: AxisItem):
+        # axis_item.setStyle()
+        return
+
+    def process_ipl_signal_impl_plot(self, signal: Signal):
         plot = self._signal_impl_plot_lut.get(signal.uid)  # type: PlotItem
         if not isinstance(plot, PlotItem):
-            logger.error(f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
+            logger.error(f"PlotItem not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
+        return plot
 
-        # All good, make a data access request.
-        # logger.debug(f"\tprocessipsignal before ts_start {signal.ts_start} ts_end {signal.ts_end}
-        # status: {signal.status_info.result} ")
-        signal_data = signal.get_data()
+    def process_ipl_signal_annotations(self, signal: Signal, impl_plot: PlotItem):
+        return
 
-        data = self.transform_data(plot, signal_data)
-
-        if hasattr(signal, 'envelope') and signal.envelope:
-            if len(data) != 3:
-                logger.error(f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data"
-                             f" arrays (==3). {signal}")
-                return
-            self.do_envelope_plot(signal, plot, data[0], data[1], data[2])
-        else:
-            if len(data) < 2:
-                logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
-                             f"arrays (<2). {signal}")
-                return
-            self.do_line_plot(signal, plot, data)
-
-        self.update_axis_labels_with_units(plot, signal)
-
-        # Check for annotations if the marker labels are visible
-        return  # TODO remove
         if isinstance(signal, SignalXY):
-            if plot.dataItems[0].scatter.opts.get('symbol') == 'None':
+            if impl_plot.get_lines()[0].get_marker() == 'None':
                 return
             if signal.markers_list:
-                annotations_names = [child.get_text() for child in plot.get_children() if
+                annotations_names = [child.get_text() for child in impl_plot.get_children() if
                                      isinstance(child, plt.Annotation)]
                 for marker in signal.markers_list:
                     if marker.visible:
                         # Check if the marker is already drawn
                         if marker.name not in annotations_names:
-                            x = self.transform_value(plot, 0, marker.xy[0], inverse=True)
+                            x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
                             y = marker.xy[1]
-                            plot.annotate(text=marker.name,
-                                          xy=(x, y),
-                                          xytext=(x, y),
-                                          bbox=dict(boxstyle="round,pad=0.3", edgecolor="black",
-                                                    facecolor=marker.color))
-
-    def do_line_plot(self, signal: Signal, plot: PlotItem, data: List[BufferObject]):
-
-        cache_item = self._impl_plot_cache_table.get_cache_item(plot)
-        i_plot = cache_item.plot()
-        plot_lines = None
-        if isinstance(signal, SignalXY):
-            if isinstance(i_plot, PlotXYWithSlider):
-                plot_lines = self.do_line_plot_xy_slider(signal, plot, i_plot, cache_item, data[0], data[1],
-                                                         data[2])
-            else:
-                plot_lines = self.do_line_plot_xy(signal, plot, i_plot, cache_item, data[0], data[1])
-        elif isinstance(signal, SignalContour):
-            plot_lines = self.do_line_plot_contour(signal, plot, i_plot, data[0], data[1], data[2])
-
-        self._signal_impl_shape_lut.update({id(signal): plot_lines})
+                            impl_plot.annotate(text=marker.name,
+                                               xy=(x, y),
+                                               xytext=(x, y),
+                                               bbox=dict(boxstyle="round,pad=0.3",
+                                                         edgecolor="black",
+                                                         facecolor=marker.color))
 
     def clear(self):
         """
@@ -486,10 +574,19 @@ class PyQtGraphParser(BackendParserBase):
         vb = plot.vb
         vb.setMouseEnabled(x=False, y=False)
 
+    def set_view_box(self):
+        for plot in self._layout.values():
+            vb = plot.vb
+            vb.setMouseMode(vb.PanMode)
+            vb.enableAutoRange(x=True, y=True)
+
     def set_view_box_zoom(self):
         for plot in self._layout.values():
             vb = plot.vb
             vb.setMouseMode(vb.RectMode)
+            vb.enableAutoRange(x=False, y=False)
+            vb.setAspectLocked(False)
+            vb.setLimits(minXRange=1e-9, minYRange=1e-12)
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass
@@ -511,7 +608,11 @@ class PyQtGraphParser(BackendParserBase):
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
-        pass
+        for plot in self._layout.values():
+            if not plot:
+                continue
+
+            self._cursors.append(pyQtCrosshair(plot))
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
@@ -529,27 +630,53 @@ class PyQtGraphParser(BackendParserBase):
     def get_impl_y_axis_limits(self, plot: PlotItem) -> AxisItem:
         return plot.getViewBox().viewRange()[1]
 
-    def get_oaw_axis_limits(self):
+    def set_impl_x_axis_label_text(self, plot: PlotItem, text: str):
+        # self.get_impl_x_axis(plot).set_label_text(text)
         pass
 
-    def set_impl_x_axis_label_text(self):
+    def set_impl_x_axis_limits(self, plot: PlotItem, limits: tuple):
+        if isinstance(plot, PlotItem):
+            vb = plot.getViewBox()
+            vb.setXRange(limits[0], limits[1], padding=0)
+
+    def set_impl_y_axis_label_text(self, plot: PlotItem, text: str):
+        """Implementations should set the y_axis label text"""
+        # self.get_impl_y_axis(plot).set_label_text(text)
         pass
 
-    def set_impl_x_axis_limits(self):
-        pass
-
-    def set_impl_y_axis_label_text(self):
-        pass
-
-    def set_impl_y_axis_limits(self):
-        pass
-
-    def set_oaw_axis_limits(self):
-        pass
+    def set_impl_y_axis_limits(self, plot: PlotItem, limits: tuple):
+        if isinstance(plot, PlotItem):
+            vb = plot.getViewBox()
+            vb.setYRange(limits[0], limits[1], padding=0)
 
     def transform_data(self, plot: PlotItem, data) -> List[Any]:
-        # TODO
-        return data
+        """This function post processes data if it cannot be plotted with matplotlib directly.
+                Currently, it transforms data if it is a large integer which can cause overflow in matplotlib"""
+        ret = []
+        if isinstance(data, Collection):
+            ci = self._impl_plot_cache_table.get_cache_item(plot)
+            for i, d in enumerate(data):
+                logger.debug(f"\t transform data i={i} d = {d} ")
 
-    def transform_value(self):
-        pass
+                offset = None
+                if ci:
+                    offset = ci.offsets[i]
+                    if offset is None and i == 0:
+                        offset = self.create_offset(d)
+                        ci.offsets[i] = offset
+
+                if ci and offset is not None:
+                    logger.debug(f"\tApplying data offsets {offset} to plot {id(plot)} ax_idx: {i}")
+                    if isinstance(d, Collection) and not isinstance(d, (str, bytes)):
+                        arr = np.asarray(d, dtype=np.int64)
+                        ret.append(BufferObject(arr / 10000))
+                    else:
+                        ret.append(np.int64(d) / 10000)
+                else:
+                    ret.append(d)
+        return ret
+
+    def transform_value(self, plot: PlotItem, ax_idx: int, value: Any, inverse=False):
+        """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
+        float when offset is int)"""
+        return self._impl_plot_cache_table.transform_value(plot, ax_idx, value, inverse=inverse)
