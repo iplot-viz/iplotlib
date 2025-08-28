@@ -6,6 +6,7 @@ from typing import Any, Callable, Collection, List, Tuple
 import pyqtgraph as pg
 from pyqtgraph import IsocurveItem
 from pyqtgraph.Qt import QtCore
+from pyqtgraph.Qt.QtWidgets import QSlider, QVBoxLayout, QGridLayout
 
 from iplotLogging import setupLogger
 from iplotProcessing.core import BufferObject
@@ -74,6 +75,8 @@ class PyQtGraphParser(BackendParserBase):
         self.legend_size = 8
         self._cursors = []
 
+        self.main_layout = QGridLayout()
+
         self.figure = pg.GraphicsLayoutWidget()
         self.figure.setBackground('w')
         self._layout = {}
@@ -83,6 +86,8 @@ class PyQtGraphParser(BackendParserBase):
             self.enable_tight_layout()
         else:
             self.disable_tight_layout()
+
+        self.main_layout.addWidget(self.figure)
 
     def export_image(self, filename: str, **kwargs):
         super().export_image(filename, **kwargs)
@@ -281,7 +286,7 @@ class PyQtGraphParser(BackendParserBase):
             else:
                 # draw_fn = mpl_axes.contour
                 img = pg.ImageItem(z_data)
-                img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
+                # img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
                 plot_item.addItem(img)
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
@@ -351,9 +356,17 @@ class PyQtGraphParser(BackendParserBase):
     def process_ipl_plot_contour(self):
         pass
 
-    def process_ipl_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider, grid_item: Any, stack_sz: int,
-                                   h_space: float):
-        pass
+    def process_ipl_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider):
+        # Slider creation
+        plot_with_slider.slider = QSlider(QtCore.Qt.Orientation.Horizontal)
+        plot_with_slider.slider.setMinimum(1)
+        plot_with_slider.slider.setMaximum(100)
+        plot_with_slider.slider.setValue(1)
+        plot_with_slider.slider.setTickPosition(QSlider.TickPosition.TicksBothSides)
+        plot_with_slider.slider.setTickInterval(10)
+
+        # Register the callback function to update the plot when the slider value changes
+        plot_with_slider.slider.valueChanged.connect(self._update_slider)
 
     def process_ipl_plot(self, i_plot: Plot, col: int, row: int):
         if not isinstance(i_plot, Plot):
@@ -379,6 +392,23 @@ class PyQtGraphParser(BackendParserBase):
                 plot = pg.PlotItem()  # axisItems={'bottom': FechaPyQtGraph(orientation='bottom')}
                 self.figure.addItem(plot, row=row, col=col, rowspan=i_plot.row_span, colspan=i_plot.col_span)
                 self._layout[key] = plot
+
+            if isinstance(i_plot, PlotXYWithSlider):
+                # self.process_ipl_plot_xy_slider(i_plot)
+                # Slider creation
+                slider = QSlider(QtCore.Qt.Orientation.Horizontal)
+                slider.setMinimum(1)
+                slider.setMaximum(100)
+                slider.setValue(1)
+                slider.setTickPosition(QSlider.TickPosition.TicksBothSides)
+                slider.setTickInterval(10)
+
+                # Register the callback function to update the plot when the slider value changes
+                slider.valueChanged.connect(self._update_slider)
+
+                i_plot.slider = slider
+
+                self.main_layout.addWidget(slider, row + 1, col)
 
             plot = self._layout[key]
             prev_plot = plot
