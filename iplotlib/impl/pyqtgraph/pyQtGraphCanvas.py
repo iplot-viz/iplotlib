@@ -281,7 +281,7 @@ class PyQtGraphParser(BackendParserBase):
             else:
                 # draw_fn = mpl_axes.contour
                 img = pg.ImageItem(z_data)
-                img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
+                # img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
                 plot_item.addItem(img)
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
