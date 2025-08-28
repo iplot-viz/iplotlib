@@ -328,59 +328,11 @@ class Canvas(ABC):
         focus_plot = self.focus_plot
         for c, column in enumerate(self.plots):
             for r, row in enumerate(column):
-                if row and (not focus_plot or row == focus_plot):
-                    for p, plot in enumerate(row.signals.values()):
-                        for s, pl_signal in enumerate(plot):
-                            col_name = f"plot{r + 1}.{c + 1}"
-                            if len(row.signals) > 1:
-                                col_name += f".{p + 1}"
-                            if pl_signal.alias:
-                                col_name += f"_{pl_signal.alias}"
-                            else:
-                                col_name += f"_{pl_signal.name}"
+                if not row or (focus_plot and row != focus_plot):
+                    continue
+                df = row.get_signals_as_df(r, c)
+                x = pd.concat([x, df], axis=1)
 
-                            # Refresh limits
-                            # Now when using pulses, if no start time or end time are specified, the default is set to
-                            # 0 and None respectively. For that reason, it is necessary to check the ts_end of the
-                            # different signals and create the mask depending on the circumstances.
-                            if isinstance(row, PlotXYWithSlider):
-                                timerange = pl_signal.time
-                                y_data = pl_signal.y_data
-                            else:
-                                if pl_signal.ts_end is None:
-                                    mask = pl_signal.x_data >= pl_signal.ts_start
-                                else:
-                                    mask = (pl_signal.x_data >= pl_signal.ts_start) & (
-                                            pl_signal.x_data <= pl_signal.ts_end)
-                                timerange = pl_signal.x_data[mask]
-                                y_data = pl_signal.y_data[mask]
-
-                            # Check min and max dates
-                            if timerange.size > 0 and bool(min(timerange) > (1 << 53) and
-                                                           max(timerange) < pd.Timestamp.max.value):
-                                timestamps = [pd.Timestamp(value) for value in timerange]
-                                format_ts = [ts.strftime("%Y-%m-%dT%H:%M:%S.%f") + "{:03d}".format(ts.nanosecond) + "Z"
-                                             for ts in timestamps]
-                            else:
-                                format_ts = timerange
-
-                            if pl_signal.envelope:
-                                result = []
-                                for i in range(len(pl_signal.y_data)):
-                                    min_values = pl_signal.y_data[i]
-                                    max_values = pl_signal.z_data[i]
-                                    avg_values = pl_signal.data_store[3][i]
-                                    result.append(f"({min_values};{avg_values};{max_values})")
-                                x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
-                                x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
-                            else:
-                                timeframe = pd.Series(format_ts, name=f"{col_name}.time")
-                                if len(y_data[0]) > 1:
-                                    dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data.{i}" for i in range(
-                                        len(y_data[0]))])  # we could use x data in header
-                                else:
-                                    dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data"])
-                                x = pd.concat([x, timeframe, dataframe], axis=1)
         return x.to_csv(index=False)
 
     def update_canvas_properties(self, properties: dict):
