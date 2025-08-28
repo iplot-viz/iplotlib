@@ -242,55 +242,55 @@ class Canvas(ABC):
                 else:
                     continue
 
-    def merge(self, old_canvas: 'Canvas'):
+    def merge(self, old_canvas: dict):
         """
         Reset the preferences to default values.
         """
 
         # Propagated attributes
-        self.font_size = old_canvas.font_size
-        self.font_color = old_canvas.font_color
-        self.background_color = old_canvas.background_color
-        self.tick_number = old_canvas.tick_number
-        self.log_scale = old_canvas.log_scale
-        self.line_style = old_canvas.line_style
-        self.line_size = old_canvas.line_size
-        self.marker = old_canvas.marker
-        self.marker_size = old_canvas.marker_size
-        self.step = old_canvas.step
-        self.legend = old_canvas.legend
-        self.legend_position = old_canvas.legend_position
-        self.legend_layout = old_canvas.legend_layout
-        self.grid = old_canvas.grid
-        self.autoscale = old_canvas.autoscale
-        self.contour_filled = old_canvas.contour_filled
-        self.legend_format = old_canvas.legend_format
-        self.equivalent_units = old_canvas.equivalent_units
-        self.color_map = old_canvas.color_map
-        self.contour_levels = old_canvas.contour_levels
+        self.font_size = old_canvas['font_size']
+        self.font_color = old_canvas['font_color']
+        self.background_color = old_canvas['background_color']
+        self.tick_number = old_canvas['tick_number']
+        self.log_scale = old_canvas['log_scale']
+        self.line_style = old_canvas['line_style']
+        self.line_size = old_canvas['line_size']
+        self.marker = old_canvas['marker']
+        self.marker_size = old_canvas['marker_size']
+        self.step = old_canvas['step']
+        self.legend = old_canvas['legend']
+        self.legend_position = old_canvas['legend_position']
+        self.legend_layout = old_canvas['legend_layout']
+        self.grid = old_canvas['grid']
+        self.autoscale = old_canvas['autoscale']
+        self.contour_filled = old_canvas['contour_filled']
+        self.legend_format = old_canvas['legend_format']
+        self.equivalent_units = old_canvas['equivalent_units']
+        self.color_map = old_canvas['color_map']
+        self.contour_levels = old_canvas['contour_levels']
         # Specific attributes
-        self.title = old_canvas.title
-        self.shared_x_axis = old_canvas.shared_x_axis
-        self.round_hour = old_canvas.round_hour
-        self.ticks_position = old_canvas.ticks_position
-        self.enable_x_label_crosshair = old_canvas.enable_x_label_crosshair
-        self.enable_y_label_crosshair = old_canvas.enable_y_label_crosshair
-        self.enable_val_label_crosshair = old_canvas.enable_val_label_crosshair
-        self.crosshair_color = old_canvas.crosshair_color
-        self.full_mode_all_stack = old_canvas.full_mode_all_stack
-        self.focus_plot = old_canvas.focus_plot
-        self.max_diff = old_canvas.max_diff
+        self.title = old_canvas['title']
+        self.shared_x_axis = old_canvas['shared_x_axis']
+        self.round_hour = old_canvas['round_hour']
+        self.ticks_position = old_canvas['ticks_position']
+        self.enable_x_label_crosshair = old_canvas['enable_x_label_crosshair']
+        self.enable_y_label_crosshair = old_canvas['enable_y_label_crosshair']
+        self.enable_val_label_crosshair = old_canvas['enable_val_label_crosshair']
+        self.crosshair_color = old_canvas['crosshair_color']
+        self.full_mode_all_stack = old_canvas['full_mode_all_stack']
+        self.focus_plot = old_canvas['focus_plot']
+        self.max_diff = old_canvas['contour_levels']
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
-                if plot and idxColumn < len(old_canvas.plots) and idxPlot < len(old_canvas.plots[idxColumn]):
+                if plot and idxColumn < len(old_canvas['plots']) and idxPlot < len(old_canvas['plots'][idxColumn]):
                     # Found matching plot
-                    old_plot = old_canvas.plots[idxColumn][idxPlot]
-                    if not old_plot:
+                    old_plot_properties = old_canvas['plots'][idxColumn][idxPlot]
+                    if not old_plot_properties:
                         continue
 
-                    if type(plot) is type(old_plot):
-                        plot.merge(old_plot)
+                    if type(plot).__name__ == old_plot_properties['_type'].split(".")[-1]:
+                        plot.merge(old_plot_properties)
                     else:
                         # Handle when it is a plot of a different type.
                         # Simplest way: Warning that a plot has been drawn where before there was a plot of a
@@ -299,17 +299,20 @@ class Canvas(ABC):
                         logger.warning("Merge with different type of plots")
 
         # Gather all old signals into a map with uid as key
-        def compute_signal_uniqkey(computed_signal: Signal):
+        def compute_signal_uniqkey(computed_signal: Signal | dict):
             # Consider signal is same if it has the same row uid, name
-            signal_key = computed_signal.uid + ";" + computed_signal.name
+            if isinstance(computed_signal, Signal):
+                signal_key = computed_signal.uid + ";" + computed_signal.name
+            else:
+                signal_key = computed_signal['uid'] + ";" + computed_signal['name']
             return signal_key
 
-        map_old_signals: Dict[str, Signal] = {}
-        for columns in old_canvas.plots:
+        map_old_signals: Dict[str, dict] = {}
+        for columns in old_canvas['plots']:
             for old_plot in columns:
                 if not old_plot:
                     continue
-                for old_signals in old_plot.signals.values():
+                for old_signals in old_plot['signals'].values():
                     for old_signal in old_signals:
                         key = compute_signal_uniqkey(old_signal)
                         map_old_signals[key] = old_signal
