@@ -77,8 +77,9 @@ class PyQtGraphParser(BackendParserBase):
 
         self.main_layout = QGridLayout()
 
-        self.figure = pg.GraphicsLayoutWidget()
-        self.figure.setBackground('w')
+        # self.figure = pg.GraphicsLayoutWidget()
+        # self.figure.setBackground('w')
+
         self._layout = {}
         self._impl_plot_ranges_hash = dict()
 
@@ -86,8 +87,6 @@ class PyQtGraphParser(BackendParserBase):
             self.enable_tight_layout()
         else:
             self.disable_tight_layout()
-
-        self.main_layout.addWidget(self.figure)
 
     def export_image(self, filename: str, **kwargs):
         super().export_image(filename, **kwargs)
@@ -388,10 +387,17 @@ class PyQtGraphParser(BackendParserBase):
             else:
                 row_id = stack_id
             key = (row, col)
+
+            pyqt_layout = QVBoxLayout()
+
             if key not in self._layout:
-                plot = pg.PlotItem()  # axisItems={'bottom': FechaPyQtGraph(orientation='bottom')}
-                self.figure.addItem(plot, row=row, col=col, rowspan=i_plot.row_span, colspan=i_plot.col_span)
+                plot_widget = pg.PlotWidget()
+                plot = plot_widget.getPlotItem()  # axisItems={'bottom': FechaPyQtGraph(orientation='bottom')}
+                # self.figure.addItem(plt, row=row, col=col, rowspan=i_plot.row_span, colspan=i_plot.col_span)
+                plot_widget.setBackground("w")
+
                 self._layout[key] = plot
+                pyqt_layout.addWidget(plot_widget)
 
             if isinstance(i_plot, PlotXYWithSlider):
                 # self.process_ipl_plot_xy_slider(i_plot)
@@ -408,7 +414,10 @@ class PyQtGraphParser(BackendParserBase):
 
                 i_plot.slider = slider
 
-                self.main_layout.addWidget(slider, row + 1, col)
+                pyqt_layout.addWidget(slider)
+
+            self.main_layout.addLayout(pyqt_layout, row, col, i_plot.row_span, i_plot.col_span,
+                                       pg.QtCore.Qt.AlignmentFlag.AlignCenter)
 
             plot = self._layout[key]
             prev_plot = plot
@@ -586,6 +595,7 @@ class PyQtGraphParser(BackendParserBase):
         super().clear()
         self._layout = {}
         # TODO improve this
+        """
         for item in self.figure.items()[:]:
             try:
                 # Solo intentar remover PlotItems y LegendItems
@@ -593,6 +603,7 @@ class PyQtGraphParser(BackendParserBase):
                     self.figure.removeItem(item)
             except Exception:
                 pass
+        """
 
     @staticmethod
     def set_grid(plot: PlotItem, grid: bool = True):

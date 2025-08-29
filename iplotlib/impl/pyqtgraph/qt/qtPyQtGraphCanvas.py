@@ -39,7 +39,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._vlayout = QVBoxLayout(self)
         self._vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._vlayout.setContentsMargins(QMargins())
-        self._vlayout.addWidget(self._parser.figure)
+        # self._vlayout.addWidget(self._parser.figure)
+        self._vlayout.addLayout(self._parser.main_layout)
 
         self.setLayout(self._vlayout)
 
