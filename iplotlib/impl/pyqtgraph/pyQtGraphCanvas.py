@@ -3,10 +3,11 @@
 import datetime
 import numpy as np
 from typing import Any, Callable, Collection, List, Tuple
+import pandas as pd
 import pyqtgraph as pg
 from pyqtgraph import IsocurveItem
 from pyqtgraph.Qt import QtCore
-from pyqtgraph.Qt.QtWidgets import QSlider, QVBoxLayout, QGridLayout
+from pyqtgraph.Qt.QtWidgets import QSlider, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QWidget
 
 from iplotLogging import setupLogger
 from iplotProcessing.core import BufferObject
@@ -130,9 +131,8 @@ class PyQtGraphParser(BackendParserBase):
 
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and y_data.ndim == 1:
-                line = plot_lines[0][0]
+                line = plot_lines[0]
                 self.set_line_data(style, line, x_data, y_data)
-                self.set_line_style(style, line)
                 # _update_marker_by_point_count(line, x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):
@@ -221,12 +221,44 @@ class PyQtGraphParser(BackendParserBase):
         step = self._pm.get_value(signal, 'step') or 'linear'
         step_mode = STEP_MAP_PG.get(step)
         style['stepMode'] = step_mode
+        style['antialias'] = True
 
         return style
 
-    def do_impl_line_plot_xy_slider(self, signal: SignalXY, mpl_axes: PlotItem, plot: PlotXYWithSlider, cache_item,
+    def do_impl_line_plot_xy_slider(self, signal: SignalXY, plot: PlotItem, i_plot: PlotXYWithSlider, cache_item,
                                     x_data, y_data, z_data):
-        pass
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[PlotDataItem]]
+        style = self.get_signal_style(signal)
+        draw_fn = plot.plot
+
+        ysub_data = y_data[i_plot.slider.value()]
+
+        # Review to implement directly in PlotXY class
+        if signal.color is None:
+            signal.color = i_plot.get_next_color()
+
+        if isinstance(plot_lines, list):
+            if x_data.ndim == 1 and ysub_data.ndim == 1:
+                line = plot_lines[0]
+                self.set_line_data(style, line, x_data, ysub_data)
+                # _update_marker_by_point_count(line, x_data, style)
+            elif x_data.ndim == 1 and ysub_data.ndim == 2:
+                for i, line in enumerate(plot_lines):
+                    line[0].setData(x=x_data, y=y_data[:, i])
+                    line[0].setPen(style['pen'])
+                    # _update_marker_by_point_count(line[0], x_data, style)
+        else:
+            if x_data.ndim == 1 and ysub_data.ndim == 1:
+                plot_lines = [draw_fn(x_data, ysub_data, **style)]
+            elif x_data.ndim == 1 and ysub_data.ndim == 2:
+                lines = draw_fn(x_data, ysub_data, **style)
+                plot_lines = [[line] for line in lines]
+                for i, line in enumerate(plot_lines):
+                    line[0].set_label(f"{signal.label}[{i}]")
+
+        signal.lines = plot_lines
+
+        return plot_lines
 
     def do_impl_line_plot_contour(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContour, x_data, y_data,
                                   z_data):
@@ -355,17 +387,44 @@ class PyQtGraphParser(BackendParserBase):
     def process_ipl_plot_contour(self):
         pass
 
-    def process_ipl_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider):
+    def process_ipl_plot_xy_slider(self, i_plot: PlotXYWithSlider, pyqt_layout):
+        # Check if there was a previous plot_with_slider with a value
+        if i_plot.slider_last_val is not None:
+            value = i_plot.slider_last_val
+        else:
+            value = 0
+
         # Slider creation
-        plot_with_slider.slider = QSlider(QtCore.Qt.Orientation.Horizontal)
-        plot_with_slider.slider.setMinimum(1)
-        plot_with_slider.slider.setMaximum(100)
-        plot_with_slider.slider.setValue(1)
-        plot_with_slider.slider.setTickPosition(QSlider.TickPosition.TicksBothSides)
-        plot_with_slider.slider.setTickInterval(10)
+        slider = QSlider(QtCore.Qt.Orientation.Horizontal)
+        slider.setMinimum(0)
+        slider.setMaximum(i_plot.signals[1][0].y_data.shape[0] - 1)
+        slider.setValue(value)
+        # slider.set TickPosition(QSlider.TickPosition.TicksBothSides)
+        slider.setTickInterval(1)
+
+        i_plot.slider = slider
+
+        # Annotate labels along the slider axis
+        h_layout = QHBoxLayout()
+
+        # Get data for the slider
+        slider_values = i_plot.signals[1][0].z_data
+        min_label = QLabel(f"{pd.Timestamp(slider_values[0])}")
+        max_label = QLabel(f"{pd.Timestamp(slider_values[-1])}")
+        current_label = QLabel(F"{pd.Timestamp(slider_values[0])}")
+        h_layout.addWidget(min_label)
+        h_layout.addStretch()
+        h_layout.addWidget(current_label)
+        h_layout.addStretch()
+        h_layout.addWidget(max_label)
 
         # Register the callback function to update the plot when the slider value changes
-        plot_with_slider.slider.valueChanged.connect(self._update_slider)
+        slider.valueChanged.connect(lambda val, i_p=i_plot: self._update_slider(val, i_p, slider_values, current_label))
+
+        pyqt_layout.addWidget(slider)
+        pyqt_layout.addLayout(h_layout)
+
+        return pyqt_layout
 
     def process_ipl_plot(self, i_plot: Plot, col: int, row: int):
         if not isinstance(i_plot, Plot):
@@ -400,21 +459,7 @@ class PyQtGraphParser(BackendParserBase):
                 pyqt_layout.addWidget(plot_widget)
 
             if isinstance(i_plot, PlotXYWithSlider):
-                # self.process_ipl_plot_xy_slider(i_plot)
-                # Slider creation
-                slider = QSlider(QtCore.Qt.Orientation.Horizontal)
-                slider.setMinimum(1)
-                slider.setMaximum(100)
-                slider.setValue(1)
-                slider.setTickPosition(QSlider.TickPosition.TicksBothSides)
-                slider.setTickInterval(10)
-
-                # Register the callback function to update the plot when the slider value changes
-                slider.valueChanged.connect(self._update_slider)
-
-                i_plot.slider = slider
-
-                pyqt_layout.addWidget(slider)
+                pyqt_layout = self.process_ipl_plot_xy_slider(i_plot, pyqt_layout)
 
             self.main_layout.addLayout(pyqt_layout, row, col, i_plot.row_span, i_plot.col_span,
                                        pg.QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -422,7 +467,7 @@ class PyQtGraphParser(BackendParserBase):
             plot = self._layout[key]
             prev_plot = plot
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
-            # Keep references to iplotlib instances for ease of access in callbacks.
+            # Keep references to iplotlib instances for ease of access in callbacks
             self._impl_plot_cache_table.register(plot, self.canvas, i_plot, key, signals)
             plot.enableAutoRange(x=True, y=True)
 
@@ -518,8 +563,16 @@ class PyQtGraphParser(BackendParserBase):
         legend.setBrush(pg.mkBrush('w'))
         legend.setPen(pg.mkPen(color='k'))
 
-    def _update_slider(self, val, plot, slider_values, current_label, formatter):
-        pass
+    def _update_slider(self, val, i_plot: PlotXYWithSlider, slider_values, current_label):
+        for c_row in i_plot.signals.values():
+            for c_signal in c_row:
+                self.process_ipl_signal(c_signal)
+
+        # Refresh current label value
+        current_value = pd.Timestamp(slider_values[int(val)])
+        current_label.setText(f"{current_value}")
+
+        i_plot.slider_last_val = val
 
     def _axis_update_callback(self, mpl_axes):
         pass
@@ -568,7 +621,6 @@ class PyQtGraphParser(BackendParserBase):
 
     def process_ipl_signal_annotations(self, signal: Signal, impl_plot: PlotItem):
         return
-
         if isinstance(signal, SignalXY):
             if impl_plot.get_lines()[0].get_marker() == 'None':
                 return
@@ -594,16 +646,25 @@ class PyQtGraphParser(BackendParserBase):
         """
         super().clear()
         self._layout = {}
-        # TODO improve this
-        """
-        for item in self.figure.items()[:]:
-            try:
-                # Solo intentar remover PlotItems y LegendItems
-                if isinstance(item, (pg.PlotItem, pg.LegendItem)):
-                    self.figure.removeItem(item)
-            except Exception:
-                pass
-        """
+        i = 0
+        self._clear_layout(self.main_layout, i)
+
+    def _clear_layout(self, layout, i):
+        while layout.count():
+            item = layout.itemAt(i)
+            if item is None:
+                break
+
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+            child_layout = item.layout()
+            if child_layout is not None:
+                self._clear_layout(child_layout, 0)
+                child_layout.deleteLater()
+
+            i += 1
 
     @staticmethod
     def set_grid(plot: PlotItem, grid: bool = True):
@@ -674,8 +735,7 @@ class PyQtGraphParser(BackendParserBase):
         return plot.getViewBox().viewRange()[1]
 
     def set_impl_x_axis_label_text(self, plot: PlotItem, text: str):
-        # self.get_impl_x_axis(plot).set_label_text(text)
-        pass
+        self.get_impl_x_axis(plot).setLabel(text)
 
     def set_impl_x_axis_limits(self, plot: PlotItem, limits: tuple):
         if isinstance(plot, PlotItem):
@@ -683,9 +743,7 @@ class PyQtGraphParser(BackendParserBase):
             vb.setXRange(limits[0], limits[1], padding=0)
 
     def set_impl_y_axis_label_text(self, plot: PlotItem, text: str):
-        """Implementations should set the y_axis label text"""
-        # self.get_impl_y_axis(plot).set_label_text(text)
-        pass
+        self.get_impl_y_axis(plot).setLabel(text)
 
     def set_impl_y_axis_limits(self, plot: PlotItem, limits: tuple):
         if isinstance(plot, PlotItem):
