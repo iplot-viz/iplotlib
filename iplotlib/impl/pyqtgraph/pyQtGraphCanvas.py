@@ -79,6 +79,7 @@ class PyQtGraphParser(BackendParserBase):
         self._layout = {}
         self._cell_gl = {}  # (row, col) -> GraphicsLayout sublayout
         self._layout_stacks = {}  # (row, col, stack_id) -> PlotItem
+        self._slider_placeholders = {}  # (row, col) -> QGraphicsProxyWidget
         self._impl_plot_ranges_hash = dict()
 
         if tight_layout:
@@ -95,6 +96,41 @@ class PyQtGraphParser(BackendParserBase):
             self.figure.addItem(cell_gl, row=row, col=col, rowspan=rowspan, colspan=colspan)
             self._cell_gl[key] = cell_gl
         return cell_gl
+
+    def _ensure_slider_row(self, cell_gl: pg.GraphicsLayout, cell_key: Tuple[int, int],
+                           row_idx: int, height: int = 28, widget: QtWidgets.QWidget = None):
+        """Ensure a reserved row (below plots) to host a slider or placeholder."""
+        # Remove any previous placeholder for this cell
+        proxy_old = self._slider_placeholders.pop(cell_key, None)
+        if proxy_old is not None:
+            try:
+                cell_gl.removeItem(proxy_old)
+            except Exception:
+                pass
+
+        # Use provided widget or a thin spacer placeholder
+        if widget is None:
+            widget = QtWidgets.QWidget()
+            widget.setFixedHeight(height)
+            widget.setMinimumWidth(10)
+
+        proxy = QtWidgets.QGraphicsProxyWidget()
+        proxy.setWidget(widget)
+        # Preferred size helps GraphicsLayout respect height
+        proxy.setPreferredSize(widget.width() or 10, height)
+
+        # Add as a new row under the last plot row in this cell
+        cell_gl.addItem(proxy, row=row_idx, col=0)
+        self._slider_placeholders[cell_key] = proxy
+
+    def _remove_slider_row(self, cell_gl: pg.GraphicsLayout, cell_key: Tuple[int, int]):
+        """Remove the reserved slider row for a given cell if present."""
+        proxy = self._slider_placeholders.pop(cell_key, None)
+        if proxy is not None:
+            try:
+                cell_gl.removeItem(proxy)
+            except Exception:
+                pass
 
     def export_image(self, filename: str, **kwargs):
         super().export_image(filename, **kwargs)
@@ -458,6 +494,15 @@ class PyQtGraphParser(BackendParserBase):
             last_row_id = max(visible_row_ids)
             self._layout_stacks[(row, col, last_row_id)].getAxis('bottom').setStyle(showValues=True)
 
+        # Reserve a slider row only for plots that require it
+        cell_key = (row, col)
+        if isinstance(i_plot, PlotXYWithSlider):
+            # Place the slider (or placeholder) on the next row under the last stack plot
+            self._ensure_slider_row(cell_gl, cell_key, last_row_id + 1, height=28)
+        else:
+            # Ensure no slider row remains for non-slider plots
+            self._remove_slider_row(cell_gl, cell_key)
+
     def set_plot_title(self, i_plot: Plot, plot: PlotItem, stack_id: int):
         if i_plot.plot_title is None or stack_id != 0:
             return
@@ -599,6 +644,7 @@ class PyQtGraphParser(BackendParserBase):
         self._layout = {}
         self._cell_gl = {}
         self._layout_stacks = {}
+        self._slider_placeholders = {}
         # Elimina items relevantes del GraphicsLayoutWidget
         for item in self.figure.items()[:]:
             try:
