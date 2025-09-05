@@ -10,8 +10,6 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 from iplotLogging import setupLogger
 from iplotProcessing.core import BufferObject
 from iplotlib.core import (Axis,
-                           LinearAxis,
-                           RangeAxis,
                            Canvas,
                            BackendParserBase,
                            Plot,
@@ -76,7 +74,6 @@ class PyQtGraphParser(BackendParserBase):
 
         self.figure = pg.GraphicsLayoutWidget()
         self.figure.setBackground('w')
-        self._layout = {}
         self._cell_gl = {}  # (row, col) -> GraphicsLayout sublayout
         self._layout_stacks = {}  # (row, col, stack_id) -> PlotItem
         self._slider_placeholders = {}  # (row, col) -> QGraphicsProxyWidget
@@ -387,9 +384,9 @@ class PyQtGraphParser(BackendParserBase):
 
         cell_gl = self._ensure_cell_layout(row, col, i_plot.row_span, i_plot.col_span)
 
-        plot = None
-        prev_plot = None
         visible_row_ids = []
+
+        l_key = (row, col)
         for stack_id, key in enumerate(sorted(i_plot.signals.keys())):
             is_stack_plot_focused = self._focus_plot_stack_key == key
 
@@ -398,26 +395,23 @@ class PyQtGraphParser(BackendParserBase):
             signals = i_plot.signals.get(key) or list()
 
             if not full_mode_all_stack and self._focus_plot_stack_key is not None:
-                row_id = 0
+                stack_id = 0
             else:
-                row_id = stack_id
-            visible_row_ids.append(row_id)
-            key = (row, col)
+                stack_id = stack_id
+            visible_row_ids.append(stack_id)
 
-            k_stack = (row, col, row_id)
-            if key not in self._layout:
+            if l_key not in self._layout_stacks:
                 plot = pg.PlotItem()
                 cell_gl.addItem(plot, row=0, col=0)
-                self._layout[key] = plot
-                self._layout_stacks[k_stack] = plot
-            elif k_stack not in self._layout_stacks:
+                self._layout_stacks.setdefault(l_key, {})[stack_id] = plot
+            elif stack_id not in self._layout_stacks[l_key]:
                 pi = pg.PlotItem()
-                cell_gl.addItem(pi, row=row_id, col=0)
-                pi.setXLink(self._layout[key])
+                cell_gl.addItem(pi, row=stack_id, col=0)
+                pi.vb.setXLink(self._layout_stacks[l_key][0])
                 pi.getAxis('bottom').setStyle(showValues=False)
-                self._layout_stacks[k_stack] = pi
+                self._layout_stacks[l_key][stack_id] = pi
 
-            plot = self._layout_stacks[k_stack]
+            plot = self._layout_stacks[l_key][stack_id]
             prev_plot = plot
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
             # Keep references to iplotlib instances for ease of access in callbacks.
@@ -454,16 +448,16 @@ class PyQtGraphParser(BackendParserBase):
                 self.process_ipl_signal(signal)
 
         if visible_row_ids:
-            for rid in set(visible_row_ids):
-                self._layout_stacks[(row, col, rid)].getAxis('bottom').setStyle(showValues=False)
+            for s_id in set(visible_row_ids):
+                self._layout_stacks[l_key][s_id].getAxis('bottom').setStyle(showValues=False)
             last_row_id = max(visible_row_ids)
-            self._layout_stacks[(row, col, last_row_id)].getAxis('bottom').setStyle(showValues=True)
+            self._layout_stacks[l_key][last_row_id].getAxis('bottom').setStyle(showValues=True)
 
         if isinstance(i_plot, PlotXYWithSlider):
             try:
-                slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+                slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
                 slider.setRange(0, 100)  # dummy range for testing
-                slider.setFocusPolicy(QtCore.Qt.NoFocus)
+                slider.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
                 proxy = QtWidgets.QGraphicsProxyWidget()
                 proxy.setWidget(slider)
@@ -611,7 +605,6 @@ class PyQtGraphParser(BackendParserBase):
         Set the canvas gridspec for the figure.
         """
         super().clear()
-        self._layout = {}
         self._cell_gl = {}
         self._layout_stacks = {}
         self._slider_placeholders = {}
@@ -642,24 +635,26 @@ class PyQtGraphParser(BackendParserBase):
         vb.setMouseEnabled(x=False, y=False)
 
     def set_view_box(self):
-        for plot in list(self._layout.values()) + list(self._layout_stacks.values()):
-            if not plot:
-                continue
-            vb = plot.vb
-            vb.setMouseMode(vb.PanMode)
-            vb.enableAutoRange(x=True, y=True)
-            vb.setMouseEnabled(x=True, y=True)
+        for stack in self._layout_stacks.values():
+            for plot in stack.values():
+                if not plot:
+                    continue
+                vb = plot.vb
+                vb.setMouseMode(vb.PanMode)
+                vb.enableAutoRange(x=True, y=True)
+                vb.setMouseEnabled(x=True, y=True)
 
     def set_view_box_zoom(self):
-        for plot in list(self._layout.values()) + list(self._layout_stacks.values()):
-            if not plot:
-                continue
-            vb = plot.vb
-            vb.setMouseMode(vb.RectMode)
-            vb.enableAutoRange(x=False, y=False)
-            vb.setAspectLocked(False)
-            vb.setLimits(minXRange=1e-9, minYRange=1e-12)
-            vb.setMouseEnabled(x=True, y=True)
+        for stack in self._layout_stacks.values():
+            for plot in stack.values():
+                if not plot:
+                    continue
+                vb = plot.vb
+                vb.setMouseMode(vb.RectMode)
+                vb.enableAutoRange(x=False, y=False)
+                vb.setAspectLocked(False)
+                vb.setLimits(minXRange=1e-9, minYRange=1e-12)
+                vb.setMouseEnabled(x=True, y=True)
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass
@@ -681,11 +676,12 @@ class PyQtGraphParser(BackendParserBase):
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
-        for plot in self._layout.values():
-            if not plot:
-                continue
+        for stack in self._layout_stacks.values():
+            for plot in stack.values():
+                if not plot:
+                    continue
 
-            self._cursors.append(pyQtCrosshair(plot))
+                self._cursors.append(pyQtCrosshair(plot))
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
