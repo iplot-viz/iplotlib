@@ -384,7 +384,12 @@ class PyQtGraphParser(BackendParserBase):
 
         cell_gl = self._ensure_cell_layout(row, col, i_plot.row_span, i_plot.col_span)
 
+        # Save original spans for restoration
+        cell_gl._original_rowspan = i_plot.row_span
+        cell_gl._original_colspan = i_plot.col_span
+
         visible_row_ids = []
+        last_row_id = 0  # Initialize to avoid undefined variable error
 
         l_key = (row, col)
         for stack_id, key in enumerate(sorted(i_plot.signals.keys())):
@@ -412,13 +417,29 @@ class PyQtGraphParser(BackendParserBase):
                 self._layout_stacks[l_key][stack_id] = pi
 
             plot = self._layout_stacks[l_key][stack_id]
-            prev_plot = plot
+            if not hasattr(self, "_plot_index"):
+                self._plot_index = {}
+            self._plot_index[plot] = (row, col, stack_id)
+
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
             # Keep references to iplotlib instances for ease of access in callbacks.
             self._impl_plot_cache_table.register(plot, self.canvas, i_plot, key, signals)
             plot.enableAutoRange(x=True, y=True)
 
-            # Set the plot title
+            if not getattr(plot, "_dbl_focus_installed", False):
+                _orig = getattr(plot, "mouseDoubleClickEvent", None)
+
+                def _on_plot_double_click(ev, p=plot, orig=_orig):
+                    if ev.button() == QtCore.Qt.MouseButton.LeftButton:
+                        self.set_focus_plot(p if self._focus_plot is None else None)
+                        ev.accept()
+                        return
+                    if orig is not None:
+                        orig(ev)
+
+                plot.mouseDoubleClickEvent = _on_plot_double_click
+                plot._dbl_focus_installed = True
+
             self.set_plot_title(i_plot, plot, stack_id)
 
             # Set the grid
@@ -453,17 +474,23 @@ class PyQtGraphParser(BackendParserBase):
             last_row_id = max(visible_row_ids)
             self._layout_stacks[l_key][last_row_id].getAxis('bottom').setStyle(showValues=True)
 
+        # Slider creation only if it doesn't exist
         if isinstance(i_plot, PlotXYWithSlider):
             try:
-                slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-                slider.setRange(0, 100)  # dummy range for testing
-                slider.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+                rc_key = (row, col)
 
-                proxy = QtWidgets.QGraphicsProxyWidget()
-                proxy.setWidget(slider)
+                # Create slider only if it does NOT exist
+                if rc_key not in self._slider_placeholders:
+                    slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+                    slider.setRange(0, 100)
+                    slider.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
-                # Add slider below the last stack row in this cell
-                cell_gl.addItem(proxy, row=last_row_id + 1, col=0)
+                    proxy = QtWidgets.QGraphicsProxyWidget()
+                    proxy.setWidget(slider)
+
+                    cell_gl.addItem(proxy, row=last_row_id + 1, col=0)
+                    self._slider_placeholders[rc_key] = proxy
+
             except Exception as e:
                 logger.error(f"Error adding slider widget: {e}")
 
@@ -608,7 +635,8 @@ class PyQtGraphParser(BackendParserBase):
         self._cell_gl = {}
         self._layout_stacks = {}
         self._slider_placeholders = {}
-        # Elimina items relevantes del GraphicsLayoutWidget
+        self._plot_index = {}
+        # Clean relevant items from GraphicsLayoutWidget
         for item in self.figure.items()[:]:
             try:
                 if isinstance(item, (
@@ -671,8 +699,77 @@ class PyQtGraphParser(BackendParserBase):
     def disable_tight_layout(self):
         pass
 
-    def set_focus_plot(self, mpl_axes):
-        pass
+    def set_focus_plot(self, plot_item):
+
+        # UNFOCUS: Show everything
+        if not isinstance(plot_item, pg.PlotItem):
+            # Show all sublayouts
+            for cell_gl in self._cell_gl.values():
+                cell_gl.setVisible(True)
+
+            # Show all plots
+            for stacks in self._layout_stacks.values():
+                for p in stacks.values():
+                    p.setVisible(True)
+
+            # Show all sliders
+            for proxy in self._slider_placeholders.values():
+                proxy.setVisible(True)
+
+            # Reset any size adjustments
+            self.figure.ci.clear()
+            for (row, col), cell_gl in self._cell_gl.items():
+                rowspan = getattr(cell_gl, '_original_rowspan', 1)
+                colspan = getattr(cell_gl, '_original_colspan', 1)
+                self.figure.addItem(cell_gl, row=row, col=col, rowspan=rowspan, colspan=colspan)
+
+            self._focus_plot = None
+            self._focus_plot_stack_key = None
+            return
+
+        # FOCUS: Recreate layout with only the selected plot
+        idx = getattr(self, "_plot_index", {}).get(plot_item)
+        if idx is None:
+            return
+
+        row, col, clicked_stack_id = idx
+        cell_key = (row, col)
+        focus_all_stack = bool(self._pm.get_value(self.canvas, 'full_mode_all_stack'))
+
+        # Clear main layout
+        self.figure.ci.clear()
+
+        # Add ONLY the selected sublayout taking up all space
+        target_gl = self._cell_gl.get(cell_key)
+        if target_gl:
+            self.figure.addItem(target_gl, row=0, col=0, rowspan=1, colspan=1)
+            target_gl.setVisible(True)
+
+        # Hide all other sublayouts even if not in layout
+        for key, cell_gl in self._cell_gl.items():
+            if key != cell_key:
+                cell_gl.setVisible(False)
+
+        # Show only relevant plots
+        for (ckey, stacks) in self._layout_stacks.items():
+            for sid, p in stacks.items():
+                if ckey == cell_key:
+                    p.setVisible(focus_all_stack or sid == clicked_stack_id)
+                else:
+                    p.setVisible(False)
+
+        # Manage slider visibility
+        for key, proxy in self._slider_placeholders.items():
+            proxy.setVisible(key == cell_key)
+
+        # Update state
+        try:
+            ci = self._impl_plot_cache_table.get_cache_item(plot_item)
+            self._focus_plot = ci.plot() if hasattr(ci, "plot") else None
+            self._focus_plot_stack_key = getattr(ci, "stack_key", None)
+        except Exception:
+            self._focus_plot = None
+            self._focus_plot_stack_key = None
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
