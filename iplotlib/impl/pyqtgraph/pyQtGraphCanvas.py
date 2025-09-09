@@ -699,76 +699,24 @@ class PyQtGraphParser(BackendParserBase):
     def disable_tight_layout(self):
         pass
 
-    def set_focus_plot(self, plot_item):
+    def set_focus_plot(self, plot):
+        """Establece o quita el focus del plot."""
+        # Quitar focus anterior si existe
+        if self._focus_plot and self._focus_plot != plot:
+            self._focus_plot.getViewBox().setBorder(pg.mkPen(None))
 
-        # UNFOCUS: Show everything
-        if not isinstance(plot_item, pg.PlotItem):
-            # Show all sublayouts
-            for cell_gl in self._cell_gl.values():
-                cell_gl.setVisible(True)
+        # Establecer nuevo focus
+        self._focus_plot = plot
 
-            # Show all plots
-            for stacks in self._layout_stacks.values():
-                for p in stacks.values():
-                    p.setVisible(True)
+        if plot:
+            # Añadir borde rojo al plot con focus
+            plot.getViewBox().setBorder(pg.mkPen('r', width=2))
 
-            # Show all sliders
-            for proxy in self._slider_placeholders.values():
-                proxy.setVisible(True)
-
-            # Reset any size adjustments
-            self.figure.ci.clear()
-            for (row, col), cell_gl in self._cell_gl.items():
-                rowspan = getattr(cell_gl, '_original_rowspan', 1)
-                colspan = getattr(cell_gl, '_original_colspan', 1)
-                self.figure.addItem(cell_gl, row=row, col=col, rowspan=rowspan, colspan=colspan)
-
-            self._focus_plot = None
-            self._focus_plot_stack_key = None
-            return
-
-        # FOCUS: Recreate layout with only the selected plot
-        idx = getattr(self, "_plot_index", {}).get(plot_item)
-        if idx is None:
-            return
-
-        row, col, clicked_stack_id = idx
-        cell_key = (row, col)
-        focus_all_stack = bool(self._pm.get_value(self.canvas, 'full_mode_all_stack'))
-
-        # Clear main layout
-        self.figure.ci.clear()
-
-        # Add ONLY the selected sublayout taking up all space
-        target_gl = self._cell_gl.get(cell_key)
-        if target_gl:
-            self.figure.addItem(target_gl, row=0, col=0, rowspan=1, colspan=1)
-            target_gl.setVisible(True)
-
-        # Hide all other sublayouts even if not in layout
-        for key, cell_gl in self._cell_gl.items():
-            if key != cell_key:
-                cell_gl.setVisible(False)
-
-        # Show only relevant plots
-        for (ckey, stacks) in self._layout_stacks.items():
-            for sid, p in stacks.items():
-                if ckey == cell_key:
-                    p.setVisible(focus_all_stack or sid == clicked_stack_id)
-                else:
-                    p.setVisible(False)
-
-        # Manage slider visibility
-        for key, proxy in self._slider_placeholders.items():
-            proxy.setVisible(key == cell_key)
-
-        # Update state
-        try:
-            ci = self._impl_plot_cache_table.get_cache_item(plot_item)
-            self._focus_plot = ci.plot() if hasattr(ci, "plot") else None
-            self._focus_plot_stack_key = getattr(ci, "stack_key", None)
-        except Exception:
-            self._focus_plot = None
+            # Actualizar stack key si es necesario
+            ci = self._impl_plot_cache_table.get_cache_item(plot)
+            if ci:
+                self._focus_plot_stack_key = ci.stack_key
+        else:
             self._focus_plot_stack_key = None
 
     @BackendParserBase.run_in_one_thread

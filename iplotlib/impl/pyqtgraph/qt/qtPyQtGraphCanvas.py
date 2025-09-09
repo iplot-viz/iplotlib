@@ -53,13 +53,29 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         pass
 
     def unfocus_plot(self):
-        pass
+        """Quita el focus del plot actual."""
+        if self._parser:
+            self._parser.set_focus_plot(None)
 
     def check_markers(self, canvas: Canvas):
         pass
 
     def mouse_clicked(self, event):
-        pass
+        if not self._parser or not hasattr(self._parser, '_layout_stacks'):
+            return
+
+        if not self._parser._layout_stacks:
+            return
+
+        # Obtener la posición del click
+        pos = event.scenePos() if hasattr(event, 'scenePos') else event.pos()
+
+        # Iterar sobre todos los plots
+        for stacks_dict in self._parser._layout_stacks.values():
+            for plot in stacks_dict.values():
+                if plot and plot.sceneBoundingRect().contains(pos):
+                    self._parser.set_focus_plot(plot)
+                    return
 
     def mouse_moved(self, pos):
         pass
@@ -74,6 +90,13 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         self._parser.deactivate_cursor()
         self._parser.process_ipl_canvas(canvas)
+
+        if self._parser.figure.scene():
+            try:
+                self._parser.figure.scene().sigMouseClicked.disconnect(self.mouse_clicked)
+            except:
+                pass
+            self._parser.figure.scene().sigMouseClicked.connect(self.mouse_clicked)
 
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
