@@ -113,7 +113,7 @@ class IplotPreferencesForm(QWidget):
         Set the python object that will be sourced by the data widgets.
         The python object should be an instance of the core iplotlib Canvas class for tthe sourcing mechanism to
         function.
-        The `QModelIndex` should've encapsulated a python object for the `Qt.UserRole`.
+        The `QModelIndex` should've encapsulated a python object for the `Qt.ItemDataRole.UserRole`.
         This encapsulation is done in :data:`~iplotlib.qt.gui.iplotQtCanvasAssembly.IplotQtCanvasAssembly.setCanvasData`
         """
         py_object = idx.data(Qt.ItemDataRole.UserRole)

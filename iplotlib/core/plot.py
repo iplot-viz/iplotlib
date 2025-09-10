@@ -50,10 +50,10 @@ class Plot(ABC):
     _type : str
         type of the plot
     """
-
+    row: int
+    col: int
     row_span: int = 1
     col_span: int = 1
-    id: Tuple[int, int] = None
     plot_title: str = None
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None

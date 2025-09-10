@@ -97,7 +97,7 @@ class IplotQtPreferencesWindow(QMainWindow):
 
     def set_canvas_from_preferences(self):
         # Get the current canvas in order to preserve the preferences if these are reset
-        original_canvas = self.treeView.model().item(0, 0).data(Qt.UserRole)
+        original_canvas = self.treeView.model().item(0, 0).data(Qt.ItemDataRole.UserRole)
         self.current_canvas = copy.deepcopy(original_canvas)
 
     def get_collective_m_time(self):
@@ -150,7 +150,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         return super().showEvent(event)
 
     def reset_prefs(self, idx: int):
-        canvas = self.treeView.model().item(idx, 0).data(Qt.UserRole)
+        canvas = self.treeView.model().item(idx, 0).data(Qt.ItemDataRole.UserRole)
         if not isinstance(canvas, Canvas):
             return
         canvas.merge(self.current_canvas)

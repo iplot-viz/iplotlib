@@ -44,7 +44,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
         Set the canvas data object for the 'idx' row in the model.
         """
         self._model.item(idx, 0).removeRows(0, self._model.item(idx, 0).rowCount())
-        self._model.item(idx, 0).setData(canvas.get_canvas(), Qt.UserRole)
+        self._model.item(idx, 0).setData(canvas.get_canvas(), Qt.ItemDataRole.UserRole)
 
     def model(self) -> QStandardItemModel:
         return self._model
