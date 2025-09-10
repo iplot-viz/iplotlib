@@ -40,6 +40,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._vlayout.setContentsMargins(QMargins())
         self._vlayout.addWidget(self._parser.figure)
+        self._parser.figure.scene().sigMouseClicked.connect(self.mouse_clicked)
 
         self.setLayout(self._vlayout)
 
@@ -61,21 +62,22 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         pass
 
     def mouse_clicked(self, event):
-        if not self._parser or not hasattr(self._parser, '_layout_stacks'):
+        if not event.currentItem:
             return
-
-        if not self._parser._layout_stacks:
+        plot = event.currentItem.parentItem()
+        if not plot:
             return
-
-        # Obtener la posición del click
-        pos = event.scenePos() if hasattr(event, 'scenePos') else event.pos()
-
-        # Iterar sobre todos los plots
-        for stacks_dict in self._parser._layout_stacks.values():
-            for plot in stacks_dict.values():
-                if plot and plot.sceneBoundingRect().contains(pos):
+        if event.button() == Qt.MouseButton.LeftButton:
+                if event.double():
                     self._parser.set_focus_plot(plot)
-                    return
+                else:
+                    pass
+        elif event.button() == Qt.MouseButton.RightButton:
+            if event.double():
+                pass
+            else:
+                pass
+
 
     def mouse_moved(self, pos):
         pass
@@ -91,29 +93,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._parser.deactivate_cursor()
         self._parser.process_ipl_canvas(canvas)
 
-        if self._parser.figure.scene():
-            try:
-                self._parser.figure.scene().sigMouseClicked.disconnect(self.mouse_clicked)
-            except:
-                pass
-            self._parser.figure.scene().sigMouseClicked.connect(self.mouse_clicked)
-
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
         self.canvas = canvas
 
-        # self._parser.figure.clear()
-        # for i, col in enumerate(self.canvas.plots):
-        #     for j, plot in enumerate(col):
-        #         if not plot:
-        #             continue
-        #         p = pg.PlotItem()
-        #
-        #         self._parser.figure.addItem(p, row=j, col=i)
-        #         for key, signal in plot.signals.items():
-        #             print(signal)
-        #             p.plot(signal[0].x_data, signal[0].y_data, pen=signal[0].color)
 
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
