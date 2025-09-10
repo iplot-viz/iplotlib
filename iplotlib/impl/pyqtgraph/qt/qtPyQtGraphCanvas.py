@@ -13,6 +13,7 @@ from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
+from iplotlib.qt.models import PlotItem
 
 logger = Sl.get_logger(__name__)
 
@@ -65,13 +66,13 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         if not event.currentItem:
             return
         plot = event.currentItem.parentItem()
-        if not plot:
+        if not plot or not isinstance(plot, PlotItem):
             return
         if event.button() == Qt.MouseButton.LeftButton:
-                if event.double():
-                    self._parser.set_focus_plot(plot)
-                else:
-                    pass
+            if event.double():
+                self._parser.set_focus_plot(plot)
+            else:
+                pass
         elif event.button() == Qt.MouseButton.RightButton:
             if event.double():
                 pass
