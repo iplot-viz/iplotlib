@@ -385,8 +385,3 @@ class Canvas(ABC):
                                     dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data"])
                                 x = pd.concat([x, timeframe, dataframe], axis=1)
         return x.to_csv(index=False)
-
-    def update_canvas_properties(self, properties: dict):
-        for property_name, value in properties.items():
-            if hasattr(self, property_name):
-                setattr(self, property_name, value)
