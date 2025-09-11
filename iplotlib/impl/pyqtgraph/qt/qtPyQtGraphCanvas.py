@@ -14,6 +14,7 @@ from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
+from iplotlib.qt.models import PlotItem
 
 logger = Sl.get_logger(__name__)
 
@@ -37,8 +38,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._vlayout = QVBoxLayout(self)
         self._vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._vlayout.setContentsMargins(QMargins())
-        # self._vlayout.addWidget(self._parser.figure)
-        self._vlayout.addLayout(self._parser.main_layout)
+        self._vlayout.addWidget(self._parser.figure)
+        self._parser.figure.scene().sigMouseClicked.connect(self.mouse_clicked)
 
         self.setLayout(self._vlayout)
 
@@ -185,10 +186,26 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     """
 
     def unfocus_plot(self):
-        pass
+        """Quita el focus del plot actual."""
+        if self._parser:
+            self._parser.set_focus_plot(None)
 
     def mouse_clicked(self, event):
-        pass
+        if not event.currentItem:
+            return
+        plot = event.currentItem.parentItem()
+        if not plot or not isinstance(plot, PlotItem):
+            return
+        if event.button() == Qt.MouseButton.LeftButton:
+            if event.double():
+                self._parser.set_focus_plot(plot)
+            else:
+                pass
+        elif event.button() == Qt.MouseButton.RightButton:
+            if event.double():
+                pass
+            else:
+                pass
 
     def mouse_moved(self, pos):
         pass

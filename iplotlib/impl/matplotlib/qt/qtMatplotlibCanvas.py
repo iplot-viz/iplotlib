@@ -159,7 +159,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 prev_stack = self._marker_window.get_stack(signal_uid)
                 idx = markers_signals_uid.index(signal_uid)
                 signal_element = markers_signals[idx]
-                current_stack = f"{signal_element.parent.id[0]}.{signal_element.parent.id[1]}.{signal_element.id}"
+                current_stack = ".".join(signal_element.get_id())
                 if prev_stack != current_stack:
                     self._marker_window.refresh_stack(signal_element, current_stack)
 
@@ -178,14 +178,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # Get signal and ax
         for idxCol, col in enumerate(self._parser.canvas.plots):
             for idxPlot, plot in enumerate(col):
-                if plot:
-                    if plot.id == plot_id:
-                        # Get signal
-                        for signals in plot.signals.values():
-                            for signal in signals:
-                                if signal.uid == signal_uid and isinstance(signal, SignalXY):
-                                    ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
-                                    return signal, ax
+                if not plot or (plot.col,plot.row) != plot_id:
+                    continue
+                # Get signal
+                for signals in plot.signals.values():
+                    for signal in signals:
+                        if signal.uid == signal_uid and isinstance(signal, SignalXY):
+                            ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
+                            return signal, ax
 
     def get_marker_row(self, signal: SignalXY, marker_name: str):
         for i, marker in enumerate(signal.markers_list):
@@ -609,5 +609,5 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         all_plots = self._parser.canvas.plots
         for column, col_plots in enumerate(all_plots):
             for row, row_plot in enumerate(col_plots):
-                if row_plot.id == plot.id:
+                if row_plot.col == plot.col and row_plot.row == plot.row:
                     return row + 1, column + 1

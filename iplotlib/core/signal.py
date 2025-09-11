@@ -43,7 +43,7 @@ class Signal(ABC):
     lines = []
     _type: str = None
     parent = None
-    id: int = None
+    stack: int = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -65,6 +65,9 @@ class Signal(ABC):
 
     def merge(self, old_signal: dict):
         pass
+
+    def get_id(self):
+        return [self.parent.col, self.parent.row, self.stack]
 
 
 @dataclass

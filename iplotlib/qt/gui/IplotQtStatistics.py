@@ -101,14 +101,14 @@ class IplotQtStatistics(QWidget):
 
         if isinstance(value, float):
             item = QTableWidgetItem(fmt(value))
-            item.setData(Qt.UserRole, value)
+            item.setData(Qt.ItemDataRole.UserRole, value)
         elif isinstance(value, tuple):
             val = f"({', '.join(fmt(v) for v in value)})"
             item = QTableWidgetItem(val)
-            item.setData(Qt.UserRole, value)
+            item.setData(Qt.ItemDataRole.UserRole, value)
         else:
             item = QTableWidgetItem(fmt(value))
-            item.setData(Qt.UserRole, float(value))
+            item.setData(Qt.ItemDataRole.UserRole, float(value))
 
         return item
 
@@ -135,7 +135,7 @@ class IplotQtStatistics(QWidget):
             self.table.insertRow(idx)
 
             # The rows correspond to the signals and their corresponding stacks
-            stack = f"{signal.parent.id[0]}.{signal.parent.id[1]}.{signal.id}"
+            stack = ".".join(signal.get_id())
             signal_name = f"{signal.label}, {stack}"
             self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
@@ -234,7 +234,7 @@ class IplotQtStatistics(QWidget):
             for col in range(1, cols):
                 item = self.table.item(row, col)
                 if item is not None:
-                    data = item.data(Qt.UserRole)
+                    data = item.data(Qt.ItemDataRole.UserRole)
 
                     # Format tuple of value in case of envelope
                     if isinstance(data, tuple):

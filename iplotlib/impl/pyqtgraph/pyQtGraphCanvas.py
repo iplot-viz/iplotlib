@@ -5,6 +5,9 @@ import numpy as np
 from typing import Any, Callable, Collection, List, Tuple
 import pandas as pd
 import pyqtgraph as pg
+from pyparsing import unicode_string
+from pyqtgraph import IsocurveItem
+from pyqtgraph.Qt import QtCore, QtWidgets
 from pyqtgraph import IsocurveItem, ViewBox
 from pyqtgraph.Qt import QtCore, QtGui
 from pyqtgraph.Qt.QtWidgets import QSlider, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QGraphicsSceneMouseEvent
@@ -13,8 +16,6 @@ from PySide6.QtCore import Signal as QtSignal
 from iplotLogging import setupLogger
 from iplotProcessing.core import BufferObject
 from iplotlib.core import (Axis,
-                           LinearAxis,
-                           RangeAxis,
                            Canvas,
                            BackendParserBase,
                            Plot,
@@ -100,18 +101,27 @@ class PyQtGraphParser(BackendParserBase):
         self.legend_size = 8
         self._cursors = []
 
-        self.main_layout = QGridLayout()
-
-        # self.figure = pg.GraphicsLayoutWidget()
-        # self.figure.setBackground('w')
-
-        self._layout = {}
+        self.figure = pg.GraphicsLayoutWidget()
+        self.figure.setBackground('w')
+        self._cell_gl = {}  # (row, col) -> GraphicsLayout sublayout
+        self._layout_stacks = {}  # (row, col, stack_id) -> PlotItem
+        self._slider_placeholders = {}  # (row, col) -> QGraphicsProxyWidget
         self._impl_plot_ranges_hash = dict()
 
         if tight_layout:
             self.enable_tight_layout()
         else:
             self.disable_tight_layout()
+
+    def _ensure_cell_layout(self, row: int, col: int, rowspan: int, colspan: int):
+        key = (row, col)
+        cell_gl = self._cell_gl.get(key)
+        if cell_gl is None:
+            cell_gl = pg.GraphicsLayout()
+            # sublayout anclado a (row, col) con spans reales
+            self.figure.addItem(cell_gl, row=row, col=col, rowspan=rowspan, colspan=colspan)
+            self._cell_gl[key] = cell_gl
+        return cell_gl
 
     def export_image(self, filename: str, **kwargs):
         super().export_image(filename, **kwargs)
@@ -166,24 +176,31 @@ class PyQtGraphParser(BackendParserBase):
 
             # Put this out in a method only for streaming
             if self.canvas.streaming:
-                ax_window = plot.get_xlim()[1] - plot.get_xlim()[0]
+                # usar ViewBox en PyQtGraph
+                vb = plot.getViewBox()
+                (x_lo, x_hi), (y_lo, y_hi) = vb.viewRange()
+                ax_window = x_hi - x_lo
+
                 all_y_data = []
-                for signal in i_plot.signals[cache_item.stack_key]:
-                    if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
-                        max_x_data = signal.x_data.max()[0]
-                        for x_temp, y_temp in zip(signal.x_data, signal.y_data):
+                for s in i_plot.signals[cache_item.stack_key]:
+                    if s.lines[0][0].get_visible() and len(s.x_data) > 0:
+                        max_x_data = s.x_data.max()[0]
+                        for x_temp, y_temp in zip(s.x_data, s.y_data):
                             if max_x_data - ax_window <= x_temp <= max_x_data:
                                 all_y_data.append(y_temp)
+
                 if all_y_data:
                     diff = (max(all_y_data) - min(all_y_data)) / 15
-                    plot.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
-                plot.set_xlim(max(x_data) - ax_window, max(x_data))
+                    vb.setYRange(min(all_y_data) - diff, max(all_y_data) + diff, padding=0)
+
+                # desplaza la ventana X al último tramo visible
+                vb.setXRange(float(max(x_data) - ax_window), float(max(x_data)), padding=0)
+
             # Preserve visible status for lines
-            """
+            # TODO: revisar bien
             for new, old in zip(plot_lines, signal.lines):
                 for n, o in zip(new, old):
                     n.setVisible(o.isVisible())
-            """
         else:
             if x_data.ndim == 1 and y_data.ndim == 1:
                 plot_lines = [draw_fn(x=x_data, y=y_data, **style)]
@@ -300,7 +317,7 @@ class PyQtGraphParser(BackendParserBase):
         if isinstance(plot_lines, IsocurveItem):
             for tp in plot_lines.collections:
                 tp.remove()
-
+            # TODO: Check size z_data
             if contour_filled:
                 pass
                 # draw_fn = mpl_axes.contourf
@@ -493,48 +510,33 @@ class PyQtGraphParser(BackendParserBase):
         if not isinstance(i_plot, Plot):
             return
 
-        full_mode_all_stack = self._pm.get_value(self.canvas, 'full_mode_all_stack')
+        cell_gl = self._ensure_cell_layout(row, col, i_plot.row_span, i_plot.col_span)
 
-        plot = None
-        prev_plot = None
+        visible_stack_ids = []
+
+        l_key = (row, col)
         for stack_id, key in enumerate(sorted(i_plot.signals.keys())):
-            is_stack_plot_focused = self._focus_plot_stack_key == key
-
-            if not full_mode_all_stack and self._focus_plot_stack_key is not None and not is_stack_plot_focused:
-                continue
             signals = i_plot.signals.get(key) or list()
+            visible_stack_ids.append(stack_id)
 
-            if not full_mode_all_stack and self._focus_plot_stack_key is not None:
-                row_id = 0
-            else:
-                row_id = stack_id
-            key = (row, col)
+            if l_key not in self._layout_stacks:
+                plot = pg.PlotItem()
+                cell_gl.addItem(plot, row=0, col=0)
+                self._layout_stacks.setdefault(l_key, {})[stack_id] = plot
+            elif stack_id not in self._layout_stacks[l_key]:
+                pi = pg.PlotItem()
+                cell_gl.addItem(pi, row=stack_id, col=0)
+                pi.vb.setXLink(self._layout_stacks[l_key][0])
+                pi.getAxis('bottom').setStyle(showValues=False)
+                self._layout_stacks[l_key][stack_id] = pi
 
-            pyqt_layout = QVBoxLayout()
+            plot = self._layout_stacks[l_key][stack_id]
 
-            if key not in self._layout:
-                plot_widget = pg.PlotWidget(viewBox=QtViewBox())
-                plot = plot_widget.getPlotItem()  # axisItems={'bottom': FechaPyQtGraph(orientation='bottom')}
-                # self.figure.addItem(plt, row=row, col=col, rowspan=i_plot.row_span, colspan=i_plot.col_span)
-                plot_widget.setBackground("w")
-
-                self._layout[key] = plot
-                pyqt_layout.addWidget(plot_widget)
-
-            if isinstance(i_plot, PlotXYWithSlider):
-                pyqt_layout = self.process_ipl_plot_xy_slider(i_plot, pyqt_layout)
-
-            self.main_layout.addLayout(pyqt_layout, row, col, i_plot.row_span, i_plot.col_span,
-                                       pg.QtCore.Qt.AlignmentFlag.AlignCenter)
-
-            plot = self._layout[key]
-            prev_plot = plot
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
-            # Keep references to iplotlib instances for ease of access in callbacks
-            self._impl_plot_cache_table.register(plot, self.canvas, i_plot, key, signals)
+            # Keep references to iplotlib instances for ease of access in callbacks.
+            self._impl_plot_cache_table.register(plot, self.canvas, i_plot, stack_id, signals)
             plot.enableAutoRange(x=True, y=True)
 
-            # Set the plot title
             self.set_plot_title(i_plot, plot, stack_id)
 
             # Set the grid
@@ -567,6 +569,30 @@ class PyQtGraphParser(BackendParserBase):
         vb = plot.getViewBox()
         vb.sigXRangeChanged.connect(self._axis_update_callback)
         vb.sigYRangeChanged.connect(self._axis_update_callback)
+
+        self.set_bottom_axis_stacked(row, col, visible_stack_ids)
+
+        # Slider creation only if it doesn't exist
+        if isinstance(i_plot, PlotXYWithSlider):
+            rc_key = (row, col)
+            slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+            slider.setRange(0, 100)  # TODO put real values
+            slider.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
+            proxy = QtWidgets.QGraphicsProxyWidget()
+            proxy.setWidget(slider)
+            last_row_id = max(visible_stack_ids) + 1
+            cell_gl.addItem(proxy, row=last_row_id, col=0)
+            self._slider_placeholders[rc_key] = proxy
+
+    def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
+        if not visible_stacks:
+            return
+        for s_id in set(visible_stacks):
+            if s_id == max(visible_stacks):
+                self._layout_stacks[(row, col)][s_id].getAxis('bottom').setStyle(showValues=True)
+            else:
+                self._layout_stacks[(row, col)][s_id].getAxis('bottom').setStyle(showValues=False)
 
     def set_plot_title(self, i_plot: Plot, plot: PlotItem, stack_id: int):
         if i_plot.plot_title is None or stack_id != 0:
@@ -772,26 +798,15 @@ class PyQtGraphParser(BackendParserBase):
         Set the canvas gridspec for the figure.
         """
         super().clear()
-        self._layout = {}
-        i = 0
-        self._clear_layout(self.main_layout, i)
-
-    def _clear_layout(self, layout, i):
-        while layout.count():
-            item = layout.itemAt(i)
-            if item is None:
-                break
-
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-
-            child_layout = item.layout()
-            if child_layout is not None:
-                self._clear_layout(child_layout, 0)
-                child_layout.deleteLater()
-
-            i += 1
+        self._cell_gl = {}
+        self._layout_stacks = {}
+        self._slider_placeholders = {}
+        # Clean relevant items from GraphicsLayoutWidget
+        for item in self.figure.items()[:]:
+            try:
+                self.figure.removeItem(item)
+            except Exception:
+                pass
 
     @staticmethod
     def set_grid(plot: PlotItem, grid: bool = True):
@@ -806,18 +821,22 @@ class PyQtGraphParser(BackendParserBase):
         vb.setMouseEnabled(x=False, y=False)
 
     def set_view_box(self):
-        for plot in self._layout.values():
-            vb = plot.vb
-            vb.setMouseMode(vb.PanMode)
-            # vb.enableAutoRange(x=True, y=True)
+        for stack in self._layout_stacks.values():
+            for plot in stack.values():
+                if not plot:
+                    continue
+                vb = plot.vb
+                vb.setMouseMode(vb.PanMode)
+                # vb.setMouseEnabled(x=True, y=True)
 
     def set_view_box_zoom(self):
-        for plot in self._layout.values():
-            vb = plot.vb
-            vb.setMouseMode(vb.RectMode)
-            # vb.enableAutoRange(x=False, y=False)
-            # vb.setAspectLocked(False)
-            # vb.setLimits(minXRange=1e-9, minYRange=1e-12)
+        for stack in self._layout_stacks.values():
+            for plot in stack.values():
+                if not plot:
+                    continue
+                vb = plot.vb
+                vb.setMouseMode(vb.RectMode)
+                # vb.setMouseEnabled(x=True, y=True)  why?
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass
@@ -884,16 +903,44 @@ class PyQtGraphParser(BackendParserBase):
     def disable_tight_layout(self):
         pass
 
-    def set_focus_plot(self, mpl_axes):
-        pass
+    def set_focus_plot(self, impl_plot: PlotItem):
+        un_focus = self._focus_plot is not None or impl_plot is None
+        all_stack = self._pm.get_value(self.canvas, "full_mode_all_stack")
+        if un_focus:
+            self._focus_plot = None
+            row, col, stack_id = None, None, None
+        else:
+            self._focus_plot = impl_plot
+            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            plot = ci.plot()
+            row = plot.row - 1
+            col = plot.col - 1
+            stack_id = ci.stack_key
+
+        for (r, c), stack_dict in self._layout_stacks.items():
+            for s_id, plot_item in stack_dict.items():
+                if un_focus:
+                    plot_item.setVisible(True)
+                else:
+                    if all_stack:
+                        plot_item.setVisible(r == row and c == col)
+                    else:
+                        plot_item.setVisible(r == row and c == col and s_id == stack_id)
+                        self.set_bottom_axis_stacked(row, col, [stack_id])
+
+        for key, value in self._slider_placeholders.items():
+            if key == (row, col):
+                continue
+            value.setVisible(un_focus)
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
-        for plot in self._layout.values():
-            if not plot:
-                continue
+        for stack in self._layout_stacks.values():
+            for plot in stack.values():
+                if not plot:
+                    continue
 
-            self._cursors.append(pyQtCrosshair(plot))
+                self._cursors.append(pyQtCrosshair(plot))
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
@@ -926,6 +973,33 @@ class PyQtGraphParser(BackendParserBase):
         if isinstance(plot, PlotItem):
             vb = plot.getViewBox()
             vb.setYRange(limits[0], limits[1], padding=0)
+
+    def transform_data(self, plot: PlotItem, data) -> List[Any]:
+        """This function post processes data if it cannot be plotted with matplotlib directly.
+                Currently, it transforms data if it is a large integer which can cause overflow in matplotlib"""
+        ret = []
+        if isinstance(data, Collection):
+            ci = self._impl_plot_cache_table.get_cache_item(plot)
+            for i, d in enumerate(data):
+                logger.debug(f"\t transform data i={i} d = {d} ")
+
+                offset = None
+                if ci:
+                    offset = ci.offsets[i]
+                    if offset is None and i == 0:
+                        offset = self.create_offset(d)
+                        ci.offsets[i] = offset
+
+                if ci and offset is not None:
+                    logger.debug(f"\tApplying data offsets {offset} to plot {id(plot)} ax_idx: {i}")
+                    if isinstance(d, Collection) and not isinstance(d, (str, bytes)):
+                        arr = np.asarray(d, dtype=np.int64)
+                        ret.append(BufferObject(arr / 10000))
+                    else:
+                        ret.append(np.int64(d) / 10000)
+                else:
+                    ret.append(d)
+        return ret
 
     def transform_value(self, plot: PlotItem, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
