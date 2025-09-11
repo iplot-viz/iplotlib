@@ -8,6 +8,7 @@ from typing import Collection, List
 
 from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication, QWidget
+from iplotlib.core.signal import SignalXY
 from iplotlib.core.axis import RangeAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXYWithSlider
@@ -16,6 +17,7 @@ from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.impl_base import BackendParserBase
 import iplotLogging.setupLogger as Sl
+from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 
 logger = Sl.get_logger(__name__)
 
@@ -35,6 +37,9 @@ class IplotQtCanvas(QWidget):
         self._refresh_original_ranges = True
         self.dropInfo = DropInfo()
 
+        # Statistics
+        self._stats_table = IplotQtStatistics()
+
     @abstractmethod
     def undo(self):
         """history: undo"""
@@ -42,6 +47,15 @@ class IplotQtCanvas(QWidget):
     @abstractmethod
     def redo(self):
         """history: redo"""
+
+    def show_stats(self):
+        if not self._stats_table.isVisible():
+            self._stats_table.show()
+        elif self._stats_table.isMinimized():
+            self._stats_table.showNormal()
+        else:
+            self._stats_table.raise_()
+            self._stats_table.activateWindow()
 
     @abstractmethod
     def drop_history(self):
@@ -88,19 +102,19 @@ class IplotQtCanvas(QWidget):
         logger.debug(f"MMode change {self._mmode} -> {mode}")
         self._mmode = mode
         if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
-            self.setCursor(Qt.CrossCursor)
+            self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_DIST:
-            self.setCursor(Qt.PointingHandCursor)
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
         elif self._mmode == Canvas.MOUSE_MODE_MARKER:
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_PAN:
-            self.setCursor(Qt.OpenHandCursor)
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
         elif self._mmode == Canvas.MOUSE_MODE_SELECT:
-            self.setCursor(Qt.CrossCursor)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
         elif self._mmode == Canvas.MOUSE_MODE_ZOOM:
-            self.setCursor(Qt.CrossCursor)
+            self.setCursor(Qt.CursorShape.CrossCursor)
         else:
-            self.setCursor(Qt.ArrowCursor)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
 
     @abstractmethod
     def set_canvas(self, canvas):
@@ -138,12 +152,33 @@ class IplotQtCanvas(QWidget):
         """Gets current iplotlib canvas"""
         return self._parser.canvas
 
-    @abstractmethod
+    def get_signals(self, canvas: Canvas):
+        signal_list = []
+        for row_idx, col in enumerate(canvas.plots, start=1):
+            for col_idx, plot in enumerate(col, start=1):
+                if plot:
+                    for stack in plot.signals.values():
+                        for signal in stack:
+                            if isinstance(signal, SignalXY):
+                                signal_list.append(signal)
+        return signal_list
+
     def stats(self, canvas: Canvas):
         """
         Computes and displays statistics for each signal in the current iplotlib canvas.
         Envelope data is used if available (min, max, mean arrays); otherwise, raw y-data is used.
         """
+        info_stats = []
+        signals = self.get_signals(canvas)
+        if signals:
+            for signal in signals:
+                if (isinstance(signal,
+                               SignalXY) and signal.status_info.result == 'Success' and signal.parent is not None):
+                    mpl_axes = self._parser._signal_impl_plot_lut.get(signal.uid)
+                    if mpl_axes is None:
+                        continue
+                    info_stats.append((signal, mpl_axes))
+            self._stats_table.fill_table(info_stats)
 
     @contextmanager
     def view_retainer(self):

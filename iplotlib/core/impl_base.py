@@ -547,7 +547,7 @@ class BackendParserBase(ABC):
 
     def unstale_cache_items(self):
         """
-        Remove all stacle cache items.
+        Remove all stale cache items.
         This is called after all the stale plots are updated in refresh_data.
         Call it manually should you want to discard the stale plots.
         """
