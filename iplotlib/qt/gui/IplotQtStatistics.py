@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, Q
     QAbstractItemView, QPushButton, QMenu, QSpinBox, QLabel, QFrame
 
 import iplotLogging.setupLogger as Sl
+from pyqtgraph import PlotItem
 
 logger = Sl.get_logger(__name__)
 
@@ -140,9 +141,20 @@ class IplotQtStatistics(QWidget):
 
             # Add Statistics to the table
             has_envelope = signal.data_store[2].size > 0 and signal.data_store[3].size > 0
-            line = signal.lines[0][0]
-            x_data = line.get_xdata()
-            lo, hi = impl_plot.get_xlim()
+
+            # Differentiate methods
+            if isinstance(impl_plot, PlotItem):
+                line = signal.lines[0]
+                x_data = line.getData()[0]
+                lo, hi = impl_plot.getViewBox().viewRange()[0]
+            else:
+                line = signal.lines[0][0]
+                x_data = line.get_xdata()
+                lo, hi = impl_plot.get_xlim()
+
+            # line = signal.lines[0][0]
+            # x_data = line.get_xdata()
+            # lo, hi = impl_plot.get_xlim()
 
             if has_envelope > 0:
                 y_min = np.array(signal.data_store[1])
@@ -150,7 +162,12 @@ class IplotQtStatistics(QWidget):
                 y_mean = np.array(signal.data_store[3])
 
                 # Filter values
-                y_lo, y_hi = impl_plot.get_ylim()
+                if isinstance(impl_plot, PlotItem):
+                    y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
+                else:
+                    y_lo, y_hi = impl_plot.get_ylim()
+
+                # y_lo, y_hi = impl_plot.get_ylim()
                 mask = ((x_data > lo) & (x_data < hi) &
                         (y_min > y_lo) & (y_min < y_hi) &
                         (y_mean > y_lo) & (y_mean < y_hi) &
@@ -174,8 +191,17 @@ class IplotQtStatistics(QWidget):
 
             else:
                 # Base case
-                y_data = line.get_ydata()
-                y_lo, y_hi = impl_plot.get_ylim()
+                # Differentiate methods
+                if isinstance(impl_plot, PlotItem):
+                    y_data = line.getData()[1]
+                    y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
+                else:
+                    y_data = line.get_ydata()
+                    y_lo, y_hi = impl_plot.get_ylim()
+
+                # y_data = line.get_ydata()
+                # y_lo, y_hi = impl_plot.get_ylim()
+
                 mask = ((x_data > lo) & (x_data < hi) &
                         (y_data > y_lo) & (y_data < y_hi))
                 y_displayed = y_data[mask]
