@@ -5,9 +5,10 @@ import numpy as np
 from typing import Any, Callable, Collection, List, Tuple
 import pandas as pd
 import pyqtgraph as pg
-from pyqtgraph import IsocurveItem
-from pyqtgraph.Qt import QtCore
-from pyqtgraph.Qt.QtWidgets import QSlider, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QWidget
+from pyqtgraph import IsocurveItem, ViewBox
+from pyqtgraph.Qt import QtCore, QtGui
+from pyqtgraph.Qt.QtWidgets import QSlider, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QGraphicsSceneMouseEvent
+from PySide6.QtCore import Signal as QtSignal
 
 from iplotLogging import setupLogger
 from iplotProcessing.core import BufferObject
@@ -58,6 +59,29 @@ class FechaPyQtGraph(pg.AxisItem):
             except Exception:
                 formatted_dates.append(str(val))
         return formatted_dates
+
+
+class QtViewBox(pg.ViewBox):
+    pressed = QtSignal(object)
+    released = QtSignal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent, enableMenu=True)
+        self.sigRangeChanged.connect(self.releaseEvent)
+
+    def mousePressEvent(self, ev: QGraphicsSceneMouseEvent):
+        # mensaje de log
+        super().mousePressEvent(ev)
+        self.pressed.emit(self)
+        # self.mouseReleaseEvent(ev)
+
+    def mouseReleaseEvent(self, ev: QGraphicsSceneMouseEvent):
+        # self._debug_log_event(event, "Mouse released")
+        super().mouseReleaseEvent(ev)
+        self.released.emit(self)
+
+    def releaseEvent(self):
+        self.released.emit(self)
 
 
 class PyQtGraphParser(BackendParserBase):
@@ -155,9 +179,11 @@ class PyQtGraphParser(BackendParserBase):
                     plot.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
                 plot.set_xlim(max(x_data) - ax_window, max(x_data))
             # Preserve visible status for lines
+            """
             for new, old in zip(plot_lines, signal.lines):
                 for n, o in zip(new, old):
                     n.setVisible(o.isVisible())
+            """
         else:
             if x_data.ndim == 1 and y_data.ndim == 1:
                 plot_lines = [draw_fn(x=x_data, y=y_data, **style)]
@@ -342,6 +368,7 @@ class PyQtGraphParser(BackendParserBase):
                     """
 
                     iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
+                    # TODO: pendiente add antialiasing para isocurvas
                     # Scaled data
                     """
                     scale_x = np.ptp(x_data) / z_data.shape[1]
@@ -375,11 +402,47 @@ class PyQtGraphParser(BackendParserBase):
         self.figure.addItem(suptitle, row=0, col=0, colspan=3)
         suptitle.setText("Título general (suptitle)", size='16pt', bold=True)
 
-    def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
-        pass
+    def set_impl_plot_limits(self, impl_plot: PlotItem, ax_idx: int, limits: tuple) -> bool:
+        if not isinstance(impl_plot, PlotItem):
+            return False
+        self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
+        return True
 
-    def _get_all_shared_axes(self, base_mpl_axes: PlotItem):
-        pass
+    def _get_all_shared_axes(self, base_impl_plot: PlotItem):
+        if not isinstance(self.canvas, Canvas):
+            return []
+
+        cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
+        if not hasattr(cache_item, 'plot'):
+            return
+        base_plot = cache_item.plot()
+        if not isinstance(base_plot, Plot):
+            return
+        if isinstance(base_plot, PlotXYWithSlider):
+            return []
+        shared = list()
+        base_limits = self.get_plot_limits(base_plot, which='original')
+        base_begin, base_end = base_limits.axes_ranges[0].begin, base_limits.axes_ranges[0].end
+
+        if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
+            # for axes in self.figure.axes:
+            for plot_item in self._layout.values():
+                cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
+                if not hasattr(cache_item, 'plot'):
+                    continue
+                plot = cache_item.plot()
+                if not isinstance(plot, Plot):
+                    continue
+                limits = self.get_plot_limits(plot, which='original')
+                begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
+                # Check if it is date and the max difference is 1 second
+                # Need to differentiate if it is absolute or relative
+                max_diff = self._pm.get_value(self.canvas, 'max_diff')
+                max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot, PlotXYWithSlider) else max_diff
+                if ((begin, end) == (base_begin, base_end) or (
+                        abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
+                    shared.append(plot_item)
+        return shared
 
     def process_ipl_plot_xy(self):
         pass
@@ -450,7 +513,7 @@ class PyQtGraphParser(BackendParserBase):
             pyqt_layout = QVBoxLayout()
 
             if key not in self._layout:
-                plot_widget = pg.PlotWidget()
+                plot_widget = pg.PlotWidget(viewBox=QtViewBox())
                 plot = plot_widget.getPlotItem()  # axisItems={'bottom': FechaPyQtGraph(orientation='bottom')}
                 # self.figure.addItem(plt, row=row, col=col, rowspan=i_plot.row_span, colspan=i_plot.col_span)
                 plot_widget.setBackground("w")
@@ -499,6 +562,11 @@ class PyQtGraphParser(BackendParserBase):
                 # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
                 self._signal_impl_plot_lut.update({signal.uid: plot})
                 self.process_ipl_signal(signal)
+
+        # Establecer callback para cuando se modifique el X lim
+        vb = plot.getViewBox()
+        vb.sigXRangeChanged.connect(self._axis_update_callback)
+        vb.sigYRangeChanged.connect(self._axis_update_callback)
 
     def set_plot_title(self, i_plot: Plot, plot: PlotItem, stack_id: int):
         if i_plot.plot_title is None or stack_id != 0:
@@ -574,8 +642,67 @@ class PyQtGraphParser(BackendParserBase):
 
         i_plot.slider_last_val = val
 
-    def _axis_update_callback(self, mpl_axes):
-        pass
+        if self._pm.get_value(i_plot, 'sync_slider'):
+            return
+
+        if self._pm.get_value(self.canvas, 'shared_x_axis'):
+            plot_with_slider_shared = self.get_shared_plot_xy_slider(i_plot)
+            for plot_with_slider in plot_with_slider_shared:
+                if not self.canvas.focus_plot:
+                    plot_with_slider.sync_slider = True
+                    plot_with_slider.slider.setValue(val)
+                    plot_with_slider.sync_slider = False
+                else:
+                    plot_with_slider.slider_last_val = val
+
+    def _axis_update_callback(self, view_box: ViewBox):
+
+        if self._pm.get_value(self.canvas, 'shared_x_axis') and not self.canvas.undo_redo:
+            plot = view_box.parentItem()
+            other_axes = self._get_all_shared_axes(plot)
+            for other_axis in other_axes:
+                cur_x_limits = self.get_oaw_axis_limits(plot, 0)
+                other_x_limits = self.get_oaw_axis_limits(other_axis, 0)
+                if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
+                    # In case of PlotXYWithSlider, update the slider limits
+                    ci = self._impl_plot_cache_table.get_cache_item(other_axis)
+                    if not hasattr(ci, 'plot'):
+                        continue
+                    if isinstance(ci.plot(), PlotXYWithSlider):
+                        self.update_slider_limits(ci.plot(), *cur_x_limits)
+                    else:
+                        self.set_oaw_axis_limits(other_axis, 0, cur_x_limits)
+
+        # Actualizar limites de los axis tras el Zoom
+        ci = self._impl_plot_cache_table.get_cache_item(view_box.parentItem())
+        if not hasattr(ci, 'plot'):
+            return
+        if not isinstance(ci.plot(), Plot):
+            return
+        ranges = []
+
+        for ax_idx, ax in enumerate(ci.plot().axes):
+            if isinstance(ax, Collection):
+                self.update_multi_range_axis(ax, ax_idx, view_box.parentItem())
+            elif isinstance(ax, RangeAxis):
+                self.update_range_axis(ax, ax_idx, view_box.parentItem())
+                ranges = ax.get_limits()
+        if ci not in self._stale_citems:
+            self._stale_citems.append(ci)
+        if self.canvas.undo_redo:
+            return
+        if isinstance(ci.plot(), PlotXYWithSlider):
+            return
+        if not hasattr(ci, 'signals'):
+            return
+        if not ci.signals:
+            return
+
+        for singal_ref in ci.signals:
+            signal = singal_ref()
+            if hasattr(signal, "set_xranges") and isinstance(signal, SignalXY):
+                signal.set_xranges(ranges)
+                logger.debug(f"callback update {ranges[0]} axis range to {ranges[1]}")
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation == 'left':
@@ -682,15 +809,15 @@ class PyQtGraphParser(BackendParserBase):
         for plot in self._layout.values():
             vb = plot.vb
             vb.setMouseMode(vb.PanMode)
-            vb.enableAutoRange(x=True, y=True)
+            # vb.enableAutoRange(x=True, y=True)
 
     def set_view_box_zoom(self):
         for plot in self._layout.values():
             vb = plot.vb
             vb.setMouseMode(vb.RectMode)
-            vb.enableAutoRange(x=False, y=False)
-            vb.setAspectLocked(False)
-            vb.setLimits(minXRange=1e-9, minYRange=1e-12)
+            # vb.enableAutoRange(x=False, y=False)
+            # vb.setAspectLocked(False)
+            # vb.setLimits(minXRange=1e-9, minYRange=1e-12)
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass
@@ -699,7 +826,57 @@ class PyQtGraphParser(BackendParserBase):
         pass
 
     def update_slider_limits(self, plot: PlotXYWithSlider, begin, end):
-        pass
+        if bool(begin > (1 << 53)):
+            # Convert time-based 'begin' and 'end' values to corresponding indices in z_data
+            new_start = np.searchsorted(plot.signals[1][0].z_data, begin)
+            new_end = np.searchsorted(plot.signals[1][0].z_data, end)
+
+            # Ensure indices are within the valid range of the signal's time data
+            max_len = len(plot.signals[1][0].z_data) - 1
+            new_start = max(0, min(new_start, max_len))
+            new_end = max(0, min(new_end, max_len))
+
+            # Adjust current slider value
+            if plot.slider.value() < new_start:
+                val = new_start
+            elif plot.slider.value() > new_end:
+                val = new_end
+            else:
+                val = plot.slider.value()
+
+            # Update slider limits
+            plot.slider_last_min = new_start
+            plot.slider.setRange(new_start, new_end)
+            # plot.slider.setMinimum(new_start)
+
+            # plot.slider.setMaximum(new_end)
+            plot.slider_last_max = new_end
+
+            plot.slider.setValue(val)
+
+            # Update the annotations labels for the slider limits
+            """
+            annotations = [label for label in plot.slider.ax.get_children() if isinstance(label, plt.Annotation)]
+            min_annotation, current_annotation, max_annotation = annotations[:3]
+            min_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_start])}')
+            current_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[val])}')
+            max_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_end])}')
+
+            # Remove any previously highlighted region from the slider axis
+            for child in plot.slider.ax.get_children():
+                if isinstance(child, Patch) and child.get_facecolor()[:3] == (1.0, 0.0, 0.0):
+                    child.remove()
+            
+
+            # Highlight the selected area in the slider, avoiding drawing a region if start and end span the full range
+            if plot.slider_last_min != 0 or plot.slider_last_max != max_len:
+                # plot.slider.ax.axvspan(new_start, new_end, color='red', alpha=0.3)
+                painter = QPainter()
+                painter.setBrush(QtGui.QColor(255, 0, 0, 80))
+                painter.drawRect(QtCore.QRect(int(start_x), 0, int(end_x - start_x), plot.slider.height()))
+                painter.end()
+                
+            """
 
     def enable_tight_layout(self):
         pass
@@ -749,33 +926,6 @@ class PyQtGraphParser(BackendParserBase):
         if isinstance(plot, PlotItem):
             vb = plot.getViewBox()
             vb.setYRange(limits[0], limits[1], padding=0)
-
-    def transform_data(self, plot: PlotItem, data) -> List[Any]:
-        """This function post processes data if it cannot be plotted with matplotlib directly.
-                Currently, it transforms data if it is a large integer which can cause overflow in matplotlib"""
-        ret = []
-        if isinstance(data, Collection):
-            ci = self._impl_plot_cache_table.get_cache_item(plot)
-            for i, d in enumerate(data):
-                logger.debug(f"\t transform data i={i} d = {d} ")
-
-                offset = None
-                if ci:
-                    offset = ci.offsets[i]
-                    if offset is None and i == 0:
-                        offset = self.create_offset(d)
-                        ci.offsets[i] = offset
-
-                if ci and offset is not None:
-                    logger.debug(f"\tApplying data offsets {offset} to plot {id(plot)} ax_idx: {i}")
-                    if isinstance(d, Collection) and not isinstance(d, (str, bytes)):
-                        arr = np.asarray(d, dtype=np.int64)
-                        ret.append(BufferObject(arr / 10000))
-                    else:
-                        ret.append(np.int64(d) / 10000)
-                else:
-                    ret.append(d)
-        return ret
 
     def transform_value(self, plot: PlotItem, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to

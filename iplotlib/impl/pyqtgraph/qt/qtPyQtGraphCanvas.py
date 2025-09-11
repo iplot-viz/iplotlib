@@ -2,12 +2,13 @@ from collections import defaultdict
 
 import numpy as np
 from PySide6.QtCore import QMargins, Qt, Signal
-from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtWidgets import QVBoxLayout, QGraphicsSceneMouseEvent
 
-from iplotlib.core import Canvas, BackendParserBase
+from iplotlib.core import Canvas, BackendParserBase, Plot, PlotContour
 import pyqtgraph as pg
 
-from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
+from pyqtgraph.Qt.QtGui import QMouseEvent
+
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
@@ -25,13 +26,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def __init__(self, parent=None, tight_layout=True, **kwargs):
         super().__init__(parent, **kwargs)
 
-        # Aquí podrías poner tus clases equivalentes a marcadores y estadísticas
         self._draw_call_counter = 0
-        self._marker_window = IplotQtMarker()  # Conéctalo según tu lógica
+        self._marker_window = IplotQtMarker()
         self._marker_window.dropMarker.connect(self.draw_marker_label)
         self._marker_window.deleteMarker.connect(self.delete_marker_label)
-
-        self._stats_table = IplotQtStatistics()
 
         self.info_shared_x_dialog = False
         self._parser = PyQtGraphParser()
@@ -46,24 +44,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         # Drag & Drop
         self.setAcceptDrops(True)
-
-    def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
-        pass
-
-    def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
-        pass
-
-    def unfocus_plot(self):
-        pass
-
-    def check_markers(self, canvas: Canvas):
-        pass
-
-    def mouse_clicked(self, event):
-        pass
-
-    def mouse_moved(self, pos):
-        pass
 
     def set_canvas(self, canvas):
         super().set_canvas(canvas)
@@ -81,6 +61,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         self.canvas = canvas
 
+        # Connect events
+        for plot_item in self._parser._layout.values():
+            vb = plot_item.getViewBox()
+            vb.pressed.connect(self._impl_mouse_press_handler)
+            vb.released.connect(self._impl_mouse_release_handler)
+
         # self._parser.figure.clear()
         # for i, col in enumerate(self.canvas.plots):
         #     for j, plot in enumerate(col):
@@ -92,6 +78,25 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         #         for key, signal in plot.signals.items():
         #             print(signal)
         #             p.plot(signal[0].x_data, signal[0].y_data, pen=signal[0].color)
+
+    def get_canvas(self) -> Canvas:
+        """Gets current iplotlib canvas"""
+        return self._parser.canvas
+
+    def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
+        pass
+
+    def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
+        pass
+
+    def check_markers(self, canvas: Canvas):
+        pass
+
+    def autoscale_y(self, impl_plot):
+        pass
+
+    def autoscale_all_y(self):
+        pass
 
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
@@ -120,3 +125,70 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 self._marker_window.raise_()
                 self._marker_window.activateWindow()
             """
+
+    def undo(self):
+        self._parser.undo()
+        self._parser.unstale_cache_items()
+
+    def redo(self):
+        self._parser.redo()
+        self._parser.unstale_cache_items()
+
+    def drop_history(self):
+        return self._parser.drop_history()
+
+    def _full_screen_mode_on(self, impl_plot):
+        pass
+
+    def _full_screen_mode_off(self):
+        pass
+
+    def _impl_mouse_press_handler(self, vb):
+        # if vb:
+        # print(vb.parentItem())
+        # self._debug_log_event(event, "Mouse released")
+
+        ci = self._parser._impl_plot_cache_table.get_cache_item(vb.parentItem())
+        if not hasattr(ci, 'plot'):
+            return
+        plot = ci.plot()
+
+        if len(self._parser._stale_citems):
+            self._parser.unstale_cache_items()
+
+        if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+            # Stage a command to obtain original view limits
+            # Disable Zoom and Pan in PlotContour
+            if isinstance(plot, PlotContour):
+                return
+            self.stage_view_lim_cmd()
+            return
+
+    def _impl_mouse_release_handler(self, vb):
+        # self._debug_log_event(event, "Mouse released")
+        if vb is None:
+            pass
+        else:
+            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                # commit commands from staging.
+                while len(self._staging_cmds):
+                    self.commit_view_lim_cmd()
+                # push uncommitted changes onto the command stack.
+                while len(self._commitd_cmds):
+                    self.push_view_lim_cmd()
+                # Update statistics
+                # self.stats(self.get_canvas())
+
+    """
+    def _debug_log_event(self, event: Event, msg: str):
+        logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")
+    """
+
+    def unfocus_plot(self):
+        pass
+
+    def mouse_clicked(self, event):
+        pass
+
+    def mouse_moved(self, pos):
+        pass
