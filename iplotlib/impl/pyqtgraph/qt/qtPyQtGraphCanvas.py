@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 import numpy as np
-from PySide6.QtCore import QMargins, Qt, Signal
+from PySide6.QtCore import QMargins, Qt, Signal, QEvent
 from PySide6.QtWidgets import QVBoxLayout, QGraphicsSceneMouseEvent
 
 from iplotlib.core import Canvas, BackendParserBase, Plot, PlotContour
@@ -14,7 +14,7 @@ from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
-from iplotlib.qt.models import PlotItem
+from pyqtgraph import PlotItem
 
 logger = Sl.get_logger(__name__)
 
@@ -39,7 +39,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._vlayout.setContentsMargins(QMargins())
         self._vlayout.addWidget(self._parser.figure)
-        self._parser.figure.scene().sigMouseClicked.connect(self.mouse_clicked)
+
+        # self._parser.figure.scene().sigMouseClicked.connect(self.mouse_clicked)
+
+        # GUI event handlers
+        # self._parser.figure.scene().installEventFilter(self)
 
         self.setLayout(self._vlayout)
 
@@ -63,10 +67,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self.canvas = canvas
 
         # Connect events
-        for plot_item in self._parser._layout.values():
-            vb = plot_item.getViewBox()
-            vb.pressed.connect(self._impl_mouse_press_handler)
-            vb.released.connect(self._impl_mouse_release_handler)
+        for stack in self._parser._layout_stacks.values():
+            for plot in stack.values():
+                vb = plot.getViewBox()
+                vb.pressed.connect(self._impl_mouse_press_handler)
+                vb.released.connect(self._impl_mouse_release_handler)
 
         # self._parser.figure.clear()
         # for i, col in enumerate(self.canvas.plots):
@@ -144,12 +149,14 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def _full_screen_mode_off(self):
         pass
 
-    def _impl_mouse_press_handler(self, vb):
-        # if vb:
-        # print(vb.parentItem())
+    def _impl_mouse_press_handler(self, view_box, event):
         # self._debug_log_event(event, "Mouse released")
 
-        ci = self._parser._impl_plot_cache_table.get_cache_item(vb.parentItem())
+        impl_plot = view_box.parentItem()
+        if not impl_plot:
+            return
+
+        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
         if not hasattr(ci, 'plot'):
             return
         plot = ci.plot()
@@ -162,8 +169,25 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             # Disable Zoom and Pan in PlotContour
             if isinstance(plot, PlotContour):
                 return
+            elif event.type() == QEvent.GraphicsSceneMouseDoubleClick:
+                pass
             self.stage_view_lim_cmd()
             return
+
+        elif self._mmode == Canvas.MOUSE_MODE_SELECT:
+            if not impl_plot or not isinstance(impl_plot, PlotItem):
+                return
+            if event.button() == Qt.MouseButton.LeftButton:
+                # if event.double():
+                if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
+                    self._parser.set_focus_plot(impl_plot)
+                else:
+                    pass
+            elif event.button() == Qt.MouseButton.RightButton:
+                if event.double():
+                    pass
+                else:
+                    pass
 
     def _impl_mouse_release_handler(self, vb):
         # self._debug_log_event(event, "Mouse released")

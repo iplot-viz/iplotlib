@@ -16,6 +16,7 @@ from PySide6.QtCore import Signal as QtSignal
 from iplotLogging import setupLogger
 from iplotProcessing.core import BufferObject
 from iplotlib.core import (Axis,
+                           RangeAxis,
                            Canvas,
                            BackendParserBase,
                            Plot,
@@ -63,7 +64,7 @@ class FechaPyQtGraph(pg.AxisItem):
 
 
 class QtViewBox(pg.ViewBox):
-    pressed = QtSignal(object)
+    pressed = QtSignal(object, object)
     released = QtSignal(object)
 
     def __init__(self, parent=None):
@@ -73,13 +74,7 @@ class QtViewBox(pg.ViewBox):
     def mousePressEvent(self, ev: QGraphicsSceneMouseEvent):
         # mensaje de log
         super().mousePressEvent(ev)
-        self.pressed.emit(self)
-        # self.mouseReleaseEvent(ev)
-
-    def mouseReleaseEvent(self, ev: QGraphicsSceneMouseEvent):
-        # self._debug_log_event(event, "Mouse released")
-        super().mouseReleaseEvent(ev)
-        self.released.emit(self)
+        self.pressed.emit(self, ev)
 
     def releaseEvent(self):
         self.released.emit(self)
@@ -198,9 +193,11 @@ class PyQtGraphParser(BackendParserBase):
 
             # Preserve visible status for lines
             # TODO: revisar bien
+            """
             for new, old in zip(plot_lines, signal.lines):
                 for n, o in zip(new, old):
                     n.setVisible(o.isVisible())
+            """
         else:
             if x_data.ndim == 1 and y_data.ndim == 1:
                 plot_lines = [draw_fn(x=x_data, y=y_data, **style)]
@@ -467,7 +464,8 @@ class PyQtGraphParser(BackendParserBase):
     def process_ipl_plot_contour(self):
         pass
 
-    def process_ipl_plot_xy_slider(self, i_plot: PlotXYWithSlider, pyqt_layout):
+    def process_ipl_plot_xy_slider(self, i_plot: PlotXYWithSlider, row, col, visible_stack_ids, cell_gl):
+
         # Check if there was a previous plot_with_slider with a value
         if i_plot.slider_last_val is not None:
             value = i_plot.slider_last_val
@@ -479,10 +477,17 @@ class PyQtGraphParser(BackendParserBase):
         slider.setMinimum(0)
         slider.setMaximum(i_plot.signals[1][0].y_data.shape[0] - 1)
         slider.setValue(value)
-        # slider.set TickPosition(QSlider.TickPosition.TicksBothSides)
         slider.setTickInterval(1)
 
         i_plot.slider = slider
+
+        # Proxy widget
+        rc_key = (row, col)
+        proxy = QtWidgets.QGraphicsProxyWidget()
+        proxy.setWidget(slider)
+        last_row_id = max(visible_stack_ids) + 1
+        cell_gl.addItem(proxy, row=last_row_id, col=0)
+        self._slider_placeholders[rc_key] = proxy
 
         # Annotate labels along the slider axis
         h_layout = QHBoxLayout()
@@ -501,10 +506,11 @@ class PyQtGraphParser(BackendParserBase):
         # Register the callback function to update the plot when the slider value changes
         slider.valueChanged.connect(lambda val, i_p=i_plot: self._update_slider(val, i_p, slider_values, current_label))
 
-        pyqt_layout.addWidget(slider)
-        pyqt_layout.addLayout(h_layout)
+        # pyqt_layout.addWidget(slider)
+        # pyqt_layout.addLayout(h_layout)
 
-        return pyqt_layout
+        # return pyqt_layout
+        return cell_gl
 
     def process_ipl_plot(self, i_plot: Plot, col: int, row: int):
         if not isinstance(i_plot, Plot):
@@ -514,13 +520,14 @@ class PyQtGraphParser(BackendParserBase):
 
         visible_stack_ids = []
 
+        plot = None
         l_key = (row, col)
         for stack_id, key in enumerate(sorted(i_plot.signals.keys())):
             signals = i_plot.signals.get(key) or list()
             visible_stack_ids.append(stack_id)
 
             if l_key not in self._layout_stacks:
-                plot = pg.PlotItem()
+                plot = pg.PlotItem(viewBox=QtViewBox())
                 cell_gl.addItem(plot, row=0, col=0)
                 self._layout_stacks.setdefault(l_key, {})[stack_id] = plot
             elif stack_id not in self._layout_stacks[l_key]:
@@ -530,12 +537,15 @@ class PyQtGraphParser(BackendParserBase):
                 pi.getAxis('bottom').setStyle(showValues=False)
                 self._layout_stacks[l_key][stack_id] = pi
 
-            plot = self._layout_stacks[l_key][stack_id]
+            # Slider creation only if it doesn't exist
+            if isinstance(i_plot, PlotXYWithSlider):
+                cell_gl = self.process_ipl_plot_xy_slider(i_plot, row, col, visible_stack_ids, cell_gl)
 
+            plot = self._layout_stacks[l_key][stack_id]
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
+
             # Keep references to iplotlib instances for ease of access in callbacks.
             self._impl_plot_cache_table.register(plot, self.canvas, i_plot, stack_id, signals)
-            plot.enableAutoRange(x=True, y=True)
 
             self.set_plot_title(i_plot, plot, stack_id)
 
@@ -565,25 +575,14 @@ class PyQtGraphParser(BackendParserBase):
                 self._signal_impl_plot_lut.update({signal.uid: plot})
                 self.process_ipl_signal(signal)
 
+            plot.enableAutoRange(x=True, y=True)
+
         # Establecer callback para cuando se modifique el X lim
         vb = plot.getViewBox()
         vb.sigXRangeChanged.connect(self._axis_update_callback)
         vb.sigYRangeChanged.connect(self._axis_update_callback)
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
-
-        # Slider creation only if it doesn't exist
-        if isinstance(i_plot, PlotXYWithSlider):
-            rc_key = (row, col)
-            slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-            slider.setRange(0, 100)  # TODO put real values
-            slider.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-
-            proxy = QtWidgets.QGraphicsProxyWidget()
-            proxy.setWidget(slider)
-            last_row_id = max(visible_stack_ids) + 1
-            cell_gl.addItem(proxy, row=last_row_id, col=0)
-            self._slider_placeholders[rc_key] = proxy
 
     def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
         if not visible_stacks:
@@ -827,8 +826,6 @@ class PyQtGraphParser(BackendParserBase):
                     continue
                 vb = plot.vb
                 vb.setMouseMode(vb.PanMode)
-                # vb.setMouseEnabled(x=True, y=True)
-
     def set_view_box_zoom(self):
         for stack in self._layout_stacks.values():
             for plot in stack.values():
@@ -836,7 +833,6 @@ class PyQtGraphParser(BackendParserBase):
                     continue
                 vb = plot.vb
                 vb.setMouseMode(vb.RectMode)
-                # vb.setMouseEnabled(x=True, y=True)  why?
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass

@@ -174,10 +174,10 @@ class IplotQtCanvas(QWidget):
             for signal in signals:
                 if (isinstance(signal,
                                SignalXY) and signal.status_info.result == 'Success' and signal.parent is not None):
-                    mpl_axes = self._parser._signal_impl_plot_lut.get(signal.uid)
-                    if mpl_axes is None:
+                    impl_plot = self._parser._signal_impl_plot_lut.get(signal.uid)
+                    if impl_plot is None:
                         continue
-                    info_stats.append((signal, mpl_axes))
+                    info_stats.append((signal, impl_plot))
             self._stats_table.fill_table(info_stats)
 
     @contextmanager
