@@ -55,11 +55,11 @@ class Axis:
         self.font_color = Axis.font_color
         self.tick_number = Axis.tick_number
 
-    def merge(self, old_axis: 'Axis'):
-        self.label = old_axis.label
-        self.font_size = old_axis.font_size
-        self.font_color = old_axis.font_color
-        self.tick_number = old_axis.tick_number
+    def merge(self, old_axis: dict):
+        self.label = old_axis['label']
+        self.font_size = old_axis['font_size']
+        self.font_color = old_axis['font_color']
+        self.tick_number = old_axis['tick_number']
 
 
 @dataclass

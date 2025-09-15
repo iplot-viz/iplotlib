@@ -37,5 +37,5 @@ class PropertyManager:
         if value is not None:
             return value
         if hasattr(obj, 'parent'):
-            return self.get_value(obj.parent, attr_name)
+            return self.get_value(obj.parent(), attr_name)
         return self.default.get(attr_name, None)

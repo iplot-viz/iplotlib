@@ -92,12 +92,12 @@ class IplotQtMarker(QWidget):
         "Creation of QTableWidgetItem for each column"
         # 1- Marker name
         marker_name = ascii_uppercase[self.count % len(ascii_uppercase)]
-        is_date = signal.parent.axes[0].is_date
+        is_date = signal.parent().axes[0].is_date
         marker_data = QTableWidgetItem(marker_name)
         marker_data.setData(Qt.UserRole, is_date)
 
         # 2- Signal stack
-        id_plot = signal.parent.id
+        id_plot = signal.parent().id
         id_signal = signal.id
         marker_id = [id_plot[0], id_plot[1], id_signal]
         stack = f"{id_plot[0]}.{id_plot[1]}.{id_signal}"
@@ -272,7 +272,7 @@ class IplotQtMarker(QWidget):
 
     def refresh_stack(self, signal: SignalXY, stack: str):
         # New Signal stack
-        marker_id = [signal.parent.id[0], signal.parent.id[1], signal.id]
+        marker_id = [signal.parent().id[0], signal.parent().id[1], signal.id]
 
         for row in range(self.table.rowCount()):
             if self.table.item(row, 2).data(Qt.UserRole) == signal.uid:
@@ -281,11 +281,11 @@ class IplotQtMarker(QWidget):
                 plot_data.setData(Qt.UserRole, marker_id)
 
     def import_table(self, signal: SignalXY):
-        id_plot = signal.parent.id
+        id_plot = signal.parent().id
         id_signal = signal.id
         id_marker = [id_plot[0], id_plot[1], id_signal]
         stack = f"{id_plot[0]}.{id_plot[1]}.{id_signal}"
-        is_date = signal.parent.axes[0].is_date
+        is_date = signal.parent().axes[0].is_date
 
         for marker in signal.markers_list:
             row_pos = self.table.rowCount()
