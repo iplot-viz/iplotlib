@@ -98,8 +98,8 @@ class ImplementationPlotCacheTable:
             base = ci.offsets[ax_idx]
             if isinstance(base, int) or type(base).__name__ == 'int64':
                 value = int(value)
-        return value - base if inverse else value + base
-        # return value / 10000 if inverse else value * 10000
+        # return value - base if inverse else value + base
+        return value / 10000 if inverse else value * 10000
 
 
 class BackendParserBase(ABC):
@@ -809,6 +809,7 @@ class BackendParserBase(ABC):
             begin, end = self.get_impl_x_axis_limits(impl_plot)
         elif ax_idx == 1:
             begin, end = self.get_impl_y_axis_limits(impl_plot)
+            return begin, end
         return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
 
     @abstractmethod
