@@ -161,7 +161,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 prev_stack = self._marker_window.get_stack(signal_uid)
                 idx = markers_signals_uid.index(signal_uid)
                 signal_element = markers_signals[idx]
-                current_stack = ".".join(signal_element.get_id())
+                current_stack = signal_element.get_stack()
                 if prev_stack != current_stack:
                     self._marker_window.refresh_stack(signal_element, current_stack)
 

@@ -69,6 +69,9 @@ class Signal(ABC):
     def get_id(self):
         return [self.parent.col, self.parent.row, self.stack]
 
+    def get_stack(self) -> str:
+        return ".".join(self.get_id())
+
 
 @dataclass
 class SignalXY(Signal, IplotSignalAdapter):

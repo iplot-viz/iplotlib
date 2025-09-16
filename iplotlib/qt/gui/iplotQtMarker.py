@@ -98,7 +98,7 @@ class IplotQtMarker(QWidget):
 
         # 2- Signal stack
         id_marker = signal.get_id()
-        stack = ".".join(id_marker)
+        stack = signal.get_stack()
         plot_data = QTableWidgetItem(stack)
         plot_data.setData(Qt.ItemDataRole.UserRole, id_marker)
 
@@ -280,7 +280,7 @@ class IplotQtMarker(QWidget):
 
     def import_table(self, signal: SignalXY):
         id_marker = signal.get_id()
-        stack = ".".join(id_marker)
+        stack = signal.get_stack()
         is_date = signal.parent.axes[0].is_date
 
         for marker in signal.markers_list:

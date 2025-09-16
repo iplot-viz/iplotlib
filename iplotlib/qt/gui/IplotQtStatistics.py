@@ -134,7 +134,7 @@ class IplotQtStatistics(QWidget):
             self.table.insertRow(idx)
 
             # The rows correspond to the signals and their corresponding stacks
-            stack = ".".join(signal.get_id())
+            stack = signal.get_stack()
             signal_name = f"{signal.label}, {stack}"
             self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
