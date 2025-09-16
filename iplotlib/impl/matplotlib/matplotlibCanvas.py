@@ -3,6 +3,7 @@
 
 from typing import Any, Callable, Collection, List
 import pandas
+import gc
 import numpy as np
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis
@@ -33,6 +34,7 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
+from iplotlib.core.impl_base import ImplementationPlotCacheTable
 
 logger = setupLogger.get_logger(__name__)
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
@@ -120,7 +122,7 @@ class MatplotlibParser(BackendParserBase):
         # Visible data is adjusted based on extremities, but only for unprocessed signals.
         # Processed signals already use the visible range.
         # Skip this step in case of streaming mode, as x_data and y_data may be empty and lead to errors.
-        if not signal.extremities and signal.x_expr == "${self}.time" and not self.canvas.streaming:
+        if not signal.extremities and not self.canvas.streaming and mpl_axes.get_xlim() != (-0.05, 0.05):
             x_data, y_data = _get_visible_data(x_data, y_data, *mpl_axes.get_xlim())
 
         if isinstance(plot_lines, list):
@@ -328,8 +330,27 @@ class MatplotlibParser(BackendParserBase):
 
     def clear(self):
         super().clear()
-        for ax in list(self.figure.axes):
-            self.figure.delaxes(ax)
+
+        # drop cache items and remove each Axes to release all artists and callbacks
+        # for ax in list(self.figure.axes):
+        #     self.figure.delaxes(ax)
+        self.figure.clear()
+        for col in self.canvas.plots:
+            for plot in col:
+                if not plot:
+                    continue
+                for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
+                    signal.lines.clear()
+        # remove any active multi‑cursors
+        for c in self._cursors:
+            c.remove()
+        self._cursors.clear()
+
+        self.map_legend_to_ax.clear()
+        self._impl_plot_ranges_hash.clear()
+        self._stale_citems.clear()
+
+        gc.collect()
 
     def set_impl_plot_limits(self, impl_plot: Any, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, MPLAxes):
@@ -645,7 +666,7 @@ class MatplotlibParser(BackendParserBase):
                     ix_legend = 0
                     for signal in signals:
                         for line in self._signal_impl_shape_lut.get(id(signal)):
-                            self.map_legend_to_ax[legend_lines[ix_legend]] = [line, signal]
+                            self.map_legend_to_ax[legend_lines[ix_legend]] = line
                             alpha = 1 if legend_lines[ix_legend].get_visible() else 0.2
                             legend_lines[ix_legend].set_picker(3)
                             legend_lines[ix_legend].set_visible(True)
@@ -1164,6 +1185,33 @@ class MatplotlibParser(BackendParserBase):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
         return self._impl_plot_cache_table.transform_value(impl_plot, ax_idx, value, inverse=inverse)
+
+    def transform_data(self, impl_plot: Any, data):
+        """This function post processes data if it cannot be plotted with matplotlib directly.
+        Currently, it transforms data if it is a large integer which can cause overflow in matplotlib"""
+        ret = []
+        if isinstance(data, Collection):
+            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            for i, d in enumerate(data):
+                logger.debug(f"\t transform data i={i} d = {d} ")
+
+                offset = None
+                if ci:
+                    offset = ci.offsets[i]
+                    if offset is None and i == 0:
+                        offset = self.create_offset(d)
+                        ci.offsets[i] = offset
+
+                if ci and offset is not None:
+                    logger.debug(f"\tApplying data offsets {offset} to plot {id(impl_plot)} ax_idx: {i}")
+                    if isinstance(d, Collection) and not isinstance(d, (str, bytes)):
+                        arr = np.asarray(d, dtype=np.int64)
+                        ret.append(BufferObject(arr - offset))
+                    else:
+                        ret.append(np.int64(d) - offset)
+                else:
+                    ret.append(d)
+        return ret
 
 
 def get_data_range(data, axis_idx):
