@@ -5,12 +5,10 @@ import numpy as np
 from typing import Any, Callable, Collection, List, Tuple
 import pandas as pd
 import pyqtgraph as pg
-from pyparsing import unicode_string
-from pyqtgraph import IsocurveItem
-from pyqtgraph.Qt import QtCore, QtWidgets
-from pyqtgraph import IsocurveItem, ViewBox
-from pyqtgraph.Qt import QtCore, QtGui
-from pyqtgraph.Qt.QtWidgets import QSlider, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QGraphicsSceneMouseEvent
+from pyqtgraph.Qt import QtWidgets
+from pyqtgraph import IsocurveItem, ViewBox, LegendItem
+from pyqtgraph.Qt import QtCore
+from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QLabel, QGraphicsSceneMouseEvent
 from PySide6.QtCore import Signal as QtSignal
 
 from iplotLogging import setupLogger
@@ -69,14 +67,14 @@ class QtViewBox(pg.ViewBox):
 
     def __init__(self, parent=None):
         super().__init__(parent=parent, enableMenu=True)
-        self.sigRangeChanged.connect(self.releaseEvent)
+        self.sigRangeChanged.connect(self.release_event)
 
     def mousePressEvent(self, ev: QGraphicsSceneMouseEvent):
-        # mensaje de log
+        # Add log message
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
 
-    def releaseEvent(self):
+    def release_event(self):
         self.released.emit(self)
 
 
@@ -121,11 +119,20 @@ class PyQtGraphParser(BackendParserBase):
     def export_image(self, filename: str, **kwargs):
         super().export_image(filename, **kwargs)
 
-    def legend_downsampled_signal(self, signal, mpl_axes, plot_lines):
+    def legend_downsampled_signal(self, signal, impl_plot, plot_lines):
         """
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
-        pass
+        legend = impl_plot.legend
+        if len(legend.items) and plot_lines is not None:
+            lines = [lines[0].item.name() for lines in legend.items]
+            pos = lines.index(plot_lines[0].name())
+
+            legend_text = legend.items[pos][1].text
+            if legend_text.endswith('*') and not signal.isDownsampled:
+                legend.items[pos][1].setText(legend_text[:-1])
+            elif not legend_text.endswith('*') and signal.isDownsampled:
+                legend.items[pos][1].setText(legend_text + '*')
 
     def do_impl_line_plot_xy(self, signal: SignalXY, plot: PlotItem, i_plot: PlotXY, cache_item, x_data, y_data):
         def _get_visible_data(xd, yd, lo, hi):
@@ -144,6 +151,7 @@ class PyQtGraphParser(BackendParserBase):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[PlotDataItem]]
         style = self.get_signal_style(signal)
         draw_fn = plot.plot
+
         # Reflect downsampling in legend
         self.legend_downsampled_signal(signal, plot, plot_lines)
 
@@ -440,22 +448,23 @@ class PyQtGraphParser(BackendParserBase):
 
         if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
             # for axes in self.figure.axes:
-            for plot_item in self._layout.values():
-                cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
-                if not hasattr(cache_item, 'plot'):
-                    continue
-                plot = cache_item.plot()
-                if not isinstance(plot, Plot):
-                    continue
-                limits = self.get_plot_limits(plot, which='original')
-                begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                # Check if it is date and the max difference is 1 second
-                # Need to differentiate if it is absolute or relative
-                max_diff = self._pm.get_value(self.canvas, 'max_diff')
-                max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot, PlotXYWithSlider) else max_diff
-                if ((begin, end) == (base_begin, base_end) or (
-                        abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
-                    shared.append(plot_item)
+            for stack in self._layout_stacks.values():
+                for plot_item in stack.values():
+                    cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
+                    if not hasattr(cache_item, 'plot'):
+                        continue
+                    plot = cache_item.plot()
+                    if not isinstance(plot, Plot):
+                        continue
+                    limits = self.get_plot_limits(plot, which='original')
+                    begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
+                    # Check if it is date and the max difference is 1 second
+                    # Need to differentiate if it is absolute or relative
+                    max_diff = self._pm.get_value(self.canvas, 'max_diff')
+                    max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot, PlotXYWithSlider) else max_diff
+                    if ((begin, end) == (base_begin, base_end) or (
+                            abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
+                        shared.append(plot_item)
         return shared
 
     def process_ipl_plot_xy(self):
@@ -575,9 +584,15 @@ class PyQtGraphParser(BackendParserBase):
                 self._signal_impl_plot_lut.update({signal.uid: plot})
                 self.process_ipl_signal(signal)
 
-            plot.enableAutoRange(x=True, y=True)
+            # Legend processing for downsampled data when drawing
+            ix_legend = 0
+            for signal in signals:
+                if signal.isDownsampled:
+                    legend_label = plot.legend.items[ix_legend][1].text + '*'
+                    plot.legend.items[ix_legend][1].setText(legend_label)
+                ix_legend += 1
 
-        # Establecer callback para cuando se modifique el X lim
+        # Observe the axis limit change events
         vb = plot.getViewBox()
         vb.sigXRangeChanged.connect(self._axis_update_callback)
         vb.sigYRangeChanged.connect(self._axis_update_callback)
@@ -605,7 +620,7 @@ class PyQtGraphParser(BackendParserBase):
         plot.getViewBox().setBackgroundColor(background_color)
 
     def process_legend_plot(self, plot: PlotItem, i_plot: Plot, signals):
-        def set_legend_position(legend, position):
+        def set_legend_position(legend: LegendItem, position: str):
             pos_map = {
                 'upper left': ((0, 0), (0, 0)),
                 'upper center': ((0.5, 0), (0.5, 0)),
@@ -682,9 +697,11 @@ class PyQtGraphParser(BackendParserBase):
 
     def _axis_update_callback(self, view_box: ViewBox):
 
+        affected_axes = [view_box.parentItem()]
         if self._pm.get_value(self.canvas, 'shared_x_axis') and not self.canvas.undo_redo:
             plot = view_box.parentItem()
             other_axes = self._get_all_shared_axes(plot)
+            affected_axes = other_axes
             for other_axis in other_axes:
                 cur_x_limits = self.get_oaw_axis_limits(plot, 0)
                 other_x_limits = self.get_oaw_axis_limits(other_axis, 0)
@@ -698,36 +715,36 @@ class PyQtGraphParser(BackendParserBase):
                     else:
                         self.set_oaw_axis_limits(other_axis, 0, cur_x_limits)
 
-        # Actualizar limites de los axis tras el Zoom
-        ci = self._impl_plot_cache_table.get_cache_item(view_box.parentItem())
-        if not hasattr(ci, 'plot'):
-            return
-        if not isinstance(ci.plot(), Plot):
-            return
-        ranges = []
+        for axes in affected_axes:
+            ci = self._impl_plot_cache_table.get_cache_item(axes)
+            if not hasattr(ci, 'plot'):
+                return
+            if not isinstance(ci.plot(), Plot):
+                return
+            ranges = []
 
-        for ax_idx, ax in enumerate(ci.plot().axes):
-            if isinstance(ax, Collection):
-                self.update_multi_range_axis(ax, ax_idx, view_box.parentItem())
-            elif isinstance(ax, RangeAxis):
-                self.update_range_axis(ax, ax_idx, view_box.parentItem())
-                ranges = ax.get_limits()
-        if ci not in self._stale_citems:
-            self._stale_citems.append(ci)
-        if self.canvas.undo_redo:
-            return
-        if isinstance(ci.plot(), PlotXYWithSlider):
-            return
-        if not hasattr(ci, 'signals'):
-            return
-        if not ci.signals:
-            return
+            for ax_idx, ax in enumerate(ci.plot().axes):
+                if isinstance(ax, Collection):
+                    self.update_multi_range_axis(ax, ax_idx, axes)
+                elif isinstance(ax, RangeAxis):
+                    self.update_range_axis(ax, ax_idx, axes)
+                    ranges = ax.get_limits()
+            if ci not in self._stale_citems:
+                self._stale_citems.append(ci)
+            if self.canvas.undo_redo:
+                return
+            if isinstance(ci.plot(), PlotXYWithSlider):
+                return
+            if not hasattr(ci, 'signals'):
+                return
+            if not ci.signals:
+                return
 
-        for singal_ref in ci.signals:
-            signal = singal_ref()
-            if hasattr(signal, "set_xranges") and isinstance(signal, SignalXY):
-                signal.set_xranges(ranges)
-                logger.debug(f"callback update {ranges[0]} axis range to {ranges[1]}")
+            for singal_ref in ci.signals:
+                signal = singal_ref()
+                if hasattr(signal, "set_xranges") and isinstance(signal, SignalXY):
+                    signal.set_xranges(ranges)
+                    logger.debug(f"callback update {ranges[0]} axis range to {ranges[1]}")
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation == 'left':
@@ -826,6 +843,7 @@ class PyQtGraphParser(BackendParserBase):
                     continue
                 vb = plot.vb
                 vb.setMouseMode(vb.PanMode)
+
     def set_view_box_zoom(self):
         for stack in self._layout_stacks.values():
             for plot in stack.values():
