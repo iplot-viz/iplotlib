@@ -10,7 +10,6 @@ import pyqtgraph as pg
 from pyqtgraph.Qt.QtGui import QMouseEvent
 
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
-from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl

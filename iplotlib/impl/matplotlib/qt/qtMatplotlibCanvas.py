@@ -26,7 +26,6 @@ from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
-from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
@@ -47,9 +46,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._marker_window = IplotQtMarker()
         self._marker_window.dropMarker.connect(self.draw_marker_label)
         self._marker_window.deleteMarker.connect(self.delete_marker_label)
-
-        # Statistics
-        self._stats_table = IplotQtStatistics()
 
         self.info_shared_x_dialog = False
 
@@ -180,7 +176,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # Get signal and ax
         for idxCol, col in enumerate(self._parser.canvas.plots):
             for idxPlot, plot in enumerate(col):
-                if not plot or (plot.col,plot.row) != plot_id:
+                if not plot or (plot.col, plot.row) != plot_id:
                     continue
                 # Get signal
                 for signals in plot.signals.values():
@@ -256,7 +252,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         signals = self.get_signals(canvas)
         if signals:
             for signal in signals:
-                if isinstance(signal, SignalXY) and signal.status_info.result == 'Success' and signal.parent is not None:
+                if isinstance(signal,
+                              SignalXY) and signal.status_info.result == 'Success' and signal.parent is not None:
                     mpl_axes = self._parser._signal_impl_plot_lut.get(signal.uid)
                     if mpl_axes is None:
                         continue
@@ -346,15 +343,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             else:
                 self._marker_window.raise_()
                 self._marker_window.activateWindow()
-
-    def show_stats(self):
-        if not self._stats_table.isVisible():
-            self._stats_table.show()
-        elif self._stats_table.isMinimized():
-            self._stats_table.showNormal()
-        else:
-            self._stats_table.raise_()
-            self._stats_table.activateWindow()
 
     def undo(self):
         self._parser.undo()
