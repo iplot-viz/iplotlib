@@ -98,8 +98,7 @@ class ImplementationPlotCacheTable:
             base = ci.offsets[ax_idx]
             if isinstance(base, int) or type(base).__name__ == 'int64':
                 value = int(value)
-        # return value - base if inverse else value + base
-        return value / 10000 if inverse else value * 10000
+        return value - base if inverse else value + base
 
 
 class BackendParserBase(ABC):
@@ -889,9 +888,9 @@ class BackendParserBase(ABC):
                     logger.debug(f"\tApplying data offsets {offset} to plot {id(impl_plot)} ax_idx: {i}")
                     if isinstance(d, Collection) and not isinstance(d, (str, bytes)):
                         arr = np.asarray(d, dtype=np.int64)
-                        ret.append(BufferObject(arr - offset))  # / 10000
+                        ret.append(BufferObject(arr - offset))
                     else:
-                        ret.append(np.int64(d) - offset)  # / 10000
+                        ret.append(np.int64(d) - offset)
                 else:
                     ret.append(d)
         return ret

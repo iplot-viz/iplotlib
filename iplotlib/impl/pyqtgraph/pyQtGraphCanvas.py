@@ -461,7 +461,8 @@ class PyQtGraphParser(BackendParserBase):
                     # Check if it is date and the max difference is 1 second
                     # Need to differentiate if it is absolute or relative
                     max_diff = self._pm.get_value(self.canvas, 'max_diff')
-                    max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot, PlotXYWithSlider) else max_diff
+                    max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot,
+                                                                                       PlotXYWithSlider) else max_diff
                     if ((begin, end) == (base_begin, base_end) or (
                             abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
                         shared.append(plot_item)
@@ -540,7 +541,7 @@ class PyQtGraphParser(BackendParserBase):
                 cell_gl.addItem(plot, row=0, col=0)
                 self._layout_stacks.setdefault(l_key, {})[stack_id] = plot
             elif stack_id not in self._layout_stacks[l_key]:
-                pi = pg.PlotItem()
+                pi = pg.PlotItem(viewBox=QtViewBox())
                 cell_gl.addItem(pi, row=stack_id, col=0)
                 pi.vb.setXLink(self._layout_stacks[l_key][0])
                 pi.getAxis('bottom').setStyle(showValues=False)
@@ -1018,4 +1019,9 @@ class PyQtGraphParser(BackendParserBase):
     def transform_value(self, plot: PlotItem, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
-        return self._impl_plot_cache_table.transform_value(plot, ax_idx, value, inverse=inverse)
+        ci = self._impl_plot_cache_table.get_cache_item(plot)
+        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is not None:
+            base = ci.offsets[ax_idx]
+            if isinstance(base, int) or type(base).__name__ == 'int64':
+                value = int(value)
+        return value / 10000 if inverse else value * 10000
