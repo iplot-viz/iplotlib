@@ -12,6 +12,7 @@ from abc import ABC
 import typing
 from dataclasses import dataclass
 from typing import Dict, List, Collection, Union, Tuple
+import weakref
 
 from iplotlib.core.axis import Axis, LinearAxis
 from matplotlib.widgets import Slider
@@ -76,12 +77,12 @@ class Plot(ABC):
         if self.axes is None:
             self.axes = [LinearAxis(), [LinearAxis()]]
 
-        self.axes[0].parent = self
+        self.axes[0].parent = weakref.ref(self)
         for axe in self.axes[1]:
-            axe.parent = self
+            axe.parent = weakref.ref(self)
 
     def add_signal(self, signal, stack: int = 1):
-        signal.parent = self
+        signal.parent = weakref.ref(self)
         if stack not in self.signals:
             self.signals[stack] = []
         self.signals[stack].append(signal)
