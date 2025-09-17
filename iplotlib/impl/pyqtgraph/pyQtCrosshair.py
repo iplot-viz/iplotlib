@@ -24,18 +24,4 @@ class pyQtCrosshair:
         # self._cid_draw = self.canvas.mpl_connect('draw_event', self.clear)
 
     def mouse_moved(self, evt):
-        pos = evt[0]
-        if self.plot.sceneBoundingRect().contains(pos):
-            mouse_point = self.plot.vb.mapSceneToView(pos)
-            x, y = mouse_point.x(), mouse_point.y()
-            self.vLine.setPos(x)
-            self.hLine.setPos(y)
-            """
-            index = int(mousePoint.x())
-            if index > 0 and index < len(data1):
-                label.setText(
-                    "<span style='font-size: 12pt'>x=%0.1f,   <span style='color: red'>y1=%0.1f</span>,   <span style='color: green'>y2=%0.1f</span>" % (
-                        mousePoint.x(), data1[index], data2[index]))
-            vLine.setPos(mousePoint.x())
-            hLine.setPos(mousePoint.y())
-            """
+        pass
