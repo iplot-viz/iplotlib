@@ -60,6 +60,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._parser.deactivate_cursor()
         self._parser.process_ipl_canvas(canvas)
 
+        # Delete _stale_citems axes after draw
+        self._parser.unstale_cache_items()
+
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
