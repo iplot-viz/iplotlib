@@ -67,7 +67,7 @@ class Signal(ABC):
         pass
 
     def get_id(self):
-        return [self.parent.col, self.parent.row, self.stack]
+        return [self.parent().col, self.parent().row, self.stack]
 
     def get_stack(self) -> str:
         return ".".join(map(str, self.get_id()))
