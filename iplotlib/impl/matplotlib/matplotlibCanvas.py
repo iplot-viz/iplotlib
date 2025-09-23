@@ -552,7 +552,7 @@ class MatplotlibParser(BackendParserBase):
                 value = 0
 
             # Maximum index value for the slider based on the y-data length
-            val_max = plot_with_slider.signals[1][0].y_data.shape[0] - 1
+            val_max = plot_with_slider.signals[1][0].time.shape[0] - 1
 
             # Slider creation
             plot_with_slider.slider = Slider(slider_ax, '', 0, val_max, valinit=value, valstep=1)
