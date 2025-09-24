@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List
 
+import numpy as np
+
 from iplotlib.core.marker import Marker
 from iplotlib.interface import IplotSignalAdapter
 
@@ -138,6 +140,23 @@ class SignalXY(Signal, IplotSignalAdapter):
 
     def delete_marker(self, index):
         self.markers_list.pop(index)
+
+    def set_limits(self, ranges):
+        if self.x_expr != '${self}.time' and len(self.data_store[0]) > 0 and len(self.x_data) > 0:
+            idx1 = np.searchsorted(self.x_data, ranges[0])
+            idx2 = np.searchsorted(self.x_data, ranges[1])
+
+            if idx1 != 0:
+                idx1 -= 1
+            if idx2 != len(self.x_data):
+                idx2 += 1
+
+            signal_begin = self.data_store[0][idx1:idx2][0]
+            signal_end = self.data_store[0][idx1:idx2][-1]
+
+            self.set_xranges([signal_begin, signal_end])
+        else:
+            self.set_xranges(ranges)
 
 
 @dataclass

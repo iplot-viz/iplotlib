@@ -759,12 +759,6 @@ class BackendParserBase(ABC):
             return int(vals[0])
         return None
 
-    def get_value(self, impl_plot: Any, ax_idx: int, data_sample):
-        """
-        Offset-aware get axis value
-        """
-        return self.transform_value(impl_plot, ax_idx, data_sample)
-
     @abstractmethod
     def get_impl_x_axis(self, impl_plot: Any):
         """

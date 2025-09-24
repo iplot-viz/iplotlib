@@ -5,6 +5,7 @@ import numpy as np
 from typing import Any, Callable, Collection, List, Tuple
 import pandas as pd
 import pyqtgraph as pg
+import inspect
 from pyqtgraph.Qt import QtWidgets
 from pyqtgraph import IsocurveItem, ViewBox, LegendItem
 from pyqtgraph.Qt import QtCore
@@ -584,19 +585,6 @@ class PyQtGraphParser(BackendParserBase):
                     x_axis = i_plot.get_x_axis()
                     self.process_ipl_axis(x_axis, ax_idx, i_plot, plot)
 
-            # Set limits for processed signals
-            x_axis = i_plot.get_x_axis()
-            if x_axis.begin is None and x_axis.end is None:
-                processed = True
-                min_value = np.inf
-                max_value = -np.inf
-                for signal in signals:
-                    if min_value > signal.ts_start:
-                        min_value = signal.ts_start
-                    if max_value < signal.ts_end:
-                        max_value = signal.ts_end
-                i_plot.set_x_axes_limits([min_value, max_value])
-
             # Process signal
             for signal in signals:
                 # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
@@ -729,29 +717,20 @@ class PyQtGraphParser(BackendParserBase):
         plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
         print(plot)
 
-        for ax_idx, ax in enumerate(plot.axes):
-            if isinstance(ax, Collection):
-                self.update_multi_range_axis(ax, ax_idx, impl_plot)
-            elif isinstance(ax, RangeAxis):
-                # if self._pm.get_value(self.canvas, 'shared_x_axis') and not self.canvas.undo_redo:
-                self.update_range_axis(ax, ax_idx, impl_plot)
+        for stack_id, key in enumerate(sorted(plot.signals.keys())):
+            # mpl_axes = self._plot_impl_plot_lut[id(plot())][stack_id]
+            for ax_idx in range(len(plot.axes)):
+                if isinstance(plot.axes[ax_idx], Collection):
+                    axis = plot.axes[ax_idx][stack_id]
+                    self.process_ipl_axis(axis, ax_idx, plot, impl_plot)
+                else:
+                    axis = plot.axes[ax_idx]
+                    self.process_ipl_axis(axis, ax_idx, plot, impl_plot)
 
         for stack in plot.signals.values():
             for signal in stack:
-                # TODO: add signal with proccesing case
-                if hasattr(signal, "set_xranges") and isinstance(signal, SignalXY):
-                    signal.set_xranges(plot.axes[0].get_limits())
-                    self.process_ipl_signal(signal)
-
-                    for stack_id, key in enumerate(sorted(plot.signals.keys())):
-                        # mpl_axes = self._plot_impl_plot_lut[id(plot())][stack_id]
-                        for ax_idx in range(len(plot.axes)):
-                            if isinstance(plot.axes[ax_idx], Collection):
-                                axis = plot.axes[ax_idx][stack_id]
-                                self.process_ipl_axis(axis, ax_idx, plot, impl_plot)
-                            else:
-                                axis = plot.axes[ax_idx]
-                                self.process_ipl_axis(axis, ax_idx, plot, impl_plot)
+                signal.set_limits(self.get_oaw_axis_limits(impl_plot,0))
+                self.process_ipl_signal(signal)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation == 'left':
@@ -1001,24 +980,13 @@ class PyQtGraphParser(BackendParserBase):
         ret = []
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
 
-        for i, d in enumerate(data):
-            logger.debug(f"\t transform data i={i} d = {d} ")
-            offset = None
-
-            if ci and i == 0 and d[0] > 10 ** 15:
-                offset = self.create_offset_pyqt(impl_plot, i)
-
-            if offset is not None:
-                # if offset == 100_000:
+        for ax_idx, d in enumerate(data):
+            logger.debug(f"\t transform data ax_idx={ax_idx} d = {d} ")
+            offset = ci.offsets[ax_idx]
+            if offset == 100_000:
                 ret.append(BufferObject([np.int64(e) / offset for e in d]))
             else:
-                ret.append(d)
-                # else:
-                #     # offset = (begin + end) / 2
-                #     ret.append(BufferObject([np.int64(e) - offset for e in d]))
-                # if axis:
-                #     axis.offset = offset
-            ci.offsets[i] = offset
+                ret.append(BufferObject([np.int64(e) - offset for e in d]))
         return ret
 
     def transform_value(self, impl_plot: PlotItem, ax_idx: int, value: Any, inverse=False):
@@ -1034,7 +1002,7 @@ class PyQtGraphParser(BackendParserBase):
         # if value < 10**15:
         #     offset = 0
         # else:
-        offset = self.create_offset_pyqt(impl_plot, ax_idx)
+        offset = self._impl_plot_cache_table.get_cache_item(impl_plot).offsets[ax_idx]
 
         if offset is None:
             return value
@@ -1049,26 +1017,102 @@ class PyQtGraphParser(BackendParserBase):
             else:
                 return value + offset
 
-    def create_offset_pyqt(self, impl_plot: PlotItem, ax_idx: int):
-        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+    def create_offset_pyqt(self, limits):
 
-        # vb = impl_plot.vb.viewRange()[ax_idx]  # Limites vb
-
-        if ci.offsets[ax_idx] is None:
-            return 0
-
-        range_axes = ci.plot().axes[ax_idx]
-        begin, end = 0, 0
-        if isinstance(range_axes, Collection):
-            for ax in range_axes:
-                begin, end = ax.get_limits()
-        else:
-            begin, end = range_axes.get_limits()
-
+        begin, end = limits
         diff = end - begin
-        if diff > 1e14:
-            offset = 100_000
+        if begin < 10 ** 15:
+            offset = 0
         else:
-            offset = (begin + end) / 2
+            if diff > 1e14:
+                offset = 100_000
+            else:
+                offset = (begin + end) / 2
 
         return offset
+
+    def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
+        """
+        Offset-aware version of implementation's `set_impl_x_axis_limits`, `set_impl_y_axis_limits`
+        The `oaw` in the function name stands for OffsetAWare.
+        """
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+
+        ci.offsets[ax_idx] = self.create_offset_pyqt(limits)
+
+        begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
+        end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
+        logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 0")
+
+        if ax_idx == 0:
+            self.set_impl_x_axis_limits(impl_plot, (begin, end))
+        elif ax_idx == 1:
+            self.set_impl_y_axis_limits(impl_plot, (begin, end))
+
+    def get_oaw_axis_limits(self, impl_plot: Any, ax_idx: int):
+        """
+        Offset-aware version of implementation's `get_impl_x_axis_limits`, `get_impl_y_axis_limits`
+        The `oaw` in the function name stands for OffsetAWare.
+        """
+        begin, end = (None, None)
+        if ax_idx == 0:
+            begin, end = self.get_impl_x_axis_limits(impl_plot)
+        elif ax_idx == 1:
+            begin, end = self.get_impl_y_axis_limits(impl_plot)
+            return begin, end
+        return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
+
+    def process_ipl_axis(self, axis: Axis, ax_idx: int, i_plot: Plot, impl_plot: Any):
+        """
+        Prepare the implementation axis.
+
+        :param axis
+        :param ax_idx
+        :param i_plot: An Axis instance
+        :param impl_plot
+        :type axis: Axis
+        :type ax_idx: int
+        :type i_plot: Plot
+        :type impl_plot: Any
+        """
+
+        axis_item = self.get_impl_axis(impl_plot, ax_idx)
+        self._axis_impl_plot_lut.update({id(axis): impl_plot})
+
+        if isinstance(axis, Axis):
+            self.process_ipl_log_axis(axis_item, i_plot)
+
+            fc = self._pm.get_value(axis, 'font_color')
+            fs = self._pm.get_value(axis, 'font_size')
+
+            axis_item._font_color = fc
+            axis_item._font_size = fs
+            axis_item._label = axis.label
+
+            self.process_ipl_axis_params(fc, fs, axis, axis_item)
+
+        if ax_idx == 1:
+            self.autoscale_y_axis(impl_plot)
+
+        if axis.original_begin is None or axis.original_end is None:
+            begin, end = +np.inf, -np.inf
+            for stack in i_plot.signals.values():
+                for signal in stack:
+                    signal.get_data()
+                    data = signal.x_data if ax_idx == 0 else signal.y_data
+                    begin, end = min(min(data), begin), max(max(data), end)
+            axis.original_begin = begin
+            axis.original_end = end
+        if any(frame.function in ["draw_clicked", "import_dict"] for frame in inspect.stack()):
+            begin, end = axis.original_begin, axis.original_end
+        else:
+            begin, end = self.get_oaw_axis_limits(impl_plot, ax_idx)
+
+        self.set_oaw_axis_limits(impl_plot, ax_idx, [begin, end])
+
+        if axis.is_date:
+            self.process_ipl_axis_formatter(impl_plot, axis_item, ax_idx)
+
+        # Set number of ticks and labels
+        tick_number = self._pm.get_value(axis, 'tick_number')
+        self.process_ipl_axis_ticks(tick_number, axis_item)
