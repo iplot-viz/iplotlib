@@ -77,6 +77,10 @@ class QtViewBox(pg.ViewBox):
     def release_event(self):
         self.released.emit(self)
 
+    def mouseClickEvent(self, ev):
+        super().mouseClickEvent(ev)
+        self.released.emit(self)
+
 
 class PyQtGraphParser(BackendParserBase):
     def __init__(self,
@@ -447,7 +451,6 @@ class PyQtGraphParser(BackendParserBase):
         base_begin, base_end = base_limits.axes_ranges[0].begin, base_limits.axes_ranges[0].end
 
         if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
-            # for axes in self.figure.axes:
             for stack in self._layout_stacks.values():
                 for plot_item in stack.values():
                     cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
@@ -553,6 +556,7 @@ class PyQtGraphParser(BackendParserBase):
 
             plot = self._layout_stacks[l_key][stack_id]
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
+            processed = False
 
             # Keep references to iplotlib instances for ease of access in callbacks.
             self._impl_plot_cache_table.register(plot, self.canvas, i_plot, stack_id, signals)
@@ -577,13 +581,35 @@ class PyQtGraphParser(BackendParserBase):
                     y_axis = i_plot.axes[ax_idx][stack_id]
                     self.process_ipl_axis(y_axis, ax_idx, i_plot, plot)
                 else:
-                    x_axis = i_plot.axes[ax_idx]
+                    x_axis = i_plot.get_x_axis()
                     self.process_ipl_axis(x_axis, ax_idx, i_plot, plot)
 
+            # Set limits for processed signals
+            x_axis = i_plot.get_x_axis()
+            if x_axis.begin is None and x_axis.end is None:
+                processed = True
+                min_value = np.inf
+                max_value = -np.inf
+                for signal in signals:
+                    if min_value > signal.ts_start:
+                        min_value = signal.ts_start
+                    if max_value < signal.ts_end:
+                        max_value = signal.ts_end
+                i_plot.set_x_axes_limits([min_value, max_value])
+
+            # Process signal
             for signal in signals:
                 # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
                 self._signal_impl_plot_lut.update({signal.uid: plot})
                 self.process_ipl_signal(signal)
+
+            # Set correct limits for processed signals
+            if processed:
+                self.update_range_axis(x_axis, 0, plot, which='current')
+                self.update_range_axis(x_axis, 0, plot, which='original')
+
+            # Set limits for y axis
+            self.update_multi_range_axis(i_plot.axes[1], 1, plot)
 
             # Legend processing for downsampled data when drawing
             ix_legend = 0
@@ -596,7 +622,6 @@ class PyQtGraphParser(BackendParserBase):
         # Observe the axis limit change events
         vb = plot.getViewBox()
         vb.sigXRangeChanged.connect(self._axis_update_callback)
-        vb.sigYRangeChanged.connect(self._axis_update_callback)
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
 
@@ -698,54 +723,35 @@ class PyQtGraphParser(BackendParserBase):
 
     def _axis_update_callback(self, view_box: ViewBox):
 
-        affected_axes = [view_box.parentItem()]
-        if self._pm.get_value(self.canvas, 'shared_x_axis') and not self.canvas.undo_redo:
-            plot = view_box.parentItem()
-            other_axes = self._get_all_shared_axes(plot)
-            affected_axes = other_axes
-            for other_axis in other_axes:
-                cur_x_limits = self.get_oaw_axis_limits(plot, 0)
-                other_x_limits = self.get_oaw_axis_limits(other_axis, 0)
-                if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
-                    # In case of PlotXYWithSlider, update the slider limits
-                    ci = self._impl_plot_cache_table.get_cache_item(other_axis)
-                    if not hasattr(ci, 'plot'):
-                        continue
-                    if isinstance(ci.plot(), PlotXYWithSlider):
-                        self.update_slider_limits(ci.plot(), *cur_x_limits)
-                    else:
-                        self.set_oaw_axis_limits(other_axis, 0, cur_x_limits)
+        # Creation of new offset due to limits changes
 
-        for axes in affected_axes:
-            ci = self._impl_plot_cache_table.get_cache_item(axes)
-            if not hasattr(ci, 'plot'):
-                return
-            if not isinstance(ci.plot(), Plot):
-                return
-            ranges = []
+        impl_plot = view_box.parentItem()
+        plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+        print(plot)
 
-            for ax_idx, ax in enumerate(ci.plot().axes):
-                if isinstance(ax, Collection):
-                    self.update_multi_range_axis(ax, ax_idx, axes)
-                elif isinstance(ax, RangeAxis):
-                    self.update_range_axis(ax, ax_idx, axes)
-                    ranges = ax.get_limits()
-            if ci not in self._stale_citems:
-                self._stale_citems.append(ci)
-            if self.canvas.undo_redo:
-                return
-            if isinstance(ci.plot(), PlotXYWithSlider):
-                return
-            if not hasattr(ci, 'signals'):
-                return
-            if not ci.signals:
-                return
+        for ax_idx, ax in enumerate(plot.axes):
+            if isinstance(ax, Collection):
+                self.update_multi_range_axis(ax, ax_idx, impl_plot)
+            elif isinstance(ax, RangeAxis):
+                # if self._pm.get_value(self.canvas, 'shared_x_axis') and not self.canvas.undo_redo:
+                self.update_range_axis(ax, ax_idx, impl_plot)
 
-            for singal_ref in ci.signals:
-                signal = singal_ref()
+        for stack in plot.signals.values():
+            for signal in stack:
+                # TODO: add signal with proccesing case
                 if hasattr(signal, "set_xranges") and isinstance(signal, SignalXY):
-                    signal.set_xranges(ranges)
-                    logger.debug(f"callback update {ranges[0]} axis range to {ranges[1]}")
+                    signal.set_xranges(plot.axes[0].get_limits())
+                    self.process_ipl_signal(signal)
+
+                    for stack_id, key in enumerate(sorted(plot.signals.keys())):
+                        # mpl_axes = self._plot_impl_plot_lut[id(plot())][stack_id]
+                        for ax_idx in range(len(plot.axes)):
+                            if isinstance(plot.axes[ax_idx], Collection):
+                                axis = plot.axes[ax_idx][stack_id]
+                                self.process_ipl_axis(axis, ax_idx, plot, impl_plot)
+                            else:
+                                axis = plot.axes[ax_idx]
+                                self.process_ipl_axis(axis, ax_idx, plot, impl_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation == 'left':
@@ -900,7 +906,7 @@ class PyQtGraphParser(BackendParserBase):
             for child in plot.slider.ax.get_children():
                 if isinstance(child, Patch) and child.get_facecolor()[:3] == (1.0, 0.0, 0.0):
                     child.remove()
-            
+
 
             # Highlight the selected area in the slider, avoiding drawing a region if start and end span the full range
             if plot.slider_last_min != 0 or plot.slider_last_max != max_len:
@@ -909,7 +915,7 @@ class PyQtGraphParser(BackendParserBase):
                 painter.setBrush(QtGui.QColor(255, 0, 0, 80))
                 painter.drawRect(QtCore.QRect(int(start_x), 0, int(end_x - start_x), plot.slider.height()))
                 painter.end()
-                
+
             """
 
     def enable_tight_layout(self):
@@ -989,39 +995,80 @@ class PyQtGraphParser(BackendParserBase):
             vb = plot.getViewBox()
             vb.setYRange(limits[0], limits[1], padding=0)
 
-    def transform_data(self, plot: PlotItem, data) -> List[Any]:
-        """This function post processes data if it cannot be plotted with matplotlib directly.
-                Currently, it transforms data if it is a large integer which can cause overflow in matplotlib"""
+    def transform_data(self, impl_plot: PlotItem, data) -> List[Any]:
+        """This function post processes data if it cannot be plotted directly.
+                Currently, it transforms data if it is a large integer which can cause overflow"""
         ret = []
-        if isinstance(data, Collection):
-            ci = self._impl_plot_cache_table.get_cache_item(plot)
-            for i, d in enumerate(data):
-                logger.debug(f"\t transform data i={i} d = {d} ")
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
 
-                offset = None
-                if ci:
-                    offset = ci.offsets[i]
-                    if offset is None and i == 0:
-                        offset = self.create_offset(d)
-                        ci.offsets[i] = offset
+        for i, d in enumerate(data):
+            logger.debug(f"\t transform data i={i} d = {d} ")
+            offset = None
 
-                if ci and offset is not None:
-                    logger.debug(f"\tApplying data offsets {offset} to plot {id(plot)} ax_idx: {i}")
-                    if isinstance(d, Collection) and not isinstance(d, (str, bytes)):
-                        arr = np.asarray(d, dtype=np.int64)
-                        ret.append(BufferObject(arr / 10000))
-                    else:
-                        ret.append(np.int64(d) / 10000)
-                else:
-                    ret.append(d)
+            if ci and i == 0 and d[0] > 10 ** 15:
+                offset = self.create_offset_pyqt(impl_plot, i)
+
+            if offset is not None:
+                # if offset == 100_000:
+                ret.append(BufferObject([np.int64(e) / offset for e in d]))
+            else:
+                ret.append(d)
+                # else:
+                #     # offset = (begin + end) / 2
+                #     ret.append(BufferObject([np.int64(e) - offset for e in d]))
+                # if axis:
+                #     axis.offset = offset
+            ci.offsets[i] = offset
         return ret
 
-    def transform_value(self, plot: PlotItem, ax_idx: int, value: Any, inverse=False):
+    def transform_value(self, impl_plot: PlotItem, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
-        ci = self._impl_plot_cache_table.get_cache_item(plot)
-        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is not None:
-            base = ci.offsets[ax_idx]
-            if isinstance(base, int) or type(base).__name__ == 'int64':
-                value = int(value)
-        return value / 10000 if inverse else value * 10000
+
+        # if impl_plot.vb.linkedView(0) is not None:
+        #     impl_plot_linked = impl_plot.vb.linkedView(0).parentItem()
+        #     offset = self._impl_plot_cache_table.get_cache_item(impl_plot_linked).offsets[ax_idx]
+        # else:
+        #     offset = self._impl_plot_cache_table.get_cache_item(impl_plot).offsets[ax_idx]
+
+        # if value < 10**15:
+        #     offset = 0
+        # else:
+        offset = self.create_offset_pyqt(impl_plot, ax_idx)
+
+        if offset is None:
+            return value
+        elif offset == 100_000:
+            if inverse:
+                return value / offset
+            else:
+                return value * offset
+        else:
+            if inverse:
+                return value - offset
+            else:
+                return value + offset
+
+    def create_offset_pyqt(self, impl_plot: PlotItem, ax_idx: int):
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+
+        # vb = impl_plot.vb.viewRange()[ax_idx]  # Limites vb
+
+        if ci.offsets[ax_idx] is None:
+            return 0
+
+        range_axes = ci.plot().axes[ax_idx]
+        begin, end = 0, 0
+        if isinstance(range_axes, Collection):
+            for ax in range_axes:
+                begin, end = ax.get_limits()
+        else:
+            begin, end = range_axes.get_limits()
+
+        diff = end - begin
+        if diff > 1e14:
+            offset = 100_000
+        else:
+            offset = (begin + end) / 2
+
+        return offset

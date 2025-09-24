@@ -1,17 +1,12 @@
-from collections import defaultdict
-
-import numpy as np
 from PySide6.QtCore import QMargins, Qt, Signal, QEvent
-from PySide6.QtWidgets import QVBoxLayout, QGraphicsSceneMouseEvent
+from PySide6.QtWidgets import QVBoxLayout
 
-from iplotlib.core import Canvas, BackendParserBase, Plot, PlotContour
-import pyqtgraph as pg
-
-from pyqtgraph.Qt.QtGui import QMouseEvent
+from iplotlib.core import Canvas, Plot, PlotContour
 
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
+from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 import iplotLogging.setupLogger as Sl
 from pyqtgraph import PlotItem
 
@@ -68,6 +63,14 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         self.canvas = canvas
 
+        # Check if Shared Time is applied and set XLink
+        if self._parser._pm.get_value(canvas, 'shared_x_axis'):
+            base_plot = self.get_base_plot()
+            other_axes = self._parser._get_all_shared_axes(base_plot)
+
+            for other_axis in other_axes[1:]:
+                other_axis.getViewBox().setXLink(base_plot.getViewBox())
+
         # Connect events
         for stack in self._parser._layout_stacks.values():
             for plot in stack.values():
@@ -86,6 +89,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         #         for key, signal in plot.signals.items():
         #             print(signal)
         #             p.plot(signal[0].x_data, signal[0].y_data, pen=signal[0].color)
+
+    def get_base_plot(self) -> PlotItem:
+        for stack in self._parser._layout_stacks.values():
+            for plot in stack.values():
+                return plot
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
@@ -173,7 +181,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 return
             elif event.type() == QEvent.GraphicsSceneMouseDoubleClick:
                 pass
-            self.stage_view_lim_cmd()
+            self.stage_view_lim_cmd(plot)
             return
 
         elif self._mmode == Canvas.MOUSE_MODE_SELECT:
@@ -186,20 +194,20 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 else:
                     pass
             elif event.button() == Qt.MouseButton.RightButton:
-                if event.double():
-                    pass
-                else:
-                    pass
+                pass
 
-    def _impl_mouse_release_handler(self, vb):
+    def _impl_mouse_release_handler(self, view_box):
         # self._debug_log_event(event, "Mouse released")
-        if vb is None:
+        if view_box is None:
             pass
         else:
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                impl_plot = view_box.parentItem()
+                ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+                plot = ci.plot()
                 # commit commands from staging.
                 while len(self._staging_cmds):
-                    self.commit_view_lim_cmd()
+                    self.commit_view_lim_cmd(plot)
                 # push uncommitted changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
@@ -235,3 +243,28 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def mouse_moved(self, pos):
         pass
+
+    def stage_view_lim_cmd(self, plot: Plot):
+        """stage a view command"""
+
+        name = self._mmode[3:]
+        # old_limits = [self._parser.get_plot_limits(plot)]
+        old_limits = self._parser.get_all_plot_limits()
+
+        cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
+        self._staging_cmds.append(cmd)
+        logger.debug(f"Staged {cmd}")
+
+    def commit_view_lim_cmd(self, plot: Plot):
+        """commit a view command"""
+        cmd = self._staging_cmds.pop()
+        cmd.new_lim = self._parser.get_all_plot_limits()  # New limits based on the current view
+        # cmd.new_lim = [self._parser.get_plot_limits(plot)]
+        assert len(cmd.new_lim) == len(cmd.old_lim)
+
+        # Check if any limit actually changed
+        if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
+            self._commitd_cmds.append(cmd)
+            logger.debug(f"Committed {cmd}")
+        else:
+            logger.debug(f"Rejected {cmd}")

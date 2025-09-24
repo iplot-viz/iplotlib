@@ -133,6 +133,15 @@ class Plot(ABC):
 
         # signals are merged at canvas level to handle move between plots
 
+    def set_x_axes_limits(self, limits, which='current'):
+        self.axes[0].set_limits(*limits)
+
+    def get_x_axis(self):
+        return self.axes[0]
+
+    def get_y_axis(self):
+        return self.axes[1]
+
 
 @dataclass
 class PlotContour(Plot):
