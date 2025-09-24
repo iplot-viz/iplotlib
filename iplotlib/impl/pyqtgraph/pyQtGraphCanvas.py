@@ -1,6 +1,8 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 import datetime
+from logging import currentframe
+
 import numpy as np
 from typing import Any, Callable, Collection, List, Tuple
 import pandas as pd
@@ -435,41 +437,29 @@ class PyQtGraphParser(BackendParserBase):
         self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
         return True
 
-    def _get_all_shared_axes(self, base_impl_plot: PlotItem):
-        if not isinstance(self.canvas, Canvas):
-            return []
-
+    def _get_all_shared_axes(self, base_impl_plot: PlotItem) -> List[PlotItem]:
         cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
-        if not hasattr(cache_item, 'plot'):
-            return
+
         base_plot = cache_item.plot()
-        if not isinstance(base_plot, Plot):
-            return
         if isinstance(base_plot, PlotXYWithSlider):
             return []
-        shared = list()
-        base_limits = self.get_plot_limits(base_plot, which='original')
-        base_begin, base_end = base_limits.axes_ranges[0].begin, base_limits.axes_ranges[0].end
 
-        if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
-            for stack in self._layout_stacks.values():
-                for plot_item in stack.values():
-                    cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
-                    if not hasattr(cache_item, 'plot'):
-                        continue
-                    plot = cache_item.plot()
-                    if not isinstance(plot, Plot):
-                        continue
-                    limits = self.get_plot_limits(plot, which='original')
-                    begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                    # Check if it is date and the max difference is 1 second
-                    # Need to differentiate if it is absolute or relative
-                    max_diff = self._pm.get_value(self.canvas, 'max_diff')
-                    max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot,
-                                                                                       PlotXYWithSlider) else max_diff
-                    if ((begin, end) == (base_begin, base_end) or (
-                            abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
-                        shared.append(plot_item)
+        shared = list()
+        base_begin, base_end = base_plot.axes[0].get_limits("original")
+
+        for stack in self._layout_stacks.values():
+            for plot_item in stack.values():
+                cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
+                plot = cache_item.plot()
+                begin, end = base_plot.axes[0].get_limits("original")
+
+                # Check if it is date and the max difference is 1 second
+                # Need to differentiate if it is absolute or relative
+                max_diff = self._pm.get_value(self.canvas, 'max_diff')
+                max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot,
+                                                                                   PlotXYWithSlider) else max_diff
+                if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
+                    shared.append(plot_item)
         return shared
 
     def process_ipl_plot_xy(self):
@@ -556,6 +546,7 @@ class PyQtGraphParser(BackendParserBase):
                 cell_gl = self.process_ipl_plot_xy_slider(i_plot, row, col, visible_stack_ids, cell_gl)
 
             plot = self._layout_stacks[l_key][stack_id]
+            plot.enableAutoRange(x=False)
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
             processed = False
 
@@ -712,25 +703,27 @@ class PyQtGraphParser(BackendParserBase):
     def _axis_update_callback(self, view_box: ViewBox):
 
         # Creation of new offset due to limits changes
+        current_plot = view_box.parentItem()
 
-        impl_plot = view_box.parentItem()
-        plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
-        print(plot)
+        shared_plots = self._get_all_shared_axes(current_plot)
 
-        for stack_id, key in enumerate(sorted(plot.signals.keys())):
-            # mpl_axes = self._plot_impl_plot_lut[id(plot())][stack_id]
-            for ax_idx in range(len(plot.axes)):
-                if isinstance(plot.axes[ax_idx], Collection):
-                    axis = plot.axes[ax_idx][stack_id]
-                    self.process_ipl_axis(axis, ax_idx, plot, impl_plot)
-                else:
-                    axis = plot.axes[ax_idx]
-                    self.process_ipl_axis(axis, ax_idx, plot, impl_plot)
+        new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
+        for impl_plot in shared_plots:
+            impl_plot.vb.sigXRangeChanged.disconnect()
+            if not self._pm.get_value(self.canvas, 'shared_x_axis') and impl_plot != current_plot:
+                continue
 
-        for stack in plot.signals.values():
-            for signal in stack:
-                signal.set_limits(self.get_oaw_axis_limits(impl_plot,0))
-                self.process_ipl_signal(signal)
+            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            plot = ci.plot()
+            ci.offsets[0] = self.create_offset([new_start, new_end])
+            self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
+
+            for stack in plot.signals.values():
+                for signal in stack:
+                    signal.set_limits((new_start, new_end))
+                    self.process_ipl_signal(signal)
+
+            impl_plot.vb.sigXRangeChanged.connect(self._axis_update_callback)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation == 'left':
@@ -993,15 +986,6 @@ class PyQtGraphParser(BackendParserBase):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
 
-        # if impl_plot.vb.linkedView(0) is not None:
-        #     impl_plot_linked = impl_plot.vb.linkedView(0).parentItem()
-        #     offset = self._impl_plot_cache_table.get_cache_item(impl_plot_linked).offsets[ax_idx]
-        # else:
-        #     offset = self._impl_plot_cache_table.get_cache_item(impl_plot).offsets[ax_idx]
-
-        # if value < 10**15:
-        #     offset = 0
-        # else:
         offset = self._impl_plot_cache_table.get_cache_item(impl_plot).offsets[ax_idx]
 
         if offset is None:

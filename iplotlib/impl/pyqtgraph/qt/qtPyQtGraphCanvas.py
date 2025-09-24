@@ -64,12 +64,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self.canvas = canvas
 
         # Check if Shared Time is applied and set XLink
-        if self._parser._pm.get_value(canvas, 'shared_x_axis'):
-            base_plot = self.get_base_plot()
-            other_axes = self._parser._get_all_shared_axes(base_plot)
-
-            for other_axis in other_axes[1:]:
-                other_axis.getViewBox().setXLink(base_plot.getViewBox())
+        # if self._parser._pm.get_value(canvas, 'shared_x_axis'):
+        #     base_plot = self.get_base_plot()
+        #     other_axes = self._parser._get_all_shared_axes(base_plot)
+        #
+        #     for other_axis in other_axes[1:]:
+        #         other_axis.getViewBox().setXLink(base_plot.getViewBox())
 
         # Connect events
         for stack in self._parser._layout_stacks.values():
