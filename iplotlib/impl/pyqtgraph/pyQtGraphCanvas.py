@@ -709,13 +709,11 @@ class PyQtGraphParser(BackendParserBase):
 
         new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
         for impl_plot in shared_plots:
-            impl_plot.vb.sigXRangeChanged.disconnect()
             if not self._pm.get_value(self.canvas, 'shared_x_axis') and impl_plot != current_plot:
                 continue
+            impl_plot.vb.sigXRangeChanged.disconnect()
 
-            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-            plot = ci.plot()
-            ci.offsets[0] = self.create_offset([new_start, new_end])
+            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
             self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
 
             for stack in plot.signals.values():

@@ -683,7 +683,7 @@ class AccessHelper:
                 if isinstance(value, np.datetime64):
                     return value
                 if isinstance(value, (int, float)) and value > 10 ** 15:
-                    return np.datetime64(value, 'ns')
+                    return np.datetime64(int(value), 'ns')
         except Exception as e:
             logger.error(f"Error {e}: Unable to convert value {value} to string timestamp")
 
