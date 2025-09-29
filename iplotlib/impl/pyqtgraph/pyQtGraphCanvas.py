@@ -1,13 +1,14 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 import datetime
-from logging import currentframe
+from collections import defaultdict
 
 import numpy as np
-from typing import Any, Callable, Collection, List, Tuple
+from typing import Any, Callable, Collection, List, Tuple, Optional
 import pandas as pd
 import pyqtgraph as pg
 import inspect
+import weakref
 from pyqtgraph.Qt import QtWidgets
 from pyqtgraph import IsocurveItem, ViewBox, LegendItem
 from pyqtgraph.Qt import QtCore
@@ -27,6 +28,8 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
+
+from iplotlib.core.limits import IplPlotViewLimits, IplSignalLimits, IplAxisLimits, IplSliderLimits
 
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem
 
@@ -112,6 +115,8 @@ class PyQtGraphParser(BackendParserBase):
             self.enable_tight_layout()
         else:
             self.disable_tight_layout()
+
+        self._update = defaultdict(int)
 
     def _ensure_cell_layout(self, row: int, col: int, rowspan: int, colspan: int):
         key = (row, col)
@@ -451,7 +456,7 @@ class PyQtGraphParser(BackendParserBase):
             for plot_item in stack.values():
                 cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
                 plot = cache_item.plot()
-                begin, end = base_plot.axes[0].get_limits("original")
+                begin, end = plot.axes[0].get_limits("original")
 
                 # Check if it is date and the max difference is 1 second
                 # Need to differentiate if it is absolute or relative
@@ -582,13 +587,8 @@ class PyQtGraphParser(BackendParserBase):
                 self._signal_impl_plot_lut.update({signal.uid: plot})
                 self.process_ipl_signal(signal)
 
-            # Set correct limits for processed signals
-            if processed:
-                self.update_range_axis(x_axis, 0, plot, which='current')
-                self.update_range_axis(x_axis, 0, plot, which='original')
-
             # Set limits for y axis
-            self.update_multi_range_axis(i_plot.axes[1], 1, plot)
+            # self.update_multi_range_axis(i_plot.axes[1], 1, plot)
 
             # Legend processing for downsampled data when drawing
             ix_legend = 0
@@ -702,16 +702,21 @@ class PyQtGraphParser(BackendParserBase):
 
     def _axis_update_callback(self, view_box: ViewBox):
 
-        # Creation of new offset due to limits changes
         current_plot = view_box.parentItem()
-
         shared_plots = self._get_all_shared_axes(current_plot)
 
         new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
         for impl_plot in shared_plots:
             if not self._pm.get_value(self.canvas, 'shared_x_axis') and impl_plot != current_plot:
                 continue
-            impl_plot.vb.sigXRangeChanged.disconnect()
+
+            if self._update[impl_plot] == 1 or self._update[impl_plot] == 2:
+                continue
+
+            self._update[impl_plot] = 1
+
+            # impl_plot.vb.sigXRangeChanged.disconnect()
+            # self._update = False
 
             plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
             self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
@@ -721,7 +726,9 @@ class PyQtGraphParser(BackendParserBase):
                     signal.set_limits((new_start, new_end))
                     self.process_ipl_signal(signal)
 
-            impl_plot.vb.sigXRangeChanged.connect(self._axis_update_callback)
+            # impl_plot.vb.sigXRangeChanged.connect(self._axis_update_callback)
+            # self._update = True
+            self._update[impl_plot] = 2
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation == 'left':
@@ -831,6 +838,7 @@ class PyQtGraphParser(BackendParserBase):
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass
+        # impl_plot.vb.enableAutoRange(y=autoscale)
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
         pass
@@ -974,7 +982,9 @@ class PyQtGraphParser(BackendParserBase):
         for ax_idx, d in enumerate(data):
             logger.debug(f"\t transform data ax_idx={ax_idx} d = {d} ")
             offset = ci.offsets[ax_idx]
-            if offset == 100_000:
+            if offset == 0:
+                ret.append(d)
+            elif offset == 100_000:
                 ret.append(BufferObject([np.int64(e) / offset for e in d]))
             else:
                 ret.append(BufferObject([np.int64(e) - offset for e in d]))
@@ -1082,10 +1092,12 @@ class PyQtGraphParser(BackendParserBase):
                 for signal in stack:
                     signal.get_data()
                     data = signal.x_data if ax_idx == 0 else signal.y_data
+                    data = data[~np.isnan(data)]
                     begin, end = min(min(data), begin), max(max(data), end)
             axis.original_begin = begin
             axis.original_end = end
-        if any(frame.function in ["draw_clicked", "import_dict"] for frame in inspect.stack()):
+        if any(frame.function in ["draw_clicked", "import_dict", "update_canvas_preferences"] for frame in
+               inspect.stack()):
             begin, end = axis.original_begin, axis.original_end
         else:
             begin, end = self.get_oaw_axis_limits(impl_plot, ax_idx)
@@ -1098,3 +1110,52 @@ class PyQtGraphParser(BackendParserBase):
         # Set number of ticks and labels
         tick_number = self._pm.get_value(axis, 'tick_number')
         self.process_ipl_axis_ticks(tick_number, axis_item)
+
+    def get_all_plot_limits(self, which='current') -> List[IplPlotViewLimits]:
+        """
+        Return limits of all plots. The `which` argument can be `original` or `current`
+        Use this function to construct an :data:`~iplotlib.core.commands.axes_range.IplotAxesRangeCmd` instance
+        that you could push onto the history manager.
+        """
+        all_limits = []
+        if not isinstance(self.canvas, Canvas):
+            return all_limits
+        for col in self.canvas.plots:
+            for plot in col:
+                if plot:
+                    impl_plot = self._plot_impl_plot_lut.get(id(plot))[0]
+                    plot_lims = self.get_plot_limits(plot, impl_plot)
+                    if not isinstance(plot_lims, IplPlotViewLimits):
+                        continue
+                    all_limits.append(plot_lims)
+        return all_limits
+
+    def get_plot_limits(self, plot: Plot, impl_plot: PlotItem) -> Optional[IplPlotViewLimits]:
+        """
+        Return limits for the given plot. The `which` argument can be `original` or `current`
+        """
+        if not isinstance(self.canvas, Canvas) or not isinstance(plot, Plot):
+            return None
+        plot_lims = IplPlotViewLimits(plot_ref=weakref.ref(plot))
+        for plot_signals in plot.signals.values():
+            for sig in plot_signals:
+                plot_lims.signals_ranges.append(IplSignalLimits(sig.ts_start, sig.ts_end, weakref.ref(sig)))
+        for axes in plot.axes:
+            if isinstance(axes, Collection):
+                for axis in axes:
+                    if not isinstance(axis, RangeAxis):
+                        continue
+                    # begin, end = axis.get_limits(which)
+                    begin, end = self.get_oaw_axis_limits(impl_plot, 1)
+                    plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
+            elif isinstance(axes, RangeAxis):
+                axis = axes
+                begin, end = self.get_oaw_axis_limits(impl_plot, 0)
+                # begin, end = axis.get_limits(which)
+                plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
+
+        # Save slider limits for PlotXYWithSlider
+        if isinstance(plot, PlotXYWithSlider):
+            plot_lims.sliders_ranges.append(IplSliderLimits(plot.slider_last_min, plot.slider_last_max))
+
+        return plot_lims

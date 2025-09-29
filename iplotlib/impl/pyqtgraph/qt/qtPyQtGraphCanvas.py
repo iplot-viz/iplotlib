@@ -181,7 +181,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 return
             elif event.type() == QEvent.GraphicsSceneMouseDoubleClick:
                 pass
-            self.stage_view_lim_cmd(plot)
+            self.stage_view_lim_cmd(plot, impl_plot)
             return
 
         elif self._mmode == Canvas.MOUSE_MODE_SELECT:
@@ -198,6 +198,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def _impl_mouse_release_handler(self, view_box):
         # self._debug_log_event(event, "Mouse released")
+        if not all(v == 2 for v in self._parser._update.values()):
+            return
         if view_box is None:
             pass
         else:
@@ -207,12 +209,14 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 plot = ci.plot()
                 # commit commands from staging.
                 while len(self._staging_cmds):
-                    self.commit_view_lim_cmd(plot)
+                    self.commit_view_lim_cmd(plot, impl_plot)
                 # push uncommitted changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
                 # Update statistics
                 # self.stats(self.get_canvas())
+
+        self._parser._update.clear()
 
     """
     def _debug_log_event(self, event: Event, msg: str):
@@ -244,22 +248,22 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def mouse_moved(self, pos):
         pass
 
-    def stage_view_lim_cmd(self, plot: Plot):
+    def stage_view_lim_cmd(self, plot, impl_plot):
         """stage a view command"""
 
         name = self._mmode[3:]
-        # old_limits = [self._parser.get_plot_limits(plot)]
-        old_limits = self._parser.get_all_plot_limits()
+        old_limits = [self._parser.get_plot_limits(plot, impl_plot)]
+        # old_limits = self._parser.get_all_plot_limits()
 
         cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
         self._staging_cmds.append(cmd)
         logger.debug(f"Staged {cmd}")
 
-    def commit_view_lim_cmd(self, plot: Plot):
+    def commit_view_lim_cmd(self, plot, impl_plot):
         """commit a view command"""
         cmd = self._staging_cmds.pop()
-        cmd.new_lim = self._parser.get_all_plot_limits()  # New limits based on the current view
-        # cmd.new_lim = [self._parser.get_plot_limits(plot)]
+        # cmd.new_lim = self._parser.get_all_plot_limits(which='original')
+        cmd.new_lim = [self._parser.get_plot_limits(plot, impl_plot)]
         assert len(cmd.new_lim) == len(cmd.old_lim)
 
         # Check if any limit actually changed
