@@ -127,7 +127,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._parser.set_view_box()
             self._parser.activate_cursor()
         elif mode == Canvas.MOUSE_MODE_PAN:
-            self._parser.set_view_box()
+            self._parser.set_view_box_pan()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
             self._parser.set_view_box_zoom()
         elif mode == Canvas.MOUSE_MODE_MARKER:
@@ -180,7 +180,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             if isinstance(plot, PlotContour):
                 return
             elif event.type() == QEvent.GraphicsSceneMouseDoubleClick:
-                pass
+                return
+            elif event.button() == Qt.MouseButton.RightButton:
+                return
             self.stage_view_lim_cmd(plot, impl_plot)
             return
 
@@ -188,13 +190,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             if not impl_plot or not isinstance(impl_plot, PlotItem):
                 return
             if event.button() == Qt.MouseButton.LeftButton:
-                # if event.double():
                 if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
                     self._parser.set_focus_plot(impl_plot)
                 else:
-                    pass
+                    return
             elif event.button() == Qt.MouseButton.RightButton:
-                pass
+                return
 
     def _impl_mouse_release_handler(self, view_box):
         # self._debug_log_event(event, "Mouse released")
@@ -262,7 +263,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def commit_view_lim_cmd(self, plot, impl_plot):
         """commit a view command"""
         cmd = self._staging_cmds.pop()
-        # cmd.new_lim = self._parser.get_all_plot_limits(which='original')
+        # cmd.new_lim = self._parser.get_all_plot_limits()
         cmd.new_lim = [self._parser.get_plot_limits(plot, impl_plot)]
         assert len(cmd.new_lim) == len(cmd.old_lim)
 
