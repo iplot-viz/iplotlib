@@ -1,19 +1,21 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 import datetime
-from collections import defaultdict
-
-import numpy as np
-from typing import Any, Callable, Collection, List, Tuple, Optional
-import pandas as pd
-import pyqtgraph as pg
 import inspect
 import weakref
-from pyqtgraph.Qt import QtWidgets
-from pyqtgraph import IsocurveItem, ViewBox, LegendItem
-from pyqtgraph.Qt import QtCore
-from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QLabel, QGraphicsSceneMouseEvent
+from collections import defaultdict
+from typing import Any, Callable, Collection, List, Tuple, Optional
+
+import numpy as np
+import pandas as pd
+import pyqtgraph as pg
 from PySide6.QtCore import Signal as QtSignal
+from PySide6.QtCore import Qt
+from pyqtgraph import IsocurveItem, ViewBox, LegendItem
+from pyqtgraph import PlotItem, AxisItem, PlotDataItem
+from pyqtgraph.Qt import QtCore
+from pyqtgraph.Qt import QtWidgets
+from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QLabel, QGraphicsSceneMouseEvent
 
 from iplotLogging import setupLogger
 from iplotProcessing.core import BufferObject
@@ -28,11 +30,7 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
-
 from iplotlib.core.limits import IplPlotViewLimits, IplSignalLimits, IplAxisLimits, IplSliderLimits
-
-from pyqtgraph import PlotItem, AxisItem, PlotDataItem
-
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 
 logger = setupLogger.get_logger(__name__)
@@ -77,6 +75,9 @@ class QtViewBox(pg.ViewBox):
 
     def mousePressEvent(self, ev: QGraphicsSceneMouseEvent):
         # Add log message
+        if ev.button() == Qt.MouseButton.RightButton:
+            ev.accept()
+            return
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
 
@@ -86,6 +87,9 @@ class QtViewBox(pg.ViewBox):
     def mouseClickEvent(self, ev):
         super().mouseClickEvent(ev)
         self.released.emit(self)
+
+    def wheelEvent(self, ev, axis=None):
+        ev.ignore()
 
 
 class PyQtGraphParser(BackendParserBase):
@@ -495,7 +499,8 @@ class PyQtGraphParser(BackendParserBase):
         proxy = QtWidgets.QGraphicsProxyWidget()
         proxy.setWidget(slider)
         last_row_id = max(visible_stack_ids) + 1
-        cell_gl.addItem(proxy, row=last_row_id, col=0)
+        cell_gl.nextRow()
+        cell_gl.addItem(proxy)  # row=last_row_id, col=0
         self._slider_placeholders[rc_key] = proxy
 
         # Annotate labels along the slider axis
@@ -528,19 +533,21 @@ class PyQtGraphParser(BackendParserBase):
         cell_gl = self._ensure_cell_layout(row, col, i_plot.row_span, i_plot.col_span)
 
         visible_stack_ids = []
-
+        axis_items = {}
         plot = None
+        # if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
+        #     axis_items["bottom"] = NanosecondDateFormatter(orientation='bottom')
         l_key = (row, col)
         for stack_id, key in enumerate(sorted(i_plot.signals.keys())):
             signals = i_plot.signals.get(key) or list()
             visible_stack_ids.append(stack_id)
 
             if l_key not in self._layout_stacks:
-                plot = pg.PlotItem(viewBox=QtViewBox())
+                plot = pg.PlotItem(viewBox=QtViewBox())  # axisItems=axis_items
                 cell_gl.addItem(plot, row=0, col=0)
                 self._layout_stacks.setdefault(l_key, {})[stack_id] = plot
             elif stack_id not in self._layout_stacks[l_key]:
-                pi = pg.PlotItem(viewBox=QtViewBox())
+                pi = pg.PlotItem(viewBox=QtViewBox())  # axisItems=axis_items
                 cell_gl.addItem(pi, row=stack_id, col=0)
                 pi.vb.setXLink(self._layout_stacks[l_key][0])
                 pi.getAxis('bottom').setStyle(showValues=False)
@@ -603,6 +610,9 @@ class PyQtGraphParser(BackendParserBase):
         vb.sigXRangeChanged.connect(self._axis_update_callback)
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
+        # if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
+        #     cell_gl.nextRow()
+        #     cell_gl.addItem(axis_items["bottom"].common_label)
 
     def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
         if not visible_stacks:
@@ -753,13 +763,7 @@ class PyQtGraphParser(BackendParserBase):
         axis_item.setStyle(**label_props)
 
     def process_ipl_axis_formatter(self, impl_plot: PlotItem, axis_item: AxisItem, ax_idx: int):
-        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        """
-        mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx,
-                                                             offset_lut=ci.offsets,
-                                                             roundh=self._pm.get_value(self.canvas, 'round_hour')))
-        """
-        return
+        pass
 
     def process_ipl_axis_ticks(self, tick_number, axis_item: AxisItem):
         # axis_item.setStyle()
@@ -827,6 +831,7 @@ class PyQtGraphParser(BackendParserBase):
                     continue
                 vb = plot.vb
                 vb.setMouseMode(vb.PanMode)
+                self.set_mouse(plot)
 
     def set_view_box_zoom(self):
         for stack in self._layout_stacks.values():
@@ -835,6 +840,16 @@ class PyQtGraphParser(BackendParserBase):
                     continue
                 vb = plot.vb
                 vb.setMouseMode(vb.RectMode)
+                self.set_mouse(plot)
+
+    def set_view_box_pan(self):
+        for stack in self._layout_stacks.values():
+            for plot in stack.values():
+                if not plot:
+                    continue
+                vb = plot.vb
+                vb.setMouseMode(vb.PanMode)
+                vb.setMouseEnabled(x=True, y=True)
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass
@@ -934,16 +949,88 @@ class PyQtGraphParser(BackendParserBase):
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
+        plots = []
         for stack in self._layout_stacks.values():
             for plot in stack.values():
-                if not plot:
-                    continue
+                if plot:
+                    plots.append(plot)
+        if not plots:
+            return
 
-                self._cursors.append(pyQtCrosshair(plot))
+        # Pause repaints/signals to avoid flicker while creating items
+        view = self.figure  # GraphicsLayoutWidget is a QGraphicsView
+        scene = view.scene()
+        vp = view.viewport()
+
+        if vp is not None:
+            vp.setUpdatesEnabled(False)
+        view.setUpdatesEnabled(False)
+        try:
+            scene.blockSignals(True)
+
+            x_label = self._pm.get_value(self.canvas, 'enable_x_label_crosshair')
+            y_label = self._pm.get_value(self.canvas, 'enable_y_label_crosshair')
+            val_label = self._pm.get_value(self.canvas, 'enable_val_label_crosshair')
+            color = self._pm.get_value(self.canvas, 'crosshair_color')
+            lw = getattr(self.canvas, 'crosshair_line_width', 1)
+            horiz_on = getattr(self.canvas, 'crosshair_horizontal', False)
+            vert_on = getattr(self.canvas, 'crosshair_vertical', True)
+            tol = 0.05  # same as IplotMultiCursor
+
+            if getattr(self.canvas, 'crosshair_per_plot', False):
+                for p in plots:
+                    self._cursors.append(
+                        pyQtCrosshair(
+                            plots=[p],
+                            x_label=x_label, y_label=y_label, val_label=val_label,
+                            color=color, lw=lw,
+                            horiz_on=horiz_on, vert_on=vert_on,
+                            val_tolerance=tol,
+                            cache_table=self._impl_plot_cache_table,
+                        )
+                    )
+            else:
+                self._cursors.append(
+                    pyQtCrosshair(
+                        plots=plots,
+                        x_label=x_label, y_label=y_label, val_label=val_label,
+                        color=color, lw=lw,
+                        horiz_on=horiz_on, vert_on=vert_on,
+                        val_tolerance=tol,
+                        cache_table=self._impl_plot_cache_table,
+                    )
+                )
+        finally:
+            try:
+                scene.blockSignals(False)
+            except Exception:
+                pass
+            view.setUpdatesEnabled(True)
+            if vp is not None:
+                vp.setUpdatesEnabled(True)
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
-        pass
+        view = self.figure
+        scene = view.scene()
+        vp = view.viewport()
+
+        if vp is not None:
+            vp.setUpdatesEnabled(False)
+        view.setUpdatesEnabled(False)
+        try:
+            scene.blockSignals(True)
+            for cursor in self._cursors:
+                cursor.clear(destroy=True)
+            self._cursors.clear()
+        finally:
+            try:
+                scene.blockSignals(False)
+            except Exception:
+                pass
+            view.setUpdatesEnabled(True)
+            if vp is not None:
+                vp.setUpdatesEnabled(True)
 
     def get_impl_x_axis(self, plot: PlotItem) -> AxisItem:
         return plot.getAxis('bottom')
