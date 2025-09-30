@@ -825,6 +825,7 @@ class PyQtGraphParser(BackendParserBase):
         vb.setMouseEnabled(x=False, y=False)
 
     def set_view_box(self):
+        self.deactivate_cursor()
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -834,6 +835,7 @@ class PyQtGraphParser(BackendParserBase):
                 self.set_mouse(plot)
 
     def set_view_box_zoom(self):
+        self.deactivate_cursor()
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -843,6 +845,7 @@ class PyQtGraphParser(BackendParserBase):
                 self.set_mouse(plot)
 
     def set_view_box_pan(self):
+        self.deactivate_cursor()
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -850,6 +853,17 @@ class PyQtGraphParser(BackendParserBase):
                 vb = plot.vb
                 vb.setMouseMode(vb.PanMode)
                 vb.setMouseEnabled(x=True, y=True)
+
+    def set_view_box_crosshair(self):
+        self.deactivate_cursor()
+        for stack in self._layout_stacks.values():
+            for plot in stack.values():
+                if not plot:
+                    continue
+                vb = plot.vb
+                vb.setMouseMode(vb.PanMode)
+                self.set_mouse(plot)
+        self.activate_cursor()
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass

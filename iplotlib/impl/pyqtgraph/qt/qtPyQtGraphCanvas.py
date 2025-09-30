@@ -124,8 +124,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             # self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
             self._parser.set_view_box()
         elif mode == Canvas.MOUSE_MODE_CROSSHAIR:
-            self._parser.set_view_box()
-            self._parser.activate_cursor()
+            self._parser.set_view_box_crosshair()
         elif mode == Canvas.MOUSE_MODE_PAN:
             self._parser.set_view_box_pan()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
