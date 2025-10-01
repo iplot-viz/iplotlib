@@ -121,7 +121,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             return
 
         if mode == Canvas.MOUSE_MODE_SELECT:
-            # self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
             self._parser.set_view_box()
         elif mode == Canvas.MOUSE_MODE_CROSSHAIR:
             self._parser.set_view_box_crosshair()
@@ -214,7 +213,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
                 # Update statistics
-                # self.stats(self.get_canvas())
+                self.stats(self.get_canvas())
 
         self._parser._update.clear()
 

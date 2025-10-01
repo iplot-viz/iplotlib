@@ -11,8 +11,7 @@ import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
-from pyqtgraph import IsocurveItem, ViewBox, LegendItem
-from pyqtgraph import PlotItem, AxisItem, PlotDataItem
+from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
 from pyqtgraph.Qt import QtCore
 from pyqtgraph.Qt import QtWidgets
 from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QLabel, QGraphicsSceneMouseEvent
@@ -45,7 +44,7 @@ LINESTYLE_MAP = {
 # Mapa de pasos a stepMode de PlotDataItem
 STEP_MAP_PG = {
     'linear': False,
-    'post': True
+    'post': 'right'
 }
 
 
@@ -164,7 +163,7 @@ class PyQtGraphParser(BackendParserBase):
                 marker_line.set_marker(signal_style.get('marker') or "")
                 marker_line.set_markersize(signal_style.get('markersize'))
 
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[PlotDataItem]]
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[PlotDataItem]
         style = self.get_signal_style(signal)
         draw_fn = plot.plot
 
@@ -259,8 +258,7 @@ class PyQtGraphParser(BackendParserBase):
 
     def get_signal_style(self, signal: SignalXY) -> dict:
         """
-        Retorna un dict de argumentos para PlotDataItem en PyQtGraph
-        a partir de los atributos de SignalXY.
+        Returns a dict of arguments for PlotDataItem based on the attributes of SignalXY
         """
         style = {'name': signal.label}
 
@@ -432,8 +430,46 @@ class PyQtGraphParser(BackendParserBase):
 
         return curves
 
-    def do_impl_envelope_plot(self, signal: Signal, mpl_axes: PlotItem, x_data, y1_data, y2_data):
-        pass
+    def do_impl_envelope_plot(self, signal: Signal, plot: PlotItem, x_data, y1_data, y2_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[PlotDataItem]
+
+        # Reflect downsampling in legend
+        self.legend_downsampled_signal(signal, plot, plot_lines)
+
+        style = self.get_signal_style(signal)
+        style2 = dict(style)
+        style2.pop("name", None)
+        draw_fn = plot.plot
+
+        # Review to implement directly in PlotXY class
+        if signal.color is None:
+            # It means that the color has been reset but must keep the original color
+            signal.color = signal.original_color
+
+        if plot_lines is not None:
+            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
+                self.set_line_data(style, plot_lines[0], x_data, y1_data)
+                self.set_line_data(style2, plot_lines[1], x_data, y2_data)
+
+                # Update FillBetweenItem
+                area = plot_lines[2]
+                if isinstance(area, FillBetweenItem):
+                    area.setCurves(plot_lines[0], plot_lines[1])
+
+        else:
+            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
+                # Creation of FillBetweenItem
+                curve_1 = draw_fn(x=x_data, y=y1_data, **style)
+                curve_2 = draw_fn(x=x_data, y=y2_data, **style2)
+                area = FillBetweenItem(curve1=curve_1, curve2=curve_2, brush=(50, 50, 150, int(0.3 * 255)))  # fillRule
+                plot.addItem(area)
+
+                plot_lines = [curve_1, curve_2, area]
+
+        signal.lines = plot_lines
+        self._signal_impl_shape_lut.update({id(signal): plot_lines})
+
+        return plot_lines
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
         suptitle = pg.LabelItem(justify='center')
@@ -558,7 +594,7 @@ class PyQtGraphParser(BackendParserBase):
                 cell_gl = self.process_ipl_plot_xy_slider(i_plot, row, col, visible_stack_ids, cell_gl)
 
             plot = self._layout_stacks[l_key][stack_id]
-            plot.enableAutoRange(x=False)
+            plot.enableAutoRange(x=False, y=False)
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
             processed = False
 
@@ -1083,7 +1119,7 @@ class PyQtGraphParser(BackendParserBase):
         for ax_idx, d in enumerate(data):
             logger.debug(f"\t transform data ax_idx={ax_idx} d = {d} ")
             offset = ci.offsets[ax_idx]
-            if offset == 0:
+            if offset == 0 or offset is None:
                 ret.append(d)
             elif offset == 100_000:
                 ret.append(BufferObject([np.int64(e) / offset for e in d]))
@@ -1192,9 +1228,15 @@ class PyQtGraphParser(BackendParserBase):
             for stack in i_plot.signals.values():
                 for signal in stack:
                     signal.get_data()
-                    data = signal.x_data if ax_idx == 0 else signal.y_data
-                    data = data[~np.isnan(data)]
-                    begin, end = min(min(data), begin), max(max(data), end)
+                    if signal.data_store[2].size > 0 and signal.data_store[3].size > 0 and ax_idx == 1:
+                        # Envelope case
+                        data = signal.z_data
+                        data = data[~np.isnan(data)]
+                        begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
+                    else:
+                        data = signal.x_data if ax_idx == 0 else signal.y_data
+                        data = data[~np.isnan(data)]
+                        begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
             axis.original_begin = begin
             axis.original_end = end
         if any(frame.function in ["draw_clicked", "import_dict", "update_canvas_preferences"] for frame in
