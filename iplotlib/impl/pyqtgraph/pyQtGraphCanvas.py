@@ -31,6 +31,7 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.core.limits import IplPlotViewLimits, IplSignalLimits, IplAxisLimits, IplSliderLimits
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
+from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
 
 logger = setupLogger.get_logger(__name__)
 # Mapa de estilos de línea de matplotlib → QtCore.Qt.PenStyle
@@ -460,8 +461,11 @@ class PyQtGraphParser(BackendParserBase):
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
                 # Creation of FillBetweenItem
                 curve_1 = draw_fn(x=x_data, y=y1_data, **style)
+                pen = curve_1.opts['pen']
+                qcolor = pen.color()
+                brush = (qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255))
                 curve_2 = draw_fn(x=x_data, y=y2_data, **style2)
-                area = FillBetweenItem(curve1=curve_1, curve2=curve_2, brush=(50, 50, 150, int(0.3 * 255)))  # fillRule
+                area = FillBetweenItem(curve1=curve_1, curve2=curve_2, brush=brush)
                 plot.addItem(area)
 
                 plot_lines = [curve_1, curve_2, area]
@@ -571,19 +575,21 @@ class PyQtGraphParser(BackendParserBase):
         visible_stack_ids = []
         axis_items = {}
         plot = None
-        # if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
-        #     axis_items["bottom"] = NanosecondDateFormatter(orientation='bottom')
         l_key = (row, col)
         for stack_id, key in enumerate(sorted(i_plot.signals.keys())):
+
+            if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
+                axis_items["bottom"] = NanosecondDateFormatter(orientation='bottom')
+
             signals = i_plot.signals.get(key) or list()
             visible_stack_ids.append(stack_id)
 
             if l_key not in self._layout_stacks:
-                plot = pg.PlotItem(viewBox=QtViewBox())  # axisItems=axis_items
+                plot = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
                 cell_gl.addItem(plot, row=0, col=0)
                 self._layout_stacks.setdefault(l_key, {})[stack_id] = plot
             elif stack_id not in self._layout_stacks[l_key]:
-                pi = pg.PlotItem(viewBox=QtViewBox())  # axisItems=axis_items
+                pi = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
                 cell_gl.addItem(pi, row=stack_id, col=0)
                 pi.vb.setXLink(self._layout_stacks[l_key][0])
                 pi.getAxis('bottom').setStyle(showValues=False)
@@ -596,7 +602,6 @@ class PyQtGraphParser(BackendParserBase):
             plot = self._layout_stacks[l_key][stack_id]
             plot.enableAutoRange(x=False, y=False)
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
-            processed = False
 
             # Keep references to iplotlib instances for ease of access in callbacks.
             self._impl_plot_cache_table.register(plot, self.canvas, i_plot, stack_id, signals)
@@ -646,9 +651,8 @@ class PyQtGraphParser(BackendParserBase):
         vb.sigXRangeChanged.connect(self._axis_update_callback)
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
-        # if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
-        #     cell_gl.nextRow()
-        #     cell_gl.addItem(axis_items["bottom"].common_label)
+        if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
+            cell_gl.addItem(axis_items["bottom"].common_label, row=len(i_plot.signals), col=0)
 
     def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
         if not visible_stacks:
@@ -767,6 +771,9 @@ class PyQtGraphParser(BackendParserBase):
             plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
             self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
 
+            if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date and isinstance(self.get_impl_axis(impl_plot, 0), NanosecondDateFormatter):
+                self.process_ipl_axis_formatter(impl_plot, 0)
+
             for stack in plot.signals.values():
                 for signal in stack:
                     signal.set_limits((new_start, new_end))
@@ -798,8 +805,11 @@ class PyQtGraphParser(BackendParserBase):
         # axis_item.set_tick_params(**tick_props)
         axis_item.setStyle(**label_props)
 
-    def process_ipl_axis_formatter(self, impl_plot: PlotItem, axis_item: AxisItem, ax_idx: int):
-        pass
+    def process_ipl_axis_formatter(self, impl_plot: PlotItem, ax_idx: int):
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        impl_plot.getAxis("bottom").set_offset(ci.offsets[ax_idx])
+        # axis_date = NanosecondDateFormatter(offset=ci.offsets[ax_idx], orientation='bottom')
+        # impl_plot.setAxisItems({"bottom": axis_date})
 
     def process_ipl_axis_ticks(self, tick_number, axis_item: AxisItem):
         # axis_item.setStyle()
@@ -985,11 +995,17 @@ class PyQtGraphParser(BackendParserBase):
             for s_id, plot_item in stack_dict.items():
                 if un_focus:
                     plot_item.setVisible(True)
+                    if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
+                        plot_item.getAxis("bottom").common_label.setVisible(True)
                 else:
                     if all_stack:
                         plot_item.setVisible(r == row and c == col)
+                        if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
+                            plot_item.getAxis("bottom").common_label.setVisible(r == row and c == col)
                     else:
                         plot_item.setVisible(r == row and c == col and s_id == stack_id)
+                        if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
+                            plot_item.getAxis("bottom").common_label.setVisible(r == row and c == col and s_id == stack_id)
                         self.set_bottom_axis_stacked(row, col, [stack_id])
 
         for key, value in self._slider_placeholders.items():
@@ -1247,8 +1263,8 @@ class PyQtGraphParser(BackendParserBase):
 
         self.set_oaw_axis_limits(impl_plot, ax_idx, [begin, end])
 
-        if axis.is_date:
-            self.process_ipl_axis_formatter(impl_plot, axis_item, ax_idx)
+        if axis.is_date and isinstance(axis_item, NanosecondDateFormatter):
+            self.process_ipl_axis_formatter(impl_plot, ax_idx)
 
         # Set number of ticks and labels
         tick_number = self._pm.get_value(axis, 'tick_number')

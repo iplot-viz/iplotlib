@@ -1,0 +1,164 @@
+import pyqtgraph as pg
+from datetime import datetime, timedelta
+import pandas
+
+import iplotLogging.setupLogger as Sl
+
+logger = Sl.get_logger(__name__)
+
+
+class NanosecondDateFormatter(pg.AxisItem):
+    """Date axis formatter that takes into account ns offset if it is defined on this formatter axis
+    Additionally it formats date as common_part + postfix and includes nanosecond precision if data is given as int64"""
+
+    """Date segment names constants"""
+    YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, MILISECOND, MICROSECOND, NANOSECOND = range(0, 9)
+
+    """pandas attr names for each segment (without milliseconds since it is not supported"""
+    attrs = ['year', 'month', 'day', 'hour', 'minute', 'second', 'millisecond', 'microsecond', 'nanosecond']
+
+    """Postfixes after each date segment"""
+    postfixes = ['-', '-', 'T', ':', ':', '.', '', '', '']
+
+    """Formats for each date segment"""
+    formats = ["{:4d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:03d}", "{:03d}", "{:03d}"]
+
+    def __init__(self, postfix_end=True, postfix_start=False, roundh=False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.postfix_end = postfix_end
+        self.postfix_start = postfix_start
+        self.offset_str = "N/A"
+        self.offset_ns = 0
+        self.cut_start = 0
+        self._round = roundh
+        self.common_label = pg.LabelItem(text='', justify='right')
+        self.last_values = []
+        self.n_ticks = 7
+        self.last_range = 0
+        self.offset = 0
+
+    def __call__(self, x, pos=None):
+        return self.date_fmt(int(x), self.cut_start + 1, self.cut_start + 4)
+
+    def set_offset(self, offset):
+        self.offset = offset
+
+    def date_part(self, ts_numeric, part):
+        """Extract date part from numerical timestamp"""
+        ts = pandas.Timestamp(ts_numeric)
+
+        if part == self.MILISECOND:
+            return int(ts.microsecond / 1000)
+        elif part == self.MICROSECOND:
+            return ts.microsecond % 1000
+        else:
+            return getattr(ts, self.attrs[part])
+
+    def date_fmt(self, date, start=YEAR, end=NANOSECOND, postfix_end=False, postfix_start=False):
+        """Formats date and returns only part between start segment and end segment"""
+        ret = ""
+        if end is None:
+            end = self.NANOSECOND
+        for i in range(start, end + 1):
+            if i > 0 and i == start and postfix_start:
+                ret += self.postfixes[i - 1]
+
+            if i < len(self.formats):
+                ret += self.formats[i].format(self.date_part(date, i))
+
+            if (i < end or postfix_end) and i < len(self.postfixes):
+                ret += self.postfixes[i]
+
+        if self._round and 'T' in ret:
+            # Implemented rounding only at the hour level, so the separator must be in that exact position
+            if ret[2] == 'T' or ret[5] == 'T':
+                return self.round_hour(ret)
+        return ret
+
+    @staticmethod
+    def round_hour(ret):
+        parts = ret.split('T')
+        hour_str = parts[1]
+
+        if len(hour_str) == 5:
+            hour = datetime.strptime(hour_str, '%H:%M')
+        else:
+            hour = datetime.strptime(hour_str, '%H:%M:%S')
+
+        if hour.minute >= 30:
+            hour += timedelta(hours=1)
+
+        if len(hour_str) == 5:
+            hour = hour.replace(minute=0)
+            round_hour_str = hour.strftime('%H:%M')
+        else:
+            hour = hour.replace(minute=0, second=0)
+            round_hour_str = hour.strftime('%H:%M:%S')
+
+        new_ret = f"{parts[0]}T{round_hour_str}"
+
+        return new_ret
+
+    def lcp(self, start, end):
+        """Returns last common segment of two dates given as start and end"""
+        for i in range(self.YEAR, self.NANOSECOND + 1):
+            val_s, val_e = self.date_part(start, i), self.date_part(end, i)
+
+            if val_s != val_e:
+                return i - 1
+
+        return 0
+
+    def tickValues(self, minVal, maxVal, size):
+        # Detectar cambio de rango
+        minVal = minVal
+        maxVal = maxVal
+        last_range = maxVal - minVal
+
+        # Si ha cambiado, recalculamos
+        if len(self.last_values) == 0 or last_range != self.last_range:
+            # Primera vez, generamos valores equiespaciados
+            spacing = last_range / self.n_ticks
+            values = [minVal + spacing / 2 + i * spacing for i in range(self.n_ticks)]
+            self.last_range = last_range
+        else:
+            # Ajustamos los ticks anteriores para el nuevo rango
+            values = []
+            for v in self.last_values:
+                if minVal <= v <= maxVal:
+                    values.append(v)
+            # Añadimos ticks nuevos si no hay suficientes
+            while len(values) < self.n_ticks:
+                # Añadir al inicio o al final
+                if values and values[-1] + (values[1] - values[0]) <= maxVal:
+                    values.append(values[-1] + (values[1] - values[0]))
+                elif values and values[0] - (values[1] - values[0]) >= minVal:
+                    values.insert(0, values[0] - (values[1] - values[0]))
+                else:
+                    break
+            values = sorted(values)
+
+        # Guardamos el estado actual
+        self.last_values = values
+
+        self.cut_start = self.lcp(self.get_real_value(int(values[0])), self.get_real_value(int(values[-1])))
+
+        self.offset_str = 'UTC:' + self.date_fmt(self.get_real_value(values[0]), self.YEAR, self.cut_start,
+                                                 postfix_end=self.postfix_end, postfix_start=self.postfix_start)
+
+        spacing = (maxVal - minVal) / max(len(values) - 1, 1)
+        print(min(values), max(values), max(values) - min(values), spacing)
+        return [(spacing, values)]
+
+    def tickStrings(self, values, scale, spacing):
+        values = list(
+            map(lambda v: self.date_fmt(self.get_real_value(int(v)), self.cut_start + 1, self.cut_start + 5), values))
+        self.common_label.setText(self.offset_str)
+        return values
+
+    def get_real_value(self, value):
+
+        if self.offset == 100_000:
+            return value * self.offset
+        else:
+            return value + self.offset
