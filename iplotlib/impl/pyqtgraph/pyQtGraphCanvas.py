@@ -74,8 +74,8 @@ class QtViewBox(pg.ViewBox):
         self.sigRangeChanged.connect(self.release_event)
 
     def mousePressEvent(self, ev: QGraphicsSceneMouseEvent):
-        # Add log message
-        if ev.button() == Qt.MouseButton.RightButton:
+        if ev.button() == Qt.MouseButton.RightButton and self._block_right_button:
+            self.pressed.emit(self, ev)
             ev.accept()
             return
         super().mousePressEvent(ev)
@@ -913,7 +913,7 @@ class PyQtGraphParser(BackendParserBase):
 
     def autoscale_y_axis(self, impl_plot, margin=0.1):
         pass
-        # impl_plot.vb.enableAutoRange(y=autoscale)
+        impl_plot.vb.enableAutoRange(axis=1, enable=True)
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
         pass

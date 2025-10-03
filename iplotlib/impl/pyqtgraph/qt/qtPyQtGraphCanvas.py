@@ -1,5 +1,5 @@
 from PySide6.QtCore import QMargins, Qt, Signal, QEvent
-from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtWidgets import QVBoxLayout, QMenu
 
 from iplotlib.core import Canvas, Plot, PlotContour
 
@@ -77,6 +77,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 vb = plot.getViewBox()
                 vb.pressed.connect(self._impl_mouse_press_handler)
                 vb.released.connect(self._impl_mouse_release_handler)
+                vb.setMenuEnabled(False) # Disable default context menu
 
         # self._parser.figure.clear()
         # for i, col in enumerate(self.canvas.plots):
@@ -109,10 +110,39 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         pass
 
     def autoscale_y(self, impl_plot):
-        pass
+        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        if not hasattr(ci, 'plot'):
+            return
+        plot = ci.plot()
+
+        self.stage_view_lim_cmd(plot, impl_plot)
+        self._parser.autoscale_y_axis(impl_plot)
+        impl_plot.getViewBox().updateAutoRange()
+        while len(self._staging_cmds):
+            self.commit_view_lim_cmd(plot, impl_plot)
+        while len(self._commitd_cmds):
+            self.push_view_lim_cmd()
+        self._parser.unstale_cache_items()
 
     def autoscale_all_y(self):
-        pass
+        base_impl = self.get_base_plot()
+        if base_impl is None:
+            return
+        base_ci = self._parser._impl_plot_cache_table.get_cache_item(base_impl)
+        if not hasattr(base_ci, 'plot'):
+            return
+        base_plot = base_ci.plot()
+
+        self.stage_view_lim_cmd(base_plot, base_impl)
+        for stack in self._parser._layout_stacks.values():
+            for pi in stack.values():
+                self._parser.autoscale_y_axis(pi)
+                pi.getViewBox().updateAutoRange()
+        while len(self._staging_cmds):
+            self.commit_view_lim_cmd(base_plot, base_impl)
+        while len(self._commitd_cmds):
+            self.push_view_lim_cmd()
+        self._parser.unstale_cache_items()
 
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
@@ -130,6 +160,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._parser.set_view_box_zoom()
         elif mode == Canvas.MOUSE_MODE_MARKER:
             self._parser.set_view_box()
+
+        block_right = (mode == Canvas.MOUSE_MODE_PAN)
+        for stack in self._parser._layout_stacks.values():
+            for plot in stack.values():
+                plot.getViewBox()._block_right_button = block_right
+
             """
             if not self._marker_window.isVisible():
                 self._marker_window.show()
@@ -173,13 +209,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._parser.unstale_cache_items()
 
         if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-            # Stage a command to obtain original view limits
-            # Disable Zoom and Pan in PlotContour
+            # Do not zoom/pan on contour plots
             if isinstance(plot, PlotContour):
                 return
-            elif event.type() == QEvent.GraphicsSceneMouseDoubleClick:
+            if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
                 return
-            elif event.button() == Qt.MouseButton.RightButton:
+            if event.button() == Qt.MouseButton.RightButton:
                 return
             self.stage_view_lim_cmd(plot, impl_plot)
             return
@@ -187,12 +222,46 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         elif self._mmode == Canvas.MOUSE_MODE_SELECT:
             if not impl_plot or not isinstance(impl_plot, PlotItem):
                 return
+
             if event.button() == Qt.MouseButton.LeftButton:
                 if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
-                    self._parser.set_focus_plot(impl_plot)
-                else:
                     return
-            elif event.button() == Qt.MouseButton.RightButton:
+                return
+
+            if event.button() == Qt.MouseButton.RightButton:
+                if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
+                    return
+
+                # Build minimal context menu
+                menu = QMenu(self)
+                a_autoscale = menu.addAction("Autoscale")
+                a_autoscale_all = menu.addAction("Autoscale All")
+
+                # show Focus/Unfocus accordingly
+                focused = getattr(self._parser, "_focus_plot", None)
+                if focused is not None:
+                    a_unfocus = menu.addAction("Unfocus on plot")
+                    a_focus = None
+                else:
+                    a_focus = menu.addAction("Focus on plot")
+                    a_unfocus = None
+
+                chosen = menu.exec(event.screenPos())
+                if chosen is None:
+                    return
+
+                # Dispatch actions
+                if chosen is a_autoscale:
+                    self.autoscale_y(impl_plot)
+                elif chosen is a_autoscale_all:
+                    self.autoscale_all_y()
+                elif a_focus is not None and chosen is a_focus:
+                    self._parser.set_focus_plot(impl_plot)
+                elif a_unfocus is not None and chosen is a_unfocus:
+                    self._parser.set_focus_plot(None)
+
+                # Ensure redraw/cache consistency after changes
+                self._parser.unstale_cache_items()
                 return
 
     def _impl_mouse_release_handler(self, view_box):
