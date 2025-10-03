@@ -188,10 +188,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         return self._parser.drop_history()
 
     def _full_screen_mode_on(self, impl_plot):
-        pass
+        self._parser.set_focus_plot(impl_plot)
 
     def _full_screen_mode_off(self):
-        pass
+        self._parser.set_focus_plot(None)
 
     def _impl_mouse_press_handler(self, view_box, event):
         # self._debug_log_event(event, "Mouse released")
@@ -232,36 +232,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
                     return
 
-                # Build minimal context menu
-                menu = QMenu(self)
-                a_autoscale = menu.addAction("Autoscale")
-                a_autoscale_all = menu.addAction("Autoscale All")
-
-                # show Focus/Unfocus accordingly
-                focused = getattr(self._parser, "_focus_plot", None)
-                if focused is not None:
-                    a_unfocus = menu.addAction("Unfocus on plot")
-                    a_focus = None
-                else:
-                    a_focus = menu.addAction("Focus on plot")
-                    a_unfocus = None
-
-                chosen = menu.exec(event.screenPos())
-                if chosen is None:
-                    return
-
-                # Dispatch actions
-                if chosen is a_autoscale:
-                    self.autoscale_y(impl_plot)
-                elif chosen is a_autoscale_all:
-                    self.autoscale_all_y()
-                elif a_focus is not None and chosen is a_focus:
-                    self._parser.set_focus_plot(impl_plot)
-                elif a_unfocus is not None and chosen is a_unfocus:
-                    self._parser.set_focus_plot(None)
-
-                # Ensure redraw/cache consistency after changes
-                self._parser.unstale_cache_items()
+                self._context_menu_for_plot(impl_plot, event.screenPos(), plot_specific_unfocus=True)
                 return
 
     def _impl_mouse_release_handler(self, view_box):

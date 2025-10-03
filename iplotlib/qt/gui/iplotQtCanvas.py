@@ -6,8 +6,8 @@ from abc import abstractmethod
 from contextlib import contextmanager
 from typing import Collection, List
 
-from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot, QPointF
+from PySide6.QtWidgets import QApplication, QWidget, QMenu
 from iplotlib.core.signal import SignalXY
 from iplotlib.core.axis import RangeAxis
 from iplotlib.core.canvas import Canvas
@@ -260,3 +260,45 @@ class IplotQtCanvas(QWidget):
 
     def import_json(self, json):
         self.set_canvas(Canvas.from_json(json))
+
+    def _context_menu_for_plot(self, impl_plot, screen_pos, *, plot_specific_unfocus: bool = False):
+
+        if isinstance(screen_pos, QPointF):
+            screen_pos = screen_pos.toPoint()
+
+        menu = QMenu(self)
+        a_autoscale = menu.addAction("Autoscale")
+        a_autoscale_all = menu.addAction("Autoscale All")
+
+        focused_impl = getattr(self._parser, "_focus_plot", None)
+        canvas_focus = getattr(self._parser.canvas, "focus_plot", None)
+
+        if plot_specific_unfocus:
+            if focused_impl is impl_plot:
+                a_unfocus = menu.addAction("Unfocus on plot")
+                a_focus = None
+            else:
+                a_focus = menu.addAction("Focus on plot")
+                a_unfocus = None
+        else:
+            if (focused_impl is not None) or (canvas_focus is not None):
+                a_unfocus = menu.addAction("Unfocus plot")
+                a_focus = None
+            else:
+                a_focus = menu.addAction("Focus on plot")
+                a_unfocus = None
+
+        chosen = menu.exec(screen_pos)
+        if chosen is None:
+            return
+
+        if chosen is a_autoscale:
+            self.autoscale_y(impl_plot)
+        elif chosen is a_autoscale_all:
+            self.autoscale_all_y()
+        elif a_focus is not None and chosen is a_focus:
+            self._full_screen_mode_on(impl_plot)
+        elif a_unfocus is not None and chosen is a_unfocus:
+            self._full_screen_mode_off()
+
+        self._parser.unstale_cache_items()

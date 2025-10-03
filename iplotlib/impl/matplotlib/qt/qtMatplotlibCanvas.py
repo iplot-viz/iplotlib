@@ -485,15 +485,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 self.stage_view_lim_cmd()
                 return
             if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.RIGHT:
-                # Create menu with autoscale options
-                autoscale_menu = QMenu(self)
-                autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
-                autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
-                if self._parser.canvas.focus_plot is None:
-                    autoscale_menu.addAction("Focus on plot", lambda: self._full_screen_mode_on(event.inaxes))
-                else:
-                    autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
-                autoscale_menu.popup(event.guiEvent.globalPos())
+                self._context_menu_for_plot(event.inaxes, event.guiEvent.globalPos(), plot_specific_unfocus=False)
+                return
 
             if event.button != MouseButton.LEFT:
                 return
