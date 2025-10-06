@@ -260,12 +260,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     info_stats.append((signal, mpl_axes))
             self._stats_table.fill_table(info_stats)
 
-    def autoscale_y(self, impl_plot):
-        return super().autoscale_y(impl_plot)
-
-    def autoscale_all_y(self):
-        return super().autoscale_all_y()
-
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
 

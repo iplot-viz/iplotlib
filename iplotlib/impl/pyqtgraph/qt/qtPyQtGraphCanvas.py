@@ -109,12 +109,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def check_markers(self, canvas: Canvas):
         pass
 
-    def autoscale_y(self, impl_plot):
-        return super().autoscale_y(impl_plot)
-
-    def autoscale_all_y(self):
-        return super().autoscale_all_y()
-
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
 
