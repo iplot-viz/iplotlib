@@ -277,18 +277,18 @@ class IplotQtCanvas(QWidget):
         if plot_specific_unfocus:
             is_this_focused = (focused_impl is impl_plot) or (canvas_focus is impl_plot)
             if is_this_focused:
-                a_unfocus = menu.addAction("Unfocus on plot");
+                a_unfocus = menu.addAction("Unfocus on plot")
                 a_focus = None
             else:
-                a_focus = menu.addAction("Focus on plot");
+                a_focus = menu.addAction("Focus on plot")
                 a_unfocus = None
         else:
             is_any_focused = (focused_impl is not None) or (canvas_focus is not None)
             if is_any_focused:
-                a_unfocus = menu.addAction("Unfocus plot");
+                a_unfocus = menu.addAction("Unfocus plot")
                 a_focus = None
             else:
-                a_focus = menu.addAction("Focus on plot");
+                a_focus = menu.addAction("Focus on plot")
                 a_unfocus = None
 
         chosen = menu.exec(screen_pos)
@@ -344,22 +344,31 @@ class IplotQtCanvas(QWidget):
         if not plot:
             return
 
-        if mode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-            if isinstance(plot, PlotContour):
+        if mode == Canvas.MOUSE_MODE_SELECT:
+            if button == Qt.MouseButton.LeftButton or is_double:
                 return
-            if is_double or button == Qt.MouseButton.RightButton:
-                return
-            self.stage_view(plot, impl_plot)
+            self._context_menu_for_plot(impl_plot, screen_pos, plot_specific_unfocus=True)
             return
 
-        if mode == Canvas.MOUSE_MODE_SELECT:
-            if button == Qt.MouseButton.LeftButton:
-                if is_double:
-                    return
+        if mode == Canvas.MOUSE_MODE_CROSSHAIR:
+            return
+
+        if mode in [Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM]:
+            if isinstance(plot, PlotContour):
                 return
-            if button == Qt.MouseButton.RightButton and not is_double:
-                self._context_menu_for_plot(impl_plot, screen_pos, plot_specific_unfocus=True)
+            if button == Qt.MouseButton.RightButton or is_double:
                 return
+            self.stage_view(plot, impl_plot)
+
+        if mode == Canvas.MOUSE_MODE_DIST:
+            if button == Qt.MouseButton.RightButton or is_double:
+                return
+            pass
+
+        if mode == Canvas.MOUSE_MODE_MARKER:
+            if button == Qt.MouseButton.RightButton or is_double:
+                return
+            pass
 
     def release_common(self, *, mode, impl_plot=None):
         """Shared release logic: commit/push/history en ZOOM/PAN."""

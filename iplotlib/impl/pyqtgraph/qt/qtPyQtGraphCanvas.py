@@ -179,10 +179,13 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         )
 
     def _impl_mouse_release_handler(self, view_box):
+        #TODO change
         if not all(v == 2 for v in self._parser._update.values()):
             return
-        if view_box is not None and self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-            self.release_common(mode=self._mmode, impl_plot=view_box.parentItem())
+        if view_box is None:
+            return
+
+        self.release_common(mode=self._mmode, impl_plot=view_box.parentItem())
         self._parser._update.clear()
 
     def unfocus_plot(self):
