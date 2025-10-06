@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QWidget, QMenu
 from iplotlib.core.signal import SignalXY
 from iplotlib.core.axis import RangeAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.plot import PlotXYWithSlider
+from iplotlib.core.plot import PlotXYWithSlider, PlotContour
 from iplotlib.core.command import IplotCommand
 from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
@@ -261,6 +261,7 @@ class IplotQtCanvas(QWidget):
     def import_json(self, json):
         self.set_canvas(Canvas.from_json(json))
 
+    # Context menu for plots
     def _context_menu_for_plot(self, impl_plot, screen_pos, *, plot_specific_unfocus: bool = False):
 
         if isinstance(screen_pos, QPointF):
@@ -270,22 +271,24 @@ class IplotQtCanvas(QWidget):
         a_autoscale = menu.addAction("Autoscale")
         a_autoscale_all = menu.addAction("Autoscale All")
 
-        focused_impl = getattr(self._parser, "_focus_plot", None)
+        focused_impl = getattr(self._parser, "_focus_plot", None)  #
         canvas_focus = getattr(self._parser.canvas, "focus_plot", None)
 
         if plot_specific_unfocus:
-            if focused_impl is impl_plot:
-                a_unfocus = menu.addAction("Unfocus on plot")
+            is_this_focused = (focused_impl is impl_plot) or (canvas_focus is impl_plot)
+            if is_this_focused:
+                a_unfocus = menu.addAction("Unfocus on plot");
                 a_focus = None
             else:
-                a_focus = menu.addAction("Focus on plot")
+                a_focus = menu.addAction("Focus on plot");
                 a_unfocus = None
         else:
-            if (focused_impl is not None) or (canvas_focus is not None):
-                a_unfocus = menu.addAction("Unfocus plot")
+            is_any_focused = (focused_impl is not None) or (canvas_focus is not None)
+            if is_any_focused:
+                a_unfocus = menu.addAction("Unfocus plot");
                 a_focus = None
             else:
-                a_focus = menu.addAction("Focus on plot")
+                a_focus = menu.addAction("Focus on plot");
                 a_unfocus = None
 
         chosen = menu.exec(screen_pos)
@@ -302,3 +305,99 @@ class IplotQtCanvas(QWidget):
             self._full_screen_mode_off()
 
         self._parser.unstale_cache_items()
+
+    # Autoscale and autoscale all
+
+    def autoscale_y(self, impl_plot):
+        """Single-plot Y autoscale with undo/redo, backend-agnostic."""
+        plot = self._get_plot(impl_plot)
+        if not plot:
+            return
+        self.stage_view(plot, impl_plot)
+        self._parser.autoscale_y_axis(impl_plot)
+        self.post_autoscale(impl_plot)
+        self.commit_view(plot, impl_plot)
+        self._parser.unstale_cache_items()
+
+    def autoscale_all_y(self):
+        """All-plots Y autoscale as one undo/redo action, backend-agnostic."""
+        base_impl = self._first_impl_plot()
+        if base_impl is None:
+            return
+        base_plot = self._get_plot(base_impl)
+        if not base_plot:
+            return
+
+        self.stage_view(base_plot, base_impl)
+        for stack in self._parser._layout_stacks.values():
+            for pi in stack.values():
+                self._parser.autoscale_y_axis(pi)
+                self.post_autoscale(pi)
+        self.commit_view(base_plot, base_impl)
+        self._parser.unstale_cache_items()
+
+    # Mouse press/release common logic
+
+    def press_common(self, *, mode, button, is_double, impl_plot, screen_pos):
+        """Shared press logic: ZOOM/PAN staging + SELECT context menu."""
+        plot = self._get_plot(impl_plot)
+        if not plot:
+            return
+
+        if mode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+            if isinstance(plot, PlotContour):
+                return
+            if is_double or button == Qt.MouseButton.RightButton:
+                return
+            self.stage_view(plot, impl_plot)
+            return
+
+        if mode == Canvas.MOUSE_MODE_SELECT:
+            if button == Qt.MouseButton.LeftButton:
+                if is_double:
+                    return
+                return
+            if button == Qt.MouseButton.RightButton and not is_double:
+                self._context_menu_for_plot(impl_plot, screen_pos, plot_specific_unfocus=True)
+                return
+
+    def release_common(self, *, mode, impl_plot=None):
+        """Shared release logic: commit/push/history en ZOOM/PAN."""
+        if mode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+            plot = self._get_plot(impl_plot) if impl_plot is not None else None
+            self.commit_view(plot, impl_plot)
+            self.stats(self.get_canvas())
+
+    # Hooks
+    def stage_view(self, plot_model=None, impl_plot=None):
+        """Stage: begin undoable view change."""
+        self.stage_view_lim_cmd()
+
+    def commit_view(self, plot_model=None, impl_plot=None):
+        """Commit+Push: finalize undoable view change."""
+        while len(self._staging_cmds):
+            self.commit_view_lim_cmd()
+        while len(self._commitd_cmds):
+            self.push_view_lim_cmd()
+
+    def post_autoscale(self, impl_plot):
+        """Backend-specific immediate apply step (no-op by default)."""
+        pass
+
+    # Helpers
+
+    def _qpoint(self, pos):
+        """Normalize QPointF -> QPoint for menu popup."""
+        return pos.toPoint() if isinstance(pos, QPointF) else pos
+
+    def _get_plot(self, impl_plot):
+        """Map backend impl_plot -> iplotlib Plot model via parser cache."""
+        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        return ci.plot() if hasattr(ci, "plot") else None
+
+    def _first_impl_plot(self):
+        """Return any available impl_plot (for batch ops like Autoscale All)."""
+        for stack in self._parser._layout_stacks.values():
+            for pi in stack.values():
+                return pi
+        return None

@@ -12,7 +12,7 @@
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
 from collections import defaultdict
 
-from PySide6.QtCore import QMargins, Qt, Slot, Signal
+from PySide6.QtCore import QMargins, Qt, Slot, Signal, QEvent
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QMenu
 
@@ -261,59 +261,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self._stats_table.fill_table(info_stats)
 
     def autoscale_y(self, impl_plot):
-        """
-            Autoscale the Y axis of a single PlotXY and store the action for undo/redo
-        """
-        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
-        if hasattr(ci, 'plot'):
-            plot = ci.plot()
-            if isinstance(plot, PlotXY):
-                # Stage a command to obtain original view limits
-                self.stage_view_lim_cmd()
-
-                # Autoscale on Y axis for the given plot
-                self._parser.autoscale_y_axis(impl_plot)
-
-                # Commit staged command
-                while len(self._staging_cmds):
-                    self.commit_view_lim_cmd()
-
-                # Push committed command
-                while len(self._commitd_cmds):
-                    self.push_view_lim_cmd()
-
-                # Redraw canvas to reflect changes
-                self._parser.figure.canvas.draw()
+        return super().autoscale_y(impl_plot)
 
     def autoscale_all_y(self):
-        """
-            Autoscale the Y axis of all PlotXY instances in the figure and store the action for undo/redo
-        """
-        axes = self._parser.figure.axes
-        # Stage a command to obtain original view limits
-        self.stage_view_lim_cmd()
-
-        for ax in axes:
-            ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
-            if not hasattr(ci, 'plot'):
-                continue
-            plot = ci.plot()
-            if not isinstance(plot, PlotXY):
-                continue
-
-            # Autoscale on Y axis for the given plot
-            self._parser.autoscale_y_axis(ax)
-
-        # Commit staged command
-        while len(self._staging_cmds):
-            self.commit_view_lim_cmd()
-
-        # Push committed command
-        while len(self._commitd_cmds):
-            self.push_view_lim_cmd()
-
-        # Redraw canvas to reflect changes
-        self._parser.figure.canvas.draw()
+        return super().autoscale_all_y()
 
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
@@ -408,127 +359,89 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if event.inaxes and event.inaxes.get_legend() and event.inaxes.get_legend().contains(event)[0]:
             return
 
-        if event.dblclick:
-            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN] and event.button == MouseButton.RIGHT:
-                mpl_axes = event.inaxes
-                if not isinstance(mpl_axes, MPLAxes):
-                    return
-                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
-                if not hasattr(ci, 'plot'):
-                    return
-                plot = ci.plot()
-                if not plot:
-                    return
+        if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.RIGHT:
+            if event.inaxes is not None:
+                self._context_menu_for_plot(event.inaxes, event.guiEvent.globalPos(), plot_specific_unfocus=False)
+            return
 
-                # Stage a command to obtain original view limits
-                self.stage_view_lim_cmd()
-
-                # Reset plot to original view limits
-                original_limits = self._parser.get_plot_limits(plot, which='original')
-                self._parser.set_plot_limits(original_limits)
-
-                # Commit it.
-                while len(self._staging_cmds):
-                    self.commit_view_lim_cmd()
-
-                # Push it.
-                while len(self._commitd_cmds):
-                    self.push_view_lim_cmd()
-
-                self.render()
-            elif self._mmode in [Canvas.MOUSE_MODE_CROSSHAIR, Canvas.MOUSE_MODE_ZOOM,
-                                 Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER] and event.button == MouseButton.LEFT:
-                mpl_axes = event.inaxes
-                if not isinstance(mpl_axes, MPLAxes):
-                    return
-                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
-                if not hasattr(ci, 'plot'):
-                    return
-                plot = ci.plot()
-                x_value = event.xdata
-                y_value = event.ydata
-
-                # Markers can only be created if the property 'marker' is not None
-                if mpl_axes.get_lines()[0].get_marker() != 'None':
-                    # Check if the marker coordinates are correct and if the marker has not already been created
-                    new_marker, marker_signal = self._parser.add_marker_scaled(mpl_axes, plot, x_value, y_value)
-                    if new_marker is not None:
-                        if new_marker not in self._marker_window.get_markers():
-                            self._marker_window.add_marker(marker_signal, new_marker)
-                            if not self._marker_window.isVisible():
-                                self._marker_window.show()
-                            elif self._marker_window.isMinimized():
-                                self._marker_window.showNormal()
-                            else:
-                                self._marker_window.raise_()
-                                self._marker_window.activateWindow()
-                        else:
-                            logger.warning(f"The marker {new_marker} is already created")
-                    else:
-                        logger.warning(
-                            f"Cannot add marker {new_marker}: found {marker_signal} samples, but the maximum allowed"
-                            f" is 50")
-                else:
-                    logger.warning("Markers must be enabled in the plot to create signal markers")
-        else:
-            if event.inaxes is None:
+        if event.dblclick and event.button == MouseButton.LEFT and \
+                self._mmode in [Canvas.MOUSE_MODE_CROSSHAIR, Canvas.MOUSE_MODE_ZOOM,
+                                Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER]:
+            mpl_axes = event.inaxes
+            if not isinstance(mpl_axes, MPLAxes):
                 return
             ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
             if not hasattr(ci, 'plot'):
                 return
             plot = ci.plot()
-            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                # Stage a command to obtain original view limits
-                # Disable Zoom and Pan in PlotContour
-                if isinstance(plot, PlotContour):
-                    return
-                self.stage_view_lim_cmd()
-                return
-            if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.RIGHT:
-                self._context_menu_for_plot(event.inaxes, event.guiEvent.globalPos(), plot_specific_unfocus=False)
-                return
-
-            if event.button != MouseButton.LEFT:
-                return
-            if not plot:
-                self._dist_calculator.reset()
-                return
-            if self._mmode == Canvas.MOUSE_MODE_DIST:
-                if self._dist_calculator.plot1 is not None:
-                    try:
-                        is_date = plot.axes[0].is_date
-                    except (AttributeError, IndexError):
-                        is_date = False
-                    x = self._parser.transform_value(event.inaxes, 0, event.xdata)
-                    self._dist_calculator.set_dst(x, event.ydata, plot, ci.stack_key)
-                    self._dist_calculator.set_dx_is_datetime(is_date)
-                    box = QMessageBox(self)
-                    box.setWindowTitle('Distance')
-                    dx, dy, dz = self._dist_calculator.dist()
-                    if any([dx, dy, dz]):
-                        box.setText(f"dx = {dx}\ndy = {dy}\ndz = {dz}")
+            x_value, y_value = event.xdata, event.ydata
+            if mpl_axes.get_lines()[0].get_marker() != 'None':
+                new_marker, marker_signal = self._parser.add_marker_scaled(mpl_axes, plot, x_value, y_value)
+                if new_marker is not None:
+                    if new_marker not in self._marker_window.get_markers():
+                        self._marker_window.add_marker(marker_signal, new_marker)
+                        if not self._marker_window.isVisible():
+                            self._marker_window.show()
+                        elif self._marker_window.isMinimized():
+                            self._marker_window.showNormal()
+                        else:
+                            self._marker_window.raise_()
+                            self._marker_window.activateWindow()
                     else:
-                        box.setText("Invalid selection")
-                    box.exec_()
-                    self._dist_calculator.reset()
+                        logger.warning(f"The marker {new_marker} is already created")
                 else:
-                    x = self._parser.transform_value(event.inaxes, 0, event.xdata)
-                    self._dist_calculator.set_src(x, event.ydata, plot, ci.stack_key)
+                    logger.warning("Cannot add marker: too many samples")
+            else:
+                logger.warning("Markers must be enabled in the plot to create signal markers")
+            return
+
+        if event.inaxes is None:
+            return
+        qt_button = {
+            MouseButton.LEFT: Qt.MouseButton.LeftButton,
+            MouseButton.RIGHT: Qt.MouseButton.RightButton,
+            MouseButton.MIDDLE: Qt.MouseButton.MiddleButton,
+        }.get(event.button, Qt.MouseButton.NoButton)
+        self.press_common(
+            mode=self._mmode,
+            button=qt_button,
+            is_double=False,
+            impl_plot=event.inaxes,
+            screen_pos=event.guiEvent.globalPos(),
+        )
+
+        ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+        if not hasattr(ci, 'plot'):
+            return
+        plot = ci.plot()
+        if event.button != MouseButton.LEFT:
+            return
+        if not plot:
+            self._dist_calculator.reset()
+            return
+        if self._mmode == Canvas.MOUSE_MODE_DIST:
+            if self._dist_calculator.plot1 is not None:
+                try:
+                    is_date = plot.axes[0].is_date
+                except (AttributeError, IndexError):
+                    is_date = False
+                x = self._parser.transform_value(event.inaxes, 0, event.xdata)
+                self._dist_calculator.set_dst(x, event.ydata, plot, ci.stack_key)
+                self._dist_calculator.set_dx_is_datetime(is_date)
+                box = QMessageBox(self)
+                box.setWindowTitle('Distance')
+                dx, dy, dz = self._dist_calculator.dist()
+                box.setText(f"dx = {dx}\ndy = {dy}\ndz = {dz}" if any([dx, dy, dz]) else "Invalid selection")
+                box.exec_()
+                self._dist_calculator.reset()
+            else:
+                x = self._parser.transform_value(event.inaxes, 0, event.xdata)
+                self._dist_calculator.set_src(x, event.ydata, plot, ci.stack_key)
 
     def _mpl_mouse_release_handler(self, event: MouseEvent):
         self._debug_log_event(event, "Mouse released")
-        if event.dblclick:
-            pass
-        else:
-            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                # commit commands from staging.
-                while len(self._staging_cmds):
-                    self.commit_view_lim_cmd()
-                # push uncommitted changes onto the command stack.
-                while len(self._commitd_cmds):
-                    self.push_view_lim_cmd()
-                # Update statistics
-                self.stats(self.get_canvas())
+        if not event.dblclick and self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+            self.release_common(mode=self._mmode)
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.text() == 'n':

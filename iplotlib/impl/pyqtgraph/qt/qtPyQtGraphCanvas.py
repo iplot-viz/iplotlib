@@ -1,5 +1,5 @@
 from PySide6.QtCore import QMargins, Qt, Signal, QEvent
-from PySide6.QtWidgets import QVBoxLayout, QMenu
+from PySide6.QtWidgets import QVBoxLayout
 
 from iplotlib.core import Canvas, Plot, PlotContour
 
@@ -110,39 +110,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         pass
 
     def autoscale_y(self, impl_plot):
-        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
-        if not hasattr(ci, 'plot'):
-            return
-        plot = ci.plot()
-
-        self.stage_view_lim_cmd(plot, impl_plot)
-        self._parser.autoscale_y_axis(impl_plot)
-        impl_plot.getViewBox().updateAutoRange()
-        while len(self._staging_cmds):
-            self.commit_view_lim_cmd(plot, impl_plot)
-        while len(self._commitd_cmds):
-            self.push_view_lim_cmd()
-        self._parser.unstale_cache_items()
+        return super().autoscale_y(impl_plot)
 
     def autoscale_all_y(self):
-        base_impl = self.get_base_plot()
-        if base_impl is None:
-            return
-        base_ci = self._parser._impl_plot_cache_table.get_cache_item(base_impl)
-        if not hasattr(base_ci, 'plot'):
-            return
-        base_plot = base_ci.plot()
-
-        self.stage_view_lim_cmd(base_plot, base_impl)
-        for stack in self._parser._layout_stacks.values():
-            for pi in stack.values():
-                self._parser.autoscale_y_axis(pi)
-                pi.getViewBox().updateAutoRange()
-        while len(self._staging_cmds):
-            self.commit_view_lim_cmd(base_plot, base_impl)
-        while len(self._commitd_cmds):
-            self.push_view_lim_cmd()
-        self._parser.unstale_cache_items()
+        return super().autoscale_all_y()
 
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
@@ -194,73 +165,25 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._parser.set_focus_plot(None)
 
     def _impl_mouse_press_handler(self, view_box, event):
-        # self._debug_log_event(event, "Mouse released")
-
         impl_plot = view_box.parentItem()
-        if not impl_plot:
+        if not impl_plot or not isinstance(impl_plot, PlotItem):
             return
-
-        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
-        if not hasattr(ci, 'plot'):
-            return
-        plot = ci.plot()
-
         if len(self._parser._stale_citems):
             self._parser.unstale_cache_items()
-
-        if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-            # Do not zoom/pan on contour plots
-            if isinstance(plot, PlotContour):
-                return
-            if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
-                return
-            if event.button() == Qt.MouseButton.RightButton:
-                return
-            self.stage_view_lim_cmd(plot, impl_plot)
-            return
-
-        elif self._mmode == Canvas.MOUSE_MODE_SELECT:
-            if not impl_plot or not isinstance(impl_plot, PlotItem):
-                return
-
-            if event.button() == Qt.MouseButton.LeftButton:
-                if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
-                    return
-                return
-
-            if event.button() == Qt.MouseButton.RightButton:
-                if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
-                    return
-
-                self._context_menu_for_plot(impl_plot, event.screenPos(), plot_specific_unfocus=True)
-                return
+        self.press_common(
+            mode=self._mmode,
+            button=event.button(),
+            is_double=(event.type() == QEvent.GraphicsSceneMouseDoubleClick),
+            impl_plot=impl_plot,
+            screen_pos=event.screenPos(),
+        )
 
     def _impl_mouse_release_handler(self, view_box):
-        # self._debug_log_event(event, "Mouse released")
         if not all(v == 2 for v in self._parser._update.values()):
             return
-        if view_box is None:
-            pass
-        else:
-            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                impl_plot = view_box.parentItem()
-                ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
-                plot = ci.plot()
-                # commit commands from staging.
-                while len(self._staging_cmds):
-                    self.commit_view_lim_cmd(plot, impl_plot)
-                # push uncommitted changes onto the command stack.
-                while len(self._commitd_cmds):
-                    self.push_view_lim_cmd()
-                # Update statistics
-                self.stats(self.get_canvas())
-
+        if view_box is not None and self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+            self.release_common(mode=self._mmode, impl_plot=view_box.parentItem())
         self._parser._update.clear()
-
-    """
-    def _debug_log_event(self, event: Event, msg: str):
-        logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")
-    """
 
     def unfocus_plot(self):
         """Quita el focus del plot actual."""
@@ -311,3 +234,20 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             logger.debug(f"Committed {cmd}")
         else:
             logger.debug(f"Rejected {cmd}")
+
+    # hooks
+
+    def post_autoscale(self, impl_plot):
+        """Apply Y autorange immediately in PyQtGraph."""
+        impl_plot.getViewBox().updateAutoRange()
+
+    def stage_view(self, plot_model=None, impl_plot=None):
+        """Begin undoable view change (PG usa (plot_model, impl_plot))."""
+        self.stage_view_lim_cmd(plot_model, impl_plot)
+
+    def commit_view(self, plot_model=None, impl_plot=None):
+        """Finalize undoable view change (PG usa (plot_model, impl_plot))."""
+        while len(self._staging_cmds):
+            self.commit_view_lim_cmd(plot_model, impl_plot)
+        while len(self._commitd_cmds):
+            self.push_view_lim_cmd()
