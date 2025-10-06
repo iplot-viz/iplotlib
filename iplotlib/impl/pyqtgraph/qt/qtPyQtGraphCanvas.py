@@ -164,12 +164,16 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             return
         if len(self._parser._stale_citems):
             self._parser.unstale_cache_items()
+
+        p = view_box.mapSceneToView(event.scenePos())
         self.press_common(
             mode=self._mmode,
             button=event.button(),
             is_double=(event.type() == QEvent.GraphicsSceneMouseDoubleClick),
             impl_plot=impl_plot,
             screen_pos=event.screenPos(),
+            x=p.x(), y=p.y(),
+            in_legend=False,
         )
 
     def _impl_mouse_release_handler(self, view_box):
@@ -183,7 +187,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._parser._update.clear()
 
     def unfocus_plot(self):
-        """Quita el focus del plot actual."""
         if self._parser:
             self._parser.set_focus_plot(None)
 

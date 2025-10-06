@@ -24,7 +24,6 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as Navigation
 
 from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
@@ -41,7 +40,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def __init__(self, parent=None, tight_layout=True, **kwargs):
         super().__init__(parent, **kwargs)
 
-        self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
         self._marker_window = IplotQtMarker()
         self._marker_window.dropMarker.connect(self.draw_marker_label)
@@ -346,91 +344,23 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._refresh_original_ranges = True
 
     def _mpl_mouse_press_handler(self, event: MouseEvent):
-        """Additional callback to allow for focusing on one plot and returning home after double click"""
-        self._debug_log_event(event, "Mouse pressed")
-
-        # If the mouse is over the legend it ignores it
-        if event.inaxes and event.inaxes.get_legend() and event.inaxes.get_legend().contains(event)[0]:
-            return
-
-        if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.RIGHT:
-            if event.inaxes is not None:
-                self._context_menu_for_plot(event.inaxes, event.guiEvent.globalPos(), plot_specific_unfocus=False)
-            return
-
-        if event.dblclick and event.button == MouseButton.LEFT and \
-                self._mmode in [Canvas.MOUSE_MODE_CROSSHAIR, Canvas.MOUSE_MODE_ZOOM,
-                                Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER]:
-            mpl_axes = event.inaxes
-            if not isinstance(mpl_axes, MPLAxes):
-                return
-            ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
-            if not hasattr(ci, 'plot'):
-                return
-            plot = ci.plot()
-            x_value, y_value = event.xdata, event.ydata
-            if mpl_axes.get_lines()[0].get_marker() != 'None':
-                new_marker, marker_signal = self._parser.add_marker_scaled(mpl_axes, plot, x_value, y_value)
-                if new_marker is not None:
-                    if new_marker not in self._marker_window.get_markers():
-                        self._marker_window.add_marker(marker_signal, new_marker)
-                        if not self._marker_window.isVisible():
-                            self._marker_window.show()
-                        elif self._marker_window.isMinimized():
-                            self._marker_window.showNormal()
-                        else:
-                            self._marker_window.raise_()
-                            self._marker_window.activateWindow()
-                    else:
-                        logger.warning(f"The marker {new_marker} is already created")
-                else:
-                    logger.warning("Cannot add marker: too many samples")
-            else:
-                logger.warning("Markers must be enabled in the plot to create signal markers")
-            return
-
-        if event.inaxes is None:
-            return
+        in_legend = bool(event.inaxes and event.inaxes.get_legend() and event.inaxes.get_legend().contains(event)[0])
         qt_button = {
             MouseButton.LEFT: Qt.MouseButton.LeftButton,
             MouseButton.RIGHT: Qt.MouseButton.RightButton,
             MouseButton.MIDDLE: Qt.MouseButton.MiddleButton,
         }.get(event.button, Qt.MouseButton.NoButton)
+
         self.press_common(
             mode=self._mmode,
             button=qt_button,
-            is_double=False,
+            is_double=bool(event.dblclick),
             impl_plot=event.inaxes,
-            screen_pos=event.guiEvent.globalPos(),
+            screen_pos=event.guiEvent.globalPos() if event.guiEvent else None,
+            x=getattr(event, "xdata", None),
+            y=getattr(event, "ydata", None),
+            in_legend=in_legend,
         )
-
-        ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
-        if not hasattr(ci, 'plot'):
-            return
-        plot = ci.plot()
-        if event.button != MouseButton.LEFT:
-            return
-        if not plot:
-            self._dist_calculator.reset()
-            return
-        if self._mmode == Canvas.MOUSE_MODE_DIST:
-            if self._dist_calculator.plot1 is not None:
-                try:
-                    is_date = plot.axes[0].is_date
-                except (AttributeError, IndexError):
-                    is_date = False
-                x = self._parser.transform_value(event.inaxes, 0, event.xdata)
-                self._dist_calculator.set_dst(x, event.ydata, plot, ci.stack_key)
-                self._dist_calculator.set_dx_is_datetime(is_date)
-                box = QMessageBox(self)
-                box.setWindowTitle('Distance')
-                dx, dy, dz = self._dist_calculator.dist()
-                box.setText(f"dx = {dx}\ndy = {dy}\ndz = {dz}" if any([dx, dy, dz]) else "Invalid selection")
-                box.exec_()
-                self._dist_calculator.reset()
-            else:
-                x = self._parser.transform_value(event.inaxes, 0, event.xdata)
-                self._dist_calculator.set_src(x, event.ydata, plot, ci.stack_key)
 
     def _mpl_mouse_release_handler(self, event: MouseEvent):
         self._debug_log_event(event, "Mouse released")

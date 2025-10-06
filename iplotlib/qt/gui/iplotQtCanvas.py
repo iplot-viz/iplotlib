@@ -7,10 +7,11 @@ from contextlib import contextmanager
 from typing import Collection, List
 
 from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot, QPointF
-from PySide6.QtWidgets import QApplication, QWidget, QMenu
+from PySide6.QtWidgets import QApplication, QWidget, QMenu, QMessageBox
 from iplotlib.core.signal import SignalXY
 from iplotlib.core.axis import RangeAxis
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.distance import DistanceCalculator
 from iplotlib.core.plot import PlotXYWithSlider, PlotContour
 from iplotlib.core.command import IplotCommand
 from iplotlib.core.drop_info import DropInfo
@@ -39,6 +40,9 @@ class IplotQtCanvas(QWidget):
 
         # Statistics
         self._stats_table = IplotQtStatistics()
+
+        # Distance calculator
+        self._dist_calculator = DistanceCalculator()
 
     @abstractmethod
     def undo(self):
@@ -338,16 +342,22 @@ class IplotQtCanvas(QWidget):
 
     # Mouse press/release common logic
 
-    def press_common(self, *, mode, button, is_double, impl_plot, screen_pos):
+    def press_common(self, *, mode, button, is_double, impl_plot, screen_pos, x=None, y=None, in_legend=False):
         """Shared press logic: ZOOM/PAN staging + SELECT context menu."""
-        plot = self._get_plot(impl_plot)
+        if in_legend:
+            return
+
+        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if hasattr(ci, 'plot') else self._get_plot(impl_plot)
         if not plot:
             return
 
         if mode == Canvas.MOUSE_MODE_SELECT:
             if button == Qt.MouseButton.LeftButton or is_double:
                 return
-            self._context_menu_for_plot(impl_plot, screen_pos, plot_specific_unfocus=True)
+            plot_specific_unfocus = not hasattr(impl_plot, "get_lines")
+            self._context_menu_for_plot(impl_plot, screen_pos,
+                                        plot_specific_unfocus=plot_specific_unfocus)
             return
 
         if mode == Canvas.MOUSE_MODE_CROSSHAIR:
@@ -363,12 +373,55 @@ class IplotQtCanvas(QWidget):
         if mode == Canvas.MOUSE_MODE_DIST:
             if button == Qt.MouseButton.RightButton or is_double:
                 return
-            pass
 
-        if mode == Canvas.MOUSE_MODE_MARKER:
-            if button == Qt.MouseButton.RightButton or is_double:
+            if x is None or y is None or not hasattr(self, "_dist_calculator"):
                 return
-            pass
+            x_val = self._parser.transform_value(impl_plot, 0, x)
+            if self._dist_calculator.plot1 is not None:
+                # Destination point
+                try:
+                    is_date = plot.axes[0].is_date
+                except (AttributeError, IndexError):
+                    is_date = False
+                self._dist_calculator.set_dst(x_val, y, plot, getattr(ci, "stack_key", None))
+                self._dist_calculator.set_dx_is_datetime(is_date)
+                box = QMessageBox(self)
+                box.setWindowTitle('Distance')
+                dx, dy, dz = self._dist_calculator.dist()
+                box.setText(f"dx = {dx}\ndy = {dy}\ndz = {dz}" if any([dx, dy, dz]) else "Invalid selection")
+                box.exec_()
+                self._dist_calculator.reset()
+            else:
+                # Source point
+                self._dist_calculator.set_src(x_val, y, plot, getattr(ci, "stack_key", None))
+            return
+
+        if mode in [Canvas.MOUSE_MODE_CROSSHAIR, Canvas.MOUSE_MODE_ZOOM,
+                    Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER]:
+            if not (is_double and button == Qt.MouseButton.LeftButton):
+                return
+            if x is None or y is None:
+                return
+
+            if not hasattr(self._parser, "add_marker_scaled") or not hasattr(self, "_marker_window"):
+                return
+
+            if hasattr(impl_plot, "get_lines"):
+                lines = impl_plot.get_lines()
+                if not lines or lines[0].get_marker() == 'None':
+                    return
+            new_marker, marker_signal = self._parser.add_marker_scaled(impl_plot, plot, x, y)
+            if new_marker is not None:
+                if new_marker not in self._marker_window.get_markers():
+                    self._marker_window.add_marker(marker_signal, new_marker)
+                    if not self._marker_window.isVisible():
+                        self._marker_window.show()
+                    elif self._marker_window.isMinimized():
+                        self._marker_window.showNormal()
+                    else:
+                        self._marker_window.raise_()
+                        self._marker_window.activateWindow()
+            return
 
     def release_common(self, *, mode, impl_plot=None):
         """Shared release logic: commit/push/history en ZOOM/PAN."""
