@@ -324,19 +324,31 @@ class IplotQtCanvas(QWidget):
         self._parser.unstale_cache_items()
 
     def autoscale_all_y(self):
-        """All-plots Y autoscale as one undo/redo action, backend-agnostic."""
-        base_impl = self._first_impl_plot()
-        if base_impl is None:
+        """All-plots Y autoscale, backend-agnostic."""
+
+        stacks = getattr(self._parser, "_layout_stacks", None)  # PG path
+        if isinstance(stacks, dict) and stacks:
+            impls = [impl for stack in stacks.values() for impl in stack.values() if impl]
+        else:  # MPL path
+            axes = getattr(getattr(self._parser, "figure", None), "axes", None)
+            impls = [ax for ax in axes] if axes else []
+
+        if not impls:
             return
+
+        # Start one undo/redo transaction using the first plot
+        base_impl = impls[0]
         base_plot = self._get_plot(base_impl)
         if not base_plot:
             return
-
         self.stage_view(base_plot, base_impl)
-        for stack in self._parser._layout_stacks.values():
-            for pi in stack.values():
-                self._parser.autoscale_y_axis(pi)
-                self.post_autoscale(pi)
+
+        # Autoscale every plot
+        for impl_plot in impls:
+            self._parser.autoscale_y_axis(impl_plot)
+            self.post_autoscale(impl_plot)
+
+        # Normalize caches
         self.commit_view(base_plot, base_impl)
         self._parser.unstale_cache_items()
 
@@ -457,9 +469,3 @@ class IplotQtCanvas(QWidget):
         ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
         return ci.plot() if hasattr(ci, "plot") else None
 
-    def _first_impl_plot(self):
-        """Return any available impl_plot (for batch ops like Autoscale All)."""
-        for stack in self._parser._layout_stacks.values():
-            for pi in stack.values():
-                return pi
-        return None
