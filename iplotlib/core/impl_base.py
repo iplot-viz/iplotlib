@@ -21,6 +21,7 @@ from queue import Empty, Queue
 import threading
 from typing import Any, Callable, Collection, Dict, List, Optional, Union
 import weakref
+import inspect
 
 from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
@@ -92,13 +93,20 @@ class ImplementationPlotCacheTable:
         Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)
         """
-        base = 0
-        ci = self.get_cache_item(impl_obj)
-        if hasattr(ci, 'offsets') and ci.offsets[ax_idx] is not None:
-            base = ci.offsets[ax_idx]
-            if isinstance(base, int) or type(base).__name__ == 'int64':
-                value = int(value)
-        return value - base if inverse else value + base
+        offset = self.get_cache_item(impl_obj).offsets[ax_idx]
+
+        if offset is None:
+            return value
+        elif offset == 100_000:
+            if inverse:
+                return value / offset
+            else:
+                return value * offset
+        else:
+            if inverse:
+                return value - offset
+            else:
+                return value + offset
 
 
 class BackendParserBase(ABC):
@@ -306,7 +314,7 @@ class BackendParserBase(ABC):
     def process_ipl_axis_ticks(self, tick_number, impl_plot: Any):
         pass
 
-    def process_ipl_axis(self, axis: Axis, ax_idx: int, plot: Plot, impl_plot: Any):
+    def process_ipl_axis(self, axis: LinearAxis, ax_idx: int, plot: Plot, impl_plot: Any):
         """
         Prepare the implementation axis.
 
@@ -323,26 +331,55 @@ class BackendParserBase(ABC):
         axis_item = self.get_impl_axis(impl_plot, ax_idx)
         self._axis_impl_plot_lut.update({id(axis): impl_plot})
 
-        if isinstance(axis, Axis):
-            self.process_ipl_log_axis(axis_item, plot)
+        # if isinstance(axis, Axis):
+        self.process_ipl_log_axis(axis_item, plot)
 
-            fc = self._pm.get_value(axis, 'font_color')
-            fs = self._pm.get_value(axis, 'font_size')
+        fc = self._pm.get_value(axis, 'font_color')
+        fs = self._pm.get_value(axis, 'font_size')
 
-            axis_item._font_color = fc
-            axis_item._font_size = fs
-            axis_item._label = axis.label
+        axis_item._font_color = fc
+        axis_item._font_size = fs
+        axis_item._label = axis.label
 
-            self.process_ipl_axis_params(fc, fs, axis, axis_item)
+        self.process_ipl_axis_params(fc, fs, axis, axis_item)
 
-        if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
-            if self._pm.get_value(self.canvas, 'autoscale') and ax_idx == 1:
-                self.autoscale_y_axis(impl_plot)
-            else:
-                logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
-                self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
+        if ax_idx == 1:
+            autoscale_val = self._pm.get_value(self.canvas, 'autoscale')
+            self.autoscale_y_axis(impl_plot)
 
-        if isinstance(axis, LinearAxis) and axis.is_date:
+        if axis.original_begin is None and axis.original_end is None:
+            # logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
+            begin, end = +np.inf, -np.inf
+            for stack in plot.signals.values():
+                for signal in stack:
+                    signal.get_data()
+                    if signal.data_store[2].size > 0 and signal.data_store[3].size > 0 and ax_idx == 1:
+                        # Envelope case
+                        data = signal.z_data
+                        data = data[~np.isnan(data)]
+                        begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
+                    else:
+                        data = signal.x_data if ax_idx == 0 else signal.y_data
+                        data = data[~np.isnan(data)]
+                        begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
+            axis.original_begin = begin
+            axis.original_end = end
+
+        if any(frame.function in ["draw_clicked", "import_dict", "update_canvas_preferences"] for frame in
+               inspect.stack()):
+            begin, end = axis.original_begin, axis.original_end
+        else:
+            begin, end = self.get_oaw_axis_limits(impl_plot, ax_idx)
+
+        if ax_idx == 1:
+            h = end - begin
+            n_begin = begin - 0.1 * h
+            n_end = end + 0.1 * h
+            self.set_oaw_axis_limits(impl_plot, ax_idx, [n_begin, n_end])
+        else:
+            self.set_oaw_axis_limits(impl_plot, ax_idx, [begin, end])
+
+        if axis.is_date:
             self.process_ipl_axis_formatter(impl_plot, axis_item, ax_idx)
 
         # Set number of ticks and labels
@@ -441,10 +478,104 @@ class BackendParserBase(ABC):
         if hasattr(xaxis, "_label") and xaxis._label:
             self.set_impl_x_axis_label_text(impl_plot, xaxis._label)
 
+    @staticmethod
     @abstractmethod
+    def _get_visible_data(xd, yd, lo, hi):
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def _update_marker_by_point_count(marker_line: Any, signal_x_data, signal_style: dict):
+        pass
+
     def do_impl_line_plot_xy(self, signal: SignalXY, impl_plot: Any, plot: PlotXY, cache_item, x_data, y_data):
 
-        """"""
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[Any]
+        style = self.get_signal_style(signal)
+        draw_fn = impl_plot.plot
+
+        # Reflect downsampling in legend
+        self.legend_downsampled_signal(signal, impl_plot, plot_lines)
+
+        # Review to implement directly in PlotXY class
+        if signal.color is None:
+            # It means that the color has been reset but must keep the original color
+            signal.color = signal.original_color
+
+        # Visible data is adjusted based on extremities, but only for unprocessed signals.
+        # Processed signals already use the visible range.
+        # Skip this step in case of streaming mode, as x_data and y_data may be empty and lead to errors.
+
+        # if not signal.extremities and not self.canvas.streaming and impl_plot.get_xlim() != (-0.05, 0.05):
+        # x_data, y_data = self._get_visible_data(x_data, y_data, *impl_plot.get_xlim())
+
+        if isinstance(plot_lines, list):
+            if x_data.ndim == 1 and y_data.ndim == 1:
+                line = plot_lines[0]
+                self.set_line_data(line, x_data, y_data, style)
+                self._update_marker_by_point_count(line, x_data, style)
+            elif x_data.ndim == 1 and y_data.ndim == 2:
+                for i, line in enumerate(plot_lines):
+                    line[0].set_xdata(x_data)
+                    line[0].set_ydata(y_data[:, i])
+                    self._update_marker_by_point_count(line[0], x_data, style)
+
+            # Streaming
+            # self.do_impl_streaming(impl_plot, plot, cache_item, x_data)
+
+            self.visible_status(plot_lines, signal)
+
+        else:
+            if x_data.ndim == 1 and y_data.ndim == 1:
+                plot_lines = self.create_plot_lines_1D(draw_fn, x_data, y_data, style)
+                self._update_marker_by_point_count(plot_lines[0], x_data, style)
+            elif x_data.ndim == 1 and y_data.ndim == 2:
+                plot_lines = self.create_plot_lines_2D(draw_fn, x_data, y_data, style)
+
+        signal.lines = plot_lines
+
+        return plot_lines
+
+    @abstractmethod
+    def visible_status(self, plot_lines, signal):
+        pass
+
+    @abstractmethod
+    def do_impl_streaming(self, impl_plot: Any, plot: Plot, cache_item, x_data):
+        # Put this out in a method only for streaming
+        if self.canvas.streaming:
+            ax_window = impl_plot.get_xlim()[1] - impl_plot.get_xlim()[0]
+            all_y_data = []
+            for signal in plot.signals[cache_item.stack_key]:
+                if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
+                    max_x_data = signal.x_data.max()[0]
+                    for x_temp, y_temp in zip(signal.x_data, signal.y_data):
+                        if max_x_data - ax_window <= x_temp <= max_x_data:
+                            all_y_data.append(y_temp)
+            if all_y_data:
+                diff = (max(all_y_data) - min(all_y_data)) / 15
+                impl_plot.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
+            impl_plot.set_xlim(max(x_data) - ax_window, max(x_data))
+
+    @abstractmethod
+    def set_line_data(self, line: Any, x_data, y_data, style: dict):
+        pass
+
+    @abstractmethod
+    def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
+        pass
+
+    @abstractmethod
+    def create_plot_lines_2D(self, draw_fn, x_data, y_data, style):
+        pass
+
+    @abstractmethod
+    def get_signal_style(self, signal: SignalXY):
+        pass
+
+    @abstractmethod
+    def legend_downsampled_signal(self, signal, impl_plot, plot_lines):
+        pass
 
     @abstractmethod
     def do_impl_line_plot_xy_slider(self, signal: SignalXY, impl_plot: Any, plot: PlotXYWithSlider, cache_item,
@@ -456,9 +587,41 @@ class BackendParserBase(ABC):
                                   z_data):
         """"""
 
-    @abstractmethod
     def do_impl_envelope_plot(self, signal: Signal, impl_plot: Any, x_data, y1_data, y2_data):
-        """"""
+
+        # TODO: check if Signal is a SignalXY. If not raise WARNING
+
+        shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Any]]
+
+        # Reflect downsampling in legend
+        self.legend_downsampled_signal(signal, impl_plot, shapes)
+
+        draw_fn = impl_plot.plot
+        style = self.get_signal_style(signal)
+        style2 = dict(style)
+        style2.pop("name", None)
+
+        if shapes is not None:
+            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
+                self.set_line_data(shapes[0][0], x_data, y1_data, style)
+                self.set_line_data(shapes[0][1], x_data, y2_data, style2)
+                self.update_area_envelope_1D(shapes, impl_plot, x_data, y1_data, y2_data, style)
+            # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
+        else:
+            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
+                shapes = self.create_area_envelope_1D(draw_fn, impl_plot, signal, x_data, y1_data, y2_data, style,
+                                                      style2)
+                signal.lines = shapes
+                self._signal_impl_shape_lut.update({id(signal): shapes})
+            # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
+
+    @abstractmethod
+    def update_area_envelope_1D(self, shapes, impl_plot: Any, x_data, y1_data, y2_data, style):
+        pass
+
+    @abstractmethod
+    def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, style, style2):
+        pass
 
     def do_impl_line_plot(self, signal: Signal, impl_plot: Any, data: List[BufferObject]):
         try:
@@ -672,13 +835,14 @@ class BackendParserBase(ABC):
             return all_limits
         for col in self.canvas.plots:
             for plot in col:
-                plot_lims = self.get_plot_limits(plot, which)
+                impl_plot = self._plot_impl_plot_lut.get(id(plot))[0]
+                plot_lims = self.get_plot_limits(plot, impl_plot)
                 if not isinstance(plot_lims, IplPlotViewLimits):
                     continue
                 all_limits.append(plot_lims)
         return all_limits
 
-    def get_plot_limits(self, plot: Plot, which='current') -> Optional[IplPlotViewLimits]:
+    def get_plot_limits(self, plot: Plot, impl_plot: Any) -> Optional[IplPlotViewLimits]:
         """
         Return limits for the given plot. The `which` argument can be `original` or `current`
         """
@@ -693,11 +857,11 @@ class BackendParserBase(ABC):
                 for axis in axes:
                     if not isinstance(axis, RangeAxis):
                         continue
-                    begin, end = axis.get_limits(which)
+                    begin, end = self.get_oaw_axis_limits(impl_plot, 1)
                     plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
             elif isinstance(axes, RangeAxis):
                 axis = axes  # singular name is easier to read for single axis
-                begin, end = axis.get_limits(which)
+                begin, end = self.get_oaw_axis_limits(impl_plot, 0)
                 plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
 
         # Save slider limits for PlotXYWithSlider
@@ -754,10 +918,17 @@ class BackendParserBase(ABC):
         This offset is needed because matplotlib does not allow zooming so deep when the plot ends are too large.
         E.g. if the limits are O(10^15) the n you cannot zoom in where the distance between both is less than 1000.
         """
-        if (isinstance(vals, (List, BufferObject)) and len(vals) > 0 and
-                isinstance(vals[0], (int, np.int64, np.uint64)) and vals[0] > 10 ** 15):
-            return int(vals[0])
-        return None
+        begin, end = vals
+        diff = end - begin
+        if begin < 10 ** 15:
+            offset = 0
+        else:
+            if diff > 1e14:
+                offset = 100_000
+            else:
+                offset = (begin + end) / 2
+
+        return offset
 
     @abstractmethod
     def get_impl_x_axis(self, impl_plot: Any):
@@ -802,7 +973,6 @@ class BackendParserBase(ABC):
             begin, end = self.get_impl_x_axis_limits(impl_plot)
         elif ax_idx == 1:
             begin, end = self.get_impl_y_axis_limits(impl_plot)
-            return begin, end
         return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
 
     @abstractmethod
@@ -823,17 +993,12 @@ class BackendParserBase(ABC):
         The `oaw` in the function name stands for OffsetAWare.
         """
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        if ci.offsets[ax_idx] is None:
-            ci.offsets[ax_idx] = self.create_offset(limits)
+        ci.offsets[ax_idx] = self.create_offset(limits)
 
-        if ci.offsets[ax_idx] is not None:
-            begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
-            end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
-            logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 0")
-        else:
-            begin = limits[0]
-            end = limits[1]
-            logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 1")
+        begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
+        end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
+        logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx}")
+
         if ax_idx == 0:
             if begin == end and begin is not None:
                 begin = end - 1
@@ -866,25 +1031,17 @@ class BackendParserBase(ABC):
         Currently, it transforms data if it is a large integer which can cause overflow in matplotlib
         """
         ret = []
-        if isinstance(data, Collection):
-            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-            for i, d in enumerate(data):
-                logger.debug(f"\t transform data i={i} d = {d} ")
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
 
-                offset = None
-                if ci:
-                    offset = ci.offsets[i]
-                    if offset is None and i == 0:
-                        offset = self.create_offset(d)
-                        ci.offsets[i] = offset
-
-                if ci and offset is not None:
-                    logger.debug(f"\tApplying data offsets {offset} to plot {id(impl_plot)} ax_idx: {i}")
-                    if isinstance(d, Collection) and not isinstance(d, (str, bytes)):
-                        arr = np.asarray(d, dtype=np.int64)
-                        ret.append(BufferObject(arr - offset))
-                    else:
-                        ret.append(np.int64(d) - offset)
+        for ax_idx, d in enumerate(data):
+            logger.debug(f"\t transform data ax_idx={ax_idx} d = {d} ")
+            offset = ci.offsets[ax_idx]
+            if offset == 0 or offset is None:
+                ret.append(d)
+            else:
+                arr = np.asarray(d, dtype=np.int64)
+                if offset == 100_000:
+                    ret.append(BufferObject(arr / offset))
                 else:
-                    ret.append(d)
+                    ret.append(BufferObject(arr - offset))
         return ret

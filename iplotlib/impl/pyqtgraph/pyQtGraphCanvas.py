@@ -1,11 +1,7 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
-import datetime
-import inspect
-import weakref
-from collections import defaultdict
-from typing import Any, Callable, Collection, List, Tuple, Optional
 
+from typing import Any, Callable, Collection, List, Tuple
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
@@ -17,7 +13,6 @@ from pyqtgraph.Qt import QtWidgets
 from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QLabel, QGraphicsSceneMouseEvent
 
 from iplotLogging import setupLogger
-from iplotProcessing.core import BufferObject
 from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
@@ -34,7 +29,8 @@ from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
 
 logger = setupLogger.get_logger(__name__)
-# Mapa de estilos de línea de matplotlib → QtCore.Qt.PenStyle
+
+# Maps PyQtGraph line styles to corresponding Qt.PenStyle values
 LINESTYLE_MAP = {
     'solid': QtCore.Qt.PenStyle.SolidLine,
     'dashed': QtCore.Qt.PenStyle.DashLine,
@@ -42,27 +38,11 @@ LINESTYLE_MAP = {
     'dotted': QtCore.Qt.PenStyle.DotLine,
 }
 
-# Mapa de pasos a stepMode de PlotDataItem
+# Maps PlotDataItem stepMode values
 STEP_MAP_PG = {
     'linear': False,
     'post': 'right'
 }
-
-
-class FechaPyQtGraph(pg.AxisItem):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def tickStrings(self, values, scale, spacing):
-        formatted_dates = []
-        for val in values:
-            try:
-                timestamp = val / 1e9
-                date_str = datetime.datetime.fromtimestamp(timestamp, datetime.UTC).strftime('%Y-%m-%d %H:%M:%S')
-                formatted_dates.append(date_str)
-            except Exception:
-                formatted_dates.append(str(val))
-        return formatted_dates
 
 
 class QtViewBox(pg.ViewBox):
@@ -99,8 +79,6 @@ class PyQtGraphParser(BackendParserBase):
                  focus_plot=None,
                  focus_plot_stack_key=None,
                  impl_flush_method: Callable = None) -> None:
-        """Initialize underlying matplotlib classes.
-        """
         super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
                          impl_flush_method=impl_flush_method)
 
@@ -120,7 +98,7 @@ class PyQtGraphParser(BackendParserBase):
         else:
             self.disable_tight_layout()
 
-        self._update = defaultdict(int)
+        self._update = False
 
     def _ensure_cell_layout(self, row: int, col: int, rowspan: int, colspan: int):
         key = (row, col)
@@ -150,94 +128,34 @@ class PyQtGraphParser(BackendParserBase):
             elif not legend_text.endswith('*') and signal.isDownsampled:
                 legend.items[pos][1].setText(legend_text + '*')
 
-    def do_impl_line_plot_xy(self, signal: SignalXY, plot: PlotItem, i_plot: PlotXY, cache_item, x_data, y_data):
-        def _get_visible_data(xd, yd, lo, hi):
-            x_displayed = xd[((xd > lo) & (xd < hi))]
-            y_displayed = yd[((xd > lo) & (xd < hi))]
-            return x_displayed, y_displayed
+    @staticmethod
+    def _get_visible_data(xd, yd, lo, hi):
+        pass
 
-        def _update_marker_by_point_count(marker_line: Any, signal_x_data, signal_style: dict):
-            if len(signal_x_data) == 1:
-                marker_line.set_marker('x')
-                marker_line.set_markersize(5)
-            else:
-                marker_line.set_marker(signal_style.get('marker') or "")
-                marker_line.set_markersize(signal_style.get('markersize'))
+    @staticmethod
+    def _update_marker_by_point_count(marker_line: PlotDataItem, signal_x_data, signal_style: dict):
+        # TODO: implement
+        pass
 
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[PlotDataItem]
-        style = self.get_signal_style(signal)
-        draw_fn = plot.plot
+    def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
+        return [draw_fn(x=x_data, y=y_data, **style)]
 
-        # Reflect downsampling in legend
-        self.legend_downsampled_signal(signal, plot, plot_lines)
-
-        # Review to implement directly in PlotXY class
-        if signal.color is None:
-            # It means that the color has been reset but must keep the original color
-            signal.color = signal.original_color
-
-        # Visible data is adjusted based on extremities, but only for unprocessed signals.
-        # Processed signals already use the visible range.
-        # Skip this step in case of streaming mode, as x_data and y_data may be empty and lead to errors.
-        # TODO if not signal.extremities and signal.x_expr == "${self}.time" and not self.canvas.streaming:
-        #     x_data, y_data = _get_visible_data(x_data, y_data, *self.get_impl_x_axis_limits(plot))
-
-        if isinstance(plot_lines, list):
-            if x_data.ndim == 1 and y_data.ndim == 1:
-                line = plot_lines[0]
-                self.set_line_data(style, line, x_data, y_data)
-                # _update_marker_by_point_count(line, x_data, style)
-            elif x_data.ndim == 1 and y_data.ndim == 2:
-                for i, line in enumerate(plot_lines):
-                    line[0].setData(x=x_data, y=y_data[:, i])
-                    line[0].setPen(style['pen'])
-                    # _update_marker_by_point_count(line[0], x_data, style)
-
-            # Put this out in a method only for streaming
-            if self.canvas.streaming:
-                # usar ViewBox en PyQtGraph
-                vb = plot.getViewBox()
-                (x_lo, x_hi), (y_lo, y_hi) = vb.viewRange()
-                ax_window = x_hi - x_lo
-
-                all_y_data = []
-                for s in i_plot.signals[cache_item.stack_key]:
-                    if s.lines[0][0].get_visible() and len(s.x_data) > 0:
-                        max_x_data = s.x_data.max()[0]
-                        for x_temp, y_temp in zip(s.x_data, s.y_data):
-                            if max_x_data - ax_window <= x_temp <= max_x_data:
-                                all_y_data.append(y_temp)
-
-                if all_y_data:
-                    diff = (max(all_y_data) - min(all_y_data)) / 15
-                    vb.setYRange(min(all_y_data) - diff, max(all_y_data) + diff, padding=0)
-
-                # desplaza la ventana X al último tramo visible
-                vb.setXRange(float(max(x_data) - ax_window), float(max(x_data)), padding=0)
-
-            # Preserve visible status for lines
-            # TODO: revisar bien
-            """
-            for new, old in zip(plot_lines, signal.lines):
-                for n, o in zip(new, old):
-                    n.setVisible(o.isVisible())
-            """
-        else:
-            if x_data.ndim == 1 and y_data.ndim == 1:
-                plot_lines = [draw_fn(x=x_data, y=y_data, **style)]
-                # _update_marker_by_point_count(plot_lines[0], x_data, style)
-            elif x_data.ndim == 1 and y_data.ndim == 2:
-                lines = plot.plot(x=x_data, y=y_data, **style)
-                plot_lines = [[line] for line in lines]
-                for i, line in enumerate(plot_lines):
-                    line[0].set_label(f"{signal.label}[{i}]")
-                    # _update_marker_by_point_count(line[0], x_data, style)
-
-        signal.lines = plot_lines
+    def create_plot_lines_2D(self, draw_fn, x_data, y_data, style):
+        plot_lines = []
+        for i in range(y_data.shape[1]):
+            curve = draw_fn(x=x_data, y=y_data[:, i], **style)
+            plot_lines.append(curve)
+            self._update_marker_by_point_count(curve, x_data, style)
 
         return plot_lines
 
-    def set_line_data(self, style: dict, line: PlotDataItem, x_data, y_data):
+    def visible_status(self, plot_lines, signal):
+        pass
+
+    def do_impl_streaming(self, impl_plot: Any, plot: Plot, cache_item, x_data):
+        pass
+
+    def set_line_data(self, line: PlotDataItem, x_data, y_data, style: dict):
         """
         Set the data for a PlotDataItem based on the attributes of SignalXY.
         """
@@ -380,7 +298,7 @@ class PyQtGraphParser(BackendParserBase):
             else:
                 # draw_fn = mpl_axes.contour
                 img = pg.ImageItem(z_data)
-                # img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
+                img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
                 plot_item.addItem(img)
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
@@ -407,13 +325,13 @@ class PyQtGraphParser(BackendParserBase):
                     iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
                     # TODO: pendiente add antialiasing para isocurvas
                     # Scaled data
-                    """
+
                     scale_x = np.ptp(x_data) / z_data.shape[1]
                     scale_y = np.ptp(y_data) / z_data.shape[0]
                     iso_curve.setTransform(
                         pg.Qt.QtGui.QTransform().scale(scale_x, scale_y).translate(np.min(x_data)[0] / scale_x,
                                                                                    np.min(y_data)[0] / scale_y))
-                    """
+
                     iso_curve.setParentItem(img)
                     iso_curve.setZValue(10)
 
@@ -431,47 +349,26 @@ class PyQtGraphParser(BackendParserBase):
 
         return curves
 
-    def do_impl_envelope_plot(self, signal: Signal, plot: PlotItem, x_data, y1_data, y2_data):
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[PlotDataItem]
+    def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
+        # Update FillBetweenItem
+        area = shapes[0][2]
+        if isinstance(area, FillBetweenItem):
+            area.setCurves(shapes[0][0], shapes[0][1])
 
-        # Reflect downsampling in legend
-        self.legend_downsampled_signal(signal, plot, plot_lines)
+    def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, style, style2):
+        # Creation of FillBetweenItem
+        curve_1 = [draw_fn(x=x_data, y=y1_data, **style)]  # type: List[PlotDataItem]
+        curve_2 = [draw_fn(x=x_data, y=y2_data, **style2)]  # type: List[PlotDataItem]
 
-        style = self.get_signal_style(signal)
-        style2 = dict(style)
-        style2.pop("name", None)
-        draw_fn = plot.plot
+        # Brush for FillBetweenItem
+        pen = curve_1[0].opts['pen']
+        qcolor = pen.color()
+        brush = (qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255))
 
-        # Review to implement directly in PlotXY class
-        if signal.color is None:
-            # It means that the color has been reset but must keep the original color
-            signal.color = signal.original_color
+        area = FillBetweenItem(curve1=curve_1[0], curve2=curve_2[0], brush=brush)
+        impl_plot.addItem(area)
 
-        if plot_lines is not None:
-            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
-                self.set_line_data(style, plot_lines[0], x_data, y1_data)
-                self.set_line_data(style2, plot_lines[1], x_data, y2_data)
-
-                # Update FillBetweenItem
-                area = plot_lines[2]
-                if isinstance(area, FillBetweenItem):
-                    area.setCurves(plot_lines[0], plot_lines[1])
-
-        else:
-            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
-                # Creation of FillBetweenItem
-                curve_1 = draw_fn(x=x_data, y=y1_data, **style)
-                pen = curve_1.opts['pen']
-                qcolor = pen.color()
-                brush = (qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255))
-                curve_2 = draw_fn(x=x_data, y=y2_data, **style2)
-                area = FillBetweenItem(curve1=curve_1, curve2=curve_2, brush=brush)
-                plot.addItem(area)
-
-                plot_lines = [curve_1, curve_2, area]
-
-        signal.lines = plot_lines
-        self._signal_impl_shape_lut.update({id(signal): plot_lines})
+        plot_lines = [curve_1 + curve_2 + [area]]
 
         return plot_lines
 
@@ -751,7 +648,9 @@ class PyQtGraphParser(BackendParserBase):
                     plot_with_slider.slider_last_val = val
 
     def _axis_update_callback(self, view_box: ViewBox):
-
+        if self._update:
+            return
+        self._update = True
         current_plot = view_box.parentItem()
         shared_plots = self._get_all_shared_axes(current_plot)
 
@@ -760,28 +659,18 @@ class PyQtGraphParser(BackendParserBase):
             if not self._pm.get_value(self.canvas, 'shared_x_axis') and impl_plot != current_plot:
                 continue
 
-            if self._update[impl_plot] == 1 or self._update[impl_plot] == 2:
-                continue
-
-            self._update[impl_plot] = 1
-
-            # impl_plot.vb.sigXRangeChanged.disconnect()
-            # self._update = False
-
             plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
             self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
 
-            if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date and isinstance(self.get_impl_axis(impl_plot, 0), NanosecondDateFormatter):
-                self.process_ipl_axis_formatter(impl_plot, 0)
+            if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
+                self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
 
             for stack in plot.signals.values():
                 for signal in stack:
                     signal.set_limits((new_start, new_end))
                     self.process_ipl_signal(signal)
 
-            # impl_plot.vb.sigXRangeChanged.connect(self._axis_update_callback)
-            # self._update = True
-            self._update[impl_plot] = 2
+        self._update = False
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation == 'left':
@@ -805,11 +694,9 @@ class PyQtGraphParser(BackendParserBase):
         # axis_item.set_tick_params(**tick_props)
         axis_item.setStyle(**label_props)
 
-    def process_ipl_axis_formatter(self, impl_plot: PlotItem, ax_idx: int):
+    def process_ipl_axis_formatter(self, impl_plot: PlotItem, impl_axis: NanosecondDateFormatter, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        impl_plot.getAxis("bottom").set_offset(ci.offsets[ax_idx])
-        # axis_date = NanosecondDateFormatter(offset=ci.offsets[ax_idx], orientation='bottom')
-        # impl_plot.setAxisItems({"bottom": axis_date})
+        impl_axis.set_offset(ci.offsets[ax_idx])
 
     def process_ipl_axis_ticks(self, tick_number, axis_item: AxisItem):
         # axis_item.setStyle()
@@ -1005,7 +892,8 @@ class PyQtGraphParser(BackendParserBase):
                     else:
                         plot_item.setVisible(r == row and c == col and s_id == stack_id)
                         if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
-                            plot_item.getAxis("bottom").common_label.setVisible(r == row and c == col and s_id == stack_id)
+                            plot_item.getAxis("bottom").common_label.setVisible(
+                                r == row and c == col and s_id == stack_id)
                         self.set_bottom_axis_stacked(row, col, [stack_id])
 
         for key, value in self._slider_placeholders.items():
@@ -1126,195 +1014,7 @@ class PyQtGraphParser(BackendParserBase):
             vb = plot.getViewBox()
             vb.setYRange(limits[0], limits[1], padding=0)
 
-    def transform_data(self, impl_plot: PlotItem, data) -> List[Any]:
-        """This function post processes data if it cannot be plotted directly.
-                Currently, it transforms data if it is a large integer which can cause overflow"""
-        ret = []
-        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-
-        for ax_idx, d in enumerate(data):
-            logger.debug(f"\t transform data ax_idx={ax_idx} d = {d} ")
-            offset = ci.offsets[ax_idx]
-            if offset == 0 or offset is None:
-                ret.append(d)
-            elif offset == 100_000:
-                ret.append(BufferObject([np.int64(e) / offset for e in d]))
-            else:
-                ret.append(BufferObject([np.int64(e) - offset for e in d]))
-        return ret
-
-    def transform_value(self, impl_plot: PlotItem, ax_idx: int, value: Any, inverse=False):
+    def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
-
-        offset = self._impl_plot_cache_table.get_cache_item(impl_plot).offsets[ax_idx]
-
-        if offset is None:
-            return value
-        elif offset == 100_000:
-            if inverse:
-                return value / offset
-            else:
-                return value * offset
-        else:
-            if inverse:
-                return value - offset
-            else:
-                return value + offset
-
-    def create_offset_pyqt(self, limits):
-
-        begin, end = limits
-        diff = end - begin
-        if begin < 10 ** 15:
-            offset = 0
-        else:
-            if diff > 1e14:
-                offset = 100_000
-            else:
-                offset = (begin + end) / 2
-
-        return offset
-
-    def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
-        """
-        Offset-aware version of implementation's `set_impl_x_axis_limits`, `set_impl_y_axis_limits`
-        The `oaw` in the function name stands for OffsetAWare.
-        """
-        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-
-        ci.offsets[ax_idx] = self.create_offset_pyqt(limits)
-
-        begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
-        end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
-        logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 0")
-
-        if ax_idx == 0:
-            self.set_impl_x_axis_limits(impl_plot, (begin, end))
-        elif ax_idx == 1:
-            self.set_impl_y_axis_limits(impl_plot, (begin, end))
-
-    def get_oaw_axis_limits(self, impl_plot: Any, ax_idx: int):
-        """
-        Offset-aware version of implementation's `get_impl_x_axis_limits`, `get_impl_y_axis_limits`
-        The `oaw` in the function name stands for OffsetAWare.
-        """
-        begin, end = (None, None)
-        if ax_idx == 0:
-            begin, end = self.get_impl_x_axis_limits(impl_plot)
-        elif ax_idx == 1:
-            begin, end = self.get_impl_y_axis_limits(impl_plot)
-            return begin, end
-        return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
-
-    def process_ipl_axis(self, axis: Axis, ax_idx: int, i_plot: Plot, impl_plot: Any):
-        """
-        Prepare the implementation axis.
-
-        :param axis
-        :param ax_idx
-        :param i_plot: An Axis instance
-        :param impl_plot
-        :type axis: Axis
-        :type ax_idx: int
-        :type i_plot: Plot
-        :type impl_plot: Any
-        """
-
-        axis_item = self.get_impl_axis(impl_plot, ax_idx)
-        self._axis_impl_plot_lut.update({id(axis): impl_plot})
-
-        if isinstance(axis, Axis):
-            self.process_ipl_log_axis(axis_item, i_plot)
-
-            fc = self._pm.get_value(axis, 'font_color')
-            fs = self._pm.get_value(axis, 'font_size')
-
-            axis_item._font_color = fc
-            axis_item._font_size = fs
-            axis_item._label = axis.label
-
-            self.process_ipl_axis_params(fc, fs, axis, axis_item)
-
-        if ax_idx == 1:
-            self.autoscale_y_axis(impl_plot)
-
-        if axis.original_begin is None or axis.original_end is None:
-            begin, end = +np.inf, -np.inf
-            for stack in i_plot.signals.values():
-                for signal in stack:
-                    signal.get_data()
-                    if signal.data_store[2].size > 0 and signal.data_store[3].size > 0 and ax_idx == 1:
-                        # Envelope case
-                        data = signal.z_data
-                        data = data[~np.isnan(data)]
-                        begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
-                    else:
-                        data = signal.x_data if ax_idx == 0 else signal.y_data
-                        data = data[~np.isnan(data)]
-                        begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
-            axis.original_begin = begin
-            axis.original_end = end
-        if any(frame.function in ["draw_clicked", "import_dict", "update_canvas_preferences"] for frame in
-               inspect.stack()):
-            begin, end = axis.original_begin, axis.original_end
-        else:
-            begin, end = self.get_oaw_axis_limits(impl_plot, ax_idx)
-
-        self.set_oaw_axis_limits(impl_plot, ax_idx, [begin, end])
-
-        if axis.is_date and isinstance(axis_item, NanosecondDateFormatter):
-            self.process_ipl_axis_formatter(impl_plot, ax_idx)
-
-        # Set number of ticks and labels
-        tick_number = self._pm.get_value(axis, 'tick_number')
-        self.process_ipl_axis_ticks(tick_number, axis_item)
-
-    def get_all_plot_limits(self, which='current') -> List[IplPlotViewLimits]:
-        """
-        Return limits of all plots. The `which` argument can be `original` or `current`
-        Use this function to construct an :data:`~iplotlib.core.commands.axes_range.IplotAxesRangeCmd` instance
-        that you could push onto the history manager.
-        """
-        all_limits = []
-        if not isinstance(self.canvas, Canvas):
-            return all_limits
-        for col in self.canvas.plots:
-            for plot in col:
-                if plot:
-                    impl_plot = self._plot_impl_plot_lut.get(id(plot))[0]
-                    plot_lims = self.get_plot_limits(plot, impl_plot)
-                    if not isinstance(plot_lims, IplPlotViewLimits):
-                        continue
-                    all_limits.append(plot_lims)
-        return all_limits
-
-    def get_plot_limits(self, plot: Plot, impl_plot: PlotItem) -> Optional[IplPlotViewLimits]:
-        """
-        Return limits for the given plot. The `which` argument can be `original` or `current`
-        """
-        if not isinstance(self.canvas, Canvas) or not isinstance(plot, Plot):
-            return None
-        plot_lims = IplPlotViewLimits(plot_ref=weakref.ref(plot))
-        for plot_signals in plot.signals.values():
-            for sig in plot_signals:
-                plot_lims.signals_ranges.append(IplSignalLimits(sig.ts_start, sig.ts_end, weakref.ref(sig)))
-        for axes in plot.axes:
-            if isinstance(axes, Collection):
-                for axis in axes:
-                    if not isinstance(axis, RangeAxis):
-                        continue
-                    # begin, end = axis.get_limits(which)
-                    begin, end = self.get_oaw_axis_limits(impl_plot, 1)
-                    plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
-            elif isinstance(axes, RangeAxis):
-                axis = axes
-                begin, end = self.get_oaw_axis_limits(impl_plot, 0)
-                # begin, end = axis.get_limits(which)
-                plot_lims.axes_ranges.append(IplAxisLimits(begin, end, weakref.ref(axis)))
-
-        # Save slider limits for PlotXYWithSlider
-        if isinstance(plot, PlotXYWithSlider):
-            plot_lims.sliders_ranges.append(IplSliderLimits(plot.slider_last_min, plot.slider_last_max))
-
-        return plot_lims
+        return self._impl_plot_cache_table.transform_value(impl_plot, ax_idx, value, inverse=inverse)
