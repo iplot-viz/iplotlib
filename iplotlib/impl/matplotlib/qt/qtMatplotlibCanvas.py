@@ -72,6 +72,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self.set_canvas(kwargs.get('canvas'))
         self.setAcceptDrops(True)
 
+        self._mouse_impl = None
+
     # Implement basic superclass functionality
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
@@ -473,6 +475,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         else:
             if event.inaxes is None:
                 return
+            self._mouse_impl = event.inaxes
             ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
             if not hasattr(ci, 'plot'):
                 return
@@ -482,7 +485,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # Disable Zoom and Pan in PlotContour
                 if isinstance(plot, PlotContour):
                     return
-                self.stage_view_lim_cmd()
+                self.stage_view_lim_cmd(plot, event.inaxes)
                 return
             if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.RIGHT:
                 # Create menu with autoscale options
@@ -528,9 +531,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             pass
         else:
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                ci = self._parser._impl_plot_cache_table.get_cache_item(self._mouse_impl)
                 # commit commands from staging.
                 while len(self._staging_cmds):
-                    self.commit_view_lim_cmd()
+                    self.commit_view_lim_cmd(ci.plot(), self._mouse_impl)
                 # push uncommitted changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()

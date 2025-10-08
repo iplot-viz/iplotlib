@@ -197,8 +197,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def _impl_mouse_release_handler(self, view_box):
         # self._debug_log_event(event, "Mouse released")
-        if not all(v == 2 for v in self._parser._update.values()):
-            return
         if view_box is None:
             pass
         else:
@@ -214,8 +212,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     self.push_view_lim_cmd()
                 # Update statistics
                 self.stats(self.get_canvas())
-
-        self._parser._update.clear()
 
     """
     def _debug_log_event(self, event: Event, msg: str):
