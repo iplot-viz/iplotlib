@@ -83,7 +83,7 @@ class MatplotlibParser(BackendParserBase):
         """
         # Filter out '_child' lines from mpl_axes, which are added in envelope plots
         # These lines should not be considered when matching lines to legend entries
-        valid_lines = [line for line in mpl_axes.get0_lines() if not line.get_label().startswith("_child")]
+        valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
         pos = valid_lines.index(plot_lines)
 
         legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
