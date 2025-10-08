@@ -494,9 +494,6 @@ class BackendParserBase(ABC):
         style = self.get_signal_style(signal)
         draw_fn = impl_plot.plot
 
-        # Reflect downsampling in legend
-        self.legend_downsampled_signal(signal, impl_plot, plot_lines)
-
         # Review to implement directly in PlotXY class
         if signal.color is None:
             # It means that the color has been reset but must keep the original color
@@ -509,7 +506,10 @@ class BackendParserBase(ABC):
         # if not signal.extremities and not self.canvas.streaming and impl_plot.get_xlim() != (-0.05, 0.05):
         # x_data, y_data = self._get_visible_data(x_data, y_data, *impl_plot.get_xlim())
 
-        if isinstance(plot_lines, list):
+        if plot_lines is not None:
+            # Reflect downsampling in legend
+            self.legend_downsampled_signal(signal, impl_plot, plot_lines[0])
+
             if x_data.ndim == 1 and y_data.ndim == 1:
                 line = plot_lines[0]
                 self.set_line_data(line, x_data, y_data, style)
@@ -574,7 +574,7 @@ class BackendParserBase(ABC):
         pass
 
     @abstractmethod
-    def legend_downsampled_signal(self, signal, impl_plot, plot_lines):
+    def legend_downsampled_signal(self, signal, impl_plot: Any, plot_lines: Any):
         pass
 
     @abstractmethod
@@ -588,13 +588,8 @@ class BackendParserBase(ABC):
         """"""
 
     def do_impl_envelope_plot(self, signal: Signal, impl_plot: Any, x_data, y1_data, y2_data):
-
         # TODO: check if Signal is a SignalXY. If not raise WARNING
-
         shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Any]]
-
-        # Reflect downsampling in legend
-        self.legend_downsampled_signal(signal, impl_plot, shapes)
 
         draw_fn = impl_plot.plot
         style = self.get_signal_style(signal)
@@ -602,6 +597,9 @@ class BackendParserBase(ABC):
         style2.pop("name", None)
 
         if shapes is not None:
+            # Reflect downsampling in legend
+            self.legend_downsampled_signal(signal, impl_plot, shapes[0][0])
+
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
                 self.set_line_data(shapes[0][0], x_data, y1_data, style)
                 self.set_line_data(shapes[0][1], x_data, y2_data, style2)

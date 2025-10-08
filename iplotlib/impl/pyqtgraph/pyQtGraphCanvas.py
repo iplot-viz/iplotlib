@@ -113,20 +113,19 @@ class PyQtGraphParser(BackendParserBase):
     def export_image(self, filename: str, **kwargs):
         super().export_image(filename, **kwargs)
 
-    def legend_downsampled_signal(self, signal, impl_plot, plot_lines):
+    def legend_downsampled_signal(self, signal, impl_plot: PlotItem, plot_lines: PlotDataItem):
         """
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
         legend = impl_plot.legend
-        if len(legend.items) and plot_lines is not None:
-            lines = [lines[0].item.name() for lines in legend.items]
-            pos = lines.index(plot_lines[0].name())
+        lines = [lines[0].item.name() for lines in legend.items]
+        pos = lines.index(plot_lines.name())
 
-            legend_text = legend.items[pos][1].text
-            if legend_text.endswith('*') and not signal.isDownsampled:
-                legend.items[pos][1].setText(legend_text[:-1])
-            elif not legend_text.endswith('*') and signal.isDownsampled:
-                legend.items[pos][1].setText(legend_text + '*')
+        legend_text = legend.items[pos][1].text
+        if legend_text.endswith('*') and not signal.isDownsampled:
+            legend.items[pos][1].setText(legend_text[:-1])
+        elif not legend_text.endswith('*') and signal.isDownsampled:
+            legend.items[pos][1].setText(legend_text + '*')
 
     @staticmethod
     def _get_visible_data(xd, yd, lo, hi):

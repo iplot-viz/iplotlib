@@ -142,36 +142,29 @@ class IplotQtStatistics(QWidget):
             # Add Statistics to the table
             has_envelope = signal.data_store[2].size > 0 and signal.data_store[3].size > 0
 
-            # Differentiate methods
-            if isinstance(impl_plot, PlotItem):
-                line = signal.lines[0][0]  # Differentiate in case of envelope
-                x_data = line.getData()[0]
-                lo, hi = impl_plot.getViewBox().viewRange()[0]
-            else:
-                line = signal.lines[0][0]
-                x_data = line.get_xdata()
-                lo, hi = impl_plot.get_xlim()
-
-            # line = signal.lines[0][0]
-            # x_data = line.get_xdata()
-            # lo, hi = impl_plot.get_xlim()
-
             if has_envelope > 0:
+                line = signal.lines[0][0]
+
+                # Differentiate methods
+                if isinstance(impl_plot, PlotItem):
+                    x_data = line.getData()[0]
+                    lo, hi = impl_plot.getViewBox().viewRange()[0]
+                    y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
+                else:
+                    x_data = line.get_xdata()
+                    lo, hi = impl_plot.get_xlim()
+                    y_lo, y_hi = impl_plot.get_ylim()
+
                 y_min = np.array(signal.data_store[1])
                 y_max = np.array(signal.data_store[2])
                 y_mean = np.array(signal.data_store[3])
 
                 # Filter values
-                if isinstance(impl_plot, PlotItem):
-                    y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
-                else:
-                    y_lo, y_hi = impl_plot.get_ylim()
-
-                # y_lo, y_hi = impl_plot.get_ylim()
                 mask = ((x_data > lo) & (x_data < hi) &
                         (y_min > y_lo) & (y_min < y_hi) &
                         (y_mean > y_lo) & (y_mean < y_hi) &
                         (y_max > y_lo) & (y_max < y_hi))
+
                 y_min_displayed = y_min[mask]
                 y_max_displayed = y_max[mask]
                 y_mean_displayed = y_mean[mask]
@@ -191,17 +184,21 @@ class IplotQtStatistics(QWidget):
 
             else:
                 # Base case
+                line = signal.lines[0]
+
                 # Differentiate methods
                 if isinstance(impl_plot, PlotItem):
+                    x_data = line.getData()[0]
                     y_data = line.getData()[1]
+                    lo, hi = impl_plot.getViewBox().viewRange()[0]
                     y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
                 else:
+                    x_data = line.get_xdata()
                     y_data = line.get_ydata()
+                    lo, hi = impl_plot.get_xlim()
                     y_lo, y_hi = impl_plot.get_ylim()
 
-                # y_data = line.get_ydata()
-                # y_lo, y_hi = impl_plot.get_ylim()
-
+                # Filter values
                 mask = ((x_data > lo) & (x_data < hi) &
                         (y_data > y_lo) & (y_data < y_hi))
                 y_displayed = y_data[mask]
@@ -219,6 +216,7 @@ class IplotQtStatistics(QWidget):
                 else:
                     # Indicate that there is no data
                     self.table.setItem(idx, 6, self._create_item(samples))
+
         # Apply formatting with the current decimal setting
         self.update_table_format()
 

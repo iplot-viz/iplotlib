@@ -77,21 +77,20 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
-    def legend_downsampled_signal(self, signal, mpl_axes, plot_lines):
+    def legend_downsampled_signal(self, signal, mpl_axes: MPLAxes, plot_lines: Line2D):
         """
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
-        if mpl_axes.get_legend():
-            # Filter out '_child' lines from mpl_axes, which are automatically added in envelope plots
-            # These auxiliary lines should not be considered when matching lines to legend entries
-            valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
-            pos = valid_lines.index(plot_lines[0][0])
+        # Filter out '_child' lines from mpl_axes, which are added in envelope plots
+        # These lines should not be considered when matching lines to legend entries
+        valid_lines = [line for line in mpl_axes.get0_lines() if not line.get_label().startswith("_child")]
+        pos = valid_lines.index(plot_lines)
 
-            legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
-            if legend_text.endswith('*') and not signal.isDownsampled:
-                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
-            elif not legend_text.endswith('*') and signal.isDownsampled:
-                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
+        legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
+        if legend_text.endswith('*') and not signal.isDownsampled:
+            mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
+        elif not legend_text.endswith('*') and signal.isDownsampled:
+            mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
 
     @staticmethod
     def _get_visible_data(xd, yd, lo, hi):
@@ -242,9 +241,9 @@ class MatplotlibParser(BackendParserBase):
     def update_area_envelope_1D(self, shapes, impl_plot: MPLAxes, x_data, y1_data, y2_data, style):
         shapes[0][2].remove()
         shapes[0][2] = impl_plot.fill_between(x_data, y1_data, y2_data,
-                                           alpha=0.3,
-                                           color=shapes[0][0].get_color(),
-                                           step=STEP_MAP[style['drawstyle']])
+                                              alpha=0.3,
+                                              color=shapes[0][0].get_color(),
+                                              step=STEP_MAP[style['drawstyle']])
         shapes[0][2].set_visible(shapes[0][0].get_visible())
         self.figure.canvas.draw_idle()
 
