@@ -190,35 +190,34 @@ class IplotQtCanvas(QWidget):
         finally:
             self._parser._hm.undo()
 
-    def stage_view_lim_cmd(self):
+    def stage_view_lim_cmd(self, plot, impl_plot):
         """stage a view command"""
 
         name = self._mmode[3:]
-        old_limits = self._parser.get_all_plot_limits()
+        old_limits = [self._parser.get_plot_limits(plot, impl_plot)]
         cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
         self._staging_cmds.append(cmd)
         logger.debug(f"Staged {cmd}")
 
-    def commit_view_lim_cmd(self):
+    def commit_view_lim_cmd(self, plot, impl_plot):
         """commit a view command"""
         cmd = self._staging_cmds.pop()
-        cmd.new_lim = self._parser.get_all_plot_limits()  # New limits based on the current view
+        cmd.new_lim = [self._parser.get_plot_limits(plot, impl_plot)]
         assert len(cmd.new_lim) == len(cmd.old_lim)
 
         # Check if any limit actually changed
         if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             QApplication.processEvents()
-            self._parser.refresh_data()
             QApplication.restoreOverrideCursor()
 
             # Update new limits after data refresh.
             # Focus case: If focus plot is active and X-axis is shared, retrieve synchronized limits across
             # all shared plots.
-            if self._parser.canvas.focus_plot and self._parser.canvas.shared_x_axis:
-                cmd.new_lim = self._parser.get_all_plot_limits_focus()
-            else:
-                cmd.new_lim = self._parser.get_all_plot_limits()
+            # if self._parser.canvas.focus_plot and self._parser.canvas.shared_x_axis:
+            #     cmd.new_lim = self._parser.get_all_plot_limits_focus()
+            # else:
+            #     cmd.new_lim = self._parser.get_all_plot_limits()
 
             self._commitd_cmds.append(cmd)
             logger.debug(f"Committed {cmd}")
