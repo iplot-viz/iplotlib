@@ -144,7 +144,7 @@ class IplotQtStatistics(QWidget):
 
             # Differentiate methods
             if isinstance(impl_plot, PlotItem):
-                line = signal.lines[0]
+                line = signal.lines[0][0]  # Differentiate in case of envelope
                 x_data = line.getData()[0]
                 lo, hi = impl_plot.getViewBox().viewRange()[0]
             else:
