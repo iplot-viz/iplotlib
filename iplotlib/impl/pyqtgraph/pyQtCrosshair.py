@@ -114,20 +114,18 @@ class pyQtCrosshair:
             gb.setVisible(False)
             self.val_badges[p] = gb
 
-        # Event connection (mouse move over scene)
+        # Event connection
         scene = self.plots[0].scene()
         self._proxy = pg.SignalProxy(scene.sigMouseMoved, rateLimit=60, slot=self.on_move)
         self._scene = scene
 
-        # Blit-like placeholders (kept for API compatibility)
+        # Blit-like placeholders
         self.use_blit = False
         self.background = None
         self.need_clear = False
 
-    # --- Matplotlib-compatible API ---
-
     def clear(self, event=None, *, destroy: bool = False):
-        # 1) ocultar
+        # hide
         buckets = (self.v_lines, self.h_lines, self.x_badges, self.y_badges, self.corner, self.val_badges)
         for d in buckets:
             for o in d.values():
@@ -140,7 +138,7 @@ class pyQtCrosshair:
         if not destroy:
             return
 
-        # 2) desconectar eventos
+        # disconnect events
         if self._proxy and self._scene:
             try:
                 self._scene.sigMouseMoved.disconnect(self._proxy)
@@ -149,7 +147,7 @@ class pyQtCrosshair:
         self._proxy = None
         self._scene = None
 
-        # 3) retirar de la vista
+        # no-show
         for p in list(self.plots):
             vb = p.getViewBox() if hasattr(p, "getViewBox") else None
             for o in (self.v_lines.get(p), self.h_lines.get(p)):
@@ -165,7 +163,7 @@ class pyQtCrosshair:
                     except Exception:
                         pass
 
-        # 4) limpiar refs
+        # clean refs
         for d in buckets: d.clear()
         self.plots.clear()
 
@@ -297,7 +295,6 @@ class pyQtCrosshair:
         self._update()
 
     def _update(self):
-        """No-op for PyQtGraph (kept for API symmetry)."""
         # Intentionally empty; PyQtGraph handles repaint internally.
         return
 
@@ -310,7 +307,7 @@ class pyQtCrosshair:
             pass
         self._proxy = None
 
-    # --- Helpers ---
+    # Helpers
 
     def _snap_value_for_plot(self, plot: PlotItem, x: float) -> Tuple[
         Optional[float], Optional[float], Optional[float]]:
