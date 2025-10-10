@@ -487,7 +487,6 @@ class PyQtGraphParser(BackendParserBase):
             elif stack_id not in self._layout_stacks[l_key]:
                 pi = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
                 cell_gl.addItem(pi, row=stack_id, col=0)
-                pi.vb.setXLink(self._layout_stacks[l_key][0])
                 pi.getAxis('bottom').setStyle(showValues=False)
                 self._layout_stacks[l_key][stack_id] = pi
 
@@ -542,9 +541,9 @@ class PyQtGraphParser(BackendParserBase):
                     plot.legend.items[ix_legend][1].setText(legend_label)
                 ix_legend += 1
 
-        # Observe the axis limit change events
-        vb = plot.getViewBox()
-        vb.sigXRangeChanged.connect(self._axis_update_callback)
+            # Observe the axis limit change events
+            vb = plot.getViewBox()
+            vb.sigXRangeChanged.connect(self._axis_update_callback)
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
         if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
@@ -650,24 +649,29 @@ class PyQtGraphParser(BackendParserBase):
         if self._update:
             return
         self._update = True
-        current_plot = view_box.parentItem()
-        shared_plots = self._get_all_shared_axes(current_plot)
+
+        current_plot = view_box.parentItem()  # type: PlotItem
+
+        if self._pm.get_value(self.canvas, 'shared_x_axis'):
+            shared_plots = self._get_all_shared_axes(current_plot)
+        else:
+            # Check for stacked plots
+            plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
+            shared_plots = self._plot_impl_plot_lut.get(id(plot))
 
         new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
-        for impl_plot in shared_plots:
-            if not self._pm.get_value(self.canvas, 'shared_x_axis') and impl_plot != current_plot:
-                continue
 
-            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+        for impl_plot in shared_plots:
             self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
 
             if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
                 self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
 
-            for stack in plot.signals.values():
-                for signal in stack:
-                    signal.set_limits((new_start, new_end))
-                    self.process_ipl_signal(signal)
+            signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+            for signal_ref in signals:
+                signal = signal_ref()
+                signal.set_limits((new_start, new_end))
+                self.process_ipl_signal(signal)
 
         self._update = False
 

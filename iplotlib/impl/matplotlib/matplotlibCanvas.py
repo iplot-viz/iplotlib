@@ -5,6 +5,7 @@ from typing import Any, Callable, Collection, List
 import pandas
 import gc
 import numpy as np
+import matplotlib as mpl
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis
 from matplotlib.axis import Axis as MPLAxis
@@ -39,6 +40,9 @@ logger = setupLogger.get_logger(__name__)
 
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
             "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
+
+mpl.rcParams['path.simplify'] = True
+mpl.rcParams['path.simplify_threshold'] = 1.0
 
 
 class MatplotlibParser(BackendParserBase):
@@ -458,7 +462,7 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     row_id = stack_id
 
-                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0], sharex=mpl_axes_prev)
+                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0])
                 mpl_axes_prev = mpl_axes
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
                 # Keep references to iplotlib instances for ease of access in callbacks.
@@ -604,10 +608,9 @@ class MatplotlibParser(BackendParserBase):
                                 leg.texts[ix_legend].set_text(legend_label)
                             ix_legend += 1
 
-        # Observe the axis limit change events
-        if not self.canvas.streaming:
-            for axes in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
-                axes.callbacks.connect('xlim_changed', self._axis_update_callback)
+            # Observe the axis limit change events
+            if not self.canvas.streaming:
+                mpl_axes.callbacks.connect('xlim_changed', self._axis_update_callback)
 
     def _update_slider(self, val, plot, slider_values, current_label, formatter):
         for c_row in plot.signals.values():
@@ -632,37 +635,30 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     plot_with_slider.slider_last_val = val
 
-    def _axis_update_callback(self, current_plot):
+    def _axis_update_callback(self, current_plot: MPLAxes):
         if self._update:
             return
         self._update = True
 
-        # affected_axes = a.get_shared_x_axes().get_siblings(a)
-        # for impl_plot in affected_axes:
-
         if self._pm.get_value(self.canvas, 'shared_x_axis'):
             shared_plots = self._get_all_shared_axes(current_plot)
         else:
-            shared_plots = [current_plot]
-
-        # Check if stacked plots
-        plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
-        impl_stacked = self._plot_impl_plot_lut.get(id(plot))
+            plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
+            shared_plots = self._plot_impl_plot_lut.get(id(plot))
 
         new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
-        for impl_plot in shared_plots:
-            # for impl_plot in impl_stacked:
 
-            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+        for impl_plot in shared_plots:
             self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
 
             if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
                 self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
 
-            for stack in plot.signals.values():
-                for signal in stack:
-                    signal.set_limits((new_start, new_end))
-                    self.process_ipl_signal(signal)
+            signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+            for signal_ref in signals:
+                signal = signal_ref()
+                signal.set_limits((new_start, new_end))
+                self.process_ipl_signal(signal)
 
         self._update = False
 
