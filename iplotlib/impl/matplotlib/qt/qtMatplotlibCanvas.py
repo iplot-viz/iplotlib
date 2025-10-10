@@ -271,14 +271,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             plot = ci.plot()
             if isinstance(plot, PlotXY):
                 # Stage a command to obtain original view limits
-                self.stage_view_lim_cmd()
+                self.stage_view_lim_cmd(impl_plot)
 
                 # Autoscale on Y axis for the given plot
                 self._parser.autoscale_y_axis(impl_plot)
 
                 # Commit staged command
                 while len(self._staging_cmds):
-                    self.commit_view_lim_cmd()
+                    self.commit_view_lim_cmd(impl_plot)
 
                 # Push committed command
                 while len(self._commitd_cmds):
@@ -292,10 +292,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             Autoscale the Y axis of all PlotXY instances in the figure and store the action for undo/redo
         """
         axes = self._parser.figure.axes
-        # Stage a command to obtain original view limits
-        self.stage_view_lim_cmd()
-
         for ax in axes:
+            # Stage a command to obtain original view limits
+            self.stage_view_lim_cmd(ax)
+
             ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
             if not hasattr(ci, 'plot'):
                 continue
@@ -306,13 +306,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             # Autoscale on Y axis for the given plot
             self._parser.autoscale_y_axis(ax)
 
-        # Commit staged command
-        while len(self._staging_cmds):
-            self.commit_view_lim_cmd()
+            # Commit staged command
+            while len(self._staging_cmds):
+                self.commit_view_lim_cmd(ax)
 
-        # Push committed command
-        while len(self._commitd_cmds):
-            self.push_view_lim_cmd()
+            # Push committed command
+            while len(self._commitd_cmds):
+                self.push_view_lim_cmd()
 
         # Redraw canvas to reflect changes
         self._parser.figure.canvas.draw()
@@ -357,9 +357,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def unfocus_plot(self):
         self._parser.set_focus_plot(None)
         self.info_shared_x_dialog = False
-
-    def drop_history(self):
-        return self._parser.drop_history()
 
     @Slot()
     def render(self):
@@ -423,7 +420,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     return
 
                 # Stage a command to obtain original view limits
-                self.stage_view_lim_cmd()
+                self.stage_view_lim_cmd(event.inaxes)
 
                 # Reset plot to original view limits
                 original_limits = self._parser.get_plot_limits(plot, which='original')
@@ -485,7 +482,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # Disable Zoom and Pan in PlotContour
                 if isinstance(plot, PlotContour):
                     return
-                self.stage_view_lim_cmd(plot, event.inaxes)
+                self.stage_view_lim_cmd(event.inaxes)
                 return
             if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.RIGHT:
                 # Create menu with autoscale options
@@ -531,10 +528,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             pass
         else:
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                ci = self._parser._impl_plot_cache_table.get_cache_item(self._mouse_impl)
                 # commit commands from staging.
                 while len(self._staging_cmds):
-                    self.commit_view_lim_cmd(ci.plot(), self._mouse_impl)
+                    self.commit_view_lim_cmd(self._mouse_impl)
                 # push uncommitted changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()

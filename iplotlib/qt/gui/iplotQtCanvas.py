@@ -57,9 +57,9 @@ class IplotQtCanvas(QWidget):
             self._stats_table.raise_()
             self._stats_table.activateWindow()
 
-    @abstractmethod
     def drop_history(self):
         """history: clear undo history. after this, can no longer undo"""
+        return self._parser.drop_history()
 
     def can_undo(self) -> bool:
         return self._parser._hm.can_undo()
@@ -190,19 +190,19 @@ class IplotQtCanvas(QWidget):
         finally:
             self._parser._hm.undo()
 
-    def stage_view_lim_cmd(self, plot, impl_plot):
+    def stage_view_lim_cmd(self, impl_plot):
         """stage a view command"""
 
         name = self._mmode[3:]
-        old_limits = [self._parser.get_plot_limits(plot, impl_plot)]
+        old_limits = [self._parser.get_plot_limits(impl_plot)]
         cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
         self._staging_cmds.append(cmd)
         logger.debug(f"Staged {cmd}")
 
-    def commit_view_lim_cmd(self, plot, impl_plot):
+    def commit_view_lim_cmd(self, impl_plot):
         """commit a view command"""
         cmd = self._staging_cmds.pop()
-        cmd.new_lim = [self._parser.get_plot_limits(plot, impl_plot)]
+        cmd.new_lim = [self._parser.get_plot_limits(impl_plot)]
         assert len(cmd.new_lim) == len(cmd.old_lim)
 
         # Check if any limit actually changed

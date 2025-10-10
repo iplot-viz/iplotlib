@@ -148,9 +148,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._parser.redo()
         self._parser.unstale_cache_items()
 
-    def drop_history(self):
-        return self._parser.drop_history()
-
     def _full_screen_mode_on(self, impl_plot):
         pass
 
@@ -181,7 +178,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 return
             elif event.button() == Qt.MouseButton.RightButton:
                 return
-            self.stage_view_lim_cmd(plot, impl_plot)
+            self.stage_view_lim_cmd(impl_plot)
             return
 
         elif self._mmode == Canvas.MOUSE_MODE_SELECT:
@@ -202,11 +199,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         else:
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
                 impl_plot = view_box.parentItem()
-                ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
-                plot = ci.plot()
                 # commit commands from staging.
                 while len(self._staging_cmds):
-                    self.commit_view_lim_cmd(plot, impl_plot)
+                    self.commit_view_lim_cmd(impl_plot)
                 # push uncommitted changes onto the command stack.
                 while len(self._commitd_cmds):
                     self.push_view_lim_cmd()
@@ -242,28 +237,3 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def mouse_moved(self, pos):
         pass
-
-    def stage_view_lim_cmd(self, plot, impl_plot):
-        """stage a view command"""
-
-        name = self._mmode[3:]
-        old_limits = [self._parser.get_plot_limits(plot, impl_plot)]
-        # old_limits = self._parser.get_all_plot_limits()
-
-        cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
-        self._staging_cmds.append(cmd)
-        logger.debug(f"Staged {cmd}")
-
-    def commit_view_lim_cmd(self, plot, impl_plot):
-        """commit a view command"""
-        cmd = self._staging_cmds.pop()
-        # cmd.new_lim = self._parser.get_all_plot_limits()
-        cmd.new_lim = [self._parser.get_plot_limits(plot, impl_plot)]
-        assert len(cmd.new_lim) == len(cmd.old_lim)
-
-        # Check if any limit actually changed
-        if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
-            self._commitd_cmds.append(cmd)
-            logger.debug(f"Committed {cmd}")
-        else:
-            logger.debug(f"Rejected {cmd}")
