@@ -144,7 +144,7 @@ class IplotMultiCursor(Widget):
                         x_min, x_max = ax.get_xbound()
                         y_min, y_max = ax.get_ybound()
 
-                        for line in signal().lines:
+                        for line in signal().lines:  # TODO: review
                             value_annotation = Annotation("",
                                                           xy=(x_min + (x_max - x_min) / 2, y_min + (y_max - y_min) / 2),
                                                           xycoords="data",  # xytext=(-200, 0),
@@ -295,7 +295,7 @@ class IplotMultiCursor(Widget):
 
             if self.value_label:
                 for annotation in self.value_annotations:
-                    annotation.axes.draw_artist(annotation)
+                    annotation.axes.draw_artist(annotation)  # TODO: fails if crosshair enabled and then click draw
             self.canvas.blit()
         else:
             self.canvas.draw_idle()

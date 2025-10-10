@@ -423,7 +423,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 self.stage_view_lim_cmd(event.inaxes)
 
                 # Reset plot to original view limits
-                original_limits = self._parser.get_plot_limits(plot, which='original')
+                original_limits = self._parser.get_plot_limits(mpl_axes)
                 self._parser.set_plot_limits(original_limits)
 
                 # Commit it.

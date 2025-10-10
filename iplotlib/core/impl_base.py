@@ -825,7 +825,7 @@ class BackendParserBase(ABC):
                 all_limits.append(plot_lims)
         return all_limits
 
-    def get_all_plot_limits(self, which='current') -> List[IplPlotViewLimits]:
+    def get_all_plot_limits(self) -> List[IplPlotViewLimits]:
         """
         Return limits of all plots. The `which` argument can be `original` or `current`
         Use this function to construct an :data:`~iplotlib.core.commands.axes_range.IplotAxesRangeCmd` instance
