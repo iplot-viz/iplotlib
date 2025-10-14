@@ -60,7 +60,6 @@ class MatplotlibParser(BackendParserBase):
         self.map_legend_to_ax = {}
         self.legend_size = 8
         self._cursors = []
-        self._update = False
 
         register_matplotlib_converters()
         self.figure = Figure()
@@ -300,30 +299,8 @@ class MatplotlibParser(BackendParserBase):
         self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
         return True
 
-    def _get_all_shared_axes(self, base_mpl_axes: MPLAxes):
-
-        cache_item = self._impl_plot_cache_table.get_cache_item(base_mpl_axes)
-        base_plot = cache_item.plot()
-
-        if isinstance(base_plot, PlotXYWithSlider):
-            return []
-
-        shared = list()
-        # base_limits = self.get_plot_limits(base_plot, which='original')
-        base_begin, base_end = base_plot.axes[0].get_limits("original")
-
-        for axes in self.figure.axes:
-            cache_item = self._impl_plot_cache_table.get_cache_item(axes)
-            plot = cache_item.plot()
-            begin, end = plot.axes[0].get_limits("original")
-
-            # Check if it is date and the max difference is 1 second
-            # Need to differentiate if it is absolute or relative
-            max_diff = self._pm.get_value(self.canvas, 'max_diff')
-            max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot, PlotXYWithSlider) else max_diff
-            if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
-                shared.append(axes)
-        return shared
+    def get_canvas_plots(self):
+        return list(self.figure.axes)
 
     def set_canvas_gridspec(self, rows: int, cols: int):
         """Set the canvas gridspec to the given rows and columns."""
@@ -637,31 +614,7 @@ class MatplotlibParser(BackendParserBase):
                     plot_with_slider.slider_last_val = val
 
     def _axis_update_callback(self, current_plot: MPLAxes):
-        if self._update:
-            return
-        self._update = True
-
-        if self._pm.get_value(self.canvas, 'shared_x_axis'):
-            shared_plots = self._get_all_shared_axes(current_plot)
-        else:
-            plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
-            shared_plots = self._plot_impl_plot_lut.get(id(plot))
-
-        new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
-
-        for impl_plot in shared_plots:
-            self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
-
-            if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
-                self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
-
-            signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
-            for signal_ref in signals:
-                signal = signal_ref()
-                signal.set_limits((new_start, new_end))
-                self.process_ipl_signal(signal)
-
-        self._update = False
+        super()._axis_update_callback(current_plot)
 
     def process_ipl_log_axis(self, mpl_axis: MPLAxis, plot: Plot):
         if isinstance(mpl_axis, YAxis):

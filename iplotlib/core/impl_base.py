@@ -139,6 +139,7 @@ class BackendParserBase(ABC):
         self._stale_citems = list()  # type: List[ImplementationPlotCacheItem]
         self._impl_plot_ranges_hash = defaultdict(
             lambda: defaultdict(dict))  # type: Dict[Any, int] # key is id(impl_plot)
+        self._update = False
 
     def run_in_one_thread(func):
         """
@@ -271,6 +272,63 @@ class BackendParserBase(ABC):
         Set the canvas suptitle.
         This is called when the canvas is set or cleared.
         """
+
+    @abstractmethod
+    def _axis_update_callback(self, current_plot: Any):
+        if self._update:
+            return
+        self._update = True
+
+        if self._pm.get_value(self.canvas, 'shared_x_axis'):
+            shared_plots = self._get_all_shared_axes(current_plot)
+        else:
+            plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
+            shared_plots = self._plot_impl_plot_lut.get(id(plot))
+
+        new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
+
+        for impl_plot in shared_plots:
+            self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
+
+            if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
+                self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
+
+            signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+            for signal_ref in signals:
+                signal = signal_ref()
+                signal.set_limits((new_start, new_end))
+                self.process_ipl_signal(signal)
+
+        self._update = False
+
+    def _get_all_shared_axes(self, base_impl_plot: Any) -> List[Any]:
+        cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
+        base_plot = cache_item.plot()
+
+        if isinstance(base_plot, PlotXYWithSlider) or base_plot is None:
+            return []
+
+        shared = list()
+        base_begin, base_end = base_plot.axes[0].get_limits("original")
+
+        plot_list = self.get_canvas_plots()
+        for plot_item in plot_list:
+            cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
+            plot = cache_item.plot()
+            begin, end = plot.axes[0].get_limits("original")
+
+            # Check if it is date and the max difference is 1 second
+            # Need to differentiate if it is absolute or relative
+            max_diff = self._pm.get_value(self.canvas, 'max_diff')
+            max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot,
+                                                                               PlotXYWithSlider) else max_diff
+            if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
+                shared.append(plot_item)
+        return shared
+
+    @abstractmethod
+    def get_canvas_plots(self):
+        pass
 
     @abstractmethod
     def process_ipl_plot(self, plot: Plot, column: int, row: int):

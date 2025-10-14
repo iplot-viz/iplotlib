@@ -98,8 +98,6 @@ class PyQtGraphParser(BackendParserBase):
         else:
             self.disable_tight_layout()
 
-        self._update = False
-
     def _ensure_cell_layout(self, row: int, col: int, rowspan: int, colspan: int):
         key = (row, col)
         cell_gl = self._cell_gl.get(key)
@@ -382,30 +380,12 @@ class PyQtGraphParser(BackendParserBase):
         self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
         return True
 
-    def _get_all_shared_axes(self, base_impl_plot: PlotItem) -> List[PlotItem]:
-        cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
-
-        base_plot = cache_item.plot()
-        if isinstance(base_plot, PlotXYWithSlider):
-            return []
-
-        shared = list()
-        base_begin, base_end = base_plot.axes[0].get_limits("original")
-
+    def get_canvas_plots(self):
+        plots = []
         for stack in self._layout_stacks.values():
             for plot_item in stack.values():
-                cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
-                plot = cache_item.plot()
-                begin, end = plot.axes[0].get_limits("original")
-
-                # Check if it is date and the max difference is 1 second
-                # Need to differentiate if it is absolute or relative
-                max_diff = self._pm.get_value(self.canvas, 'max_diff')
-                max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot,
-                                                                                   PlotXYWithSlider) else max_diff
-                if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
-                    shared.append(plot_item)
-        return shared
+                plots.append(plot_item)
+        return plots
 
     def process_ipl_plot_xy(self):
         pass
@@ -646,34 +626,8 @@ class PyQtGraphParser(BackendParserBase):
                     plot_with_slider.slider_last_val = val
 
     def _axis_update_callback(self, view_box: ViewBox):
-        if self._update:
-            return
-        self._update = True
-
         current_plot = view_box.parentItem()  # type: PlotItem
-
-        if self._pm.get_value(self.canvas, 'shared_x_axis'):
-            shared_plots = self._get_all_shared_axes(current_plot)
-        else:
-            # Check for stacked plots
-            plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
-            shared_plots = self._plot_impl_plot_lut.get(id(plot))
-
-        new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
-
-        for impl_plot in shared_plots:
-            self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
-
-            if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
-                self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
-
-            signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
-            for signal_ref in signals:
-                signal = signal_ref()
-                signal.set_limits((new_start, new_end))
-                self.process_ipl_signal(signal)
-
-        self._update = False
+        super()._axis_update_callback(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation == 'left':
