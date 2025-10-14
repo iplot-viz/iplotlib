@@ -272,6 +272,11 @@ class MatplotlibParser(BackendParserBase):
     def clear(self):
         super().clear()
 
+        # remove any active multi‑cursors
+        for c in self._cursors:
+            c.remove()
+        self._cursors.clear()
+
         # drop cache items and remove each Axes to release all artists and callbacks
         # for ax in list(self.figure.axes):
         #     self.figure.delaxes(ax)
@@ -282,10 +287,6 @@ class MatplotlibParser(BackendParserBase):
                     continue
                 for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
                     signal.lines.clear()
-        # remove any active multi‑cursors
-        for c in self._cursors:
-            c.remove()
-        self._cursors.clear()
 
         self.map_legend_to_ax.clear()
         self._impl_plot_ranges_hash.clear()

@@ -413,8 +413,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 if not isinstance(mpl_axes, MPLAxes):
                     return
                 ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
-                if not hasattr(ci, 'plot'):
-                    return
                 plot = ci.plot()
                 if not plot:
                     return
@@ -428,7 +426,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
                 # Commit it.
                 while len(self._staging_cmds):
-                    self.commit_view_lim_cmd()
+                    self.commit_view_lim_cmd(event.inaxes)
 
                 # Push it.
                 while len(self._commitd_cmds):
