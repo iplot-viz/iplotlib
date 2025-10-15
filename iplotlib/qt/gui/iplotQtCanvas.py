@@ -375,10 +375,17 @@ class IplotQtCanvas(QWidget):
         if mode == Canvas.MOUSE_MODE_CROSSHAIR:
             return
 
-        if mode in [Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM]:
+        if mode == Canvas.MOUSE_MODE_PAN:
             if isinstance(plot, PlotContour):
                 return
             if button == Qt.MouseButton.RightButton or is_double:
+                return
+            self.stage_view(plot, impl_plot)
+
+        if mode == Canvas.MOUSE_MODE_ZOOM:
+            if isinstance(plot, PlotContour):
+                return
+            if is_double:
                 return
             self.stage_view(plot, impl_plot)
 

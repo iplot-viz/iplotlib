@@ -66,6 +66,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_renderer.mpl_connect('button_release_event', self._mpl_mouse_release_handler)
         self._mpl_renderer.mpl_connect('pick_event', self.on_pick_legend)
 
+        self._mpl_renderer.installEventFilter(self)
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
         self.setAcceptDrops(True)
@@ -351,6 +352,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             MouseButton.MIDDLE: Qt.MouseButton.MiddleButton,
         }.get(event.button, Qt.MouseButton.NoButton)
 
+        if self._mmode == Canvas.MOUSE_MODE_PAN and (
+            qt_button == Qt.MouseButton.RightButton or bool(event.dblclick)
+        ):
+            if event.guiEvent:
+                try:
+                    event.guiEvent.accept()
+                except Exception:
+                    pass
+            return
+
         self.press_common(
             mode=self._mmode,
             button=qt_button,
@@ -431,3 +442,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             for row, row_plot in enumerate(col_plots):
                 if row_plot.col == plot.col and row_plot.row == plot.row:
                     return row + 1, column + 1
+
+    def eventFilter(self, obj, event):
+        if obj is self._mpl_renderer and self._mmode == Canvas.MOUSE_MODE_PAN:
+            et = event.type()
+            if et in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.MouseButtonRelease):
+                if getattr(event, 'button', None) and event.button() == Qt.MouseButton.RightButton:
+                    event.accept()
+                    return True
+            elif et == QEvent.MouseMove:
+                if hasattr(event, 'buttons') and (event.buttons() & Qt.MouseButton.RightButton):
+                    event.accept()
+                    return True
+        return super().eventFilter(obj, event)

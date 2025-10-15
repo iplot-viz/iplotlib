@@ -72,6 +72,7 @@ class QtViewBox(pg.ViewBox):
     def __init__(self, parent=None):
         super().__init__(parent=parent, enableMenu=True)
         self.sigRangeChanged.connect(self.release_event)
+        self._block_right_button = False
 
     def mousePressEvent(self, ev: QGraphicsSceneMouseEvent):
         if ev.button() == Qt.MouseButton.RightButton and self._block_right_button:
@@ -90,6 +91,40 @@ class QtViewBox(pg.ViewBox):
 
     def wheelEvent(self, ev, axis=None):
         ev.ignore()
+
+    def mouseDragEvent(self, ev, axis=None):
+        if getattr(self, 'state', None) and self.state.get('mouseMode') == self.RectMode \
+                and ev.button() == Qt.MouseButton.RightButton:
+            if ev.isStart():
+                self.rbScaleBox.setPen(pg.mkPen((0, 0, 0), width=1, style=QtCore.Qt.PenStyle.DashLine))
+                self.updateScaleBox(ev.buttonDownPos(), ev.pos())
+                ev.accept()
+                return
+            elif ev.isFinish():
+                p0 = self.mapSceneToView(ev.buttonDownScenePos())
+                p1 = self.mapSceneToView(ev.scenePos())
+                x1, x2 = float(min(p0.x(), p1.x())), float(max(p0.x(), p1.x()))
+                y1, y2 = float(min(p0.y(), p1.y())), float(max(p0.y(), p1.y()))
+                self.rbScaleBox.hide()
+                if x2 - x1 <= 0 or y2 - y1 <= 0:
+                    ev.accept()
+                    return
+                (vx0, vx1), (vy0, vy1) = self.viewRange()
+                vw = float(vx1 - vx0)
+                vh = float(vy1 - vy0)
+                cx = (x1 + x2) / 2.0
+                cy = (y1 + y2) / 2.0
+                new_w = vw * vw / float(x2 - x1)
+                new_h = vh * vh / float(y2 - y1)
+                self.setXRange(cx - new_w / 2.0, cx + new_w / 2.0, padding=0)
+                self.setYRange(cy - new_h / 2.0, cy + new_h / 2.0, padding=0)
+                ev.accept()
+                return
+            else:
+                self.updateScaleBox(ev.buttonDownPos(), ev.pos())
+                ev.accept()
+                return
+        super().mouseDragEvent(ev, axis=axis)
 
 
 class PyQtGraphParser(BackendParserBase):
