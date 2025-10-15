@@ -506,7 +506,6 @@ class PyQtGraphParser(BackendParserBase):
 
             # Process signal
             for signal in signals:
-                # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
                 self._signal_impl_plot_lut.update({signal.uid: plot})
                 self.process_ipl_signal(signal)
 

@@ -289,7 +289,6 @@ class MatplotlibParser(BackendParserBase):
 
         self.map_legend_to_ax.clear()
         self._impl_plot_ranges_hash.clear()
-        self._stale_citems.clear()
 
         gc.collect()
 
@@ -428,7 +427,6 @@ class MatplotlibParser(BackendParserBase):
             subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
 
         mpl_axes = None
-        mpl_axes_prev = None
         for stack_id, key in enumerate(sorted(plot.signals.keys())):
             is_stack_plot_focused = self._focus_plot_stack_key == key
 
@@ -441,8 +439,8 @@ class MatplotlibParser(BackendParserBase):
                     row_id = stack_id
 
                 mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0])
-                mpl_axes_prev = mpl_axes
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
+
                 # Keep references to iplotlib instances for ease of access in callbacks.
                 self._impl_plot_cache_table.register(mpl_axes, self.canvas, plot, key, signals)
                 mpl_axes.set_xmargin(0)
@@ -498,7 +496,6 @@ class MatplotlibParser(BackendParserBase):
                         self.process_ipl_axis(x_axis, ax_idx, plot, mpl_axes)
 
                 for signal in signals:
-                    # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
                     self._signal_impl_plot_lut.update({signal.uid: mpl_axes})
                     self.process_ipl_signal(signal)
 
