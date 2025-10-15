@@ -352,16 +352,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             MouseButton.MIDDLE: Qt.MouseButton.MiddleButton,
         }.get(event.button, Qt.MouseButton.NoButton)
 
-        if self._mmode == Canvas.MOUSE_MODE_PAN and (
-            qt_button == Qt.MouseButton.RightButton or bool(event.dblclick)
-        ):
-            if event.guiEvent:
-                try:
-                    event.guiEvent.accept()
-                except Exception:
-                    pass
-            return
-
         self.press_common(
             mode=self._mmode,
             button=qt_button,
@@ -444,7 +434,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     return row + 1, column + 1
 
     def eventFilter(self, obj, event):
-        if obj is self._mpl_renderer and self._mmode == Canvas.MOUSE_MODE_PAN:
+        if obj is self._mpl_renderer and not self._rbtn_allowed(self._mmode):
             et = event.type()
             if et in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.MouseButtonRelease):
                 if getattr(event, 'button', None) and event.button() == Qt.MouseButton.RightButton:

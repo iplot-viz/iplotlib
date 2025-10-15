@@ -126,7 +126,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         elif mode == Canvas.MOUSE_MODE_MARKER:
             self._parser.set_view_box()
 
-        block_right = (mode == Canvas.MOUSE_MODE_PAN)
+        block_right = (not self._rbtn_allowed(mode))
         for stack in self._parser._layout_stacks.values():
             for plot in stack.values():
                 plot.getViewBox()._block_right_button = block_right

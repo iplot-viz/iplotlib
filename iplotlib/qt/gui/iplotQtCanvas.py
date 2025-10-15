@@ -364,6 +364,9 @@ class IplotQtCanvas(QWidget):
         if not plot:
             return
 
+        if button == Qt.MouseButton.RightButton and not self._rbtn_allowed(mode):
+            return
+
         if mode == Canvas.MOUSE_MODE_SELECT:
             if button == Qt.MouseButton.LeftButton or is_double:
                 return
@@ -378,7 +381,7 @@ class IplotQtCanvas(QWidget):
         if mode == Canvas.MOUSE_MODE_PAN:
             if isinstance(plot, PlotContour):
                 return
-            if button == Qt.MouseButton.RightButton or is_double:
+            if is_double:
                 return
             self.stage_view(plot, impl_plot)
 
@@ -390,7 +393,7 @@ class IplotQtCanvas(QWidget):
             self.stage_view(plot, impl_plot)
 
         if mode == Canvas.MOUSE_MODE_DIST:
-            if button == Qt.MouseButton.RightButton or is_double:
+            if is_double:
                 return
 
             if x is None or y is None or not hasattr(self, "_dist_calculator"):
@@ -476,3 +479,6 @@ class IplotQtCanvas(QWidget):
         ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
         return ci.plot() if hasattr(ci, "plot") else None
 
+    def _rbtn_allowed(self, mode: str) -> bool:
+        """Button right only available for SELECT and ZOOM modes."""
+        return mode in (Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_ZOOM)
