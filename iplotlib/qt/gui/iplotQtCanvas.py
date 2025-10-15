@@ -34,7 +34,6 @@ class IplotQtCanvas(QWidget):
         self._parser = None  # type: BackendParserBase
         self._staging_cmds = []  # type: List[IplotAxesRangeCmd]
         self._commitd_cmds = []  # type: List[IplotAxesRangeCmd]
-        self._refresh_original_ranges = True
         self.dropInfo = DropInfo()
 
         # Statistics
@@ -119,34 +118,7 @@ class IplotQtCanvas(QWidget):
     @abstractmethod
     def set_canvas(self, canvas):
         """Sets new version of iplotlib canvas and redraw"""
-
-        # Do some post processing stuff here.
-        # 1. Update the original begin, end for each axis.
-        if not canvas:
-            return
-        if self._refresh_original_ranges:
-            for col in canvas.plots:
-                for plot in col:
-                    if not plot:
-                        continue
-                    for ax_idx, axes in enumerate(plot.axes):
-                        if isinstance(axes, Collection):
-                            for axis in axes:
-                                if isinstance(axis, RangeAxis):
-                                    impl_plot = self._parser._axis_impl_plot_lut.get(id(axis))
-                                    self._parser.update_range_axis(axis, ax_idx, impl_plot, which='original')
-                                    self._parser.update_range_axis(axis, ax_idx, impl_plot, which='current')
-                        elif isinstance(axes, RangeAxis) and axes.original_begin is None and axes.original_end is None:
-                            axis = axes
-                            impl_plot = self._parser._axis_impl_plot_lut.get(id(axis))
-
-                            if isinstance(plot, PlotXYWithSlider):
-                                if not isinstance(axis, RangeAxis) or impl_plot is None:
-                                    continue
-                                limits = plot.signals[1][0].z_data[0], plot.signals[1][0].z_data[-1]
-                                axis.set_limits(*limits, 'original')
-                            else:
-                                self._parser.update_range_axis(axis, ax_idx, impl_plot, which='original')
+        pass
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""

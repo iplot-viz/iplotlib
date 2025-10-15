@@ -45,8 +45,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self.setAcceptDrops(True)
 
     def set_canvas(self, canvas):
-        super().set_canvas(canvas)
-
         prev_canvas = self._parser.canvas
 
         if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
@@ -55,21 +53,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._parser.deactivate_cursor()
         self._parser.process_ipl_canvas(canvas)
 
-        # Delete _stale_citems axes after draw
-        self._parser.unstale_cache_items()
-
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
         self.canvas = canvas
-
-        # Check if Shared Time is applied and set XLink
-        # if self._parser._pm.get_value(canvas, 'shared_x_axis'):
-        #     base_plot = self.get_base_plot()
-        #     other_axes = self._parser._get_all_shared_axes(base_plot)
-        #
-        #     for other_axis in other_axes[1:]:
-        #         other_axis.getViewBox().setXLink(base_plot.getViewBox())
 
         # Connect events
         for stack in self._parser._layout_stacks.values():
@@ -142,11 +129,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def undo(self):
         self._parser.undo()
-        self._parser.unstale_cache_items()
 
     def redo(self):
         self._parser.redo()
-        self._parser.unstale_cache_items()
 
     def _full_screen_mode_on(self, impl_plot):
         pass
@@ -165,9 +150,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         if not hasattr(ci, 'plot'):
             return
         plot = ci.plot()
-
-        if len(self._parser._stale_citems):
-            self._parser.unstale_cache_items()
 
         if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
             # Stage a command to obtain original view limits

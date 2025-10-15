@@ -77,8 +77,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     # Implement basic superclass functionality
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
-        super().set_canvas(canvas)
-
         prev_canvas = self._parser.canvas
 
         if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
@@ -361,7 +359,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     @Slot()
     def render(self):
         self._mpl_renderer.draw()
-        self._parser.unstale_cache_items()
 
     # custom event handlers
     def _mpl_draw_finish(self, event: DrawEvent):
@@ -387,17 +384,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _full_screen_mode_on(self, impl_plot):
         self._parser.set_focus_plot(impl_plot)
-        self._refresh_original_ranges = False
         self.refresh()
         self.stats(self.get_canvas())
-        self._refresh_original_ranges = True
 
     def _full_screen_mode_off(self):
         self._parser.set_focus_plot(None)
-        self._refresh_original_ranges = False
         self.refresh()
         self.stats(self.get_canvas())
-        self._refresh_original_ranges = True
 
     def _mpl_mouse_press_handler(self, event: MouseEvent):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
