@@ -11,7 +11,7 @@ one might want to use when plotting data.
 from abc import ABC
 import typing
 from dataclasses import dataclass
-from typing import Dict, List, Collection, Union, Tuple
+from typing import Dict, List, Collection, Union
 import weakref
 
 from iplotlib.core.axis import Axis, LinearAxis

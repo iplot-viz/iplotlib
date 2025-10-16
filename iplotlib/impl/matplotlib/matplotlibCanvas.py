@@ -140,61 +140,25 @@ class MatplotlibParser(BackendParserBase):
 
         return plot_lines
 
-    def do_impl_line_plot_xy_slider(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXYWithSlider, cache_item,
-                                    x_data, y_data, z_data):
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+    def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
+        return y_data[plot.slider.val]
 
-        # plot.slider.valtext.set_text(pandas.Timestamp(z_data[plot.slider.val]))
-        ysub_data = y_data[plot.slider.val]
+    def create_slider_plot_lines_1D(self, draw_fn, x_data, ysub_data, style) -> List[Line2D]:
+        return draw_fn(x_data, ysub_data, **style)
 
-        # Review to implement directly in PlotXY class
-        if signal.color is None:
-            signal.color = plot.get_next_color()
+    def create_slider_plot_lines_2D(self, draw_fn, x_data, ysub_data, style):
+        pass
+        # lines = draw_fn(x_data, ysub_data, **style)
+        # plot_lines = [[line] for line in lines]
+        # for i, line in enumerate(plot_lines):
+        #     line[0].set_label(f"{signal.label}[{i}]")
+        #
+        # return plot_lines
 
-        if isinstance(plot_lines, list):
-            if x_data.ndim == 1 and ysub_data.ndim == 1:
-                line = plot_lines[0][0]
-                line.set_xdata(x_data)
-                line.set_ydata(ysub_data)
-            elif x_data.ndim == 1 and ysub_data.ndim == 2:
-                for i, line in enumerate(plot_lines):
-                    line[0].set_xdata(x_data)
-                    line[0].set_ydata(ysub_data[:, i])
-
-            # Put this out in a method only for streaming
-            if self.canvas.streaming:
-                ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
-                all_y_data = []
-                for signal in plot.signals[cache_item.stack_key]:
-                    if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
-                        max_x_data = signal.x_data.max()[0]
-                        for x_temp, y_temp in zip(signal.x_data, signal.y_data):
-                            if max_x_data - ax_window <= x_temp <= max_x_data:
-                                all_y_data.append(y_temp)
-                if all_y_data:
-                    diff = (max(all_y_data) - min(all_y_data)) / 15
-                    mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
-                mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
-            self.figure.canvas.draw_idle()
-        else:
-            style = self.get_signal_style(signal)
-            params = dict(**style)
-            draw_fn = mpl_axes.plot
-            if x_data.ndim == 1 and ysub_data.ndim == 1:
-                plot_lines = [draw_fn(x_data, ysub_data, **params)]
-            elif x_data.ndim == 1 and ysub_data.ndim == 2:
-                lines = draw_fn(x_data, ysub_data, **params)
-                plot_lines = [[line] for line in lines]
-                for i, line in enumerate(plot_lines):
-                    line[0].set_label(f"{signal.label}[{i}]")
-
+    def slider_visible_status(self, plot_lines, signal):
         for new, old in zip(plot_lines, signal.lines):
-            for n, o in zip(new, old):
-                n.set_visible(o.get_visible())
-
-        signal.lines = plot_lines
-
-        return plot_lines
+            # for n, o in zip(new, old):
+            new.set_visible(old.get_visible())
 
     def do_impl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
                                   z_data):
@@ -499,8 +463,8 @@ class MatplotlibParser(BackendParserBase):
                     self._signal_impl_plot_lut.update({signal.uid: mpl_axes})
                     self.process_ipl_signal(signal)
 
-                # Set limits for processed signals
-                if isinstance(x_axis, RangeAxis) and x_axis.begin is None and x_axis.end is None:
+                # Set limits for processed signals  TODO: no more needed
+                if isinstance(x_axis, RangeAxis) and x_axis.original_begin is None and x_axis.original_end is None:
                     self.update_range_axis(x_axis, 0, mpl_axes, which='current')
                     if isinstance(plot, PlotXYWithSlider):
                         # In the case of PlotXYWithSlider, the 'original' limits must correspond to the dates stored
@@ -591,6 +555,8 @@ class MatplotlibParser(BackendParserBase):
         for c_row in plot.signals.values():
             for c_signal in c_row:
                 self.process_ipl_signal(c_signal)
+
+        # Refresh current label value
         current_value = pandas.Timestamp(slider_values[int(val)])
         current_label.set_text(
             formatter.date_fmt(current_value.value, formatter.cut_start + 3, formatter.NANOSECOND,

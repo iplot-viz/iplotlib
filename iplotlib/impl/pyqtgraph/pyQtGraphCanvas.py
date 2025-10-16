@@ -7,10 +7,11 @@ import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
 from pyqtgraph.Qt import QtCore
 from pyqtgraph.Qt import QtWidgets
-from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QLabel, QGraphicsSceneMouseEvent
+from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QGraphicsSceneMouseEvent, QWidget
 
 from iplotLogging import setupLogger
 from iplotlib.core import (Axis,
@@ -203,40 +204,17 @@ class PyQtGraphParser(BackendParserBase):
 
         return style
 
-    def do_impl_line_plot_xy_slider(self, signal: SignalXY, plot: PlotItem, i_plot: PlotXYWithSlider, cache_item,
-                                    x_data, y_data, z_data):
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[PlotDataItem]]
-        style = self.get_signal_style(signal)
-        draw_fn = plot.plot
+    def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
+        return y_data[plot.slider.value()]
 
-        ysub_data = y_data[i_plot.slider.value()]
+    def create_slider_plot_lines_1D(self, draw_fn, x_data, ysub_data, style) -> List[PlotDataItem]:
+        return [draw_fn(x_data, ysub_data, **style)]
 
-        # Review to implement directly in PlotXY class
-        if signal.color is None:
-            signal.color = i_plot.get_next_color()
+    def create_slider_plot_lines_2D(self, draw_fn, x_data, ysub_data, style):
+        pass
 
-        if isinstance(plot_lines, list):
-            if x_data.ndim == 1 and ysub_data.ndim == 1:
-                line = plot_lines[0]
-                self.set_line_data(style, line, x_data, ysub_data)
-                # _update_marker_by_point_count(line, x_data, style)
-            elif x_data.ndim == 1 and ysub_data.ndim == 2:
-                for i, line in enumerate(plot_lines):
-                    line[0].setData(x=x_data, y=y_data[:, i])
-                    line[0].setPen(style['pen'])
-                    # _update_marker_by_point_count(line[0], x_data, style)
-        else:
-            if x_data.ndim == 1 and ysub_data.ndim == 1:
-                plot_lines = [draw_fn(x_data, ysub_data, **style)]
-            elif x_data.ndim == 1 and ysub_data.ndim == 2:
-                lines = draw_fn(x_data, ysub_data, **style)
-                plot_lines = [[line] for line in lines]
-                for i, line in enumerate(plot_lines):
-                    line[0].set_label(f"{signal.label}[{i}]")
-
-        signal.lines = plot_lines
-
-        return plot_lines
+    def slider_visible_status(self, plot_lines, signal):
+        pass
 
     def do_impl_line_plot_contour(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContour, x_data, y_data,
                                   z_data):
@@ -394,7 +372,6 @@ class PyQtGraphParser(BackendParserBase):
         pass
 
     def process_ipl_plot_xy_slider(self, i_plot: PlotXYWithSlider, row, col, visible_stack_ids, cell_gl):
-
         # Check if there was a previous plot_with_slider with a value
         if i_plot.slider_last_val is not None:
             value = i_plot.slider_last_val
@@ -410,23 +387,40 @@ class PyQtGraphParser(BackendParserBase):
 
         i_plot.slider = slider
 
-        # Proxy widget
-        rc_key = (row, col)
-        proxy = QtWidgets.QGraphicsProxyWidget()
-        proxy.setWidget(slider)
-        last_row_id = max(visible_stack_ids) + 1
-        cell_gl.nextRow()
-        cell_gl.addItem(proxy)  # row=last_row_id, col=0
-        self._slider_placeholders[rc_key] = proxy
-
         # Annotate labels along the slider axis
         h_layout = QHBoxLayout()
 
+        # Proxy widget
+        rc_key = (row, col)
+        proxy = QtWidgets.QGraphicsProxyWidget()
+        container = QWidget()
+        v_layout = QVBoxLayout(container)
+        v_layout.setContentsMargins(0, 0, 0, 0)
+        v_layout.setSpacing(0)
+        v_layout.addWidget(slider)
+        v_layout.addLayout(h_layout)
+        proxy.setWidget(container)
+        last_row_id = max(visible_stack_ids) + 1
+        cell_gl.addItem(proxy, row=last_row_id, col=0)
+        self._slider_placeholders[rc_key] = proxy
+
         # Get data for the slider
         slider_values = i_plot.signals[1][0].z_data
+
+        # Slider labels
         min_label = QLabel(f"{pd.Timestamp(slider_values[0])}")
         max_label = QLabel(f"{pd.Timestamp(slider_values[-1])}")
         current_label = QLabel(F"{pd.Timestamp(slider_values[0])}")
+
+        # Apply font_size for slider labels
+        fs = self._pm.get_value(i_plot, 'font_size') or self._pm.get_value(self.canvas, 'font_size')
+        if fs:
+            qf = QFont()
+            qf.setPointSize(int(fs))
+            min_label.setFont(qf)
+            current_label.setFont(qf)
+            max_label.setFont(qf)
+
         h_layout.addWidget(min_label)
         h_layout.addStretch()
         h_layout.addWidget(current_label)
@@ -436,10 +430,6 @@ class PyQtGraphParser(BackendParserBase):
         # Register the callback function to update the plot when the slider value changes
         slider.valueChanged.connect(lambda val, i_p=i_plot: self._update_slider(val, i_p, slider_values, current_label))
 
-        # pyqt_layout.addWidget(slider)
-        # pyqt_layout.addLayout(h_layout)
-
-        # return pyqt_layout
         return cell_gl
 
     def process_ipl_plot(self, i_plot: Plot, col: int, row: int):
@@ -629,26 +619,34 @@ class PyQtGraphParser(BackendParserBase):
         super()._axis_update_callback(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
-        if axis_item.orientation == 'left':
-            log_scale = self._pm.get_value(plot, 'log_scale')
-            if log_scale:
-                # Set log scale for AxisItem
-                pass
+        if axis_item.orientation != 'left':
+            return
+        log_scale = self._pm.get_value(plot, 'log_scale')
+        if log_scale:
+            # Set log scale for AxisItem
+            pass
 
     def process_ipl_axis_params(self, fc, fs, axis: Axis, axis_item: AxisItem):
-        label_props = dict(maxTickLevel=0)
+        tick_props = dict(maxTickLevel=0)  # TODO: add color to tick values
+        label_props = dict(color=fc)
 
         # Set ticks on the top and right axis
         if self._pm.get_value(self.canvas, 'ticks_position'):
-            label_props['maxTickLevel'] = 2
+            tick_props['maxTickLevel'] = 2
         else:
-            label_props['maxTickLevel'] = 0
+            tick_props['maxTickLevel'] = 0
+
+        # Set color and font
+        if fs is not None and fs > 0:
+            tick_font = QFont()
+            tick_font.setPointSize(int(fs))
+            tick_props.update({'tickFont': tick_font})
+            label_props.update({'font-size': f'{int(fs)}pt'})
 
         if axis.label is not None:
-            axis_item.setLabel(axis.label)
+            axis_item.setLabel(axis.label, **label_props)
 
-        # axis_item.set_tick_params(**tick_props)
-        axis_item.setStyle(**label_props)
+        axis_item.setStyle(**tick_props)
 
     def process_ipl_axis_formatter(self, impl_plot: PlotItem, impl_axis: NanosecondDateFormatter, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)

@@ -545,9 +545,8 @@ class BackendParserBase(ABC):
             self.legend_downsampled_signal(signal, impl_plot, plot_lines[0])
 
             if x_data.ndim == 1 and y_data.ndim == 1:
-                line = plot_lines[0]
-                self.set_line_data(line, x_data, y_data, style)
-                self._update_marker_by_point_count(line, x_data, style)
+                self.set_line_data(plot_lines[0], x_data, y_data, style)
+                self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):
                     line[0].set_xdata(x_data)
@@ -611,10 +610,54 @@ class BackendParserBase(ABC):
     def legend_downsampled_signal(self, signal, impl_plot: Any, plot_lines: Any):
         pass
 
-    @abstractmethod
     def do_impl_line_plot_xy_slider(self, signal: SignalXY, impl_plot: Any, plot: PlotXYWithSlider, cache_item,
                                     x_data, y_data, z_data):
-        """"""
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[Any]
+        style = self.get_signal_style(signal)
+        draw_fn = impl_plot.plot
+
+        ysub_data = self.get_ysub_data(plot, y_data)
+
+        # Review to implement directly in PlotXY class
+        if signal.color is None:
+            signal.color = plot.get_next_color()
+
+        if isinstance(plot_lines, list):
+            if x_data.ndim == 1 and ysub_data.ndim == 1:
+                self.set_line_data(plot_lines[0], x_data, ysub_data, style)
+                # _update_marker_by_point_count(line, x_data, style)
+            elif x_data.ndim == 1 and ysub_data.ndim == 2:  # TODO: pendant
+                for i, line in enumerate(plot_lines):
+                    line[0].set_xdata(x_data)
+                    line[0].set_ydata(ysub_data[:, i])
+            # For now, streaming just with Signal XY within a PlotXY
+        else:
+            if x_data.ndim == 1 and ysub_data.ndim == 1:
+                plot_lines = self.create_slider_plot_lines_1D(draw_fn, x_data, ysub_data, style)
+            elif x_data.ndim == 1 and ysub_data.ndim == 2:
+                plot_lines = self.create_slider_plot_lines_2D(draw_fn, x_data, ysub_data, style)
+
+        self.slider_visible_status(plot_lines, signal)
+
+        signal.lines = plot_lines
+
+        return plot_lines
+
+    @abstractmethod
+    def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
+        pass
+
+    @abstractmethod
+    def create_slider_plot_lines_1D(self, draw_fn, x_data, y_data, style):
+        pass
+
+    @abstractmethod
+    def create_slider_plot_lines_2D(self, draw_fn, x_data, y_data, style):
+        pass
+
+    @abstractmethod
+    def slider_visible_status(self, plot_lines, signal):
+        pass
 
     @abstractmethod
     def do_impl_line_plot_contour(self, signal: SignalContour, impl_plot: Any, plot: PlotContour, x_data, y_data,
