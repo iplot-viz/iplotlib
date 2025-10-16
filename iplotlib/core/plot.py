@@ -52,8 +52,8 @@ class Plot(ABC):
     _type : str
         type of the plot
     """
-    row: int
-    col: int
+    row: int = 1
+    col: int = 1
     row_span: int = 1
     col_span: int = 1
     plot_title: str = None
