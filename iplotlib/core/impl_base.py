@@ -185,8 +185,68 @@ class BackendParserBase(ABC):
         self.unstale_cache_items()
 
     @abstractmethod
-    def autoscale_y_axis(self, impl_plot):
+    def get_data_items_for_autoscale(self, impl_plot):
         pass
+
+    @abstractmethod
+    def get_xy_data_from_item(self, data_item):
+        pass
+
+    def autoscale_y_axis(self, impl_plot, margin=0.1):
+        def get_bottom_top(data_item):
+            """Get min and max Y values for data visible in current X range."""
+            xd, yd = self.get_xy_data_from_item(data_item)
+
+            if xd is None or yd is None or len(xd) == 0 or len(yd) == 0:
+                return np.inf, -np.inf
+
+            lo, hi = self.get_impl_x_axis_limits(impl_plot)
+
+            # Filter Y data to only include points visible in current X range
+            mask = (xd > lo) & (xd < hi)
+            y_displayed = yd[mask]
+
+            # Check if the visible Y data contains valid values
+            if len(y_displayed) > 0:
+                # Remove NaN values if present
+                if np.isnan(y_displayed).any():
+                    y_displayed = y_displayed[~np.isnan(y_displayed)]
+
+                if len(y_displayed) > 0:
+                    min_bot = np.min(y_displayed)
+                    max_top = np.max(y_displayed)
+                else:
+                    min_bot = np.inf
+                    max_top = -np.inf
+            else:
+                min_bot = np.inf
+                max_top = -np.inf
+            return min_bot, max_top
+
+        # Get all data items from the implementation plot
+        data_items = self.get_data_items_for_autoscale(impl_plot)
+
+        bot, top = np.inf, -np.inf
+
+        for item in data_items:
+            new_bot, new_top = get_bottom_top(item)
+            if new_bot < bot:
+                bot = new_bot
+            if new_top > top:
+                top = new_top
+
+        # Apply default Y limits in case of missing or invalid data
+        if bot == np.inf and top == -np.inf:
+            bot, top = 0, 1
+
+        # Compute final margin
+        h = (top - bot)
+        n_new_bot = bot - margin * h
+        n_new_top = top + margin * h
+
+        # Set new Y axis limits
+        if data_items:
+            self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
 
     @abstractmethod
     def export_image(self, filename: str, **kwargs):
