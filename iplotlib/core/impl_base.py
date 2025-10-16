@@ -263,6 +263,7 @@ class BackendParserBase(ABC):
         new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
 
         for impl_plot in shared_plots:
+            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
             self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
 
             if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
@@ -271,7 +272,8 @@ class BackendParserBase(ABC):
             signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
             for signal_ref in signals:
                 signal = signal_ref()
-                signal.set_limits((new_start, new_end))
+                if not isinstance(plot, PlotXYWithSlider):
+                    signal.set_limits((new_start, new_end))
                 self.process_ipl_signal(signal)
 
         self._update = False

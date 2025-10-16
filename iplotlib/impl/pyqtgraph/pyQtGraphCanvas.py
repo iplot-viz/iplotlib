@@ -25,7 +25,6 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
-from iplotlib.core.limits import IplPlotViewLimits, IplSignalLimits, IplAxisLimits, IplSliderLimits
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
 
@@ -466,6 +465,7 @@ class PyQtGraphParser(BackendParserBase):
 
             plot = self._layout_stacks[l_key][stack_id]
             plot.enableAutoRange(x=False, y=False)
+            plot.hideButtons()
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
 
             # Keep references to iplotlib instances for ease of access in callbacks.
@@ -503,8 +503,10 @@ class PyQtGraphParser(BackendParserBase):
             # self.update_multi_range_axis(i_plot.axes[1], 1, plot)
 
             # Legend processing for downsampled data when drawing
+            fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
             ix_legend = 0
             for signal in signals:
+                plot.legend.items[ix_legend][1].setAttr(attr='size', value=f'{fs}pt')
                 if signal.isDownsampled:
                     legend_label = plot.legend.items[ix_legend][1].text + '*'
                     plot.legend.items[ix_legend][1].setText(legend_label)
@@ -532,7 +534,7 @@ class PyQtGraphParser(BackendParserBase):
             return
         fc = self._pm.get_value(i_plot, 'font_color')
         fs = self._pm.get_value(i_plot, 'font_size')
-        plot.setTitle(i_plot.plot_title, color=fc, size=fs)
+        plot.setTitle(i_plot.plot_title, color=fc, size=f'{fs}pt')
 
     def set_background_color(self, i_plot: Plot, plot: PlotItem):
         background_color = self._pm.get_value(i_plot, 'background_color')
@@ -561,10 +563,10 @@ class PyQtGraphParser(BackendParserBase):
                     item = grid.itemAtPosition(row, col)
                     if item:
                         items.append(item)
-            # limpiar
+            # Clean
             for item in items:
                 grid.removeItem(item)
-            # recolocar
+            # Relocate
             if layout_type.lower() == 'vertical':
                 for i, item in enumerate(items):
                     grid.addItem(item, i, 0)
@@ -622,9 +624,11 @@ class PyQtGraphParser(BackendParserBase):
         if axis_item.orientation != 'left':
             return
         log_scale = self._pm.get_value(plot, 'log_scale')
-        if log_scale:
+        if log_scale: # TODO: review log scale
             # Set log scale for AxisItem
-            pass
+            plot_item = axis_item.parentItem()
+            plot_item.setLogMode(y=log_scale)
+            # axis_item.setLogMode(log_scale)
 
     def process_ipl_axis_params(self, fc, fs, axis: Axis, axis_item: AxisItem):
         tick_props = dict(maxTickLevel=0)  # TODO: add color to tick values

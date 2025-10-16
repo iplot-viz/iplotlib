@@ -309,12 +309,15 @@ class MatplotlibParser(BackendParserBase):
         end_format = formatter.date_fmt(max_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
                                         postfix_end=True)
 
+        # Font size for slider labels
+        fs = self._pm.get_value(plot_with_slider, 'font_size')
+
         # Annotate labels along the slider axis
-        slider_ax.annotate(start_format, xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center', fontsize=8)
+        slider_ax.annotate(start_format, xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center', fontsize=fs)
         current_label = slider_ax.annotate(current_format, xy=(0.425, -0.3), xycoords='axes fraction', ha='left',
-                                           va='center', fontsize=8)
+                                           va='center', fontsize=fs)
         slider_ax.annotate(end_format, xy=(0.85, -0.3), xycoords='axes fraction', ha='left', va='center',
-                           fontsize=8)
+                           fontsize=fs)
 
         # Check if there was a previous plot_with_slider with a value
         if plot_with_slider.slider_last_val is not None:
@@ -327,6 +330,7 @@ class MatplotlibParser(BackendParserBase):
 
         # Slider creation
         plot_with_slider.slider = Slider(slider_ax, '', 0, val_max, valinit=value, valstep=1)
+        plot_with_slider.slider.valtext.set_visible(False)  # Hide slider value text
 
         # Register the callback function to update the plot when the slider value changes
         plot_with_slider.slider.on_changed(
@@ -532,6 +536,7 @@ class MatplotlibParser(BackendParserBase):
                             new_text = current_text.replace("$", r"\$")
                             line.set_text(new_text)
 
+                    fs = self._pm.get_value(plot, 'font_size')  # Font size fot legend lines
                     legend_lines = leg.get_lines()
                     ix_legend = 0
                     for signal in signals:
@@ -545,6 +550,7 @@ class MatplotlibParser(BackendParserBase):
                             if signal.isDownsampled:
                                 legend_label = leg.texts[ix_legend].get_text() + '*'
                                 leg.texts[ix_legend].set_text(legend_label)
+                            leg.get_texts()[ix_legend].set_fontsize(fs)
                             ix_legend += 1
 
             # Observe the axis limit change events
@@ -602,6 +608,9 @@ class MatplotlibParser(BackendParserBase):
             tick_props.update({'labelsize': fs})
         if axis.label is not None:
             mpl_axis.set_label_text(axis.label, **label_props)
+
+        # Font size for UTC label
+        mpl_axis.get_offset_text().set_fontsize(fs)
 
         mpl_axis.set_tick_params(**tick_props)
 
