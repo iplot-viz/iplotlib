@@ -550,7 +550,7 @@ class BackendParserBase(ABC):
                 self.set_line_data(plot_lines[0], x_data, y_data, style)
                 self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                for i, line in enumerate(plot_lines):
+                for i, line in enumerate(plot_lines):  # TODO: pendant for PYQTGRAPH
                     line[0].set_xdata(x_data)
                     line[0].set_ydata(y_data[:, i])
                     self._update_marker_by_point_count(line[0], x_data, style)

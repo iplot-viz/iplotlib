@@ -584,6 +584,9 @@ class PyQtGraphParser(BackendParserBase):
         legend = plot.legend
 
         leg_position = self._pm.get_value(i_plot, 'legend_position')
+        # Check for 'same as canvas' value
+        if leg_position == 'same as canvas':
+            leg_position = 'upper right'
         set_legend_position(legend, leg_position)
         # leg_layout = self._pm.get_value(plot, 'legend_layout')
         # set_legend_layout(legend, leg_layout)

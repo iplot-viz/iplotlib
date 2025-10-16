@@ -486,7 +486,7 @@ class MatplotlibParser(BackendParserBase):
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value(plot, 'legend')
-                if show_legend and mpl_axes.get_lines():
+                if show_legend and mpl_axes.get_lines():  # TODO improve
                     plot_leg_position = self._pm.get_value(plot, 'legend_position')
                     canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
                     plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
