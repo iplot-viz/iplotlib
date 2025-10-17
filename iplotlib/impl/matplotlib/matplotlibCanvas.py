@@ -5,6 +5,7 @@ from typing import Any, Callable, Collection, List
 import pandas
 import gc
 import numpy as np
+import matplotlib as mpl
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis
 from matplotlib.axis import Axis as MPLAxis
@@ -40,6 +41,9 @@ logger = setupLogger.get_logger(__name__)
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
             "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
 
+mpl.rcParams['path.simplify'] = True
+mpl.rcParams['path.simplify_threshold'] = 1.0
+
 
 class MatplotlibParser(BackendParserBase):
     def __init__(self,
@@ -56,7 +60,6 @@ class MatplotlibParser(BackendParserBase):
         self.map_legend_to_ax = {}
         self.legend_size = 8
         self._cursors = []
-        self._update = False
 
         register_matplotlib_converters()
         self.figure = Figure()
@@ -77,21 +80,20 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
-    def legend_downsampled_signal(self, signal, mpl_axes, plot_lines):
+    def legend_downsampled_signal(self, signal, mpl_axes: MPLAxes, plot_lines: Line2D):
         """
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
-        if mpl_axes.get_legend():
-            # Filter out '_child' lines from mpl_axes, which are automatically added in envelope plots
-            # These auxiliary lines should not be considered when matching lines to legend entries
-            valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
-            pos = valid_lines.index(plot_lines[0][0])
+        # Filter out '_child' lines from mpl_axes, which are added in envelope plots
+        # These lines should not be considered when matching lines to legend entries
+        valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
+        pos = valid_lines.index(plot_lines)
 
-            legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
-            if legend_text.endswith('*') and not signal.isDownsampled:
-                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
-            elif not legend_text.endswith('*') and signal.isDownsampled:
-                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
+        legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
+        if legend_text.endswith('*') and not signal.isDownsampled:
+            mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
+        elif not legend_text.endswith('*') and signal.isDownsampled:
+            mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
 
     @staticmethod
     def _get_visible_data(xd, yd, lo, hi):
@@ -138,61 +140,25 @@ class MatplotlibParser(BackendParserBase):
 
         return plot_lines
 
-    def do_impl_line_plot_xy_slider(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXYWithSlider, cache_item,
-                                    x_data, y_data, z_data):
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
+    def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
+        return y_data[plot.slider.val]
 
-        # plot.slider.valtext.set_text(pandas.Timestamp(z_data[plot.slider.val]))
-        ysub_data = y_data[plot.slider.val]
+    def create_slider_plot_lines_1D(self, draw_fn, x_data, ysub_data, style) -> List[Line2D]:
+        return draw_fn(x_data, ysub_data, **style)
 
-        # Review to implement directly in PlotXY class
-        if signal.color is None:
-            signal.color = plot.get_next_color()
+    def create_slider_plot_lines_2D(self, draw_fn, x_data, ysub_data, style):
+        pass
+        # lines = draw_fn(x_data, ysub_data, **style)
+        # plot_lines = [[line] for line in lines]
+        # for i, line in enumerate(plot_lines):
+        #     line[0].set_label(f"{signal.label}[{i}]")
+        #
+        # return plot_lines
 
-        if isinstance(plot_lines, list):
-            if x_data.ndim == 1 and ysub_data.ndim == 1:
-                line = plot_lines[0][0]
-                line.set_xdata(x_data)
-                line.set_ydata(ysub_data)
-            elif x_data.ndim == 1 and ysub_data.ndim == 2:
-                for i, line in enumerate(plot_lines):
-                    line[0].set_xdata(x_data)
-                    line[0].set_ydata(ysub_data[:, i])
-
-            # Put this out in a method only for streaming
-            if self.canvas.streaming:
-                ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
-                all_y_data = []
-                for signal in plot.signals[cache_item.stack_key]:
-                    if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
-                        max_x_data = signal.x_data.max()[0]
-                        for x_temp, y_temp in zip(signal.x_data, signal.y_data):
-                            if max_x_data - ax_window <= x_temp <= max_x_data:
-                                all_y_data.append(y_temp)
-                if all_y_data:
-                    diff = (max(all_y_data) - min(all_y_data)) / 15
-                    mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
-                mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
-            self.figure.canvas.draw_idle()
-        else:
-            style = self.get_signal_style(signal)
-            params = dict(**style)
-            draw_fn = mpl_axes.plot
-            if x_data.ndim == 1 and ysub_data.ndim == 1:
-                plot_lines = [draw_fn(x_data, ysub_data, **params)]
-            elif x_data.ndim == 1 and ysub_data.ndim == 2:
-                lines = draw_fn(x_data, ysub_data, **params)
-                plot_lines = [[line] for line in lines]
-                for i, line in enumerate(plot_lines):
-                    line[0].set_label(f"{signal.label}[{i}]")
-
+    def slider_visible_status(self, plot_lines, signal):
         for new, old in zip(plot_lines, signal.lines):
-            for n, o in zip(new, old):
-                n.set_visible(o.get_visible())
-
-        signal.lines = plot_lines
-
-        return plot_lines
+            # for n, o in zip(new, old):
+            new.set_visible(old.get_visible())
 
     def do_impl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
                                   z_data):
@@ -242,9 +208,9 @@ class MatplotlibParser(BackendParserBase):
     def update_area_envelope_1D(self, shapes, impl_plot: MPLAxes, x_data, y1_data, y2_data, style):
         shapes[0][2].remove()
         shapes[0][2] = impl_plot.fill_between(x_data, y1_data, y2_data,
-                                           alpha=0.3,
-                                           color=shapes[0][0].get_color(),
-                                           step=STEP_MAP[style['drawstyle']])
+                                              alpha=0.3,
+                                              color=shapes[0][0].get_color(),
+                                              step=STEP_MAP[style['drawstyle']])
         shapes[0][2].set_visible(shapes[0][0].get_visible())
         self.figure.canvas.draw_idle()
 
@@ -269,6 +235,11 @@ class MatplotlibParser(BackendParserBase):
     def clear(self):
         super().clear()
 
+        # remove any active multi‑cursors
+        for c in self._cursors:
+            c.remove()
+        self._cursors.clear()
+
         # drop cache items and remove each Axes to release all artists and callbacks
         # for ax in list(self.figure.axes):
         #     self.figure.delaxes(ax)
@@ -279,14 +250,9 @@ class MatplotlibParser(BackendParserBase):
                     continue
                 for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
                     signal.lines.clear()
-        # remove any active multi‑cursors
-        for c in self._cursors:
-            c.remove()
-        self._cursors.clear()
 
         self.map_legend_to_ax.clear()
         self._impl_plot_ranges_hash.clear()
-        self._stale_citems.clear()
 
         gc.collect()
 
@@ -296,30 +262,8 @@ class MatplotlibParser(BackendParserBase):
         self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
         return True
 
-    def _get_all_shared_axes(self, base_mpl_axes: MPLAxes):
-
-        cache_item = self._impl_plot_cache_table.get_cache_item(base_mpl_axes)
-        base_plot = cache_item.plot()
-
-        if isinstance(base_plot, PlotXYWithSlider):
-            return []
-
-        shared = list()
-        # base_limits = self.get_plot_limits(base_plot, which='original')
-        base_begin, base_end = base_plot.axes[0].get_limits("original")
-
-        for axes in self.figure.axes:
-            cache_item = self._impl_plot_cache_table.get_cache_item(axes)
-            plot = cache_item.plot()
-            begin, end = plot.axes[0].get_limits("original")
-
-            # Check if it is date and the max difference is 1 second
-            # Need to differentiate if it is absolute or relative
-            max_diff = self._pm.get_value(self.canvas, 'max_diff')
-            max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot, PlotXYWithSlider) else max_diff
-            if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
-                shared.append(axes)
-        return shared
+    def get_canvas_plots(self):
+        return list(self.figure.axes)
 
     def set_canvas_gridspec(self, rows: int, cols: int):
         """Set the canvas gridspec to the given rows and columns."""
@@ -365,12 +309,15 @@ class MatplotlibParser(BackendParserBase):
         end_format = formatter.date_fmt(max_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
                                         postfix_end=True)
 
+        # Font size for slider labels
+        fs = self._pm.get_value(plot_with_slider, 'font_size')
+
         # Annotate labels along the slider axis
-        slider_ax.annotate(start_format, xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center', fontsize=8)
+        slider_ax.annotate(start_format, xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center', fontsize=fs)
         current_label = slider_ax.annotate(current_format, xy=(0.425, -0.3), xycoords='axes fraction', ha='left',
-                                           va='center', fontsize=8)
+                                           va='center', fontsize=fs)
         slider_ax.annotate(end_format, xy=(0.85, -0.3), xycoords='axes fraction', ha='left', va='center',
-                           fontsize=8)
+                           fontsize=fs)
 
         # Check if there was a previous plot_with_slider with a value
         if plot_with_slider.slider_last_val is not None:
@@ -383,6 +330,7 @@ class MatplotlibParser(BackendParserBase):
 
         # Slider creation
         plot_with_slider.slider = Slider(slider_ax, '', 0, val_max, valinit=value, valstep=1)
+        plot_with_slider.slider.valtext.set_visible(False)  # Hide slider value text
 
         # Register the callback function to update the plot when the slider value changes
         plot_with_slider.slider.on_changed(
@@ -447,7 +395,6 @@ class MatplotlibParser(BackendParserBase):
             subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
 
         mpl_axes = None
-        mpl_axes_prev = None
         for stack_id, key in enumerate(sorted(plot.signals.keys())):
             is_stack_plot_focused = self._focus_plot_stack_key == key
 
@@ -459,9 +406,9 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     row_id = stack_id
 
-                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0], sharex=mpl_axes_prev)
-                mpl_axes_prev = mpl_axes
+                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0])
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
+
                 # Keep references to iplotlib instances for ease of access in callbacks.
                 self._impl_plot_cache_table.register(mpl_axes, self.canvas, plot, key, signals)
                 mpl_axes.set_xmargin(0)
@@ -517,12 +464,11 @@ class MatplotlibParser(BackendParserBase):
                         self.process_ipl_axis(x_axis, ax_idx, plot, mpl_axes)
 
                 for signal in signals:
-                    # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
                     self._signal_impl_plot_lut.update({signal.uid: mpl_axes})
                     self.process_ipl_signal(signal)
 
-                # Set limits for processed signals
-                if isinstance(x_axis, RangeAxis) and x_axis.begin is None and x_axis.end is None:
+                # Set limits for processed signals  TODO: no more needed
+                if isinstance(x_axis, RangeAxis) and x_axis.original_begin is None and x_axis.original_end is None:
                     self.update_range_axis(x_axis, 0, mpl_axes, which='current')
                     if isinstance(plot, PlotXYWithSlider):
                         # In the case of PlotXYWithSlider, the 'original' limits must correspond to the dates stored
@@ -540,7 +486,7 @@ class MatplotlibParser(BackendParserBase):
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value(plot, 'legend')
-                if show_legend and mpl_axes.get_lines():
+                if show_legend and mpl_axes.get_lines():  # TODO improve
                     plot_leg_position = self._pm.get_value(plot, 'legend_position')
                     canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
                     plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
@@ -590,6 +536,7 @@ class MatplotlibParser(BackendParserBase):
                             new_text = current_text.replace("$", r"\$")
                             line.set_text(new_text)
 
+                    fs = self._pm.get_value(plot, 'font_size')  # Font size fot legend lines
                     legend_lines = leg.get_lines()
                     ix_legend = 0
                     for signal in signals:
@@ -603,17 +550,19 @@ class MatplotlibParser(BackendParserBase):
                             if signal.isDownsampled:
                                 legend_label = leg.texts[ix_legend].get_text() + '*'
                                 leg.texts[ix_legend].set_text(legend_label)
+                            leg.get_texts()[ix_legend].set_fontsize(fs)
                             ix_legend += 1
 
-        # Observe the axis limit change events
-        if not self.canvas.streaming:
-            for axes in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
-                axes.callbacks.connect('xlim_changed', self._axis_update_callback)
+            # Observe the axis limit change events
+            if not self.canvas.streaming:
+                mpl_axes.callbacks.connect('xlim_changed', self._axis_update_callback)
 
     def _update_slider(self, val, plot, slider_values, current_label, formatter):
         for c_row in plot.signals.values():
             for c_signal in c_row:
                 self.process_ipl_signal(c_signal)
+
+        # Refresh current label value
         current_value = pandas.Timestamp(slider_values[int(val)])
         current_label.set_text(
             formatter.date_fmt(current_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
@@ -633,39 +582,8 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     plot_with_slider.slider_last_val = val
 
-    def _axis_update_callback(self, current_plot):
-        if self._update:
-            return
-        self._update = True
-
-        # affected_axes = a.get_shared_x_axes().get_siblings(a)
-        # for impl_plot in affected_axes:
-
-        if self._pm.get_value(self.canvas, 'shared_x_axis'):
-            shared_plots = self._get_all_shared_axes(current_plot)
-        else:
-            shared_plots = [current_plot]
-
-        # Check if stacked plots
-        plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
-        impl_stacked = self._plot_impl_plot_lut.get(id(plot))
-
-        new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
-        for impl_plot in shared_plots:
-            # for impl_plot in impl_stacked:
-
-            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
-            self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
-
-            if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
-                self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
-
-            for stack in plot.signals.values():
-                for signal in stack:
-                    signal.set_limits((new_start, new_end))
-                    self.process_ipl_signal(signal)
-
-        self._update = False
+    def _axis_update_callback(self, current_plot: MPLAxes):
+        super()._axis_update_callback(current_plot)
 
     def process_ipl_log_axis(self, mpl_axis: MPLAxis, plot: Plot):
         if isinstance(mpl_axis, YAxis):
@@ -690,6 +608,9 @@ class MatplotlibParser(BackendParserBase):
             tick_props.update({'labelsize': fs})
         if axis.label is not None:
             mpl_axis.set_label_text(axis.label, **label_props)
+
+        # Font size for UTC label
+        mpl_axis.get_offset_text().set_fontsize(fs)
 
         mpl_axis.set_tick_params(**tick_props)
 

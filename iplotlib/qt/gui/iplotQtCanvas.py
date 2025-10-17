@@ -34,7 +34,6 @@ class IplotQtCanvas(QWidget):
         self._parser = None  # type: BackendParserBase
         self._staging_cmds = []  # type: List[IplotAxesRangeCmd]
         self._commitd_cmds = []  # type: List[IplotAxesRangeCmd]
-        self._refresh_original_ranges = True
         self.dropInfo = DropInfo()
 
         # Statistics
@@ -57,9 +56,9 @@ class IplotQtCanvas(QWidget):
             self._stats_table.raise_()
             self._stats_table.activateWindow()
 
-    @abstractmethod
     def drop_history(self):
         """history: clear undo history. after this, can no longer undo"""
+        return self._parser.drop_history()
 
     def can_undo(self) -> bool:
         return self._parser._hm.can_undo()
@@ -119,34 +118,7 @@ class IplotQtCanvas(QWidget):
     @abstractmethod
     def set_canvas(self, canvas):
         """Sets new version of iplotlib canvas and redraw"""
-
-        # Do some post processing stuff here.
-        # 1. Update the original begin, end for each axis.
-        if not canvas:
-            return
-        if self._refresh_original_ranges:
-            for col in canvas.plots:
-                for plot in col:
-                    if not plot:
-                        continue
-                    for ax_idx, axes in enumerate(plot.axes):
-                        if isinstance(axes, Collection):
-                            for axis in axes:
-                                if isinstance(axis, RangeAxis):
-                                    impl_plot = self._parser._axis_impl_plot_lut.get(id(axis))
-                                    self._parser.update_range_axis(axis, ax_idx, impl_plot, which='original')
-                                    self._parser.update_range_axis(axis, ax_idx, impl_plot, which='current')
-                        elif isinstance(axes, RangeAxis) and axes.original_begin is None and axes.original_end is None:
-                            axis = axes
-                            impl_plot = self._parser._axis_impl_plot_lut.get(id(axis))
-
-                            if isinstance(plot, PlotXYWithSlider):
-                                if not isinstance(axis, RangeAxis) or impl_plot is None:
-                                    continue
-                                limits = plot.signals[1][0].z_data[0], plot.signals[1][0].z_data[-1]
-                                axis.set_limits(*limits, 'original')
-                            else:
-                                self._parser.update_range_axis(axis, ax_idx, impl_plot, which='original')
+        pass
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
@@ -190,19 +162,19 @@ class IplotQtCanvas(QWidget):
         finally:
             self._parser._hm.undo()
 
-    def stage_view_lim_cmd(self, plot, impl_plot):
+    def stage_view_lim_cmd(self, impl_plot):
         """stage a view command"""
 
         name = self._mmode[3:]
-        old_limits = [self._parser.get_plot_limits(plot, impl_plot)]
+        old_limits = [self._parser.get_plot_limits(impl_plot)]
         cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
         self._staging_cmds.append(cmd)
         logger.debug(f"Staged {cmd}")
 
-    def commit_view_lim_cmd(self, plot, impl_plot):
+    def commit_view_lim_cmd(self, impl_plot):
         """commit a view command"""
         cmd = self._staging_cmds.pop()
-        cmd.new_lim = [self._parser.get_plot_limits(plot, impl_plot)]
+        cmd.new_lim = [self._parser.get_plot_limits(impl_plot)]
         assert len(cmd.new_lim) == len(cmd.old_lim)
 
         # Check if any limit actually changed

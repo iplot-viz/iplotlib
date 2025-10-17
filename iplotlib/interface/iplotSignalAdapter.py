@@ -993,9 +993,9 @@ class ParserHelper:
         p.substitute_var(tmp_local_env, ParserHelper.dict_result)
         p.eval_expr()
         if p.has_time_units:
-            result =  p.result.astype('int64')
+            result = p.result.astype('int64')
         else:
-            result =  p.result
+            result = p.result
         p.clear_expr()
         return result
 

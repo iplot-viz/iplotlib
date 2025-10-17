@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Collection
 import numpy as np
 
 from matplotlib.axes import Axes as MPLAxes
@@ -150,7 +150,7 @@ class IplotMultiCursor(Widget):
                                                           xycoords="data",  # xytext=(-200, 0),
                                                           verticalalignment="top", horizontalalignment="left",
                                                           **value_arrow_props)
-                            value_annotation.line = line
+                            value_annotation.line = line if isinstance(line, Collection) else [line]
                             ax.add_artist(value_annotation)
                             self.value_annotations.append(value_annotation)
 

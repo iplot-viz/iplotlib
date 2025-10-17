@@ -143,8 +143,12 @@ class SignalXY(Signal, IplotSignalAdapter):
 
     def set_limits(self, ranges):
         if self.x_expr != '${self}.time' and len(self.data_store[0]) > 0 and len(self.x_data) > 0:
-            idx1 = np.searchsorted(self.x_data, ranges[0])
-            idx2 = np.searchsorted(self.x_data, ranges[1])
+            # Make sure that the x_data array is filter and sorted
+            x_data = self.x_data[~np.isnan(self.x_data)]
+            x_data_sorted = np.sort(x_data)
+
+            idx1 = np.searchsorted(x_data_sorted, ranges[0])
+            idx2 = np.searchsorted(x_data_sorted, ranges[1])
 
             if idx1 != 0:
                 idx1 -= 1

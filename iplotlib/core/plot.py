@@ -11,7 +11,7 @@ one might want to use when plotting data.
 from abc import ABC
 import typing
 from dataclasses import dataclass
-from typing import Dict, List, Collection, Union, Tuple
+from typing import Dict, List, Collection, Union
 import weakref
 
 from iplotlib.core.axis import Axis, LinearAxis
@@ -52,8 +52,8 @@ class Plot(ABC):
     _type : str
         type of the plot
     """
-    row: int
-    col: int
+    row: int = 1
+    col: int = 1
     row_span: int = 1
     col_span: int = 1
     plot_title: str = None

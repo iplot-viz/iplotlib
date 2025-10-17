@@ -7,10 +7,11 @@ import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
 from pyqtgraph.Qt import QtCore
 from pyqtgraph.Qt import QtWidgets
-from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QLabel, QGraphicsSceneMouseEvent
+from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QGraphicsSceneMouseEvent, QWidget
 
 from iplotLogging import setupLogger
 from iplotlib.core import (Axis,
@@ -24,7 +25,6 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
-from iplotlib.core.limits import IplPlotViewLimits, IplSignalLimits, IplAxisLimits, IplSliderLimits
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
 
@@ -98,8 +98,6 @@ class PyQtGraphParser(BackendParserBase):
         else:
             self.disable_tight_layout()
 
-        self._update = False
-
     def _ensure_cell_layout(self, row: int, col: int, rowspan: int, colspan: int):
         key = (row, col)
         cell_gl = self._cell_gl.get(key)
@@ -113,20 +111,19 @@ class PyQtGraphParser(BackendParserBase):
     def export_image(self, filename: str, **kwargs):
         super().export_image(filename, **kwargs)
 
-    def legend_downsampled_signal(self, signal, impl_plot, plot_lines):
+    def legend_downsampled_signal(self, signal, impl_plot: PlotItem, plot_lines: PlotDataItem):
         """
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
         legend = impl_plot.legend
-        if len(legend.items) and plot_lines is not None:
-            lines = [lines[0].item.name() for lines in legend.items]
-            pos = lines.index(plot_lines[0].name())
+        lines = [lines[0].item.name() for lines in legend.items]
+        pos = lines.index(plot_lines.name())
 
-            legend_text = legend.items[pos][1].text
-            if legend_text.endswith('*') and not signal.isDownsampled:
-                legend.items[pos][1].setText(legend_text[:-1])
-            elif not legend_text.endswith('*') and signal.isDownsampled:
-                legend.items[pos][1].setText(legend_text + '*')
+        legend_text = legend.items[pos][1].text
+        if legend_text.endswith('*') and not signal.isDownsampled:
+            legend.items[pos][1].setText(legend_text[:-1])
+        elif not legend_text.endswith('*') and signal.isDownsampled:
+            legend.items[pos][1].setText(legend_text + '*')
 
     @staticmethod
     def _get_visible_data(xd, yd, lo, hi):
@@ -206,40 +203,17 @@ class PyQtGraphParser(BackendParserBase):
 
         return style
 
-    def do_impl_line_plot_xy_slider(self, signal: SignalXY, plot: PlotItem, i_plot: PlotXYWithSlider, cache_item,
-                                    x_data, y_data, z_data):
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[PlotDataItem]]
-        style = self.get_signal_style(signal)
-        draw_fn = plot.plot
+    def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
+        return y_data[plot.slider.value()]
 
-        ysub_data = y_data[i_plot.slider.value()]
+    def create_slider_plot_lines_1D(self, draw_fn, x_data, ysub_data, style) -> List[PlotDataItem]:
+        return [draw_fn(x_data, ysub_data, **style)]
 
-        # Review to implement directly in PlotXY class
-        if signal.color is None:
-            signal.color = i_plot.get_next_color()
+    def create_slider_plot_lines_2D(self, draw_fn, x_data, ysub_data, style):
+        pass
 
-        if isinstance(plot_lines, list):
-            if x_data.ndim == 1 and ysub_data.ndim == 1:
-                line = plot_lines[0]
-                self.set_line_data(style, line, x_data, ysub_data)
-                # _update_marker_by_point_count(line, x_data, style)
-            elif x_data.ndim == 1 and ysub_data.ndim == 2:
-                for i, line in enumerate(plot_lines):
-                    line[0].setData(x=x_data, y=y_data[:, i])
-                    line[0].setPen(style['pen'])
-                    # _update_marker_by_point_count(line[0], x_data, style)
-        else:
-            if x_data.ndim == 1 and ysub_data.ndim == 1:
-                plot_lines = [draw_fn(x_data, ysub_data, **style)]
-            elif x_data.ndim == 1 and ysub_data.ndim == 2:
-                lines = draw_fn(x_data, ysub_data, **style)
-                plot_lines = [[line] for line in lines]
-                for i, line in enumerate(plot_lines):
-                    line[0].set_label(f"{signal.label}[{i}]")
-
-        signal.lines = plot_lines
-
-        return plot_lines
+    def slider_visible_status(self, plot_lines, signal):
+        pass
 
     def do_impl_line_plot_contour(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContour, x_data, y_data,
                                   z_data):
@@ -383,30 +357,12 @@ class PyQtGraphParser(BackendParserBase):
         self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
         return True
 
-    def _get_all_shared_axes(self, base_impl_plot: PlotItem) -> List[PlotItem]:
-        cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
-
-        base_plot = cache_item.plot()
-        if isinstance(base_plot, PlotXYWithSlider):
-            return []
-
-        shared = list()
-        base_begin, base_end = base_plot.axes[0].get_limits("original")
-
+    def get_canvas_plots(self):
+        plots = []
         for stack in self._layout_stacks.values():
             for plot_item in stack.values():
-                cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
-                plot = cache_item.plot()
-                begin, end = plot.axes[0].get_limits("original")
-
-                # Check if it is date and the max difference is 1 second
-                # Need to differentiate if it is absolute or relative
-                max_diff = self._pm.get_value(self.canvas, 'max_diff')
-                max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot,
-                                                                                   PlotXYWithSlider) else max_diff
-                if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
-                    shared.append(plot_item)
-        return shared
+                plots.append(plot_item)
+        return plots
 
     def process_ipl_plot_xy(self):
         pass
@@ -415,7 +371,6 @@ class PyQtGraphParser(BackendParserBase):
         pass
 
     def process_ipl_plot_xy_slider(self, i_plot: PlotXYWithSlider, row, col, visible_stack_ids, cell_gl):
-
         # Check if there was a previous plot_with_slider with a value
         if i_plot.slider_last_val is not None:
             value = i_plot.slider_last_val
@@ -431,23 +386,40 @@ class PyQtGraphParser(BackendParserBase):
 
         i_plot.slider = slider
 
-        # Proxy widget
-        rc_key = (row, col)
-        proxy = QtWidgets.QGraphicsProxyWidget()
-        proxy.setWidget(slider)
-        last_row_id = max(visible_stack_ids) + 1
-        cell_gl.nextRow()
-        cell_gl.addItem(proxy)  # row=last_row_id, col=0
-        self._slider_placeholders[rc_key] = proxy
-
         # Annotate labels along the slider axis
         h_layout = QHBoxLayout()
 
+        # Proxy widget
+        rc_key = (row, col)
+        proxy = QtWidgets.QGraphicsProxyWidget()
+        container = QWidget()
+        v_layout = QVBoxLayout(container)
+        v_layout.setContentsMargins(0, 0, 0, 0)
+        v_layout.setSpacing(0)
+        v_layout.addWidget(slider)
+        v_layout.addLayout(h_layout)
+        proxy.setWidget(container)
+        last_row_id = max(visible_stack_ids) + 1
+        cell_gl.addItem(proxy, row=last_row_id, col=0)
+        self._slider_placeholders[rc_key] = proxy
+
         # Get data for the slider
         slider_values = i_plot.signals[1][0].z_data
+
+        # Slider labels
         min_label = QLabel(f"{pd.Timestamp(slider_values[0])}")
         max_label = QLabel(f"{pd.Timestamp(slider_values[-1])}")
         current_label = QLabel(F"{pd.Timestamp(slider_values[0])}")
+
+        # Apply font_size for slider labels
+        fs = self._pm.get_value(i_plot, 'font_size') or self._pm.get_value(self.canvas, 'font_size')
+        if fs:
+            qf = QFont()
+            qf.setPointSize(int(fs))
+            min_label.setFont(qf)
+            current_label.setFont(qf)
+            max_label.setFont(qf)
+
         h_layout.addWidget(min_label)
         h_layout.addStretch()
         h_layout.addWidget(current_label)
@@ -457,10 +429,6 @@ class PyQtGraphParser(BackendParserBase):
         # Register the callback function to update the plot when the slider value changes
         slider.valueChanged.connect(lambda val, i_p=i_plot: self._update_slider(val, i_p, slider_values, current_label))
 
-        # pyqt_layout.addWidget(slider)
-        # pyqt_layout.addLayout(h_layout)
-
-        # return pyqt_layout
         return cell_gl
 
     def process_ipl_plot(self, i_plot: Plot, col: int, row: int):
@@ -488,7 +456,6 @@ class PyQtGraphParser(BackendParserBase):
             elif stack_id not in self._layout_stacks[l_key]:
                 pi = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
                 cell_gl.addItem(pi, row=stack_id, col=0)
-                pi.vb.setXLink(self._layout_stacks[l_key][0])
                 pi.getAxis('bottom').setStyle(showValues=False)
                 self._layout_stacks[l_key][stack_id] = pi
 
@@ -498,6 +465,7 @@ class PyQtGraphParser(BackendParserBase):
 
             plot = self._layout_stacks[l_key][stack_id]
             plot.enableAutoRange(x=False, y=False)
+            plot.hideButtons()
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
 
             # Keep references to iplotlib instances for ease of access in callbacks.
@@ -528,7 +496,6 @@ class PyQtGraphParser(BackendParserBase):
 
             # Process signal
             for signal in signals:
-                # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
                 self._signal_impl_plot_lut.update({signal.uid: plot})
                 self.process_ipl_signal(signal)
 
@@ -536,16 +503,18 @@ class PyQtGraphParser(BackendParserBase):
             # self.update_multi_range_axis(i_plot.axes[1], 1, plot)
 
             # Legend processing for downsampled data when drawing
+            fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
             ix_legend = 0
             for signal in signals:
+                plot.legend.items[ix_legend][1].setAttr(attr='size', value=f'{fs}pt')
                 if signal.isDownsampled:
                     legend_label = plot.legend.items[ix_legend][1].text + '*'
                     plot.legend.items[ix_legend][1].setText(legend_label)
                 ix_legend += 1
 
-        # Observe the axis limit change events
-        vb = plot.getViewBox()
-        vb.sigXRangeChanged.connect(self._axis_update_callback)
+            # Observe the axis limit change events
+            vb = plot.getViewBox()
+            vb.sigXRangeChanged.connect(self._axis_update_callback)
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
         if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
@@ -565,7 +534,7 @@ class PyQtGraphParser(BackendParserBase):
             return
         fc = self._pm.get_value(i_plot, 'font_color')
         fs = self._pm.get_value(i_plot, 'font_size')
-        plot.setTitle(i_plot.plot_title, color=fc, size=fs)
+        plot.setTitle(i_plot.plot_title, color=fc, size=f'{fs}pt')
 
     def set_background_color(self, i_plot: Plot, plot: PlotItem):
         background_color = self._pm.get_value(i_plot, 'background_color')
@@ -594,10 +563,10 @@ class PyQtGraphParser(BackendParserBase):
                     item = grid.itemAtPosition(row, col)
                     if item:
                         items.append(item)
-            # limpiar
+            # Clean
             for item in items:
                 grid.removeItem(item)
-            # recolocar
+            # Relocate
             if layout_type.lower() == 'vertical':
                 for i, item in enumerate(items):
                     grid.addItem(item, i, 0)
@@ -615,6 +584,9 @@ class PyQtGraphParser(BackendParserBase):
         legend = plot.legend
 
         leg_position = self._pm.get_value(i_plot, 'legend_position')
+        # Check for 'same as canvas' value
+        if leg_position == 'same as canvas':
+            leg_position = 'upper right'
         set_legend_position(legend, leg_position)
         # leg_layout = self._pm.get_value(plot, 'legend_layout')
         # set_legend_layout(legend, leg_layout)
@@ -648,51 +620,40 @@ class PyQtGraphParser(BackendParserBase):
                     plot_with_slider.slider_last_val = val
 
     def _axis_update_callback(self, view_box: ViewBox):
-        if self._update:
-            return
-        self._update = True
-        current_plot = view_box.parentItem()
-        shared_plots = self._get_all_shared_axes(current_plot)
-
-        new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
-        for impl_plot in shared_plots:
-            if not self._pm.get_value(self.canvas, 'shared_x_axis') and impl_plot != current_plot:
-                continue
-
-            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
-            self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
-
-            if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
-                self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
-
-            for stack in plot.signals.values():
-                for signal in stack:
-                    signal.set_limits((new_start, new_end))
-                    self.process_ipl_signal(signal)
-
-        self._update = False
+        current_plot = view_box.parentItem()  # type: PlotItem
+        super()._axis_update_callback(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
-        if axis_item.orientation == 'left':
-            log_scale = self._pm.get_value(plot, 'log_scale')
-            if log_scale:
-                # Set log scale for AxisItem
-                pass
+        if axis_item.orientation != 'left':
+            return
+        log_scale = self._pm.get_value(plot, 'log_scale')
+        if log_scale:  # TODO: review log scale
+            # Set log scale for AxisItem
+            plot_item = axis_item.parentItem()
+            plot_item.setLogMode(y=log_scale)
+            # axis_item.setLogMode(log_scale)
 
     def process_ipl_axis_params(self, fc, fs, axis: Axis, axis_item: AxisItem):
-        label_props = dict(maxTickLevel=0)
+        tick_props = dict(maxTickLevel=0)  # TODO: add color to tick values
+        label_props = dict(color=fc)
 
         # Set ticks on the top and right axis
         if self._pm.get_value(self.canvas, 'ticks_position'):
-            label_props['maxTickLevel'] = 2
+            tick_props['maxTickLevel'] = 2
         else:
-            label_props['maxTickLevel'] = 0
+            tick_props['maxTickLevel'] = 0
+
+        # Set color and font
+        if fs is not None and fs > 0:
+            tick_font = QFont()
+            tick_font.setPointSize(int(fs))
+            tick_props.update({'tickFont': tick_font})
+            label_props.update({'font-size': f'{int(fs)}pt'})
 
         if axis.label is not None:
-            axis_item.setLabel(axis.label)
+            axis_item.setLabel(axis.label, **label_props)
 
-        # axis_item.set_tick_params(**tick_props)
-        axis_item.setStyle(**label_props)
+        axis_item.setStyle(**tick_props)
 
     def process_ipl_axis_formatter(self, impl_plot: PlotItem, impl_axis: NanosecondDateFormatter, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
@@ -871,35 +832,37 @@ class PyQtGraphParser(BackendParserBase):
             self._focus_plot = None
             row, col, stack_id = None, None, None
         else:
-            self._focus_plot = impl_plot
             ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
             plot = ci.plot()
+            self._focus_plot = plot
             row = plot.row - 1
             col = plot.col - 1
             stack_id = ci.stack_key
 
+        """
         for (r, c), stack_dict in self._layout_stacks.items():
-            for s_id, plot_item in stack_dict.items():
-                if un_focus:
-                    plot_item.setVisible(True)
-                    if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
-                        plot_item.getAxis("bottom").common_label.setVisible(True)
-                else:
-                    if all_stack:
-                        plot_item.setVisible(r == row and c == col)
-                        if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
-                            plot_item.getAxis("bottom").common_label.setVisible(r == row and c == col)
-                    else:
-                        plot_item.setVisible(r == row and c == col and s_id == stack_id)
-                        if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
-                            plot_item.getAxis("bottom").common_label.setVisible(
-                                r == row and c == col and s_id == stack_id)
-                        self.set_bottom_axis_stacked(row, col, [stack_id])
-
-        for key, value in self._slider_placeholders.items():
-            if key == (row, col):
-                continue
-            value.setVisible(un_focus)
+             for s_id, plot_item in stack_dict.items():
+                 if un_focus:
+                     plot_item.setVisible(True)
+                     if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
+                         plot_item.getAxis("bottom").common_label.setVisible(True)
+                 else:
+                     if all_stack:
+                         plot_item.setVisible(r == row and c == col)
+                         if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
+                             plot_item.getAxis("bottom").common_label.setVisible(r == row and c == col)
+                     else:
+                         plot_item.setVisible(r == row and c == col and s_id == stack_id)
+                         if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
+                             plot_item.getAxis("bottom").common_label.setVisible(
+                                 r == row and c == col and s_id == stack_id)
+                         self.set_bottom_axis_stacked(row, col, [stack_id])
+    
+         for key, value in self._slider_placeholders.items():
+             if key == (row, col):
+                 continue
+             value.setVisible(un_focus)
+         """
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
