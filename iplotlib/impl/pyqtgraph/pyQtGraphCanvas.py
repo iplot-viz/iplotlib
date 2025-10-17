@@ -627,7 +627,7 @@ class PyQtGraphParser(BackendParserBase):
         if axis_item.orientation != 'left':
             return
         log_scale = self._pm.get_value(plot, 'log_scale')
-        if log_scale: # TODO: review log scale
+        if log_scale:  # TODO: review log scale
             # Set log scale for AxisItem
             plot_item = axis_item.parentItem()
             plot_item.setLogMode(y=log_scale)
@@ -832,35 +832,37 @@ class PyQtGraphParser(BackendParserBase):
             self._focus_plot = None
             row, col, stack_id = None, None, None
         else:
-            self._focus_plot = impl_plot
             ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
             plot = ci.plot()
+            self._focus_plot = plot
             row = plot.row - 1
             col = plot.col - 1
             stack_id = ci.stack_key
 
+        """
         for (r, c), stack_dict in self._layout_stacks.items():
-            for s_id, plot_item in stack_dict.items():
-                if un_focus:
-                    plot_item.setVisible(True)
-                    if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
-                        plot_item.getAxis("bottom").common_label.setVisible(True)
-                else:
-                    if all_stack:
-                        plot_item.setVisible(r == row and c == col)
-                        if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
-                            plot_item.getAxis("bottom").common_label.setVisible(r == row and c == col)
-                    else:
-                        plot_item.setVisible(r == row and c == col and s_id == stack_id)
-                        if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
-                            plot_item.getAxis("bottom").common_label.setVisible(
-                                r == row and c == col and s_id == stack_id)
-                        self.set_bottom_axis_stacked(row, col, [stack_id])
-
-        for key, value in self._slider_placeholders.items():
-            if key == (row, col):
-                continue
-            value.setVisible(un_focus)
+             for s_id, plot_item in stack_dict.items():
+                 if un_focus:
+                     plot_item.setVisible(True)
+                     if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
+                         plot_item.getAxis("bottom").common_label.setVisible(True)
+                 else:
+                     if all_stack:
+                         plot_item.setVisible(r == row and c == col)
+                         if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
+                             plot_item.getAxis("bottom").common_label.setVisible(r == row and c == col)
+                     else:
+                         plot_item.setVisible(r == row and c == col and s_id == stack_id)
+                         if isinstance(plot_item.getAxis("bottom"), NanosecondDateFormatter):
+                             plot_item.getAxis("bottom").common_label.setVisible(
+                                 r == row and c == col and s_id == stack_id)
+                         self.set_bottom_axis_stacked(row, col, [stack_id])
+    
+         for key, value in self._slider_placeholders.items():
+             if key == (row, col):
+                 continue
+             value.setVisible(un_focus)
+         """
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):

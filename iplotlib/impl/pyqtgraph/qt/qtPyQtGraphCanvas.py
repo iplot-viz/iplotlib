@@ -169,6 +169,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             if event.button() == Qt.MouseButton.LeftButton:
                 if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
                     self._parser.set_focus_plot(impl_plot)
+                    self.refresh()
+                    # self.stats(self.get_canvas())
                 else:
                     return
             elif event.button() == Qt.MouseButton.RightButton:

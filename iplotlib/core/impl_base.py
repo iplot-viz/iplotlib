@@ -904,13 +904,16 @@ class BackendParserBase(ABC):
             return all_limits
         for col in self.canvas.plots:
             for plot in col:
+                if self._focus_plot is not None and self._focus_plot != plot:
+                    continue
                 impl_list = self._plot_impl_plot_lut.get(id(plot))
-                if impl_list:
-                    for impl_plot in impl_list:
-                        plot_lims = self.get_plot_limits(impl_plot)
-                        if not isinstance(plot_lims, IplPlotViewLimits):
-                            continue
-                        all_limits.append(plot_lims)
+                if not impl_list:
+                    continue
+                for impl_plot in impl_list:
+                    plot_lims = self.get_plot_limits(impl_plot)
+                    if not isinstance(plot_lims, IplPlotViewLimits):
+                        continue
+                    all_limits.append(plot_lims)
         return all_limits
 
     def get_plot_limits(self, impl_plot: Any) -> Optional[IplPlotViewLimits]:
