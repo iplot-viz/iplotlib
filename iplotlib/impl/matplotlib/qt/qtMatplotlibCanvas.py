@@ -11,6 +11,7 @@
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
 from collections import defaultdict
+from collections.abc import Collection
 
 from PySide6.QtCore import QMargins, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
@@ -372,13 +373,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         ax_lines = self._parser.map_legend_to_ax[legend_line]
         visible = True
-        for ax_line in ax_lines:
-            visible = not ax_line.get_visible()
-            ax_line.set_visible(visible)
+        if isinstance(ax_lines, Collection):
+            for ax_line in ax_lines:  # Envelope case
+                visible = not ax_line.get_visible()
+                ax_line.set_visible(visible)
+        else:
+            visible = not ax_lines.get_visible()
+            ax_lines.set_visible(visible)
 
         # signal.lines = ax_lines
-        # Change the alpha on the line in the legend, so we can see what lines
-        # have been toggled.
+        # Change the alpha on the line in the legend, so we can see what lines have been toggled
         legend_line.set_alpha(1.0 if visible else 0.2)
         self._parser.figure.canvas.draw()
 
