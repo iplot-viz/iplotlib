@@ -688,6 +688,10 @@ class PyQtGraphParser(BackendParserBase):
         if axis.label is not None:
             axis_item.setLabel(axis.label, **label_props)
 
+        # Font size for UTC label
+        if isinstance(axis_item, NanosecondDateFormatter):
+            axis_item.common_label.setText(axis_item.offset_str, size=f'{fs}pt')
+
         axis_item.setStyle(**tick_props)
 
     def process_ipl_axis_formatter(self, impl_plot: PlotItem, impl_axis: NanosecondDateFormatter, ax_idx: int):
