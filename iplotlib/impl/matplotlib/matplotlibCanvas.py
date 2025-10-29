@@ -1,6 +1,6 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
-
+from datetime import datetime
 from typing import Any, Callable, Collection, List
 import pandas
 import gc
@@ -34,15 +34,15 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
-from iplotlib.core.impl_base import ImplementationPlotCacheTable
 
 logger = setupLogger.get_logger(__name__)
 
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
             "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
 
-mpl.rcParams['path.simplify'] = True
-mpl.rcParams['path.simplify_threshold'] = 1.0
+
+# mpl.rcParams['path.simplify'] = True
+# mpl.rcParams['path.simplify_threshold'] = 1.0
 
 
 class MatplotlibParser(BackendParserBase):
@@ -118,8 +118,35 @@ class MatplotlibParser(BackendParserBase):
             # for n, o in zip(new, old):
             new.set_visible(old.get_visible())
 
-    def do_impl_streaming(self, impl_plot: Any, plot: Plot, cache_item, x_data):
-        pass
+    def do_impl_streaming(self, impl_plot: MPLAxes, plot: Plot, cache_item):
+        """
+        Updates the X and Y view ranges of the Axes based on the most recent data received from the Streaming
+        """
+        ax_window = impl_plot.get_xlim()[1] - impl_plot.get_xlim()[0]
+
+        # Time window
+        now = int(datetime.now().timestamp() * 1e9)
+        min_time = now - int(ax_window)
+
+        all_y_data = []
+        for signal_ref in cache_item.signals:
+            signal = signal_ref()
+            if signal.lines[0].get_visible() and len(signal.x_data) > 0:
+                mask = (signal.x_data >= min_time) & (signal.x_data <= now)
+                all_y_data.extend(signal.y_data[mask])
+
+        if all_y_data:
+            y_max = np.nanmax(all_y_data).item()
+            y_min = np.nanmin(all_y_data).item()
+            if y_max == y_min:
+                diff = y_max * 0.05
+            else:
+                diff = (y_max - y_min) * 0.1
+            impl_plot.set_ylim(y_min - diff, y_max + diff)
+
+        begin = self.transform_value(impl_plot, 0, min_time, inverse=True)
+        end = self.transform_value(impl_plot, 0, now, inverse=True)
+        impl_plot.set_xlim(begin, end)
 
     def set_line_data(self, line: Line2D, x_data, y_data, style: dict):
         """
@@ -555,7 +582,8 @@ class MatplotlibParser(BackendParserBase):
 
             # Observe the axis limit change events
             if not self.canvas.streaming:
-                mpl_axes.callbacks.connect('xlim_changed', self._axis_update_callback)
+                mpl_axes.callbacks.connect('xlim_changed', self._x_axis_update_callback)
+                mpl_axes.callbacks.connect('ylim_changed', self._y_axis_update_callback)
 
     def _update_slider(self, val, plot, slider_values, current_label, formatter):
         for c_row in plot.signals.values():
@@ -582,8 +610,11 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     plot_with_slider.slider_last_val = val
 
-    def _axis_update_callback(self, current_plot: MPLAxes):
-        super()._axis_update_callback(current_plot)
+    def _x_axis_update_callback(self, current_plot: MPLAxes):
+        super()._x_axis_update_callback(current_plot)
+
+    def _y_axis_update_callback(self, current_plot: MPLAxes):
+        super()._y_axis_update_callback(current_plot)
 
     def process_ipl_log_axis(self, mpl_axis: MPLAxis, plot: Plot):
         if isinstance(mpl_axis, YAxis):
@@ -986,11 +1017,19 @@ class MatplotlibParser(BackendParserBase):
 
     def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
         """Implementations should set the x_axis label text"""
-        self.get_impl_x_axis(impl_plot).set_label_text(text)
+        x_axis = self.get_impl_x_axis(impl_plot)
+        fc = self._pm.get_value(x_axis, 'font_color')
+        fs = self._pm.get_value(x_axis, 'font_size')
+        label_props = dict(fontsize=fs, color=fc)
+        x_axis.set_label_text(text, **label_props)
 
     def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
         """Implementations should set the y_axis label text"""
-        self.get_impl_y_axis(impl_plot).set_label_text(text)
+        y_axis = self.get_impl_y_axis(impl_plot)
+        fc = self._pm.get_value(y_axis, 'font_color')
+        fs = self._pm.get_value(y_axis, 'font_size')
+        label_props = dict(fontsize=fs, color=fc)
+        y_axis.set_label_text(text, **label_props)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to

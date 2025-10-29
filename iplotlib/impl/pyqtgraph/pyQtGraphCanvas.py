@@ -1,6 +1,6 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
-
+from datetime import datetime
 from typing import Any, Callable, Collection, List, Tuple
 import numpy as np
 import pandas as pd
@@ -51,9 +51,9 @@ class QtViewBox(pg.ViewBox):
 
     def __init__(self, parent=None):
         super().__init__(parent=parent, enableMenu=True)
-        self.sigRangeChanged.connect(self.release_event)
+        self.sigRangeChangedManually.connect(self.release_event)
 
-    def mousePressEvent(self, ev: QGraphicsSceneMouseEvent):
+    def mousePressEvent(self, ev):
         # Add log message
         if ev.button() == Qt.MouseButton.RightButton:
             ev.accept()
@@ -149,8 +149,33 @@ class PyQtGraphParser(BackendParserBase):
     def visible_status(self, plot_lines, signal):
         pass
 
-    def do_impl_streaming(self, impl_plot: Any, plot: Plot, cache_item, x_data):
-        pass
+    def do_impl_streaming(self, impl_plot: PlotItem, plot: Plot, cache_item):
+        """
+        Updates the X and Y view ranges of the ViewBox based on the most recent data received from the Streaming
+        """
+        vb = impl_plot.getViewBox()
+        vb_x_limits = vb.viewRange()[0]
+        ax_window = vb_x_limits[1] - vb_x_limits[0]
+
+        # Time window
+        now = int(datetime.now().timestamp() * 1e9)
+        min_time = now - int(ax_window)
+
+        all_y_data = []
+        for signal_ref in cache_item.signals:
+            signal = signal_ref()
+            if signal.lines[0].isVisible() and len(signal.x_data) > 0:
+                mask = (signal.x_data >= min_time) & (signal.x_data <= now)
+                all_y_data.extend(signal.y_data[mask])
+
+        if all_y_data:
+            y_max = np.nanmax(all_y_data).item()
+            y_min = np.nanmin(all_y_data).item()
+            vb.setYRange(y_min, y_max, padding=0.1)
+
+        begin = self.transform_value(impl_plot, 0, min_time, inverse=True)
+        end = self.transform_value(impl_plot, 0, now, inverse=True)
+        vb.setXRange(begin, end, padding=0)
 
     def set_line_data(self, line: PlotDataItem, x_data, y_data, style: dict):
         """
@@ -514,7 +539,8 @@ class PyQtGraphParser(BackendParserBase):
 
             # Observe the axis limit change events
             vb = plot.getViewBox()
-            vb.sigXRangeChanged.connect(self._axis_update_callback)
+            vb.sigXRangeChanged.connect(self._x_axis_update_callback)
+            vb.sigYRangeChanged.connect(self._y_axis_update_callback)
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
         if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
@@ -619,9 +645,17 @@ class PyQtGraphParser(BackendParserBase):
                 else:
                     plot_with_slider.slider_last_val = val
 
-    def _axis_update_callback(self, view_box: ViewBox):
+    def _y_axis_update_callback(self, view_box: ViewBox):
+        if self.canvas.streaming:
+            return
         current_plot = view_box.parentItem()  # type: PlotItem
-        super()._axis_update_callback(current_plot)
+        super()._y_axis_update_callback(current_plot)
+
+    def _x_axis_update_callback(self, view_box: ViewBox):
+        if self.canvas.streaming:
+            return
+        current_plot = view_box.parentItem()  # type: PlotItem
+        super()._x_axis_update_callback(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':

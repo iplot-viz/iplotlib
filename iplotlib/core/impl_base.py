@@ -12,6 +12,7 @@ See :data:`~iplotlib.core.impl_base.ImplementationPlotCacheItem` and :data:
 
 # Author: Jaswant Sai Panchumarti
 
+from datetime import datetime
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -21,7 +22,6 @@ from queue import Empty, Queue
 import threading
 from typing import Any, Callable, Collection, Dict, List, Optional, Union
 import weakref
-import inspect
 
 from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
@@ -139,6 +139,7 @@ class BackendParserBase(ABC):
         self._impl_plot_ranges_hash = defaultdict(
             lambda: defaultdict(dict))  # type: Dict[Any, int] # key is id(impl_plot)
         self._update = False
+        self._streaming_impl_plot_lut = defaultdict(lambda: [None, None])
 
     def run_in_one_thread(func):
         """
@@ -155,6 +156,9 @@ class BackendParserBase(ABC):
             if threading.current_thread() == self._impl_draw_thread or self._impl_flush_method is None:
                 return func(self, *args, **kwargs)
             else:
+                # We are not in the main thread, so the Streaming thread is added to the task queue
+                # The call to self._impl_flush_method() triggers the main thread to execute draw_in_main_thread
+                # This eventually calls process_work_queue in the correct thread
                 self._impl_task_queue.put(partial(func, self, *args, **kwargs))
                 self._impl_flush_method()
 
@@ -162,6 +166,8 @@ class BackendParserBase(ABC):
 
     @run_in_one_thread
     def process_work_queue(self):
+        # Processes a single pending task from the task queue
+        # Since it is decorated with run_in_one_thread, it will never run in the wrong thread
         try:
             work_item = self._impl_task_queue.get_nowait()
             work_item()
@@ -187,6 +193,7 @@ class BackendParserBase(ABC):
         self._plot_impl_plot_lut.clear()
         self._signal_impl_plot_lut.clear()
         self._signal_impl_shape_lut.clear()
+        self._streaming_impl_plot_lut.clear()
 
     def process_ipl_canvas(self, canvas: Canvas):
         """
@@ -249,7 +256,25 @@ class BackendParserBase(ABC):
         """
 
     @abstractmethod
-    def _axis_update_callback(self, current_plot: Any):
+    def _y_axis_update_callback(self, current_plot: Any):
+        """
+        Callback that updates the Y axis limits when the axis bounds change in the corresponding plot implementation
+        """
+        y_start, y_end = self.get_oaw_axis_limits(current_plot, 1)
+        plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
+        shared_plots = self._plot_impl_plot_lut.get(id(plot))
+
+        # Set Y Axis limits
+        pos = shared_plots.index(current_plot)
+        y_sub_axis = plot.axes[1][pos]
+        y_sub_axis.set_limits(y_start, y_end, 'current')
+
+    @abstractmethod
+    def _x_axis_update_callback(self, current_plot: Any):
+        """
+        Callback that updates the X axis limits when the axis bounds change in the corresponding plot implementation.
+        This callback ensures that all plots sharing the time axis are synchronized.
+        """
         if self._update:
             return
         self._update = True
@@ -264,6 +289,10 @@ class BackendParserBase(ABC):
 
         for impl_plot in shared_plots:
             plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+            # Set X Axis limits
+            plot.axes[0].set_limits(new_start, new_end, 'current')
+
             self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
 
             if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
@@ -381,18 +410,24 @@ class BackendParserBase(ABC):
             autoscale_val = self._pm.get_value(self.canvas, 'autoscale')
             self.autoscale_y_axis(impl_plot)
 
-        if axis.original_begin is None and axis.original_end is None:
-            self.update_original_axis_limits(axis, impl_plot, ax_idx)
+        if ax_idx != 1 or not self.canvas.streaming:  # In case of Streaming, just set X limits at the start
+            if axis.begin is None and axis.end is None:
+                self.update_original_axis_limits(axis, impl_plot, ax_idx)
+                begin, end = axis.original_begin, axis.original_end
+            else:
+                begin, end = axis.begin, axis.end
 
-        begin, end = axis.original_begin, axis.original_end
-
-        if ax_idx == 1:
-            h = end - begin
-            n_begin = begin - 0.1 * h
-            n_end = end + 0.1 * h
-            self.set_oaw_axis_limits(impl_plot, ax_idx, [n_begin, n_end])
-        else:
-            self.set_oaw_axis_limits(impl_plot, ax_idx, [begin, end])
+            if ax_idx == 1:
+                h = end - begin
+                n_begin = begin - 0.1 * h
+                n_end = end + 0.1 * h
+                self.set_oaw_axis_limits(impl_plot, ax_idx, [n_begin, n_end])
+                # Set Y Axis limits
+                axis.set_limits(n_begin, n_end, 'current')  # TODO: save limits with padding, adjust based on visible data
+            else:
+                self.set_oaw_axis_limits(impl_plot, ax_idx, [begin, end])
+                # Set X Axis limits
+                axis.set_limits(begin, end, 'current')
 
         # Process Nanoseconds Axis
         if axis.is_date:
@@ -524,6 +559,32 @@ class BackendParserBase(ABC):
     def _update_marker_by_point_count(marker_line: Any, signal_x_data, signal_style: dict):
         pass
 
+    def update_plot_line_streaming(self, impl_plot: Any, plot_lines, x_data, y_data, style):
+        """
+        Updates the plot data during streaming, distinguishing between the cases when new data arrives and when no
+        new data is received.
+
+        The method stores the last X and Y points from the arrays and compares them with the most recent values. If
+        the latest X value remains unchanged, it means no new data has arrived. In this case, a constant value is drawn
+        to represent the last received Y point.
+        """
+        last_x = self._streaming_impl_plot_lut[impl_plot][0]
+        last_y = self._streaming_impl_plot_lut[impl_plot][1]
+
+        if len(x_data) > 0 and last_x != x_data[-1]:  # New data
+            self._streaming_impl_plot_lut[impl_plot] = [x_data[-1], y_data[-1]]
+            self.set_line_data(plot_lines[0], x_data, y_data, style)
+            self._update_marker_by_point_count(plot_lines[0], x_data, style)
+
+        elif len(x_data) > 0 and last_x == x_data[-1]:  # No new data
+            now = int(datetime.now().timestamp() * 1e9)
+            new_x = self.transform_value(impl_plot, 0, now, inverse=True)
+            const_x = np.append(x_data, new_x)
+            const_y = np.append(y_data, last_y)
+            self.set_line_data(plot_lines[0], const_x, const_y, style)
+
+        return plot_lines
+
     def do_impl_line_plot_xy(self, signal: SignalXY, impl_plot: Any, plot: PlotXY, cache_item, x_data, y_data):
 
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[Any]
@@ -547,16 +608,20 @@ class BackendParserBase(ABC):
             self.legend_downsampled_signal(signal, impl_plot, plot_lines[0])
 
             if x_data.ndim == 1 and y_data.ndim == 1:
-                self.set_line_data(plot_lines[0], x_data, y_data, style)
-                self._update_marker_by_point_count(plot_lines[0], x_data, style)
+                # Streaming
+                if self.canvas.streaming and len(x_data) > 0:
+                    plot_lines = self.update_plot_line_streaming(impl_plot, plot_lines, x_data, y_data, style)
+                else:
+                    self.set_line_data(plot_lines[0], x_data, y_data, style)
+                    self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):  # TODO: pendant for PYQTGRAPH
                     line[0].set_xdata(x_data)
                     line[0].set_ydata(y_data[:, i])
                     self._update_marker_by_point_count(line[0], x_data, style)
 
-            # Streaming
-            # self.do_impl_streaming(impl_plot, plot, cache_item, x_data)
+            if self.canvas.streaming:
+                self.do_impl_streaming(impl_plot, plot, cache_item)
 
             self.visible_status(plot_lines, signal)
 
@@ -576,21 +641,8 @@ class BackendParserBase(ABC):
         pass
 
     @abstractmethod
-    def do_impl_streaming(self, impl_plot: Any, plot: Plot, cache_item, x_data):
-        # Put this out in a method only for streaming
-        if self.canvas.streaming:
-            ax_window = impl_plot.get_xlim()[1] - impl_plot.get_xlim()[0]
-            all_y_data = []
-            for signal in plot.signals[cache_item.stack_key]:
-                if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
-                    max_x_data = signal.x_data.max()[0]
-                    for x_temp, y_temp in zip(signal.x_data, signal.y_data):
-                        if max_x_data - ax_window <= x_temp <= max_x_data:
-                            all_y_data.append(y_temp)
-            if all_y_data:
-                diff = (max(all_y_data) - min(all_y_data)) / 15
-                impl_plot.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
-            impl_plot.set_xlim(max(x_data) - ax_window, max(x_data))
+    def do_impl_streaming(self, impl_plot: Any, plot: Plot, cache_item):
+        pass
 
     @abstractmethod
     def set_line_data(self, line: Any, x_data, y_data, style: dict):
@@ -936,8 +988,15 @@ class BackendParserBase(ABC):
         plot_lims.axes_ranges.append(IplAxisLimits(x_begin, x_end))
 
         # -- Y limits --
-        y_begin, y_end = self.get_oaw_axis_limits(impl_plot, 1)
-        plot_lims.axes_ranges.append(IplAxisLimits(y_begin, y_end))
+        y_oaw_begin, y_oaw_end = self.get_oaw_axis_limits(impl_plot, 1)
+        stacked_plots = self._plot_impl_plot_lut.get(id(plot))
+        pos = stacked_plots.index(impl_plot)
+        y_begin, y_end = plot.axes[1][pos].get_limits('current')
+
+        if (y_oaw_begin, y_oaw_end) == (y_begin, y_end):
+            plot_lims.axes_ranges.append(IplAxisLimits(y_oaw_begin, y_oaw_end))
+        else:
+            plot_lims.axes_ranges.append(IplAxisLimits(y_begin, y_end))  # Case modify Axis preferences
 
         # IplSliderLimits
         if isinstance(plot, PlotXYWithSlider):
