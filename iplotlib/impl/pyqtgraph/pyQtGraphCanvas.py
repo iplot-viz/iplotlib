@@ -11,7 +11,7 @@ from PySide6.QtGui import QFont
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
 from pyqtgraph.Qt import QtCore
 from pyqtgraph.Qt import QtWidgets
-from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QGraphicsSceneMouseEvent, QWidget
+from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QWidget
 
 from iplotLogging import setupLogger
 from iplotlib.core import (Axis,
@@ -532,9 +532,10 @@ class PyQtGraphParser(BackendParserBase):
             ix_legend = 0
             for signal in signals:
                 plot.legend.items[ix_legend][1].setAttr(attr='size', value=f'{fs}pt')
+                legend_label = plot.legend.items[ix_legend][1].text
                 if signal.isDownsampled:
-                    legend_label = plot.legend.items[ix_legend][1].text + '*'
-                    plot.legend.items[ix_legend][1].setText(legend_label)
+                    legend_label += '*'
+                plot.legend.items[ix_legend][1].setText(legend_label)
                 ix_legend += 1
 
             # Observe the axis limit change events
