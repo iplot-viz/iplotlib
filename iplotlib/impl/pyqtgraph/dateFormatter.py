@@ -110,26 +110,26 @@ class NanosecondDateFormatter(pg.AxisItem):
         return 0
 
     def tickValues(self, minVal, maxVal, size):
-        # Detectar cambio de rango
+        # Detect range change
         minVal = minVal
         maxVal = maxVal
         last_range = maxVal - minVal
 
-        # Si ha cambiado, recalculamos
+        # If it has changed, we need to recalculate ticks
         if len(self.last_values) == 0 or last_range != self.last_range:
-            # Primera vez, generamos valores equiespaciados
+            # First time we generate evenly spaced values
             spacing = last_range / self.n_ticks
             values = [minVal + spacing / 2 + i * spacing for i in range(self.n_ticks)]
             self.last_range = last_range
         else:
-            # Ajustamos los ticks anteriores para el nuevo rango
+            # Adjust previous ticks to new range
             values = []
             for v in self.last_values:
                 if minVal <= v <= maxVal:
                     values.append(v)
-            # Añadimos ticks nuevos si no hay suficientes
+            # Add new ticks if needed
             while len(values) < self.n_ticks:
-                # Añadir al inicio o al final
+                # Add to the end or to the beginning
                 if values and values[-1] + (values[1] - values[0]) <= maxVal:
                     values.append(values[-1] + (values[1] - values[0]))
                 elif values and values[0] - (values[1] - values[0]) >= minVal:
@@ -138,7 +138,7 @@ class NanosecondDateFormatter(pg.AxisItem):
                     break
             values = sorted(values)
 
-        # Guardamos el estado actual
+        # Save current state
         self.last_values = values
 
         self.cut_start = self.lcp(self.get_real_value(int(values[0])), self.get_real_value(int(values[-1])))
