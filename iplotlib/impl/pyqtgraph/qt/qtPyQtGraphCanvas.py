@@ -27,7 +27,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._marker_window.deleteMarker.connect(self.delete_marker_label)
 
         self.info_shared_x_dialog = False
-        self._parser = PyQtGraphParser()
+        self._parser = PyQtGraphParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
 
         self._vlayout = QVBoxLayout(self)
         self._vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
