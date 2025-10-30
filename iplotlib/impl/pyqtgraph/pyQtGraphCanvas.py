@@ -1042,6 +1042,8 @@ class PyQtGraphParser(BackendParserBase):
             ax = p.getAxis('left')
             vb = p.getViewBox()
             y0, y1 = vb.viewRange()[1]
+            if y0 == 0 and y1 == 1:
+                continue
             tv = ax.tickValues(y0, y1, vb.height())
             if not tv:
                 continue
