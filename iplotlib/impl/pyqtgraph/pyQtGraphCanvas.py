@@ -437,7 +437,7 @@ class PyQtGraphParser(BackendParserBase):
         current_label = QLabel(F"{pd.Timestamp(slider_values[0])}")
 
         # Apply font_size for slider labels
-        fs = self._pm.get_value(i_plot, 'font_size') or self._pm.get_value(self.canvas, 'font_size')
+        fs = self._pm.get_value(i_plot, 'font_size')
         if fs:
             qf = QFont()
             qf.setPointSize(int(fs))

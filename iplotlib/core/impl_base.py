@@ -408,26 +408,25 @@ class BackendParserBase(ABC):
 
         if ax_idx == 1:
             autoscale_val = self._pm.get_value(self.canvas, 'autoscale')
-            self.autoscale_y_axis(impl_plot)
+            if autoscale_val:
+                self.autoscale_y_axis(impl_plot)
 
         if ax_idx != 1 or not self.canvas.streaming:  # In case of Streaming, just set X limits at the start
             if axis.begin is None and axis.end is None:
                 self.update_original_axis_limits(axis, impl_plot, ax_idx)
                 begin, end = axis.original_begin, axis.original_end
+
+                # Adjust initial padding for Y axis
+                if ax_idx == 1:
+                    h = end - begin
+                    begin -= 0.1 * h
+                    end += 0.1 * h
             else:
                 begin, end = axis.begin, axis.end
 
-            if ax_idx == 1:
-                h = end - begin
-                n_begin = begin - 0.1 * h
-                n_end = end + 0.1 * h
-                self.set_oaw_axis_limits(impl_plot, ax_idx, [n_begin, n_end])
-                # Set Y Axis limits
-                axis.set_limits(n_begin, n_end, 'current')  # TODO: save limits with padding, adjust based on visible data
-            else:
-                self.set_oaw_axis_limits(impl_plot, ax_idx, [begin, end])
-                # Set X Axis limits
-                axis.set_limits(begin, end, 'current')
+            # Set X,Y axis limits
+            self.set_oaw_axis_limits(impl_plot, ax_idx, [begin, end])
+            axis.set_limits(begin, end, 'current')
 
         # Process Nanoseconds Axis
         if axis.is_date:
