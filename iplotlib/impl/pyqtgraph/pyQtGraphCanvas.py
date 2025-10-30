@@ -7,7 +7,7 @@ import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QFontMetricsF
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
 from pyqtgraph.Qt import QtCore
 from pyqtgraph.Qt import QtWidgets
@@ -547,6 +547,9 @@ class PyQtGraphParser(BackendParserBase):
         if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
             cell_gl.addItem(axis_items["bottom"].common_label, row=len(i_plot.signals), col=0)
 
+        # MODIFIED
+        self.align_y_axis(row, col)
+
     def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
         if not visible_stacks:
             return
@@ -651,6 +654,12 @@ class PyQtGraphParser(BackendParserBase):
             return
         current_plot = view_box.parentItem()  # type: PlotItem
         super()._y_axis_update_callback(current_plot)
+
+        # MODIFIED
+        for (r, c), stacks in self._layout_stacks.items():
+            if current_plot in stacks.values():
+                self.align_y_axis(r, c)
+                break
 
     def _x_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
@@ -1015,6 +1024,46 @@ class PyQtGraphParser(BackendParserBase):
         if isinstance(plot, PlotItem):
             vb = plot.getViewBox()
             vb.setYRange(limits[0], limits[1], padding=0)
+
+    # MODIFIED
+    def align_y_axis(self, row: int, col: int) -> None:
+        stacks = self._layout_stacks.get((row, col))
+        if not stacks:
+            return
+
+        for p in stacks.values():
+            if p:
+                p.getAxis('left').setWidth(None)
+
+        max_w = 0.0
+        for p in stacks.values():
+            if not p:
+                continue
+            ax = p.getAxis('left')
+            vb = p.getViewBox()
+            y0, y1 = vb.viewRange()[1]
+            tv = ax.tickValues(y0, y1, vb.height())
+            if not tv:
+                continue
+            spacing, values = tv[0]
+            labels = ax.tickStrings(values, scale=1.0, spacing=spacing)
+            fm = QFontMetricsF(ax.style.get('tickFont') or QtWidgets.QApplication.font())
+            text_w = max((fm.horizontalAdvance(str(s)) for s in labels), default=0.0)
+            label_w = ax.label.boundingRect().height() if ax.label.isVisible() else 0.0
+            if text_w + label_w > max_w:
+                max_w = text_w + label_w
+
+        if max_w <= 0:
+            return
+
+        w = int(max_w)
+        for p in stacks.values():
+            if p:
+                p.getAxis('left').setWidth(w)
+
+        gl = getattr(self, '_graphics_layout', None)
+        if gl:
+            gl.updateGeometry()
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
