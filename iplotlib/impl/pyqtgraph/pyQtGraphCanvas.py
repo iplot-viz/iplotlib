@@ -85,6 +85,7 @@ class PyQtGraphParser(BackendParserBase):
         self.map_legend_to_ax = {}
         self.legend_size = 8
         self._cursors = []
+        self._cursor_active = False
 
         self.figure = pg.GraphicsLayoutWidget()
         self.figure.setBackground('w')
@@ -764,7 +765,8 @@ class PyQtGraphParser(BackendParserBase):
         vb.setMouseEnabled(x=False, y=False)
 
     def set_view_box(self):
-        self.deactivate_cursor()
+        if self._cursor_active:
+            self.deactivate_cursor()
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -774,7 +776,8 @@ class PyQtGraphParser(BackendParserBase):
                 self.set_mouse(plot)
 
     def set_view_box_zoom(self):
-        self.deactivate_cursor()
+        if self._cursor_active:
+            self.deactivate_cursor()
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -784,7 +787,8 @@ class PyQtGraphParser(BackendParserBase):
                 self.set_mouse(plot)
 
     def set_view_box_pan(self):
-        self.deactivate_cursor()
+        if self._cursor_active:
+            self.deactivate_cursor()
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -794,7 +798,8 @@ class PyQtGraphParser(BackendParserBase):
                 vb.setMouseEnabled(x=True, y=True)
 
     def set_view_box_crosshair(self):
-        self.deactivate_cursor()
+        if self._cursor_active:
+            return
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -803,6 +808,7 @@ class PyQtGraphParser(BackendParserBase):
                 vb.setMouseMode(vb.PanMode)
                 self.set_mouse(plot)
         self.activate_cursor()
+        self._cursor_active = True
 
     def get_impl_data(self, line: PlotDataItem):
         return line.getData()[0], line.getData()[1]
@@ -928,7 +934,10 @@ class PyQtGraphParser(BackendParserBase):
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
-        plots = []
+        if self._cursor_active:
+            return
+
+        plots: List[PlotItem] = []
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if plot:
@@ -936,80 +945,56 @@ class PyQtGraphParser(BackendParserBase):
         if not plots:
             return
 
-        # Pause repaints/signals to avoid flicker while creating items
-        view = self.figure  # GraphicsLayoutWidget is a QGraphicsView
-        scene = view.scene()
-        vp = view.viewport()
+        x_label = self._pm.get_value(self.canvas, 'enable_x_label_crosshair')
+        y_label = self._pm.get_value(self.canvas, 'enable_y_label_crosshair')
+        val_label = self._pm.get_value(self.canvas, 'enable_val_label_crosshair')
+        color = self._pm.get_value(self.canvas, 'crosshair_color')
+        lw = getattr(self.canvas, 'crosshair_line_width', 1)
+        horiz_on = bool(getattr(self.canvas, 'crosshair_horizontal', False))
+        vert_on = bool(getattr(self.canvas, 'crosshair_vertical', True))
 
-        if vp is not None:
-            vp.setUpdatesEnabled(False)
-        view.setUpdatesEnabled(False)
-        try:
-            scene.blockSignals(True)
-
-            x_label = self._pm.get_value(self.canvas, 'enable_x_label_crosshair')
-            y_label = self._pm.get_value(self.canvas, 'enable_y_label_crosshair')
-            val_label = self._pm.get_value(self.canvas, 'enable_val_label_crosshair')
-            color = self._pm.get_value(self.canvas, 'crosshair_color')
-            lw = getattr(self.canvas, 'crosshair_line_width', 1)
-            horiz_on = getattr(self.canvas, 'crosshair_horizontal', False)
-            vert_on = getattr(self.canvas, 'crosshair_vertical', True)
-            tol = 0.05  # same as IplotMultiCursor
-
-            if getattr(self.canvas, 'crosshair_per_plot', False):
-                for p in plots:
-                    self._cursors.append(
-                        pyQtCrosshair(
-                            plots=[p],
-                            x_label=x_label, y_label=y_label, val_label=val_label,
-                            color=color, lw=lw,
-                            horiz_on=horiz_on, vert_on=vert_on,
-                            val_tolerance=tol,
-                            cache_table=self._impl_plot_cache_table,
-                        )
-                    )
-            else:
-                self._cursors.append(
-                    pyQtCrosshair(
-                        plots=plots,
-                        x_label=x_label, y_label=y_label, val_label=val_label,
-                        color=color, lw=lw,
-                        horiz_on=horiz_on, vert_on=vert_on,
-                        val_tolerance=tol,
-                        cache_table=self._impl_plot_cache_table,
-                    )
+        if getattr(self.canvas, 'crosshair_per_plot', False):
+            for p in plots:
+                cursor = pyQtCrosshair(
+                    plots=[p],
+                    x_label=x_label,
+                    y_label=y_label,
+                    val_label=val_label,
+                    color=color,
+                    lw=lw,
+                    horiz_on=horiz_on,
+                    vert_on=vert_on,
+                    val_tolerance=0.05,
+                    cache_table=self._impl_plot_cache_table,
                 )
-        finally:
-            try:
-                scene.blockSignals(False)
-            except Exception:
-                pass
-            view.setUpdatesEnabled(True)
-            if vp is not None:
-                vp.setUpdatesEnabled(True)
+                self._cursors.append(cursor)
+        else:
+            cursor = pyQtCrosshair(
+                plots=plots,
+                x_label=x_label,
+                y_label=y_label,
+                val_label=val_label,
+                color=color,
+                lw=lw,
+                horiz_on=horiz_on,
+                vert_on=vert_on,
+                val_tolerance=0.05,
+                cache_table=self._impl_plot_cache_table,
+            )
+            self._cursors.append(cursor)
+
+        self._cursor_active = True
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
-        view = self.figure
-        scene = view.scene()
-        vp = view.viewport()
+        if not self._cursor_active:
+            return
 
-        if vp is not None:
-            vp.setUpdatesEnabled(False)
-        view.setUpdatesEnabled(False)
-        try:
-            scene.blockSignals(True)
-            for cursor in self._cursors:
-                cursor.clear(destroy=True)
-            self._cursors.clear()
-        finally:
-            try:
-                scene.blockSignals(False)
-            except Exception:
-                pass
-            view.setUpdatesEnabled(True)
-            if vp is not None:
-                vp.setUpdatesEnabled(True)
+        for cursor in self._cursors:
+            cursor.remove()
+
+        self._cursors.clear()
+        self._cursor_active = False
 
     def get_impl_x_axis(self, plot: PlotItem) -> AxisItem:
         return plot.getAxis('bottom')
