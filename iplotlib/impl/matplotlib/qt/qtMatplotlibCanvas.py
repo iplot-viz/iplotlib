@@ -177,7 +177,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # Get signal and ax
         for idxCol, col in enumerate(self._parser.canvas.plots):
             for idxPlot, plot in enumerate(col):
-                if not plot or (plot.col, plot.row) != plot_id:
+                if not plot or [plot.col, plot.row] != plot_id:
                     continue
                 # Get signal
                 for signals in plot.signals.values():

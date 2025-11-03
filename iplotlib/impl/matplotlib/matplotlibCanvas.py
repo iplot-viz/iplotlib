@@ -924,8 +924,8 @@ class MatplotlibParser(BackendParserBase):
                 x_zoom = signal.data_store[0][idx1:idx2]
                 y_zoom = signal.data_store[1][idx1:idx2]
 
-                # If the number of samples per signal is less than 50 we continue, if not the user shall keep zooming
-                if len(x_zoom) > 50:
+                # If the number of samples per signal is less than 100 we continue, if not the user shall keep zooming
+                if len(x_zoom) > 100:
                     return None, len(x_zoom)
 
                 # If there are no data points in the zoomed region, skip this signal
