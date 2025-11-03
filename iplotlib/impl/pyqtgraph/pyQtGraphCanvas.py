@@ -47,26 +47,26 @@ STEP_MAP_PG = {
 
 class QtViewBox(pg.ViewBox):
     pressed = QtSignal(object, object)
-    released = QtSignal(object)
+    released = QtSignal(object, object)
 
     def __init__(self, parent=None):
-        super().__init__(parent=parent, enableMenu=True)
+        super().__init__(parent=parent, enableMenu=False)
         self.sigRangeChangedManually.connect(self.release_event)
 
     def mousePressEvent(self, ev):
-        # Add log message
-        if ev.button() == Qt.MouseButton.RightButton:
+        # Right click PAN has no effect
+        if ev.button() == Qt.MouseButton.RightButton and self.getState()['mouseEnabled'] == [True, True]:
             ev.accept()
             return
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
 
     def release_event(self):
-        self.released.emit(self)
+        self.released.emit(self, None)
 
     def mouseClickEvent(self, ev):
         super().mouseClickEvent(ev)
-        self.released.emit(self)
+        self.released.emit(self, ev)
 
     def wheelEvent(self, ev, axis=None):
         ev.ignore()
@@ -524,9 +524,6 @@ class PyQtGraphParser(BackendParserBase):
                 self._signal_impl_plot_lut.update({signal.uid: plot})
                 self.process_ipl_signal(signal)
 
-            # Set limits for y axis
-            # self.update_multi_range_axis(i_plot.axes[1], 1, plot)
-
             # Legend processing for downsampled data when drawing
             fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
             ix_legend = 0
@@ -807,9 +804,26 @@ class PyQtGraphParser(BackendParserBase):
                 self.set_mouse(plot)
         self.activate_cursor()
 
-    def autoscale_y_axis(self, impl_plot, margin=0.1):
-        pass
-        # impl_plot.vb.enableAutoRange(y=autoscale)
+    def get_impl_data(self, line: PlotDataItem):
+        return line.getData()[0], line.getData()[1]
+
+    def get_impl_lines(self, impl_plot: PlotItem):
+        lines = impl_plot.listDataItems()
+        vb = impl_plot.getViewBox()
+        lo, hi = vb.viewRange()[0]
+        return lines, lo, hi
+
+    def autoscale_y_axis(self, impl_plot: PlotItem, padding=0.1):
+        """
+        This function rescales the y-axis based on the data that is visible given the current limits of the viewbox.
+        impl_plot -- a PyQtGraph plot item
+        padding -- the fraction of the total height of the y-data to pad the upper and lower ylims
+        """
+        bot, top = super().autoscale_y_axis(impl_plot)
+        vb = impl_plot.getViewBox()
+
+        # Set new Y axis limits
+        vb.setYRange(bot, top, padding=padding)
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
         pass

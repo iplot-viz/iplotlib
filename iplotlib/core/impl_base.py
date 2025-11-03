@@ -174,9 +174,52 @@ class BackendParserBase(ABC):
         except Empty:
             logger.debug("Nothing to do.")
 
+
     @abstractmethod
-    def autoscale_y_axis(self, impl_plot):
+    def get_impl_data(self, curve):
         pass
+
+    def get_bottom_top(self, x_line, lo, hi):
+        xd, yd = self.get_impl_data(x_line)
+        y_displayed = yd[((xd > lo) & (xd < hi))]
+
+        # Check if the visible Y data contains valid values
+        if len(y_displayed) > 0:
+            # Check if there exist NaN values in the y_displayed array
+            if np.isnan(y_displayed).any():
+                y_displayed = y_displayed[~np.isnan(y_displayed)]
+            min_bot = np.min(y_displayed)
+            max_top = np.max(y_displayed)
+        else:
+            min_bot = np.inf
+            max_top = -np.inf
+
+        return min_bot, max_top
+
+    @abstractmethod
+    def get_impl_lines(self, impl_plot: Any):
+        pass
+
+    @abstractmethod
+    def autoscale_y_axis(self, impl_plot: Any, padding=0.1):
+        """
+        This function rescales the y-axis based on the data that is visible given the current limits of the X-axis
+        """
+        lines, lo, hi = self.get_impl_lines(impl_plot)
+        bot, top = np.inf, -np.inf
+
+        for line in lines:
+            new_bot, new_top = self.get_bottom_top(line, lo, hi)
+            if new_bot < bot:
+                bot = new_bot
+            if new_top > top:
+                top = new_top
+
+        # Apply default Y limits in case of missing or invalid data
+        if bot == np.inf and top == -np.inf:
+            bot, top = 0, 1
+
+        return bot,top
 
     @abstractmethod
     def export_image(self, filename: str, **kwargs):
@@ -260,14 +303,33 @@ class BackendParserBase(ABC):
         """
         Callback that updates the Y axis limits when the axis bounds change in the corresponding plot implementation
         """
-        y_start, y_end = self.get_oaw_axis_limits(current_plot, 1)
+        if self._update:
+            return
         plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
-        shared_plots = self._plot_impl_plot_lut.get(id(plot))
 
-        # Set Y Axis limits
-        pos = shared_plots.index(current_plot)
-        y_sub_axis = plot.axes[1][pos]
-        y_sub_axis.set_limits(y_start, y_end, 'current')
+        if self._pm.get_value(self.canvas, 'shared_x_axis'):
+            shared_plots = self._get_all_shared_axes(current_plot)
+        else:
+            shared_plots = self._plot_impl_plot_lut.get(id(plot))  # Stacked plots
+
+        for impl_plot in shared_plots:
+            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+            stacked_plots = self._plot_impl_plot_lut.get(id(plot))
+
+            if self._pm.get_value(self.canvas, 'autoscale'):
+                self._update = True
+                self.autoscale_y_axis(impl_plot)
+            else:
+                if impl_plot != current_plot:
+                    continue
+
+            # Set Y Axis limits
+            y_start, y_end = self.get_oaw_axis_limits(impl_plot, 1)
+            pos = stacked_plots.index(impl_plot)
+            y_sub_axis = plot.axes[1][pos]
+            y_sub_axis.set_limits(y_start, y_end, 'current')
+
+        self._update = False
 
     @abstractmethod
     def _x_axis_update_callback(self, current_plot: Any):
@@ -406,11 +468,7 @@ class BackendParserBase(ABC):
 
         self.process_ipl_axis_params(fc, fs, axis, axis_item)
 
-        if ax_idx == 1:
-            autoscale_val = self._pm.get_value(self.canvas, 'autoscale')
-            if autoscale_val:
-                self.autoscale_y_axis(impl_plot)
-
+        # Set axis limits
         if ax_idx != 1 or not self.canvas.streaming:  # In case of Streaming, just set X limits at the start
             if axis.begin is None and axis.end is None:
                 self.update_original_axis_limits(axis, impl_plot, ax_idx)

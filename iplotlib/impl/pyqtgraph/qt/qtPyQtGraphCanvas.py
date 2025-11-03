@@ -1,12 +1,10 @@
 from PySide6.QtCore import QMargins, Qt, Signal, QEvent
-from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtWidgets import QVBoxLayout, QMenu
 
-from iplotlib.core import Canvas, Plot, PlotContour
-
+from iplotlib.core import Canvas, PlotXY, PlotContour
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
-from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 import iplotLogging.setupLogger as Sl
 from pyqtgraph import PlotItem
 
@@ -34,12 +32,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._vlayout.setContentsMargins(QMargins())
         self._vlayout.addWidget(self._parser.figure)
 
-        # self._parser.figure.scene().sigMouseClicked.connect(self.mouse_clicked)
-
-        # GUI event handlers
-        # self._parser.figure.scene().installEventFilter(self)
-
         self.setLayout(self._vlayout)
+
+        # QMenu
+        self.autoscale_menu = None
 
         # Drag & Drop
         self.setAcceptDrops(True)
@@ -96,10 +92,55 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         pass
 
     def autoscale_y(self, impl_plot):
-        pass
+        """
+            Autoscale the Y axis of a single PlotXY and store the action for undo/redo
+        """
+        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        if hasattr(ci, 'plot'):
+            plot = ci.plot()
+            if isinstance(plot, PlotXY):
+                # Stage a command to obtain original view limits
+                self.stage_view_lim_cmd(impl_plot)
+
+                # Autoscale on Y axis for the given plot
+                self._parser.autoscale_y_axis(impl_plot)
+
+                # Commit staged command
+                while len(self._staging_cmds):
+                    self.commit_view_lim_cmd(impl_plot)
+
+                # Push committed command
+                while len(self._commitd_cmds):
+                    self.push_view_lim_cmd()
+
+                return
 
     def autoscale_all_y(self):
-        pass
+        """
+            Autoscale the Y axis of all PlotXY instances in the figure and store the action for undo/redo
+        """
+        axes = self._parser.get_canvas_plots()
+        for ax in axes:
+            # Stage a command to obtain original view limits
+            self.stage_view_lim_cmd(ax)
+
+            ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
+            if not hasattr(ci, 'plot'):
+                continue
+            plot = ci.plot()
+            if not isinstance(plot, PlotXY):
+                continue
+
+            # Autoscale on Y axis for the given plot
+            self._parser.autoscale_y_axis(ax)
+
+            # Commit staged command
+            while len(self._staging_cmds):
+                self.commit_view_lim_cmd(ax)
+
+            # Push committed command
+            while len(self._commitd_cmds):
+                self.push_view_lim_cmd()
 
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
@@ -134,10 +175,13 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._parser.redo()
 
     def _full_screen_mode_on(self, impl_plot):
-        pass
+        self._parser.set_focus_plot(impl_plot)
+        self.refresh()
+        # self.stats(self.get_canvas())
 
     def _full_screen_mode_off(self):
-        pass
+        self._parser.set_focus_plot(None)
+        self.refresh()
 
     def _impl_mouse_press_handler(self, view_box, event):
         # self._debug_log_event(event, "Mouse released")
@@ -163,26 +207,16 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self.stage_view_lim_cmd(impl_plot)
             return
 
-        elif self._mmode == Canvas.MOUSE_MODE_SELECT:
-            if not impl_plot or not isinstance(impl_plot, PlotItem):
-                return
-            if event.button() == Qt.MouseButton.LeftButton:
-                if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
-                    self._parser.set_focus_plot(impl_plot)
-                    self.refresh()
-                    # self.stats(self.get_canvas())
-                else:
-                    return
-            elif event.button() == Qt.MouseButton.RightButton:
-                return
+        elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
+            self.autoscale_menu = None
 
-    def _impl_mouse_release_handler(self, view_box):
+    def _impl_mouse_release_handler(self, view_box, event):
         # self._debug_log_event(event, "Mouse released")
         if view_box is None:
             pass
         else:
+            impl_plot = view_box.parentItem()
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                impl_plot = view_box.parentItem()
                 # commit commands from staging.
                 while len(self._staging_cmds):
                     self.commit_view_lim_cmd(impl_plot)
@@ -192,10 +226,24 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 # Update statistics
                 self.stats(self.get_canvas())
 
-    """
-    def _debug_log_event(self, event: Event, msg: str):
-        logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")
-    """
+            elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
+                if event.button() == Qt.MouseButton.RightButton:
+                    if event.double():
+                        return
+                    else:
+                        view_box.state['enableMenu'] = True
+
+                        # Create menu with autoscale options
+                        if self.autoscale_menu is None:
+                            self.autoscale_menu = QMenu(self)
+                            self.autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(impl_plot))
+                            self.autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+                            if self._parser.canvas.focus_plot is None:
+                                self.autoscale_menu.addAction("Focus on plot",
+                                                              lambda: self._full_screen_mode_on(impl_plot))
+                            else:
+                                self.autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+                            self.autoscale_menu.popup(event.screenPos().toPoint())
 
     def unfocus_plot(self):
         """Quita el focus del plot actual."""

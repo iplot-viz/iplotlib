@@ -681,52 +681,30 @@ class MatplotlibParser(BackendParserBase):
                                                          edgecolor="black",
                                                          facecolor=marker.color))
 
-    def autoscale_y_axis(self, impl_plot, margin=0.1):
-        """This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
-        ax -- a matplotlib axes object
-        margin -- the fraction of the total height of the y-data to pad the upper and lower ylims"""
+    def get_impl_data(self, line: Line2D):
+        return line.get_xdata(), line.get_ydata()
 
-        def get_bottom_top(x_line):
-            xd = x_line.get_xdata()
-            yd = x_line.get_ydata()
-            lo, hi = impl_plot.get_xlim()
-            y_displayed = yd[((xd > lo) & (xd < hi))]
-
-            # Check if the visible Y data contains valid values
-            if len(y_displayed) > 0:
-                # Check if there exist NaN values in the y_displayed array
-                if np.isnan(y_displayed).any():
-                    y_displayed = y_displayed[~np.isnan(y_displayed)]
-                min_bot = np.min(y_displayed)
-                max_top = np.max(y_displayed)
-            else:
-                min_bot = np.inf
-                max_top = -np.inf
-            return min_bot, max_top
-
+    def get_impl_lines(self, impl_plot: MPLAxes):
         lines = impl_plot.get_lines()
         lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY"]]
-        bot, top = np.inf, -np.inf
+        lo, hi = impl_plot.get_xlim()
+        return lines, lo, hi
 
-        for line in lines:
-            new_bot, new_top = get_bottom_top(line)
-            if new_bot < bot:
-                bot = new_bot
-            if new_top > top:
-                top = new_top
-
-        # Apply default Y limits in case of missing or invalid data
-        if bot == np.inf and top == -np.inf:
-            bot, top = 0, 1
+    def autoscale_y_axis(self, impl_plot: MPLAxes, padding=0.1):
+        """
+        This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
+        ax -- a matplotlib axes object
+        padding -- the fraction of the total height of the y-data to pad the upper and lower ylims
+        """
+        bot, top = super().autoscale_y_axis(impl_plot)
 
         # Compute final margin
         h = (top - bot)
-        n_new_bot = bot - margin * h
-        n_new_top = top + margin * h
+        n_new_bot = bot - padding * h
+        n_new_top = top + padding * h
 
         # Set new Y axis limits
-        if lines:
-            self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
+        self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
         """
