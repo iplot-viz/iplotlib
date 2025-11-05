@@ -15,8 +15,6 @@ from typing import Dict, List, Collection, Union
 import weakref
 
 from iplotlib.core.axis import Axis, LinearAxis
-from matplotlib.widgets import Slider
-from pyqtgraph.Qt.QtWidgets import QSlider
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 
 
@@ -266,9 +264,7 @@ class PlotXYWithSlider(PlotXY):
     """
     A concrete Plot class specialized for 2D plottling with slider.
     """
-
-    # slider: typing.Optional[Slider] = None
-    slider: typing.Optional[QSlider] = None
+    slider: typing.Optional = None
     slider_last_val: int = None
     slider_last_min: int = None
     slider_last_max: int = None
