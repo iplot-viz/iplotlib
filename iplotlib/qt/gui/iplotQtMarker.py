@@ -92,7 +92,7 @@ class IplotQtMarker(QWidget):
         "Creation of QTableWidgetItem for each column"
         # 1- Marker name
         marker_name = ascii_uppercase[self.count % len(ascii_uppercase)]
-        is_date = signal.parent.axes[0].is_date
+        is_date = signal.parent().axes[0].is_date
         marker_data = QTableWidgetItem(marker_name)
         marker_data.setData(Qt.ItemDataRole.UserRole, is_date)
 
@@ -281,7 +281,7 @@ class IplotQtMarker(QWidget):
     def import_table(self, signal: SignalXY):
         id_marker = signal.get_id()
         stack = signal.get_stack()
-        is_date = signal.parent.axes[0].is_date
+        is_date = signal.parent().axes[0].is_date
 
         for marker in signal.markers_list:
             row_pos = self.table.rowCount()

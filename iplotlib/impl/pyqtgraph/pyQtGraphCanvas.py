@@ -1,17 +1,18 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
-
+from datetime import datetime
 from typing import Any, Callable, Collection, List, Tuple
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QFontMetricsF
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
 from pyqtgraph.Qt import QtCore
 from pyqtgraph.Qt import QtWidgets
-from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QGraphicsSceneMouseEvent, QWidget
+from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QWidget
+from pyqtgraph import TextItem
 
 from iplotLogging import setupLogger
 from iplotlib.core import (Axis,
@@ -47,26 +48,26 @@ STEP_MAP_PG = {
 
 class QtViewBox(pg.ViewBox):
     pressed = QtSignal(object, object)
-    released = QtSignal(object)
+    released = QtSignal(object, object)
 
     def __init__(self, parent=None):
-        super().__init__(parent=parent, enableMenu=True)
-        self.sigRangeChanged.connect(self.release_event)
+        super().__init__(parent=parent, enableMenu=False)
+        self.sigRangeChangedManually.connect(self.release_event)
 
-    def mousePressEvent(self, ev: QGraphicsSceneMouseEvent):
-        # Add log message
-        if ev.button() == Qt.MouseButton.RightButton:
+    def mousePressEvent(self, ev):
+        # Right click PAN has no effect
+        if ev.button() == Qt.MouseButton.RightButton and self.getState()['mouseEnabled'] == [True, True]:
             ev.accept()
             return
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
 
     def release_event(self):
-        self.released.emit(self)
+        self.released.emit(self, None)
 
     def mouseClickEvent(self, ev):
         super().mouseClickEvent(ev)
-        self.released.emit(self)
+        self.released.emit(self, ev)
 
     def wheelEvent(self, ev, axis=None):
         ev.ignore()
@@ -85,6 +86,7 @@ class PyQtGraphParser(BackendParserBase):
         self.map_legend_to_ax = {}
         self.legend_size = 8
         self._cursors = []
+        self._cursor_active = False
 
         self.figure = pg.GraphicsLayoutWidget()
         self.figure.setBackground('w')
@@ -149,8 +151,33 @@ class PyQtGraphParser(BackendParserBase):
     def visible_status(self, plot_lines, signal):
         pass
 
-    def do_impl_streaming(self, impl_plot: Any, plot: Plot, cache_item, x_data):
-        pass
+    def do_impl_streaming(self, impl_plot: PlotItem, plot: Plot, cache_item):
+        """
+        Updates the X and Y view ranges of the ViewBox based on the most recent data received from the Streaming
+        """
+        vb = impl_plot.getViewBox()
+        vb_x_limits = vb.viewRange()[0]
+        ax_window = vb_x_limits[1] - vb_x_limits[0]
+
+        # Time window
+        now = int(datetime.now().timestamp() * 1e9)
+        min_time = now - int(ax_window)
+
+        all_y_data = []
+        for signal_ref in cache_item.signals:
+            signal = signal_ref()
+            if signal.lines[0].isVisible() and len(signal.x_data) > 0:
+                mask = (signal.x_data >= min_time) & (signal.x_data <= now)
+                all_y_data.extend(signal.y_data[mask])
+
+        if all_y_data:
+            y_max = np.nanmax(all_y_data).item()
+            y_min = np.nanmin(all_y_data).item()
+            vb.setYRange(y_min, y_max, padding=0.1)
+
+        begin = self.transform_value(impl_plot, 0, min_time, inverse=True)
+        end = self.transform_value(impl_plot, 0, now, inverse=True)
+        vb.setXRange(begin, end, padding=0)
 
     def set_line_data(self, line: PlotDataItem, x_data, y_data, style: dict):
         """
@@ -202,6 +229,9 @@ class PyQtGraphParser(BackendParserBase):
         style['antialias'] = True
 
         return style
+
+    def markers_valid_lines(self, impl_plot: PlotItem):
+        return [item.name() for item in impl_plot.listDataItems()]
 
     def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
         return y_data[plot.slider.value()]
@@ -412,7 +442,7 @@ class PyQtGraphParser(BackendParserBase):
         current_label = QLabel(F"{pd.Timestamp(slider_values[0])}")
 
         # Apply font_size for slider labels
-        fs = self._pm.get_value(i_plot, 'font_size') or self._pm.get_value(self.canvas, 'font_size')
+        fs = self._pm.get_value(i_plot, 'font_size')
         if fs:
             qf = QFont()
             qf.setPointSize(int(fs))
@@ -499,26 +529,28 @@ class PyQtGraphParser(BackendParserBase):
                 self._signal_impl_plot_lut.update({signal.uid: plot})
                 self.process_ipl_signal(signal)
 
-            # Set limits for y axis
-            # self.update_multi_range_axis(i_plot.axes[1], 1, plot)
-
             # Legend processing for downsampled data when drawing
             fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
             ix_legend = 0
             for signal in signals:
                 plot.legend.items[ix_legend][1].setAttr(attr='size', value=f'{fs}pt')
+                legend_label = plot.legend.items[ix_legend][1].text
                 if signal.isDownsampled:
-                    legend_label = plot.legend.items[ix_legend][1].text + '*'
-                    plot.legend.items[ix_legend][1].setText(legend_label)
+                    legend_label += '*'
+                plot.legend.items[ix_legend][1].setText(legend_label)
                 ix_legend += 1
 
             # Observe the axis limit change events
             vb = plot.getViewBox()
-            vb.sigXRangeChanged.connect(self._axis_update_callback)
+            vb.sigXRangeChanged.connect(self._x_axis_update_callback)
+            vb.sigYRangeChanged.connect(self._y_axis_update_callback)
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
         if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
             cell_gl.addItem(axis_items["bottom"].common_label, row=len(i_plot.signals), col=0)
+
+        # MODIFIED
+        self.align_y_axis(row, col)
 
     def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
         if not visible_stacks:
@@ -619,9 +651,23 @@ class PyQtGraphParser(BackendParserBase):
                 else:
                     plot_with_slider.slider_last_val = val
 
-    def _axis_update_callback(self, view_box: ViewBox):
+    def _y_axis_update_callback(self, view_box: ViewBox):
+        if self.canvas.streaming:
+            return
         current_plot = view_box.parentItem()  # type: PlotItem
-        super()._axis_update_callback(current_plot)
+        super()._y_axis_update_callback(current_plot)
+
+        # MODIFIED
+        for (r, c), stacks in self._layout_stacks.items():
+            if current_plot in stacks.values():
+                self.align_y_axis(r, c)
+                break
+
+    def _x_axis_update_callback(self, view_box: ViewBox):
+        if self.canvas.streaming:
+            return
+        current_plot = view_box.parentItem()  # type: PlotItem
+        super()._x_axis_update_callback(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':
@@ -653,6 +699,10 @@ class PyQtGraphParser(BackendParserBase):
         if axis.label is not None:
             axis_item.setLabel(axis.label, **label_props)
 
+        # Font size for UTC label
+        if isinstance(axis_item, NanosecondDateFormatter):
+            axis_item.common_label.setText(axis_item.offset_str, size=f'{fs}pt')
+
         axis_item.setStyle(**tick_props)
 
     def process_ipl_axis_formatter(self, impl_plot: PlotItem, impl_axis: NanosecondDateFormatter, ax_idx: int):
@@ -671,25 +721,39 @@ class PyQtGraphParser(BackendParserBase):
         return plot
 
     def process_ipl_signal_annotations(self, signal: Signal, impl_plot: PlotItem):
-        return
-        if isinstance(signal, SignalXY):
-            if impl_plot.get_lines()[0].get_marker() == 'None':
-                return
-            if signal.markers_list:
-                annotations_names = [child.get_text() for child in impl_plot.get_children() if
-                                     isinstance(child, plt.Annotation)]
-                for marker in signal.markers_list:
-                    if marker.visible:
-                        # Check if the marker is already drawn
-                        if marker.name not in annotations_names:
-                            x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
-                            y = marker.xy[1]
-                            impl_plot.annotate(text=marker.name,
-                                               xy=(x, y),
-                                               xytext=(x, y),
-                                               bbox=dict(boxstyle="round,pad=0.3",
-                                                         edgecolor="black",
-                                                         facecolor=marker.color))
+        if not isinstance(signal, SignalXY):
+            return
+
+        if impl_plot.listDataItems()[0].opts['symbol'] == 'None':
+            return
+
+        if signal.markers_list:
+            annotations_names = [child.toPlainText() for child in impl_plot.items if isinstance(child, TextItem)]
+            for marker in signal.markers_list:
+                if marker.visible:
+                    # Draw marker with correct offset to right display
+                    x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
+                    y = marker.xy[1]
+
+                    # Create annotation if not present (import case)
+                    if marker.name not in annotations_names:
+                        marker_text = TextItem(anchor=(0.5, 0.5),
+                                               html=f"""<div style="
+                                               background-color:{marker.color};
+                                               color:black;
+                                               border:1px solid black;
+                                               border-radius:4px;
+                                               padding:2px 5px;
+                                               font-size:12pt;
+                                               text-align:center;
+                                                ">{marker.name}</div>""")
+                        marker_text.setPos(x, y)
+                        impl_plot.addItem(marker_text)
+                    else:
+                        # Update position if annotation already exists
+                        prev_annotation = [child for child in impl_plot.items if isinstance(child,
+                                                                                            TextItem) and child.toPlainText() == marker.name]  # type: List[TextItem]
+                        prev_annotation[0].setPos(x, y)
 
     def clear(self):
         """
@@ -719,7 +783,8 @@ class PyQtGraphParser(BackendParserBase):
         vb.setMouseEnabled(x=False, y=False)
 
     def set_view_box(self):
-        self.deactivate_cursor()
+        if self._cursor_active:
+            self.deactivate_cursor()
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -729,7 +794,8 @@ class PyQtGraphParser(BackendParserBase):
                 self.set_mouse(plot)
 
     def set_view_box_zoom(self):
-        self.deactivate_cursor()
+        if self._cursor_active:
+            self.deactivate_cursor()
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -739,7 +805,8 @@ class PyQtGraphParser(BackendParserBase):
                 self.set_mouse(plot)
 
     def set_view_box_pan(self):
-        self.deactivate_cursor()
+        if self._cursor_active:
+            self.deactivate_cursor()
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -749,7 +816,8 @@ class PyQtGraphParser(BackendParserBase):
                 vb.setMouseEnabled(x=True, y=True)
 
     def set_view_box_crosshair(self):
-        self.deactivate_cursor()
+        if self._cursor_active:
+            return
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
@@ -758,10 +826,28 @@ class PyQtGraphParser(BackendParserBase):
                 vb.setMouseMode(vb.PanMode)
                 self.set_mouse(plot)
         self.activate_cursor()
+        self._cursor_active = True
 
-    def autoscale_y_axis(self, impl_plot, margin=0.1):
-        pass
-        # impl_plot.vb.enableAutoRange(y=autoscale)
+    def get_impl_data(self, line: PlotDataItem):
+        return line.getData()[0], line.getData()[1]
+
+    def get_impl_lines(self, impl_plot: PlotItem):
+        lines = impl_plot.listDataItems()
+        vb = impl_plot.getViewBox()
+        lo, hi = vb.viewRange()[0]
+        return lines, lo, hi
+
+    def autoscale_y_axis(self, impl_plot: PlotItem, padding=0.1):
+        """
+        This function rescales the y-axis based on the data that is visible given the current limits of the viewbox.
+        impl_plot -- a PyQtGraph plot item
+        padding -- the fraction of the total height of the y-data to pad the upper and lower ylims
+        """
+        bot, top = super().autoscale_y_axis(impl_plot)
+        vb = impl_plot.getViewBox()
+
+        # Set new Y axis limits
+        vb.setYRange(bot, top, padding=padding)
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
         pass
@@ -866,7 +952,10 @@ class PyQtGraphParser(BackendParserBase):
 
     @BackendParserBase.run_in_one_thread
     def activate_cursor(self):
-        plots = []
+        if self._cursor_active:
+            return
+
+        plots: List[PlotItem] = []
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if plot:
@@ -874,80 +963,56 @@ class PyQtGraphParser(BackendParserBase):
         if not plots:
             return
 
-        # Pause repaints/signals to avoid flicker while creating items
-        view = self.figure  # GraphicsLayoutWidget is a QGraphicsView
-        scene = view.scene()
-        vp = view.viewport()
+        x_label = self._pm.get_value(self.canvas, 'enable_x_label_crosshair')
+        y_label = self._pm.get_value(self.canvas, 'enable_y_label_crosshair')
+        val_label = self._pm.get_value(self.canvas, 'enable_val_label_crosshair')
+        color = self._pm.get_value(self.canvas, 'crosshair_color')
+        lw = getattr(self.canvas, 'crosshair_line_width', 1)
+        horiz_on = bool(getattr(self.canvas, 'crosshair_horizontal', False))
+        vert_on = bool(getattr(self.canvas, 'crosshair_vertical', True))
 
-        if vp is not None:
-            vp.setUpdatesEnabled(False)
-        view.setUpdatesEnabled(False)
-        try:
-            scene.blockSignals(True)
-
-            x_label = self._pm.get_value(self.canvas, 'enable_x_label_crosshair')
-            y_label = self._pm.get_value(self.canvas, 'enable_y_label_crosshair')
-            val_label = self._pm.get_value(self.canvas, 'enable_val_label_crosshair')
-            color = self._pm.get_value(self.canvas, 'crosshair_color')
-            lw = getattr(self.canvas, 'crosshair_line_width', 1)
-            horiz_on = getattr(self.canvas, 'crosshair_horizontal', False)
-            vert_on = getattr(self.canvas, 'crosshair_vertical', True)
-            tol = 0.05  # same as IplotMultiCursor
-
-            if getattr(self.canvas, 'crosshair_per_plot', False):
-                for p in plots:
-                    self._cursors.append(
-                        pyQtCrosshair(
-                            plots=[p],
-                            x_label=x_label, y_label=y_label, val_label=val_label,
-                            color=color, lw=lw,
-                            horiz_on=horiz_on, vert_on=vert_on,
-                            val_tolerance=tol,
-                            cache_table=self._impl_plot_cache_table,
-                        )
-                    )
-            else:
-                self._cursors.append(
-                    pyQtCrosshair(
-                        plots=plots,
-                        x_label=x_label, y_label=y_label, val_label=val_label,
-                        color=color, lw=lw,
-                        horiz_on=horiz_on, vert_on=vert_on,
-                        val_tolerance=tol,
-                        cache_table=self._impl_plot_cache_table,
-                    )
+        if getattr(self.canvas, 'crosshair_per_plot', False):
+            for p in plots:
+                cursor = pyQtCrosshair(
+                    plots=[p],
+                    x_label=x_label,
+                    y_label=y_label,
+                    val_label=val_label,
+                    color=color,
+                    lw=lw,
+                    horiz_on=horiz_on,
+                    vert_on=vert_on,
+                    val_tolerance=0.05,
+                    cache_table=self._impl_plot_cache_table,
                 )
-        finally:
-            try:
-                scene.blockSignals(False)
-            except Exception:
-                pass
-            view.setUpdatesEnabled(True)
-            if vp is not None:
-                vp.setUpdatesEnabled(True)
+                self._cursors.append(cursor)
+        else:
+            cursor = pyQtCrosshair(
+                plots=plots,
+                x_label=x_label,
+                y_label=y_label,
+                val_label=val_label,
+                color=color,
+                lw=lw,
+                horiz_on=horiz_on,
+                vert_on=vert_on,
+                val_tolerance=0.05,
+                cache_table=self._impl_plot_cache_table,
+            )
+            self._cursors.append(cursor)
+
+        self._cursor_active = True
 
     @BackendParserBase.run_in_one_thread
     def deactivate_cursor(self):
-        view = self.figure
-        scene = view.scene()
-        vp = view.viewport()
+        if not self._cursor_active:
+            return
 
-        if vp is not None:
-            vp.setUpdatesEnabled(False)
-        view.setUpdatesEnabled(False)
-        try:
-            scene.blockSignals(True)
-            for cursor in self._cursors:
-                cursor.clear(destroy=True)
-            self._cursors.clear()
-        finally:
-            try:
-                scene.blockSignals(False)
-            except Exception:
-                pass
-            view.setUpdatesEnabled(True)
-            if vp is not None:
-                vp.setUpdatesEnabled(True)
+        for cursor in self._cursors:
+            cursor.remove()
+
+        self._cursors.clear()
+        self._cursor_active = False
 
     def get_impl_x_axis(self, plot: PlotItem) -> AxisItem:
         return plot.getAxis('bottom')
@@ -976,6 +1041,48 @@ class PyQtGraphParser(BackendParserBase):
         if isinstance(plot, PlotItem):
             vb = plot.getViewBox()
             vb.setYRange(limits[0], limits[1], padding=0)
+
+    # MODIFIED
+    def align_y_axis(self, row: int, col: int) -> None:
+        stacks = self._layout_stacks.get((row, col))
+        if not stacks:
+            return
+
+        for p in stacks.values():
+            if p:
+                p.getAxis('left').setWidth(None)
+
+        max_w = 0.0
+        for p in stacks.values():
+            if not p:
+                continue
+            ax = p.getAxis('left')
+            vb = p.getViewBox()
+            y0, y1 = vb.viewRange()[1]
+            if y0 == 0 and y1 == 1:
+                continue
+            tv = ax.tickValues(y0, y1, vb.height())
+            if not tv:
+                continue
+            spacing, values = tv[0]
+            labels = ax.tickStrings(values, scale=1.0, spacing=spacing)
+            fm = QFontMetricsF(ax.style.get('tickFont') or QtWidgets.QApplication.font())
+            text_w = max((fm.horizontalAdvance(str(s)) for s in labels), default=0.0)
+            label_w = ax.label.boundingRect().height() if ax.label.isVisible() else 0.0
+            if text_w + label_w > max_w:
+                max_w = text_w + label_w
+
+        if max_w <= 0:
+            return
+
+        w = int(max_w)
+        for p in stacks.values():
+            if p:
+                p.getAxis('left').setWidth(w)
+
+        gl = getattr(self, '_graphics_layout', None)
+        if gl:
+            gl.updateGeometry()
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to

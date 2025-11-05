@@ -1,6 +1,6 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
-
+from datetime import datetime
 from typing import Any, Callable, Collection, List
 import pandas
 import gc
@@ -34,15 +34,15 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
-from iplotlib.core.impl_base import ImplementationPlotCacheTable
 
 logger = setupLogger.get_logger(__name__)
 
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
             "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
 
-mpl.rcParams['path.simplify'] = True
-mpl.rcParams['path.simplify_threshold'] = 1.0
+
+# mpl.rcParams['path.simplify'] = True
+# mpl.rcParams['path.simplify_threshold'] = 1.0
 
 
 class MatplotlibParser(BackendParserBase):
@@ -118,8 +118,35 @@ class MatplotlibParser(BackendParserBase):
             # for n, o in zip(new, old):
             new.set_visible(old.get_visible())
 
-    def do_impl_streaming(self, impl_plot: Any, plot: Plot, cache_item, x_data):
-        pass
+    def do_impl_streaming(self, impl_plot: MPLAxes, plot: Plot, cache_item):
+        """
+        Updates the X and Y view ranges of the Axes based on the most recent data received from the Streaming
+        """
+        ax_window = impl_plot.get_xlim()[1] - impl_plot.get_xlim()[0]
+
+        # Time window
+        now = int(datetime.now().timestamp() * 1e9)
+        min_time = now - int(ax_window)
+
+        all_y_data = []
+        for signal_ref in cache_item.signals:
+            signal = signal_ref()
+            if signal.lines[0].get_visible() and len(signal.x_data) > 0:
+                mask = (signal.x_data >= min_time) & (signal.x_data <= now)
+                all_y_data.extend(signal.y_data[mask])
+
+        if all_y_data:
+            y_max = np.nanmax(all_y_data).item()
+            y_min = np.nanmin(all_y_data).item()
+            if y_max == y_min:
+                diff = y_max * 0.05
+            else:
+                diff = (y_max - y_min) * 0.1
+            impl_plot.set_ylim(y_min - diff, y_max + diff)
+
+        begin = self.transform_value(impl_plot, 0, min_time, inverse=True)
+        end = self.transform_value(impl_plot, 0, now, inverse=True)
+        impl_plot.set_xlim(begin, end)
 
     def set_line_data(self, line: Line2D, x_data, y_data, style: dict):
         """
@@ -555,7 +582,8 @@ class MatplotlibParser(BackendParserBase):
 
             # Observe the axis limit change events
             if not self.canvas.streaming:
-                mpl_axes.callbacks.connect('xlim_changed', self._axis_update_callback)
+                mpl_axes.callbacks.connect('xlim_changed', self._x_axis_update_callback)
+                mpl_axes.callbacks.connect('ylim_changed', self._y_axis_update_callback)
 
     def _update_slider(self, val, plot, slider_values, current_label, formatter):
         for c_row in plot.signals.values():
@@ -582,8 +610,11 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     plot_with_slider.slider_last_val = val
 
-    def _axis_update_callback(self, current_plot: MPLAxes):
-        super()._axis_update_callback(current_plot)
+    def _x_axis_update_callback(self, current_plot: MPLAxes):
+        super()._x_axis_update_callback(current_plot)
+
+    def _y_axis_update_callback(self, current_plot: MPLAxes):
+        super()._y_axis_update_callback(current_plot)
 
     def process_ipl_log_axis(self, mpl_axis: MPLAxis, plot: Plot):
         if isinstance(mpl_axis, YAxis):
@@ -631,71 +662,61 @@ class MatplotlibParser(BackendParserBase):
         return mpl_axes
 
     def process_ipl_signal_annotations(self, signal: Signal, impl_plot: MPLAxes):
-        if isinstance(signal, SignalXY):
-            if impl_plot.get_lines()[0].get_marker() == 'None':
-                return
-            if signal.markers_list:
-                annotations_names = [child.get_text() for child in impl_plot.get_children() if
-                                     isinstance(child, plt.Annotation)]
-                for marker in signal.markers_list:
-                    if marker.visible:
-                        # Check if the marker is already drawn
-                        if marker.name not in annotations_names:
-                            x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
-                            y = marker.xy[1]
-                            impl_plot.annotate(text=marker.name,
-                                               xy=(x, y),
-                                               xytext=(x, y),
-                                               bbox=dict(boxstyle="round,pad=0.3",
-                                                         edgecolor="black",
-                                                         facecolor=marker.color))
+        if not isinstance(signal, SignalXY):
+            return
 
-    def autoscale_y_axis(self, impl_plot, margin=0.1):
-        """This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
-        ax -- a matplotlib axes object
-        margin -- the fraction of the total height of the y-data to pad the upper and lower ylims"""
+        if impl_plot.get_lines()[0].get_marker() == 'None':
+            return
 
-        def get_bottom_top(x_line):
-            xd = x_line.get_xdata()
-            yd = x_line.get_ydata()
-            lo, hi = impl_plot.get_xlim()
-            y_displayed = yd[((xd > lo) & (xd < hi))]
+        if signal.markers_list:
+            annotations_names = [child.get_text() for child in impl_plot.get_children() if
+                                 isinstance(child, plt.Annotation)]
+            for marker in signal.markers_list:
+                if marker.visible:
+                    # Draw marker with correct offset to right display
+                    x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
+                    y = marker.xy[1]
 
-            # Check if the visible Y data contains valid values
-            if len(y_displayed) > 0:
-                # Check if there exist NaN values in the y_displayed array
-                if np.isnan(y_displayed).any():
-                    y_displayed = y_displayed[~np.isnan(y_displayed)]
-                min_bot = np.min(y_displayed)
-                max_top = np.max(y_displayed)
-            else:
-                min_bot = np.inf
-                max_top = -np.inf
-            return min_bot, max_top
+                    # Create annotation if not present (import case)
+                    if marker.name not in annotations_names:
+                        impl_plot.annotate(text=marker.name,
+                                           xy=(x, y),
+                                           xytext=(x, y),
+                                           bbox=dict(boxstyle="round,pad=0.3",
+                                                     edgecolor="black",
+                                                     facecolor=marker.color))
+                    else:
+                        # Update position if annotation already exists
+                        prev_annotation = [child for child in impl_plot.get_children() if isinstance(child,
+                                                                                                     plt.Annotation) and child.get_text() == marker.name]  # type: List[plt.Annotation]
 
+                        prev_annotation[0].xy = (x, y)
+                        prev_annotation[0].set_position((x, y))
+
+    def get_impl_data(self, line: Line2D):
+        return line.get_xdata(), line.get_ydata()
+
+    def get_impl_lines(self, impl_plot: MPLAxes):
         lines = impl_plot.get_lines()
         lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY"]]
-        bot, top = np.inf, -np.inf
+        lo, hi = impl_plot.get_xlim()
+        return lines, lo, hi
 
-        for line in lines:
-            new_bot, new_top = get_bottom_top(line)
-            if new_bot < bot:
-                bot = new_bot
-            if new_top > top:
-                top = new_top
-
-        # Apply default Y limits in case of missing or invalid data
-        if bot == np.inf and top == -np.inf:
-            bot, top = 0, 1
+    def autoscale_y_axis(self, impl_plot: MPLAxes, padding=0.1):
+        """
+        This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
+        ax -- a matplotlib axes object
+        padding -- the fraction of the total height of the y-data to pad the upper and lower ylims
+        """
+        bot, top = super().autoscale_y_axis(impl_plot)
 
         # Compute final margin
         h = (top - bot)
-        n_new_bot = bot - margin * h
-        n_new_top = top + margin * h
+        n_new_bot = bot - padding * h
+        n_new_top = top + padding * h
 
         # Set new Y axis limits
-        if lines:
-            self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
+        self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
         """
@@ -885,70 +906,8 @@ class MatplotlibParser(BackendParserBase):
 
         return style
 
-    def add_marker_scaled(self, mpl_axes: MPLAxes, plot: PlotXY, x_coord, y_coord):
-        """
-        Function that returns the nearest point of the plot to create the corresponding marker.
-        As the scale of the axes is very different, a normalization of the data is done to adjust the data to a
-        common scale.
-        """
-
-        ranges = []
-        marker_signal = None
-        nearest_point = None
-        minor_dist = float('inf')
-
-        for ax_idx, ax in enumerate(plot.axes):
-            if isinstance(ax, RangeAxis):
-                ranges = ax.get_limits()
-
-        # Get the lines that are actually located in the current mpl_axes
-        valid_lines = [line.get_label() for line in mpl_axes.get_lines()]
-
-        # With the new X axis limits, we obtain the points within that range
-        for stack in plot.signals.values():
-            for signal in stack:
-                if signal.label not in valid_lines:
-                    continue
-                idx1 = np.searchsorted(signal.x_data, ranges[0])
-                idx2 = np.searchsorted(signal.x_data, ranges[1])
-
-                x_zoom = signal.data_store[0][idx1:idx2]
-                y_zoom = signal.data_store[1][idx1:idx2]
-
-                # If the number of samples per signal is less than 50 we continue, if not the user shall keep zooming
-                if len(x_zoom) > 50:
-                    return None, len(x_zoom)
-
-                # If there are no data points in the zoomed region, skip this signal
-                if not len(x_zoom):
-                    continue
-
-                # Get the points (x,y) for each signal
-                points = list(zip(x_zoom, y_zoom))
-
-                # Normalization of the points
-                x_min, x_max = min(x_zoom), max(x_zoom)
-                y_min, y_max = min(y_zoom), max(y_zoom)
-
-                x_range = x_max - x_min if x_max != x_min else 1
-                y_range = y_max - y_min if y_max != y_min else 1
-                scaled_points = [((px - x_min) / x_range, (py - y_min) / y_range) for px, py in points]
-
-                # Normalization of the coordinates where the user clicked
-                x_coord_transform = self.transform_value(mpl_axes, 0, x_coord)
-                scaled_x = (x_coord_transform - x_min) / x_range
-                scaled_y = (y_coord - y_min) / y_range
-
-                # Get the nearest point using the Euclidian distance
-                distances = [np.sqrt((px - scaled_x) ** 2 + (py - scaled_y) ** 2) for px, py in scaled_points]
-                idx_result = np.argmin(distances)
-
-                if distances[idx_result] < minor_dist:
-                    minor_dist = distances[idx_result]
-                    nearest_point = points[idx_result]
-                    marker_signal = signal
-
-        return nearest_point, marker_signal
+    def markers_valid_lines(self, impl_plot: MPLAxes):
+        return [line.get_label() for line in impl_plot.get_lines()]
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):
@@ -986,11 +945,19 @@ class MatplotlibParser(BackendParserBase):
 
     def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
         """Implementations should set the x_axis label text"""
-        self.get_impl_x_axis(impl_plot).set_label_text(text)
+        x_axis = self.get_impl_x_axis(impl_plot)
+        fc = self._pm.get_value(x_axis, 'font_color')
+        fs = self._pm.get_value(x_axis, 'font_size')
+        label_props = dict(fontsize=fs, color=fc)
+        x_axis.set_label_text(text, **label_props)
 
     def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
         """Implementations should set the y_axis label text"""
-        self.get_impl_y_axis(impl_plot).set_label_text(text)
+        y_axis = self.get_impl_y_axis(impl_plot)
+        fc = self._pm.get_value(y_axis, 'font_color')
+        fs = self._pm.get_value(y_axis, 'font_size')
+        label_props = dict(fontsize=fs, color=fc)
+        y_axis.set_label_text(text, **label_props)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to

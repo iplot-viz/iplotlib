@@ -1,22 +1,15 @@
-"""
-This module contains definitions of various kinds of Signal (s)
-one might want to use when plotting data.
+""" Represents a spatial marker used to identify and compare specific points on a plotted SignalXY.
 
-TODO: cambiar descripcion de clase
+Each marker stores a pair of (x, y) coordinates, along with a name, visibility state, and color.
+Markers can be placed on data plots to mark points of interest and to compute distance between two marked positions.
 """
+
 from dataclasses import dataclass
 from typing import Tuple
 
 
 @dataclass
 class Marker:
-    """
-    name : str
-        Name of the marker
-    xy : tuple
-        Coordinates XY
-    """
-
     name: str = None
     xy: Tuple[float, float] = None
     color: str = "#FFFFFF"

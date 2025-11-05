@@ -135,6 +135,41 @@ class IplotQtCanvas(QWidget):
                                 signal_list.append(signal)
         return signal_list
 
+    def check_markers(self, canvas: Canvas):
+        # Check if there are signals in the table that are no longer used
+        markers_signals = self.get_signals(canvas)
+        markers_signals_uid = [signal.uid for signal in markers_signals]
+
+        for signal_uid in self._marker_window.get_markers_signal():
+            if signal_uid not in markers_signals_uid:
+                self._marker_window.remove_signal(signal_uid)
+            else:
+                # Check signal markers stack
+                prev_stack = self._marker_window.get_stack(signal_uid)
+                idx = markers_signals_uid.index(signal_uid)
+                signal_element = markers_signals[idx]
+                current_stack = signal_element.get_stack()
+                if prev_stack != current_stack:
+                    self._marker_window.refresh_stack(signal_element, current_stack)
+
+    def get_signal_marker(self, plot_id, signal_uid):
+        # Get signal and ax
+        for idxCol, col in enumerate(self._parser.canvas.plots):
+            for idxPlot, plot in enumerate(col):
+                if not plot or [plot.col, plot.row] != plot_id:
+                    continue
+                # Get signal
+                for signals in plot.signals.values():
+                    for signal in signals:
+                        if signal.uid == signal_uid and isinstance(signal, SignalXY):
+                            ax = self._parser._signal_impl_plot_lut.get(signal.uid)
+                            return signal, ax
+
+    def get_marker_row(self, signal: SignalXY, marker_name: str):
+        for i, marker in enumerate(signal.markers_list):
+            if marker.name == marker_name:
+                return i
+
     def stats(self, canvas: Canvas):
         """
         Computes and displays statistics for each signal in the current iplotlib canvas.
