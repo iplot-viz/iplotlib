@@ -4,7 +4,7 @@ This module defines the `Canvas` object.
 
 # Changelog:
 #   Jan 2023:   -Added legend position and layout properties [Alberto Luengo]
-
+import numpy as np
 from abc import ABC
 from dataclasses import dataclass
 from typing import List, Union, Dict
@@ -375,7 +375,7 @@ class Canvas(ABC):
                                 x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
                             else:
                                 timeframe = pd.Series(format_ts, name=f"{col_name}.time")
-                                if len(y_data[0]) > 1:
+                                if np.isscalar(y_data)==False and len(y_data[0]) > 1:
                                     dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data.{i}" for i in range(
                                         len(y_data[0]))])  # we could use x data in header
                                 else:
