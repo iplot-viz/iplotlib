@@ -662,24 +662,36 @@ class MatplotlibParser(BackendParserBase):
         return mpl_axes
 
     def process_ipl_signal_annotations(self, signal: Signal, impl_plot: MPLAxes):
-        if isinstance(signal, SignalXY):
-            if impl_plot.get_lines()[0].get_marker() == 'None':
-                return
-            if signal.markers_list:
-                annotations_names = [child.get_text() for child in impl_plot.get_children() if
-                                     isinstance(child, plt.Annotation)]
-                for marker in signal.markers_list:
-                    if marker.visible:
-                        # Check if the marker is already drawn
-                        if marker.name not in annotations_names:
-                            x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
-                            y = marker.xy[1]
-                            impl_plot.annotate(text=marker.name,
-                                               xy=(x, y),
-                                               xytext=(x, y),
-                                               bbox=dict(boxstyle="round,pad=0.3",
-                                                         edgecolor="black",
-                                                         facecolor=marker.color))
+        if not isinstance(signal, SignalXY):
+            return
+
+        if impl_plot.get_lines()[0].get_marker() == 'None':
+            return
+
+        if signal.markers_list:
+            annotations_names = [child.get_text() for child in impl_plot.get_children() if
+                                 isinstance(child, plt.Annotation)]
+            for marker in signal.markers_list:
+                if marker.visible:
+                    # Draw marker with correct offset to right display
+                    x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
+                    y = marker.xy[1]
+
+                    # Create annotation if not present (import case)
+                    if marker.name not in annotations_names:
+                        impl_plot.annotate(text=marker.name,
+                                           xy=(x, y),
+                                           xytext=(x, y),
+                                           bbox=dict(boxstyle="round,pad=0.3",
+                                                     edgecolor="black",
+                                                     facecolor=marker.color))
+                    else:
+                        # Update position if annotation already exists
+                        prev_annotation = [child for child in impl_plot.get_children() if isinstance(child,
+                                                                                                     plt.Annotation) and child.get_text() == marker.name]  # type: List[plt.Annotation]
+
+                        prev_annotation[0].xy = (x, y)
+                        prev_annotation[0].set_position((x, y))
 
     def get_impl_data(self, line: Line2D):
         return line.get_xdata(), line.get_ydata()
@@ -894,70 +906,8 @@ class MatplotlibParser(BackendParserBase):
 
         return style
 
-    def add_marker_scaled(self, mpl_axes: MPLAxes, plot: PlotXY, x_coord, y_coord):
-        """
-        Function that returns the nearest point of the plot to create the corresponding marker.
-        As the scale of the axes is very different, a normalization of the data is done to adjust the data to a
-        common scale.
-        """
-
-        ranges = []
-        marker_signal = None
-        nearest_point = None
-        minor_dist = float('inf')
-
-        for ax_idx, ax in enumerate(plot.axes):
-            if isinstance(ax, RangeAxis):
-                ranges = ax.get_limits()
-
-        # Get the lines that are actually located in the current mpl_axes
-        valid_lines = [line.get_label() for line in mpl_axes.get_lines()]
-
-        # With the new X axis limits, we obtain the points within that range
-        for stack in plot.signals.values():
-            for signal in stack:
-                if signal.label not in valid_lines:
-                    continue
-                idx1 = np.searchsorted(signal.x_data, ranges[0])
-                idx2 = np.searchsorted(signal.x_data, ranges[1])
-
-                x_zoom = signal.data_store[0][idx1:idx2]
-                y_zoom = signal.data_store[1][idx1:idx2]
-
-                # If the number of samples per signal is less than 100 we continue, if not the user shall keep zooming
-                if len(x_zoom) > 100:
-                    return None, len(x_zoom)
-
-                # If there are no data points in the zoomed region, skip this signal
-                if not len(x_zoom):
-                    continue
-
-                # Get the points (x,y) for each signal
-                points = list(zip(x_zoom, y_zoom))
-
-                # Normalization of the points
-                x_min, x_max = min(x_zoom), max(x_zoom)
-                y_min, y_max = min(y_zoom), max(y_zoom)
-
-                x_range = x_max - x_min if x_max != x_min else 1
-                y_range = y_max - y_min if y_max != y_min else 1
-                scaled_points = [((px - x_min) / x_range, (py - y_min) / y_range) for px, py in points]
-
-                # Normalization of the coordinates where the user clicked
-                x_coord_transform = self.transform_value(mpl_axes, 0, x_coord)
-                scaled_x = (x_coord_transform - x_min) / x_range
-                scaled_y = (y_coord - y_min) / y_range
-
-                # Get the nearest point using the Euclidian distance
-                distances = [np.sqrt((px - scaled_x) ** 2 + (py - scaled_y) ** 2) for px, py in scaled_points]
-                idx_result = np.argmin(distances)
-
-                if distances[idx_result] < minor_dist:
-                    minor_dist = distances[idx_result]
-                    nearest_point = points[idx_result]
-                    marker_signal = signal
-
-        return nearest_point, marker_signal
+    def markers_valid_lines(self, impl_plot: MPLAxes):
+        return [line.get_label() for line in impl_plot.get_lines()]
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):

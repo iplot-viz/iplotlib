@@ -1,12 +1,12 @@
 from PySide6.QtCore import QMargins, Qt, Signal, QEvent
 from PySide6.QtWidgets import QVBoxLayout, QMenu
 
-from iplotlib.core import Canvas, PlotXY, PlotContour
+from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
-from pyqtgraph import PlotItem
+from pyqtgraph import PlotItem, TextItem
 
 logger = Sl.get_logger(__name__)
 
@@ -83,13 +83,79 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         return self._parser.canvas
 
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
-        pass
+        signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: PlotItem
+
+        # Creation of the annotations
+        if isinstance(signal, SignalXY) and ax:
+            if not modify:
+                # Create and draw marker
+                x = self._parser.transform_value(ax, 0, xy[0], inverse=True)
+                y = xy[1]
+
+                marker_text = TextItem(anchor=(0.5, 0.5),
+                                       html=f"""<div style="
+                                       background-color:{color};
+                                       color:black;
+                                       border:1px solid black;
+                                       border-radius:4px;
+                                       padding:2px 5px;
+                                       font-size:12pt;
+                                       text-align:center;
+                                        ">{marker_name}</div>""")
+                marker_text.setPos(x, y)
+                ax.addItem(marker_text)
+
+                # Get marker row
+                row = self.get_marker_row(signal, marker_name)
+
+                # Set marker visibility
+                signal.markers_list[row].visible = True
+                signal.markers_list[row].color = color
+            else:
+                # Change marker color when it is visible
+                annotations = [child for child in ax.items if isinstance(child, TextItem)]
+                if annotations:
+                    for annotation in annotations:
+                        if annotation.toPlainText() == marker_name:
+                            # Set new color property
+                            new_html = f"""<div style="
+                                            background-color:{color};
+                                            color:black;
+                                            border:1px solid black;
+                                            border-radius:4px;
+                                            padding:2px 5px;
+                                            font-size:12pt;
+                                            text-align:center;
+                                        ">{marker_name}</div>"""
+
+                            annotation.setHtml(new_html)
+                            annotation.update()
+
+                            # Get marker row
+                            row = self.get_marker_row(signal, marker_name)
+                            signal.markers_list[row].color = color
 
     def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
-        pass
+        signal, ax = self.get_signal_marker(plot_id, signal_uid)
 
-    def check_markers(self, canvas: Canvas):
-        pass
+        # Get annotations from the axis
+        annotations = [child for child in ax.items if isinstance(child, TextItem)]
+
+        # Get marker row
+        row = self.get_marker_row(signal, marker_name)
+
+        # Indicate if the marker will be removed or hidden
+        if delete:
+            signal.delete_marker(row)
+        else:
+            signal.markers_list[row].visible = False
+
+        # Remove annotations
+        if annotations:
+            for annotation in annotations:
+                if annotation.toPlainText() == marker_name:
+                    ax.removeItem(annotation)
+                    return
 
     def autoscale_y(self, impl_plot):
         """
@@ -158,7 +224,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._parser.set_view_box_zoom()
         elif mode == Canvas.MOUSE_MODE_MARKER:
             self._parser.set_view_box()
-            """
             if not self._marker_window.isVisible():
                 self._marker_window.show()
             elif self._marker_window.isMinimized():
@@ -166,7 +231,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             else:
                 self._marker_window.raise_()
                 self._marker_window.activateWindow()
-            """
 
     def undo(self):
         self._parser.undo()
@@ -195,20 +259,59 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             return
         plot = ci.plot()
 
-        if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-            # Stage a command to obtain original view limits
-            # Disable Zoom and Pan in PlotContour
-            if isinstance(plot, PlotContour):
-                return
-            elif event.type() == QEvent.GraphicsSceneMouseDoubleClick:
-                return
-            elif event.button() == Qt.MouseButton.RightButton:
-                return
-            self.stage_view_lim_cmd(impl_plot)
-            return
+        if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
+            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER,
+                               Canvas.MOUSE_MODE_CROSSHAIR]:
+                if event.button() == Qt.MouseButton.RightButton:
+                    return
 
-        elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
-            self.autoscale_menu = None
+                ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+                plot = ci.plot()
+
+                # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
+                system_coord = view_box.mapSceneToView(event.scenePos())
+                x_value = system_coord.x()
+                y_value = system_coord.y()
+
+                # Markers can only be created if the property 'marker' is not None
+                if impl_plot.listDataItems()[0].opts['symbol'] != 'None':  # TODO: review
+                    # Check if the marker coordinates are correct and if the marker has not already been created
+                    new_marker, marker_signal = self._parser.add_marker_scaled(impl_plot, plot, x_value, y_value)
+                    if new_marker is not None:
+                        if new_marker not in self._marker_window.get_markers():
+                            self._marker_window.add_marker(marker_signal, new_marker)
+                            if not self._marker_window.isVisible():
+                                self._marker_window.show()
+                            elif self._marker_window.isMinimized():
+                                self._marker_window.showNormal()
+                            else:
+                                self._marker_window.raise_()
+                                self._marker_window.activateWindow()
+                        else:
+                            logger.warning(f"The marker {new_marker} is already created")
+                    else:
+                        logger.warning(
+                            f"Cannot add marker {new_marker}: found {marker_signal} samples, but the maximum allowed"
+                            f" is 100")
+                else:
+                    logger.warning("Markers must be enabled in the plot to create signal markers")
+
+            elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
+                self.autoscale_menu = None
+        else:
+            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                if event.type() == QEvent.GraphicsSceneMousePress:
+                    # Stage a command to obtain original view limits
+                    # Disable Zoom and Pan in PlotContour
+                    if isinstance(plot, PlotContour):
+                        return
+                    elif event.button() == Qt.MouseButton.RightButton:
+                        return
+                    self.stage_view_lim_cmd(impl_plot)
+                    return
+
+            elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
+                self.autoscale_menu = None
 
     def _impl_mouse_release_handler(self, view_box, event):
         # self._debug_log_event(event, "Mouse released")
@@ -227,23 +330,20 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 self.stats(self.get_canvas())
 
             elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
-                if event.button() == Qt.MouseButton.RightButton:
-                    if event.double():
-                        return
-                    else:
-                        view_box.state['enableMenu'] = True
+                if event.button() == Qt.MouseButton.LeftButton or event.double():
+                    return
 
-                        # Create menu with autoscale options
-                        if self.autoscale_menu is None:
-                            self.autoscale_menu = QMenu(self)
-                            self.autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(impl_plot))
-                            self.autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
-                            if self._parser.canvas.focus_plot is None:
-                                self.autoscale_menu.addAction("Focus on plot",
-                                                              lambda: self._full_screen_mode_on(impl_plot))
-                            else:
-                                self.autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
-                            self.autoscale_menu.popup(event.screenPos().toPoint())
+                # Create menu with autoscale options
+                if self.autoscale_menu is None:
+                    self.autoscale_menu = QMenu(self)
+                    self.autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(impl_plot))
+                    self.autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+                    if self._parser.canvas.focus_plot is None:
+                        self.autoscale_menu.addAction("Focus on plot",
+                                                      lambda: self._full_screen_mode_on(impl_plot))
+                    else:
+                        self.autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+                    self.autoscale_menu.popup(event.screenPos().toPoint())
 
     def unfocus_plot(self):
         """Quita el focus del plot actual."""

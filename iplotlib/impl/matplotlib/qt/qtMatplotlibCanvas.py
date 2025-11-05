@@ -145,52 +145,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 box.setText(message)
                 box.exec_()
 
-    def check_markers(self, canvas: Canvas):
-        # Check if there are signals in the table that are no longer used
-        markers_signals = self.get_signals(canvas)
-        markers_signals_uid = [signal.uid for signal in markers_signals]
-
-        for signal_uid in self._marker_window.get_markers_signal():
-            if signal_uid not in markers_signals_uid:
-                self._marker_window.remove_signal(signal_uid)
-            else:
-                # Check signal markers stack
-                prev_stack = self._marker_window.get_stack(signal_uid)
-                idx = markers_signals_uid.index(signal_uid)
-                signal_element = markers_signals[idx]
-                current_stack = signal_element.get_stack()
-                if prev_stack != current_stack:
-                    self._marker_window.refresh_stack(signal_element, current_stack)
-
-    def get_signals(self, canvas: Canvas):
-        signal_list = []
-        for row_idx, col in enumerate(canvas.plots, start=1):
-            for col_idx, plot in enumerate(col, start=1):
-                if plot:
-                    for stack in plot.signals.values():
-                        for signal in stack:
-                            if isinstance(signal, SignalXY):
-                                signal_list.append(signal)
-        return signal_list
-
-    def get_signal_marker(self, plot_id, signal_uid):
-        # Get signal and ax
-        for idxCol, col in enumerate(self._parser.canvas.plots):
-            for idxPlot, plot in enumerate(col):
-                if not plot or [plot.col, plot.row] != plot_id:
-                    continue
-                # Get signal
-                for signals in plot.signals.values():
-                    for signal in signals:
-                        if signal.uid == signal_uid and isinstance(signal, SignalXY):
-                            ax = self._parser._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
-                            return signal, ax
-
-    def get_marker_row(self, signal: SignalXY, marker_name: str):
-        for i, marker in enumerate(signal.markers_list):
-            if marker.name == marker_name:
-                return i
-
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: MPLAxes
 
@@ -247,19 +201,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     annotation.remove()
                     self._parser.figure.canvas.draw()
                     return
-
-    def stats(self, canvas: Canvas):
-        info_stats = []
-        signals = self.get_signals(canvas)
-        if signals:
-            for signal in signals:
-                if isinstance(signal,
-                              SignalXY) and signal.status_info.result == 'Success' and signal.parent is not None:
-                    mpl_axes = self._parser._signal_impl_plot_lut.get(signal.uid)
-                    if mpl_axes is None:
-                        continue
-                    info_stats.append((signal, mpl_axes))
-            self._stats_table.fill_table(info_stats)
 
     def autoscale_y(self, impl_plot):
         """
@@ -461,7 +402,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     else:
                         logger.warning(
                             f"Cannot add marker {new_marker}: found {marker_signal} samples, but the maximum allowed"
-                            f" is 50")
+                            f" is 100")
                 else:
                     logger.warning("Markers must be enabled in the plot to create signal markers")
         else:

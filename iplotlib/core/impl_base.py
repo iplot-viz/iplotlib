@@ -721,6 +721,75 @@ class BackendParserBase(ABC):
     def legend_downsampled_signal(self, signal, impl_plot: Any, plot_lines: Any):
         pass
 
+    @abstractmethod
+    def markers_valid_lines(self, impl_plot: Any):
+        pass
+
+    def add_marker_scaled(self, impl_plot: Any, plot: PlotXY, x_coord, y_coord):
+        """
+        Function that returns the nearest point of the plot to create the corresponding marker.
+        As the scale of the axes is very different, a normalization of the data is done to adjust the data to a
+        common scale.
+        """
+
+        ranges = []
+        marker_signal = None
+        nearest_point = None
+        minor_dist = float('inf')
+
+        for ax_idx, ax in enumerate(plot.axes):
+            if isinstance(ax, RangeAxis):
+                ranges = ax.get_limits()
+
+        # Get the lines that are actually located in the current mpl_axes
+        valid_lines = self.markers_valid_lines(impl_plot)
+
+        # With the new X axis limits, we obtain the points within that range
+        for stack in plot.signals.values():
+            for signal in stack:
+                if signal.label not in valid_lines:
+                    continue
+                idx1 = np.searchsorted(signal.x_data, ranges[0])
+                idx2 = np.searchsorted(signal.x_data, ranges[1])
+
+                x_zoom = signal.data_store[0][idx1:idx2]
+                y_zoom = signal.data_store[1][idx1:idx2]
+
+                # If the number of samples per signal is less than 100 we continue, if not the user shall keep zooming
+                if len(x_zoom) > 100:
+                    return None, len(x_zoom)
+
+                # If there are no data points in the zoomed region, skip this signal
+                if not len(x_zoom):
+                    continue
+
+                # Get the points (x,y) for each signal
+                points = list(zip(x_zoom, y_zoom))
+
+                # Normalization of the points
+                x_min, x_max = min(x_zoom), max(x_zoom)
+                y_min, y_max = min(y_zoom), max(y_zoom)
+
+                x_range = x_max - x_min if x_max != x_min else 1
+                y_range = y_max - y_min if y_max != y_min else 1
+                scaled_points = [((px - x_min) / x_range, (py - y_min) / y_range) for px, py in points]
+
+                # Normalization of the coordinates where the user clicked
+                x_coord_transform = self.transform_value(impl_plot, 0, x_coord)
+                scaled_x = (x_coord_transform - x_min) / x_range
+                scaled_y = (y_coord - y_min) / y_range
+
+                # Get the nearest point using the Euclidian distance
+                distances = [np.sqrt((px - scaled_x) ** 2 + (py - scaled_y) ** 2) for px, py in scaled_points]
+                idx_result = np.argmin(distances)
+
+                if distances[idx_result] < minor_dist:
+                    minor_dist = distances[idx_result]
+                    nearest_point = points[idx_result]
+                    marker_signal = signal
+
+        return nearest_point, marker_signal
+
     def do_impl_line_plot_xy_slider(self, signal: SignalXY, impl_plot: Any, plot: PlotXYWithSlider, cache_item,
                                     x_data, y_data, z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[Any]
