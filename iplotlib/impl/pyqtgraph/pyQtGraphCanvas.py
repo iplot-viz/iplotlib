@@ -673,11 +673,9 @@ class PyQtGraphParser(BackendParserBase):
         if axis_item.orientation != 'left':
             return
         log_scale = self._pm.get_value(plot, 'log_scale')
-        if log_scale:  # TODO: review log scale
-            # Set log scale for AxisItem
+        if log_scale:
             plot_item = axis_item.parentItem()
-            plot_item.setLogMode(y=log_scale)
-            # axis_item.setLogMode(log_scale)
+            plot_item.setLogMode(x=False, y=True)
 
     def process_ipl_axis_params(self, fc, fs, axis: Axis, axis_item: AxisItem):
         tick_props = dict(maxTickLevel=0)  # TODO: add color to tick values
