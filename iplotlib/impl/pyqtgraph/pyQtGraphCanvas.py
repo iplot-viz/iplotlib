@@ -198,6 +198,7 @@ class PyQtGraphParser(BackendParserBase):
             # Set the symbol and size if specified
             line.setSymbol(style['symbol'])
             line.setSymbolSize(style['symbolSize'])
+            line.setSymbolBrush(style['symbolBrush'])
 
     def get_signal_style(self, signal: SignalXY) -> dict:
         """
@@ -222,6 +223,7 @@ class PyQtGraphParser(BackendParserBase):
         if marker:
             style['symbol'] = self._pm.get_value(signal, 'marker')
             style['symbolSize'] = self._pm.get_value(signal, 'marker_size')
+            style['symbolBrush'] = self._pm.get_value(signal, 'color')
 
         step = self._pm.get_value(signal, 'step') or 'linear'
         step_mode = STEP_MAP_PG.get(step)
@@ -758,6 +760,12 @@ class PyQtGraphParser(BackendParserBase):
         Set the canvas gridspec for the figure.
         """
         super().clear()
+
+        # remove any active multi‑cursors
+        for c in self._cursors:
+            c.remove()
+        self._cursors.clear()
+
         self._cell_gl = {}
         self._layout_stacks = {}
         self._slider_placeholders = {}

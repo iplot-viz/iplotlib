@@ -1,8 +1,8 @@
-from typing import List, Optional, Tuple, Union
+from typing import List, Tuple, Union
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph import PlotItem, InfiniteLine, TextItem, PlotDataItem
-from pyqtgraph.Qt import QtCore, QtGui
+from pyqtgraph.Qt import QtGui
 from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
 
@@ -135,21 +135,30 @@ class pyQtCrosshair:
             [[xmin, xmax], [ymin, ymax]] = vb.viewRange()
 
             if self.x_label and i < len(self.x_arrows):
+                ci = self._cache_table.get_cache_item(plot)
+                ip = ci.plot()
+                is_last = True
+                for p2 in self.plots:
+                    ci2 = self._cache_table.get_cache_item(p2)
+                    ip2 = ci2.plot()
+                    if getattr(ip2, "row", None) == getattr(ip, "row", None) and getattr(ip2, "col", None) == getattr(
+                            ip, "col", None) and ci2.stack_key > ci.stack_key:
+                        is_last = False
+                        break
                 arrow = self.x_arrows[i]
-                if xmin < x < xmax:
+                if not is_last or not (xmin < x < xmax):
+                    arrow.setVisible(False)
+                else:
                     axis = plot.getAxis("bottom")
                     text_key = f"x{i}"
                     current_text = self._text_cache.get(text_key)
-                    new_text = (axis.tickStrings([x], 1.0, 1)[0]
-                                if isinstance(axis, NanosecondDateFormatter) and axis.tickStrings([x], 1.0, 1)
-                                else f"{x:.6g}")
+                    ts = axis.tickStrings([x], 1.0, 1) if isinstance(axis, NanosecondDateFormatter) else None
+                    new_text = ts[0] if ts else f"{x:.6g}"
                     if current_text != new_text:
                         arrow.setText(new_text)
                         self._text_cache[text_key] = new_text
-                    arrow.setPos(x, ymin);
+                    arrow.setPos(x, ymin)
                     arrow.setVisible(True)
-                else:
-                    arrow.setVisible(False)
 
             if self.y_label and i < len(self.y_arrows):
                 arrow = self.y_arrows[i]
@@ -160,7 +169,7 @@ class pyQtCrosshair:
                     if current_text != new_text:
                         arrow.setText(new_text)
                         self._text_cache[text_key] = new_text
-                    arrow.setPos(xmin, y);
+                    arrow.setPos(xmin, y)
                     arrow.setVisible(True)
                 else:
                     arrow.setVisible(False)
@@ -171,7 +180,7 @@ class pyQtCrosshair:
                 line = annotation.line
                 x_data, y_data = line.getData()
                 if x_data is None or len(x_data) == 0:
-                    annotation.setVisible(False);
+                    annotation.setVisible(False)
                     continue
 
                 idx = np.searchsorted(x_data, x, side="left")
@@ -189,15 +198,23 @@ class pyQtCrosshair:
                     annotation.setVisible(False)
 
     def clear(self, event):
-        all_items = self.v_lines + self.h_lines + self.x_arrows + self.y_arrows + self.value_annotations
-        for item in all_items:
-            if item.scene():
-                item.setVisible(False)
+        items = self.v_lines + self.h_lines + self.x_arrows + self.y_arrows + self.value_annotations
+        for it in items:
+            sc = it.scene()
+            if sc is not None:
+                it.setVisible(False)
         self._text_cache.clear()
 
     def remove(self):
         self._is_active = False
         self.disconnect()
+        items = self.v_lines + self.h_lines + self.x_arrows + self.y_arrows + self.value_annotations
+        for it in items:
+            sc = it.scene()
+            if sc is not None:
+                it.setVisible(False)
+                sc.removeItem(it)
+            it.setParentItem(None)
         self.v_lines.clear()
         self.h_lines.clear()
         self.x_arrows.clear()
@@ -205,10 +222,7 @@ class pyQtCrosshair:
         self.value_annotations.clear()
 
     def disconnect(self):
-        if self._connected and self._scene:
-            try:
-                self._scene.sigMouseMoved.disconnect(self.on_move)
-            except (TypeError, RuntimeError):
-                pass
+        if self._connected and self._scene and hasattr(self._scene, "sigMouseMoved"):
+            self._scene.sigMouseMoved.disconnect(self.on_move)
         self._connected = False
         self._scene = None

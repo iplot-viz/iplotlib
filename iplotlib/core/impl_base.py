@@ -616,7 +616,7 @@ class BackendParserBase(ABC):
     def _update_marker_by_point_count(marker_line: Any, signal_x_data, signal_style: dict):
         pass
 
-    def update_plot_line_streaming(self, impl_plot: Any, plot_lines, x_data, y_data, style):
+    def update_plot_line_streaming(self, signal: SignalXY, impl_plot: Any, plot_lines, x_data, y_data, style):
         """
         Updates the plot data during streaming, distinguishing between the cases when new data arrives and when no
         new data is received.
@@ -625,11 +625,11 @@ class BackendParserBase(ABC):
         the latest X value remains unchanged, it means no new data has arrived. In this case, a constant value is drawn
         to represent the last received Y point.
         """
-        last_x = self._streaming_impl_plot_lut[impl_plot][0]
-        last_y = self._streaming_impl_plot_lut[impl_plot][1]
+        last_x = self._streaming_impl_plot_lut[signal.uid][0]
+        last_y = self._streaming_impl_plot_lut[signal.uid][1]
 
         if len(x_data) > 0 and last_x != x_data[-1]:  # New data
-            self._streaming_impl_plot_lut[impl_plot] = [x_data[-1], y_data[-1]]
+            self._streaming_impl_plot_lut[signal.uid] = [x_data[-1], y_data[-1]]
             self.set_line_data(plot_lines[0], x_data, y_data, style)
             self._update_marker_by_point_count(plot_lines[0], x_data, style)
 
@@ -667,7 +667,7 @@ class BackendParserBase(ABC):
             if x_data.ndim == 1 and y_data.ndim == 1:
                 # Streaming
                 if self.canvas.streaming and len(x_data) > 0:
-                    plot_lines = self.update_plot_line_streaming(impl_plot, plot_lines, x_data, y_data, style)
+                    plot_lines = self.update_plot_line_streaming(signal, impl_plot, plot_lines, x_data, y_data, style)
                 else:
                     self.set_line_data(plot_lines[0], x_data, y_data, style)
                     self._update_marker_by_point_count(plot_lines[0], x_data, style)

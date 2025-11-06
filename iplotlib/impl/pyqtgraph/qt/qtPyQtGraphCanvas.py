@@ -255,8 +255,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             return
 
         ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
-        if not hasattr(ci, 'plot'):
-            return
         plot = ci.plot()
 
         if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
@@ -315,35 +313,33 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def _impl_mouse_release_handler(self, view_box, event):
         # self._debug_log_event(event, "Mouse released")
-        if view_box is None:
-            pass
-        else:
-            impl_plot = view_box.parentItem()
-            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                # commit commands from staging.
-                while len(self._staging_cmds):
-                    self.commit_view_lim_cmd(impl_plot)
-                # push uncommitted changes onto the command stack.
-                while len(self._commitd_cmds):
-                    self.push_view_lim_cmd()
-                # Update statistics
-                self.stats(self.get_canvas())
 
-            elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
-                if event.button() == Qt.MouseButton.LeftButton or event.double():
-                    return
+        impl_plot = view_box.parentItem()
+        if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+            # commit commands from staging.
+            while len(self._staging_cmds):
+                self.commit_view_lim_cmd(impl_plot)
+            # push uncommitted changes onto the command stack.
+            while len(self._commitd_cmds):
+                self.push_view_lim_cmd()
+            # Update statistics
+            self.stats(self.get_canvas())
 
-                # Create menu with autoscale options
-                if self.autoscale_menu is None:
-                    self.autoscale_menu = QMenu(self)
-                    self.autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(impl_plot))
-                    self.autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
-                    if self._parser.canvas.focus_plot is None:
-                        self.autoscale_menu.addAction("Focus on plot",
-                                                      lambda: self._full_screen_mode_on(impl_plot))
-                    else:
-                        self.autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
-                    self.autoscale_menu.popup(event.screenPos().toPoint())
+        elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
+            if event is None or event.button() == Qt.MouseButton.LeftButton or event.double():
+                return
+
+            # Create menu with autoscale options
+            if self.autoscale_menu is None:
+                self.autoscale_menu = QMenu(self)
+                self.autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(impl_plot))
+                self.autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+                if self._parser.canvas.focus_plot is None:
+                    self.autoscale_menu.addAction("Focus on plot",
+                                                  lambda: self._full_screen_mode_on(impl_plot))
+                else:
+                    self.autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+                self.autoscale_menu.popup(event.screenPos().toPoint())
 
     def unfocus_plot(self):
         """Quita el focus del plot actual."""
