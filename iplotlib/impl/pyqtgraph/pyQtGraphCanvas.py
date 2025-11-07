@@ -215,7 +215,8 @@ class PyQtGraphParser(BackendParserBase):
             pen = pg.mkPen(
                 color=color,
                 width=line_size,
-                style=LINESTYLE_MAP.get(line_style, QtCore.Qt.PenStyle.SolidLine)
+                style=LINESTYLE_MAP.get(line_style, QtCore.Qt.PenStyle.SolidLine),
+                cosmetic=True
             )
         style['pen'] = pen
 
@@ -616,6 +617,8 @@ class PyQtGraphParser(BackendParserBase):
 
         plot.addLegend(horSpacing=13)
         legend = plot.legend
+
+        legend.layout.setColumnFixedWidth(0, 13)
 
         leg_position = self._pm.get_value(i_plot, 'legend_position')
         # Check for 'same as canvas' value
