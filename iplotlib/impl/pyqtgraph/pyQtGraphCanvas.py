@@ -183,10 +183,7 @@ class PyQtGraphParser(BackendParserBase):
         """
         Set the data for a PlotDataItem based on the attributes of SignalXY.
         """
-        line.setData(x=x_data, y=y_data, stepMode=style['stepMode'])
-
-        # Update the line style after setting the data
-        self.set_line_style(style, line)
+        line.setData(x=x_data, y=y_data)
 
     @staticmethod
     def set_line_style(style: dict, line: PlotDataItem):
@@ -215,7 +212,8 @@ class PyQtGraphParser(BackendParserBase):
             pen = pg.mkPen(
                 color=color,
                 width=line_size,
-                style=LINESTYLE_MAP.get(line_style, QtCore.Qt.PenStyle.SolidLine)
+                style=LINESTYLE_MAP.get(line_style, QtCore.Qt.PenStyle.SolidLine),
+                cosmetic=True
             )
         style['pen'] = pen
 
@@ -614,8 +612,9 @@ class PyQtGraphParser(BackendParserBase):
             plot.legend = None
             return
 
-        plot.addLegend()
+        plot.addLegend(horSpacing=10)
         legend = plot.legend
+        legend.layout.setContentsMargins(3, 0, 0, 0)
 
         leg_position = self._pm.get_value(i_plot, 'legend_position')
         # Check for 'same as canvas' value
@@ -626,7 +625,7 @@ class PyQtGraphParser(BackendParserBase):
         # set_legend_layout(legend, leg_layout)
 
         # Set aspect legend
-        legend.setBrush(pg.mkBrush('w'))
+        legend.setBrush(pg.mkBrush(255, 255, 255, 120))
         legend.setPen(pg.mkPen(color='k'))
 
     def _update_slider(self, val, i_plot: PlotXYWithSlider, slider_values, current_label):
@@ -680,14 +679,14 @@ class PyQtGraphParser(BackendParserBase):
             plot_item.setLogMode(x=False, y=True)
 
     def process_ipl_axis_params(self, fc, fs, axis: Axis, axis_item: AxisItem):
-        tick_props = dict(maxTickLevel=0)  # TODO: add color to tick values
+        tick_props = dict()  # TODO: add color to tick values
         label_props = dict(color=fc)
 
         # Set ticks on the top and right axis
         if self._pm.get_value(self.canvas, 'ticks_position'):
             tick_props['maxTickLevel'] = 2
         else:
-            tick_props['maxTickLevel'] = 0
+            tick_props['maxTickLevel'] = 1
 
         # Set color and font
         if fs is not None and fs > 0:
