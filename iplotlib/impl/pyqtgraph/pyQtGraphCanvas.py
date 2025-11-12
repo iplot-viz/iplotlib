@@ -31,6 +31,9 @@ from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
 
 logger = setupLogger.get_logger(__name__)
 
+# Set PyQtGraph default foreground color to black instead of grey
+pg.setConfigOption('foreground', 'k')
+
 # Maps PyQtGraph line styles to corresponding Qt.PenStyle values
 LINESTYLE_MAP = {
     'solid': QtCore.Qt.PenStyle.SolidLine,
