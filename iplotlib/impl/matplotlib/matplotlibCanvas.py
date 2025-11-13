@@ -898,6 +898,8 @@ class MatplotlibParser(BackendParserBase):
         style['linewidth'] = self._pm.get_value(signal, 'line_size')
         style['linestyle'] = (self._pm.get_value(signal, 'line_style')).lower()
         style['marker'] = self._pm.get_value(signal, 'marker')
+        if style['marker'] == 'None':
+            style['marker'] = None
         style['markersize'] = self._pm.get_value(signal, 'marker_size')
         step = self._pm.get_value(signal, 'step')
         if step is None:

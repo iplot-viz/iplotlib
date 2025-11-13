@@ -208,7 +208,7 @@ class PyQtGraphParser(BackendParserBase):
 
         color = self._pm.get_value(signal, 'color')
         line_size = self._pm.get_value(signal, 'line_size')
-        line_style = (self._pm.get_value(signal, 'line_style') or 'solid').lower()
+        line_style = self._pm.get_value(signal, 'line_style').lower()
         if line_size == 0 or line_style == 'none':
             pen = None
         else:
@@ -221,7 +221,7 @@ class PyQtGraphParser(BackendParserBase):
         style['pen'] = pen
 
         marker = self._pm.get_value(signal, 'marker')
-        if marker:
+        if marker != 'None':
             style['symbol'] = self._pm.get_value(signal, 'marker')
             style['symbolSize'] = self._pm.get_value(signal, 'marker_size')
             style['symbolBrush'] = self._pm.get_value(signal, 'color')
