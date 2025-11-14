@@ -2,14 +2,14 @@
 This module has a base class defined for all Qt canvas implementations.
 """
 
+from collections import defaultdict
 from abc import abstractmethod
 from contextlib import contextmanager
-from typing import Collection, List
+from typing import List
 
 from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
 from iplotlib.core.signal import SignalXY
-from iplotlib.core.axis import RangeAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXYWithSlider
 from iplotlib.core.command import IplotCommand
@@ -18,6 +18,7 @@ from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.impl_base import BackendParserBase
 import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
+from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 
 logger = Sl.get_logger(__name__)
 
@@ -36,8 +37,15 @@ class IplotQtCanvas(QWidget):
         self._commitd_cmds = []  # type: List[IplotAxesRangeCmd]
         self.dropInfo = DropInfo()
 
+        # Iplotlib markers
+        self._marker_window = IplotQtMarker()
+        self._marker_window.dropMarker.connect(self.draw_marker_label)
+        self._marker_window.deleteMarker.connect(self.delete_marker_label)
+
         # Statistics
         self._stats_table = IplotQtStatistics()
+
+        self.info_shared_x_dialog = False
 
     @abstractmethod
     def undo(self):
@@ -46,6 +54,11 @@ class IplotQtCanvas(QWidget):
     @abstractmethod
     def redo(self):
         """history: redo"""
+
+    def unfocus_plot(self):
+        """Remove focus from the current plot"""
+        self._parser.set_focus_plot(None)
+        self.info_shared_x_dialog = False
 
     def show_stats(self):
         if not self._stats_table.isVisible():
@@ -116,13 +129,71 @@ class IplotQtCanvas(QWidget):
             self.setCursor(Qt.CursorShape.ArrowCursor)
 
     @abstractmethod
-    def set_canvas(self, canvas):
+    def set_canvas(self, canvas: Canvas):
         """Sets new version of iplotlib canvas and redraw"""
-        pass
+        if not canvas:
+            return
+
+        # Check if plots share time axis
+        ranges = []
+        plot_stack = []
+
+        if not self._parser._pm.get_value(canvas, 'shared_x_axis'):
+            self.info_shared_x_dialog = False
+        else:
+            if self.info_shared_x_dialog:
+                return
+            self.info_shared_x_dialog = True
+            relative = False
+            for row_idx, col in enumerate(canvas.plots, start=1):
+                for col_idx, plot in enumerate(col, start=1):
+                    if plot:
+                        axis = plot.axes[0]
+                        if not axis.is_date and not isinstance(plot, PlotXYWithSlider):
+                            relative = True
+                        ranges.append((axis.original_begin, axis.original_end))
+                        plot_stack.append(f"{col_idx}.{row_idx}")
+
+            dict_ranges = defaultdict(list)
+            # Need to differentiate if it is absolute or relative
+            if relative:
+                max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff')
+            else:
+                max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff') * 1e9
+            for idx, uniq_range in enumerate(ranges):
+                if uniq_range == ranges[0]:
+                    dict_ranges[uniq_range].append(plot_stack[idx])
+                # If the difference of the ranges is less than 1 second, we consider them equal
+                elif abs(uniq_range[0] - ranges[0][0]) <= max_diff_ns and abs(
+                        uniq_range[1] - ranges[0][1]) <= max_diff_ns:
+                    dict_ranges[ranges[0]].append(plot_stack[idx])
+                else:
+                    dict_ranges[uniq_range].append(plot_stack[idx])
+
+            # If there is more than one element in the dictionary it means that there is more than one time
+            # range
+            if len(dict_ranges) > 1:
+                box = QMessageBox()
+                box.setIcon(QMessageBox.Icon.Information)
+                message = "There are plots with different time range:\n"
+                for i, stacks in enumerate(dict_ranges.values(), start=1):
+                    plots_str = ", ".join(stacks)
+                    message += f"Time range {i}: Plots {plots_str}\n"
+
+                box.setText(message)
+                box.exec_()
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
         return self._parser.canvas
+
+    @abstractmethod
+    def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
+        """"""
+
+    @abstractmethod
+    def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
+        """"""
 
     def get_signals(self, canvas: Canvas):
         signal_list = []
