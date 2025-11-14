@@ -179,7 +179,7 @@ class PyQtGraphParser(BackendParserBase):
         end = self.transform_value(impl_plot, 0, now, inverse=True)
         vb.setXRange(begin, end, padding=0)
 
-    def set_line_data(self, line: PlotDataItem, x_data, y_data, style: dict):
+    def set_line_data(self, line: PlotDataItem, x_data, y_data):
         """
         Set the data for a PlotDataItem based on the attributes of SignalXY.
         """
@@ -203,7 +203,8 @@ class PyQtGraphParser(BackendParserBase):
         """
         style = {'name': signal.label}
 
-        color = self._pm.get_value(signal, 'color')
+        signal_color = self._pm.get_value(signal, 'color')
+        color = signal_color if signal_color is not None else signal.original_color
         line_size = self._pm.get_value(signal, 'line_size')
         line_style = self._pm.get_value(signal, 'line_style').lower()
         if line_size == 0 or line_style == 'none':
@@ -221,7 +222,9 @@ class PyQtGraphParser(BackendParserBase):
         if marker != 'None':
             style['symbol'] = self._pm.get_value(signal, 'marker')
             style['symbolSize'] = self._pm.get_value(signal, 'marker_size')
-            style['symbolBrush'] = self._pm.get_value(signal, 'color')
+            marker_color = self._pm.get_value(signal, 'color')
+            style['symbolPen'] = marker_color
+            style['symbolBrush'] = marker_color
 
         step = self._pm.get_value(signal, 'step') or 'linear'
         step_mode = STEP_MAP_PG.get(step)

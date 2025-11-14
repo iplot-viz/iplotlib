@@ -174,7 +174,6 @@ class BackendParserBase(ABC):
         except Empty:
             logger.debug("Nothing to do.")
 
-
     @abstractmethod
     def get_impl_data(self, curve):
         pass
@@ -219,7 +218,7 @@ class BackendParserBase(ABC):
         if bot == np.inf and top == -np.inf:
             bot, top = 0, 1
 
-        return bot,top
+        return bot, top
 
     @abstractmethod
     def export_image(self, filename: str, **kwargs):
@@ -630,7 +629,7 @@ class BackendParserBase(ABC):
 
         if len(x_data) > 0 and last_x != x_data[-1]:  # New data
             self._streaming_impl_plot_lut[signal.uid] = [x_data[-1], y_data[-1]]
-            self.set_line_data(plot_lines[0], x_data, y_data, style)
+            self.set_line_data(plot_lines[0], x_data, y_data)
             self._update_marker_by_point_count(plot_lines[0], x_data, style)
 
         elif len(x_data) > 0 and last_x == x_data[-1]:  # No new data
@@ -638,7 +637,7 @@ class BackendParserBase(ABC):
             new_x = self.transform_value(impl_plot, 0, now, inverse=True)
             const_x = np.append(x_data, new_x)
             const_y = np.append(y_data, last_y)
-            self.set_line_data(plot_lines[0], const_x, const_y, style)
+            self.set_line_data(plot_lines[0], const_x, const_y)
 
         return plot_lines
 
@@ -669,7 +668,7 @@ class BackendParserBase(ABC):
                 if self.canvas.streaming and len(x_data) > 0:
                     plot_lines = self.update_plot_line_streaming(signal, impl_plot, plot_lines, x_data, y_data, style)
                 else:
-                    self.set_line_data(plot_lines[0], x_data, y_data, style)
+                    self.set_line_data(plot_lines[0], x_data, y_data)
                     self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):  # TODO: pendant for PYQTGRAPH
@@ -702,7 +701,7 @@ class BackendParserBase(ABC):
         pass
 
     @abstractmethod
-    def set_line_data(self, line: Any, x_data, y_data, style: dict):
+    def set_line_data(self, line: Any, x_data, y_data):
         pass
 
     @abstractmethod
@@ -804,7 +803,7 @@ class BackendParserBase(ABC):
 
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and ysub_data.ndim == 1:
-                self.set_line_data(plot_lines[0], x_data, ysub_data, style)
+                self.set_line_data(plot_lines[0], x_data, ysub_data)
                 # _update_marker_by_point_count(line, x_data, style)
             elif x_data.ndim == 1 and ysub_data.ndim == 2:  # TODO: pendant
                 for i, line in enumerate(plot_lines):
@@ -858,8 +857,8 @@ class BackendParserBase(ABC):
             self.legend_downsampled_signal(signal, impl_plot, shapes[0][0])
 
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
-                self.set_line_data(shapes[0][0], x_data, y1_data, style)
-                self.set_line_data(shapes[0][1], x_data, y2_data, style2)
+                self.set_line_data(shapes[0][0], x_data, y1_data)
+                self.set_line_data(shapes[0][1], x_data, y2_data)
                 self.update_area_envelope_1D(shapes, impl_plot, x_data, y1_data, y2_data, style)
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
         else:
