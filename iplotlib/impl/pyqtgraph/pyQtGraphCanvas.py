@@ -533,15 +533,18 @@ class PyQtGraphParser(BackendParserBase):
                 self.process_ipl_signal(signal)
 
             # Legend processing for downsampled data when drawing
-            fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
-            ix_legend = 0
-            for signal in signals:
-                plot.legend.items[ix_legend][1].setAttr(attr='size', value=f'{fs}pt')
-                legend_label = plot.legend.items[ix_legend][1].text
-                if signal.isDownsampled:
-                    legend_label += '*'
-                plot.legend.items[ix_legend][1].setText(legend_label)
-                ix_legend += 1
+            if plot.legend is not None:
+                fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
+                ix_legend = 0
+                for signal in signals:
+                    plot.legend.items[ix_legend][1].setAttr(attr='size', value=f'{fs}pt')
+                    legend_label = plot.legend.items[ix_legend][1].text
+                    if signal.isDownsampled:
+                        legend_label += '*'
+                    plot.legend.items[ix_legend][1].setText(legend_label)
+                    ix_legend += 1
+                plot.legend.updateSize()
+                self._auto_adjust_legend_layout(plot, i_plot, signals)
 
             # Observe the axis limit change events
             vb = plot.getViewBox()
@@ -590,47 +593,62 @@ class PyQtGraphParser(BackendParserBase):
             }
             legend.anchor(pos_map[position][0], pos_map[position][1])
 
-        def set_legend_layout(legend, layout_type: str):
-            grid = legend.layout
-            items = []
-            for row in range(grid.rowCount()):
-                for col in range(grid.columnCount()):
-                    item = grid.itemAtPosition(row, col)
-                    if item:
-                        items.append(item)
-            # Clean
-            for item in items:
-                grid.removeItem(item)
-            # Relocate
-            if layout_type.lower() == 'vertical':
-                for i, item in enumerate(items):
-                    grid.addItem(item, i, 0)
-            else:  # horizontal
-                for i, item in enumerate(items):
-                    grid.addItem(item, 0, i)
-
         # Show the plot legend if enabled
         show_legend = self._pm.get_value(i_plot, 'legend')
         if not show_legend:
             plot.legend = None
             return
 
-        plot.addLegend(horSpacing=13)
+        plot_leg_position = self._pm.get_value(i_plot, 'legend_position')
+        canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
+        plot_leg_layout = self._pm.get_value(i_plot, 'legend_layout')
+        canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
+
+        if plot_leg_position == 'same as canvas':
+            plot_leg_position = canvas_leg_position
+        if plot_leg_layout == 'same as canvas':
+            plot_leg_layout = canvas_leg_layout
+
+        if plot_leg_layout == 'horizontal':
+            col_count = len(signals)
+        else:
+            col_count = 1
+
+        plot.addLegend(horSpacing=25, colCount=col_count)
         legend = plot.legend
-
-        legend.layout.setColumnFixedWidth(0, 13)
-
-        leg_position = self._pm.get_value(i_plot, 'legend_position')
-        # Check for 'same as canvas' value
-        if leg_position == 'same as canvas':
-            leg_position = 'upper right'
-        set_legend_position(legend, leg_position)
-        # leg_layout = self._pm.get_value(plot, 'legend_layout')
-        # set_legend_layout(legend, leg_layout)
+        legend.layout.setContentsMargins(3, 0, 0, 0)
 
         # Set aspect legend
+        set_legend_position(legend, plot_leg_position)
         legend.setBrush(pg.mkBrush(255, 255, 255, 120))
         legend.setPen(pg.mkPen(color='k'))
+
+    def _auto_adjust_legend_layout(self, plot: PlotItem, i_plot: Plot, signals):
+        legend = plot.legend
+        if legend is None:
+            return
+
+        layout = self._pm.get_value(i_plot, 'legend_layout')
+        canvas_layout = self._pm.get_value(self.canvas, 'legend_layout')
+        if layout == 'same as canvas':
+            layout = canvas_layout
+
+        if layout == 'horizontal':
+            cols = range(len(signals), 0, -1)
+        else:
+            cols = range(1, min(3, len(signals)) + 1)
+
+        vb_rect = plot.getViewBox().sceneBoundingRect()
+
+        for ncol in cols:
+            legend.setColumnCount(ncol)
+            legend.updateSize()
+            leg_rect = legend.sceneBoundingRect()
+            if (leg_rect.left() >= vb_rect.left()
+                    and leg_rect.right() <= vb_rect.right()
+                    and leg_rect.top() >= vb_rect.top()
+                    and leg_rect.bottom() <= vb_rect.bottom()):
+                break
 
     def _update_slider(self, val, i_plot: PlotXYWithSlider, slider_values, current_label):
         for c_row in i_plot.signals.values():
