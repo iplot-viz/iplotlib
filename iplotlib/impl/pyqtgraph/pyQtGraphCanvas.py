@@ -537,11 +537,14 @@ class PyQtGraphParser(BackendParserBase):
                 fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
                 ix_legend = 0
                 for signal in signals:
-                    plot.legend.items[ix_legend][1].setAttr(attr='size', value=f'{fs}pt')
-                    legend_label = plot.legend.items[ix_legend][1].text
+                    label_item = plot.legend.items[ix_legend][1]
+                    label_item.setAttr(attr='size', value=f'{fs}pt')
+                    legend_label = label_item.text
                     if signal.isDownsampled:
                         legend_label += '*'
-                    plot.legend.items[ix_legend][1].setText(legend_label)
+                    label_item.setText(legend_label)
+                    size = label_item.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None)
+                    label_item.resize(size)
                     ix_legend += 1
                 plot.legend.updateSize()
                 self._auto_adjust_legend_layout(plot, i_plot, signals)
