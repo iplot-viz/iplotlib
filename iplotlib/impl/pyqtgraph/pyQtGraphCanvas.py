@@ -139,12 +139,21 @@ class PyQtGraphParser(BackendParserBase):
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
         return [draw_fn(x=x_data, y=y_data, **style)]
 
-    def create_plot_lines_2D(self, draw_fn, x_data, y_data, style):
+    def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
         plot_lines = []
         for i in range(y_data.shape[1]):
-            curve = draw_fn(x=x_data, y=y_data[:, i], **style)
-            plot_lines.append(curve)
+            style_i = dict(**style)
+            line_color = PlotXY._color_cycle[i % len(PlotXY._color_cycle)]
+            pen = pg.mkPen(style_i['pen'])
+            pen.setColor(line_color)
+            style_i['pen'] = pen
+            style_i['symbolPen'] = line_color
+            style_i['symbolBrush'] = line_color
+
+            curve = draw_fn(x=x_data, y=y_data[:, i], **style_i)
+            curve.opts["name"] = f"{signal.label}[{i}]"
             self._update_marker_by_point_count(curve, x_data, style)
+            plot_lines.append(curve)
 
         return plot_lines
 
@@ -233,8 +242,11 @@ class PyQtGraphParser(BackendParserBase):
 
         return style
 
-    def markers_valid_lines(self, impl_plot: PlotItem):
-        return [item.name() for item in impl_plot.listDataItems()]
+    def get_line_label(self, line: PlotDataItem):
+        return line.name()
+
+    def get_line_xdata(self, line: Any):
+        return line.getData()[0]
 
     def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
         return y_data[plot.slider.value()]
@@ -536,12 +548,13 @@ class PyQtGraphParser(BackendParserBase):
             fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
             ix_legend = 0
             for signal in signals:
-                plot.legend.items[ix_legend][1].setAttr(attr='size', value=f'{fs}pt')
-                legend_label = plot.legend.items[ix_legend][1].text
-                if signal.isDownsampled:
-                    legend_label += '*'
-                plot.legend.items[ix_legend][1].setText(legend_label)
-                ix_legend += 1
+                for line in self._signal_impl_shape_lut.get(id(signal)):
+                    plot.legend.items[ix_legend][1].setAttr(attr='size', value=f'{fs}pt')
+                    legend_label = line.name()
+                    if signal.isDownsampled:
+                        legend_label += '*'
+                    plot.legend.items[ix_legend][1].setText(legend_label)
+                    ix_legend += 1
 
             # Observe the axis limit change events
             vb = plot.getViewBox()

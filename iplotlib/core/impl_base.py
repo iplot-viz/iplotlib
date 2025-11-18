@@ -474,7 +474,7 @@ class BackendParserBase(ABC):
                 begin, end = axis.original_begin, axis.original_end
 
                 # Adjust initial padding for Y axis
-                if ax_idx == 1:
+                if ax_idx == 1 and not isinstance(plot, PlotContour):
                     h = end - begin
                     begin -= 0.1 * h
                     end += 0.1 * h
@@ -671,10 +671,9 @@ class BackendParserBase(ABC):
                     self.set_line_data(plot_lines[0], x_data, y_data)
                     self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                for i, line in enumerate(plot_lines):  # TODO: pendant for PYQTGRAPH
-                    line[0].set_xdata(x_data)
-                    line[0].set_ydata(y_data[:, i])
-                    self._update_marker_by_point_count(line[0], x_data, style)
+                for i, line in enumerate(plot_lines):
+                    self.set_line_data(line, x_data, y_data[:, i])
+                    self._update_marker_by_point_count(line, x_data, style)
 
             if self.canvas.streaming:
                 self.do_impl_streaming(impl_plot, plot, cache_item)
@@ -686,7 +685,7 @@ class BackendParserBase(ABC):
                 plot_lines = self.create_plot_lines_1D(draw_fn, x_data, y_data, style)
                 self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                plot_lines = self.create_plot_lines_2D(draw_fn, x_data, y_data, style)
+                plot_lines = self.create_plot_lines_2D(draw_fn, signal, x_data, y_data, style)
 
         signal.lines = plot_lines
 
@@ -709,7 +708,7 @@ class BackendParserBase(ABC):
         pass
 
     @abstractmethod
-    def create_plot_lines_2D(self, draw_fn, x_data, y_data, style):
+    def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
         pass
 
     @abstractmethod
@@ -721,8 +720,12 @@ class BackendParserBase(ABC):
         pass
 
     @abstractmethod
-    def markers_valid_lines(self, impl_plot: Any):
-        pass
+    def get_line_label(self, line: Any):
+        """"""
+
+    @abstractmethod
+    def get_line_xdata(self, line: Any):
+        """"""
 
     def add_marker_scaled(self, impl_plot: Any, plot: PlotXY, x_coord, y_coord):
         """
@@ -734,6 +737,7 @@ class BackendParserBase(ABC):
         ranges = []
         marker_signal = None
         nearest_point = None
+        nearest_line_label = None
         minor_dist = float('inf')
 
         for ax_idx, ax in enumerate(plot.axes):
@@ -741,18 +745,22 @@ class BackendParserBase(ABC):
                 ranges = ax.get_limits()
 
         # Get the lines that are actually located in the current mpl_axes
-        valid_lines = self.markers_valid_lines(impl_plot)
+        signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
 
         # With the new X axis limits, we obtain the points within that range
-        for stack in plot.signals.values():
-            for signal in stack:
-                if signal.label not in valid_lines:
-                    continue
-                idx1 = np.searchsorted(signal.x_data, ranges[0])
-                idx2 = np.searchsorted(signal.x_data, ranges[1])
+        for signal_ref in signals:
+            signal = signal_ref()
+            for idx_line, line in enumerate(signal.lines):
+                x_data = self.get_line_xdata(line)
+                idx1 = np.searchsorted(x_data, ranges[0])
+                idx2 = np.searchsorted(x_data, ranges[1])
 
                 x_zoom = signal.data_store[0][idx1:idx2]
-                y_zoom = signal.data_store[1][idx1:idx2]
+                y_data = signal.data_store[1]
+                if y_data.ndim == 1:
+                    y_zoom = y_data[idx1:idx2]
+                else:  # ndim = 2
+                    y_zoom = y_data[idx1:idx2, idx_line]
 
                 # If the number of samples per signal is less than 100 we continue, if not the user shall keep zooming
                 if len(x_zoom) > 100:
@@ -786,8 +794,9 @@ class BackendParserBase(ABC):
                     minor_dist = distances[idx_result]
                     nearest_point = points[idx_result]
                     marker_signal = signal
+                    nearest_line_label = self.get_line_label(line)
 
-        return nearest_point, marker_signal
+        return nearest_point, marker_signal, nearest_line_label
 
     def do_impl_line_plot_xy_slider(self, signal: SignalXY, impl_plot: Any, plot: PlotXYWithSlider, cache_item,
                                     x_data, y_data, z_data):

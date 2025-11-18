@@ -261,10 +261,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 # Markers can only be created if the property 'marker' is not None
                 if impl_plot.listDataItems()[0].opts['symbol'] != 'None':  # TODO: review
                     # Check if the marker coordinates are correct and if the marker has not already been created
-                    new_marker, marker_signal = self._parser.add_marker_scaled(impl_plot, plot, x_value, y_value)
+                    new_marker, marker_signal, label_line = self._parser.add_marker_scaled(impl_plot, plot, x_value, y_value)
                     if new_marker is not None:
                         if new_marker not in self._marker_window.get_markers():
-                            self._marker_window.add_marker(marker_signal, new_marker)
+                            self._marker_window.add_marker(marker_signal, new_marker, label_line)
                             if not self._marker_window.isVisible():
                                 self._marker_window.show()
                             elif self._marker_window.isMinimized():

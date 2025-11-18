@@ -158,12 +158,15 @@ class MatplotlibParser(BackendParserBase):
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
         return draw_fn(x_data, y_data, **style)
 
-    def create_plot_lines_2D(self, draw_fn, x_data, y_data, style):
-        lines = draw_fn(x_data, y_data, **style)
-        plot_lines = [line for line in lines]
-        for i, line in enumerate(plot_lines):
-            # line[0].set_label(f"{signal.label}[{i}]")
+    def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
+        plot_lines = []
+        for i in range(y_data.shape[1]):
+            style_i = dict(**style)
+            style_i['color'] = PlotXY._color_cycle[i % len(PlotXY._color_cycle)]
+            line = draw_fn(x_data, y_data[:, i], **style_i)  # List[Line2D]
+            line[0].set_label(f"{signal.label}[{i}]")
             self._update_marker_by_point_count(line[0], x_data, style)
+            plot_lines.append(line[0])
 
         return plot_lines
 
@@ -908,8 +911,11 @@ class MatplotlibParser(BackendParserBase):
 
         return style
 
-    def markers_valid_lines(self, impl_plot: MPLAxes):
-        return [line.get_label() for line in impl_plot.get_lines()]
+    def get_line_label(self, line: Line2D):
+        return line.get_label()
+
+    def get_line_xdata(self, line: Any):
+        return line.get_xdata()
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):
