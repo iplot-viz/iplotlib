@@ -704,14 +704,14 @@ class PyQtGraphParser(BackendParserBase):
             plot_item.setLogMode(x=False, y=True)
 
     def process_ipl_axis_params(self, fc, fs, axis: Axis, axis_item: AxisItem):
-        tick_props = dict()  # TODO: add color to tick values
+        tick_props = dict(maxTickLevel=0)  # TODO: add color to tick values
         label_props = dict(color=fc)
 
         # Set ticks on the top and right axis
         if self._pm.get_value(self.canvas, 'ticks_position'):
             tick_props['maxTickLevel'] = 2
         else:
-            tick_props['maxTickLevel'] = 1
+            tick_props['maxTickLevel'] = 0
 
         # Set color and font
         if fs is not None and fs > 0:
