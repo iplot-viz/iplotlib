@@ -104,8 +104,16 @@ class PyQtGraphParser(BackendParserBase):
         key = (row, col)
         cell_gl = self._cell_gl.get(key)
         if cell_gl is None:
+            rspan = max(1, rowspan)
+            cspan = max(1, colspan)
+            end_row = row + rspan - 1
+            end_col = col + cspan - 1
+
+            lay = self.figure.ci.layout
+            lay.setRowStretchFactor(end_row, 1)
+            lay.setColumnStretchFactor(end_col, 1)
+
             cell_gl = pg.GraphicsLayout()
-            # sublayout anclado a (row, col) con spans reales
             self.figure.addItem(cell_gl, row=row, col=col, rowspan=rowspan, colspan=colspan)
             self._cell_gl[key] = cell_gl
         return cell_gl
@@ -118,14 +126,18 @@ class PyQtGraphParser(BackendParserBase):
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
         legend = impl_plot.legend
+        if not legend:
+            return
+
         lines = [lines[0].item.name() for lines in legend.items]
         pos = lines.index(plot_lines.name())
-
+        legend_label = legend.items[pos][1]
         legend_text = legend.items[pos][1].text
+
         if legend_text.endswith('*') and not signal.isDownsampled:
-            legend.items[pos][1].setText(legend_text[:-1])
+            legend_label.setText(legend_text[:-1])
         elif not legend_text.endswith('*') and signal.isDownsampled:
-            legend.items[pos][1].setText(legend_text + '*')
+            legend_label.setText(legend_text + '*')
 
     @staticmethod
     def _get_visible_data(xd, yd, lo, hi):
@@ -486,29 +498,27 @@ class PyQtGraphParser(BackendParserBase):
         axis_items = {}
         plot = None
         l_key = (row, col)
-        for stack_id, key in enumerate(sorted(i_plot.signals.keys())):
+        stack_map = self._layout_stacks.setdefault(l_key, {})
 
+        for stack_id, key in enumerate(i_plot.signals):
             if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
                 axis_items["bottom"] = NanosecondDateFormatter(orientation='bottom')
 
             signals = i_plot.signals.get(key) or list()
             visible_stack_ids.append(stack_id)
 
-            if l_key not in self._layout_stacks:
-                plot = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
-                cell_gl.addItem(plot, row=0, col=0)
-                self._layout_stacks.setdefault(l_key, {})[stack_id] = plot
-            elif stack_id not in self._layout_stacks[l_key]:
+            if stack_id not in stack_map:
                 pi = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
                 cell_gl.addItem(pi, row=stack_id, col=0)
-                pi.getAxis('bottom').setStyle(showValues=False)
-                self._layout_stacks[l_key][stack_id] = pi
+                if stack_id > 0:
+                    pi.getAxis('bottom').setStyle(showValues=False)
+                stack_map[stack_id] = pi
 
             # Slider creation only if it doesn't exist
             if isinstance(i_plot, PlotXYWithSlider):
                 cell_gl = self.process_ipl_plot_xy_slider(i_plot, row, col, visible_stack_ids, cell_gl)
 
-            plot = self._layout_stacks[l_key][stack_id]
+            plot = stack_map[stack_id]
             plot.enableAutoRange(x=False, y=False)
             plot.hideButtons()
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
@@ -560,6 +570,7 @@ class PyQtGraphParser(BackendParserBase):
                         label_item.resize(size)
                         ix_legend += 1
                 plot.legend.updateSize()
+                self._auto_adjust_legend_layout(plot, i_plot, signals)
 
             # Observe the axis limit change events
             vb = plot.getViewBox()
@@ -570,8 +581,7 @@ class PyQtGraphParser(BackendParserBase):
         if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
             cell_gl.addItem(axis_items["bottom"].common_label, row=len(i_plot.signals), col=0)
 
-        # MODIFIED
-        self.align_y_axis(row, col)
+        self.align_y_axis(col)
 
     def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
         if not visible_stacks:
@@ -638,6 +648,34 @@ class PyQtGraphParser(BackendParserBase):
         legend.setBrush(pg.mkBrush(255, 255, 255, 120))
         legend.setPen(pg.mkPen(color='k'))
 
+    def _auto_adjust_legend_layout(self, plot: PlotItem, i_plot: Plot, signals):
+        legend = plot.legend
+        if legend is None:
+            return
+
+        layout = self._pm.get_value(i_plot, 'legend_layout')
+        canvas_layout = self._pm.get_value(self.canvas, 'legend_layout')
+        if layout == 'same as canvas':
+            layout = canvas_layout
+
+        if layout == 'horizontal':
+            cols = range(len(signals), 0, -1)
+        else:
+            max_cols = min(4, len(signals))
+            cols = range(1, max_cols, 1)
+
+        vb_rect = plot.getViewBox().sceneBoundingRect()
+
+        for ncol in cols:
+            legend.setColumnCount(ncol)
+            legend.updateSize()
+            leg_rect = legend.sceneBoundingRect()
+            if (leg_rect.left() >= vb_rect.left()
+                    and leg_rect.right() <= vb_rect.right()
+                    and leg_rect.top() >= vb_rect.top()
+                    and leg_rect.bottom() <= vb_rect.bottom()):
+                break
+
     def _update_slider(self, val, i_plot: PlotXYWithSlider, slider_values, current_label):
         for c_row in i_plot.signals.values():
             for c_signal in c_row:
@@ -668,10 +706,9 @@ class PyQtGraphParser(BackendParserBase):
         current_plot = view_box.parentItem()  # type: PlotItem
         super()._y_axis_update_callback(current_plot)
 
-        # MODIFIED
         for (r, c), stacks in self._layout_stacks.items():
             if current_plot in stacks.values():
-                self.align_y_axis(r, c)
+                self.align_y_axis(c)
                 break
 
     def _x_axis_update_callback(self, view_box: ViewBox):
@@ -710,7 +747,7 @@ class PyQtGraphParser(BackendParserBase):
 
         # Font size for UTC label
         if isinstance(axis_item, NanosecondDateFormatter):
-            axis_item.common_label.setText(axis_item.offset_str, size=f'{fs}pt')
+            axis_item.common_label.setText(axis_item.offset_str, size=f'{fs}pt', color=fc)
 
         axis_item.setStyle(**tick_props)
 
@@ -924,7 +961,22 @@ class PyQtGraphParser(BackendParserBase):
             """
 
     def enable_tight_layout(self):
-        pass
+        glw = self.figure
+        glw.ci.layout.setContentsMargins(6, 6, 6, 6)
+        glw.ci.layout.setSpacing(4)
+
+    def disable_tight_layout(self):
+        glw = self.figure
+        glw.ci.layout.setContentsMargins(0, 0, 0, 0)
+        glw.ci.layout.setSpacing(0)
+
+    def set_canvas_gridspec(self, rows: int, cols: int):
+        self._grid_shape = (rows, cols)
+        lay = self.figure.ci.layout
+        for r in range(rows):
+            lay.setRowStretchFactor(r, 1)
+        for c in range(cols):
+            lay.setColumnStretchFactor(c, 1)
 
     def disable_tight_layout(self):
         pass
@@ -1060,47 +1112,57 @@ class PyQtGraphParser(BackendParserBase):
             vb = plot.getViewBox()
             vb.setYRange(limits[0], limits[1], padding=0)
 
-    # MODIFIED
-    def align_y_axis(self, row: int, col: int) -> None:
-        stacks = self._layout_stacks.get((row, col))
-        if not stacks:
+    def align_y_axis(self, col: int) -> None:
+        """
+        Synchronizes the Y-axis width across all plots in a column.
+        """
+        # Collect all plots from the specified column
+        column_plots = [
+            p for (r, c), stack_dict in self._layout_stacks.items()
+            if c == col
+            for p in stack_dict.values()
+            if p
+        ]
+
+        if not column_plots:
             return
 
-        for p in stacks.values():
-            if p:
-                p.getAxis('left').setWidth(None)
+        # Reset widths to allow PyQtGraph to recalculate
+        for p in column_plots:
+            p.getAxis('left').setWidth(None)
 
+        # Calculate maximum required width based on current tick labels
         max_w = 0.0
-        for p in stacks.values():
-            if not p:
-                continue
+        for p in column_plots:
             ax = p.getAxis('left')
             vb = p.getViewBox()
             y0, y1 = vb.viewRange()[1]
-            if y0 == 0 and y1 == 1:
-                continue
+
             tv = ax.tickValues(y0, y1, vb.height())
             if not tv:
+                max_w = max(max_w, ax.width())
                 continue
+
             spacing, values = tv[0]
             labels = ax.tickStrings(values, scale=1.0, spacing=spacing)
+
+            # Measure tick label text width
             fm = QFontMetricsF(ax.style.get('tickFont') or QtWidgets.QApplication.font())
             text_w = max((fm.horizontalAdvance(str(s)) for s in labels), default=0.0)
+
+            # Add axis label width if visible
             label_w = ax.label.boundingRect().height() if ax.label.isVisible() else 0.0
-            if text_w + label_w > max_w:
-                max_w = text_w + label_w
+
+            # Update maximum (including margin for ticks and padding)
+            max_w = max(max_w, text_w + label_w + 15)
 
         if max_w <= 0:
             return
 
+        # Apply maximum width to all axes in column
         w = int(max_w)
-        for p in stacks.values():
-            if p:
-                p.getAxis('left').setWidth(w)
-
-        gl = getattr(self, '_graphics_layout', None)
-        if gl:
-            gl.updateGeometry()
+        for p in column_plots:
+            p.getAxis('left').setWidth(w)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to

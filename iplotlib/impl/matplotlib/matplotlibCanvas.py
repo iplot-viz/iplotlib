@@ -84,16 +84,21 @@ class MatplotlibParser(BackendParserBase):
         """
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
+        legend = mpl_axes.get_legend()
+        if legend is None:
+            return
+
         # Filter out '_child' lines from mpl_axes, which are added in envelope plots
         # These lines should not be considered when matching lines to legend entries
         valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
         pos = valid_lines.index(plot_lines)
+        legend_label = legend.get_texts()[pos]
+        legend_text = legend.get_texts()[pos].get_text()
 
-        legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
         if legend_text.endswith('*') and not signal.isDownsampled:
-            mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
+            legend_label.set_text(legend_text[:-1])
         elif not legend_text.endswith('*') and signal.isDownsampled:
-            mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
+            legend_label.set_text(legend_text + '*')
 
     @staticmethod
     def _get_visible_data(xd, yd, lo, hi):
