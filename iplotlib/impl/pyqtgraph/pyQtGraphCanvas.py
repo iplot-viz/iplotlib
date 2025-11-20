@@ -639,7 +639,8 @@ class PyQtGraphParser(BackendParserBase):
         if layout == 'horizontal':
             cols = range(len(signals), 0, -1)
         else:
-            cols = range(1, min(3, len(signals)) + 1)
+            max_cols = min(4, len(signals))
+            cols = range(1, max_cols, 1)
 
         vb_rect = plot.getViewBox().sceneBoundingRect()
 
