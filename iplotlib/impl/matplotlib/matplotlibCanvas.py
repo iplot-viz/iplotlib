@@ -628,7 +628,7 @@ class MatplotlibParser(BackendParserBase):
                 y_minor = LogLocator(base=10, subs=(1.0,))
                 mpl_axis.set_minor_locator(y_minor)
 
-    def process_ipl_axis_params(self, fc, fs, axis: Axis, mpl_axis: MPLAxis):
+    def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, mpl_axis: MPLAxis):
         label_props = dict(color=fc)
 
         # Set ticks on the top and right axis
@@ -648,14 +648,14 @@ class MatplotlibParser(BackendParserBase):
 
         mpl_axis.set_tick_params(**tick_props)
 
+        # Set number of ticks and labels
+        mpl_axis.set_major_locator(MaxNLocator(tick_number))
+
     def process_ipl_axis_formatter(self, impl_plot: MPLAxes, mpl_axis: MPLAxis, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx,
                                                              offset_lut=ci.offsets,
                                                              roundh=self._pm.get_value(self.canvas, 'round_hour')))
-
-    def process_ipl_axis_ticks(self, tick_number, mpl_axis: MPLAxis):
-        mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
     def process_ipl_signal_impl_plot(self, signal: Signal):
         mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes

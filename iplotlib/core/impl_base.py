@@ -426,17 +426,13 @@ class BackendParserBase(ABC):
         """
 
     @abstractmethod
-    def process_ipl_axis_params(self, fc, fs, axis: Axis, impl_axis: Any):
+    def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, impl_axis: Any):
         """
         param
         """
 
     @abstractmethod
     def process_ipl_axis_formatter(self, impl_plot: Any, axis_item: Any, ax_idx: int):
-        pass
-
-    @abstractmethod
-    def process_ipl_axis_ticks(self, tick_number, impl_plot: Any):
         pass
 
     def process_ipl_axis(self, axis: LinearAxis, ax_idx: int, plot: Plot, impl_plot: Any):
@@ -465,7 +461,8 @@ class BackendParserBase(ABC):
         axis_item._font_size = fs
         axis_item._label = axis.label
 
-        self.process_ipl_axis_params(fc, fs, axis, axis_item)
+        tick_number = self._pm.get_value(axis, 'tick_number')
+        self.process_ipl_axis_params(fc, fs, tick_number, axis, axis_item)
 
         # Set axis limits
         if ax_idx != 1 or not self.canvas.streaming:  # In case of Streaming, just set X limits at the start
@@ -488,10 +485,6 @@ class BackendParserBase(ABC):
         # Process Nanoseconds Axis
         if axis.is_date:
             self.process_ipl_axis_formatter(impl_plot, axis_item, ax_idx)
-
-        # Set number of ticks and labels
-        tick_number = self._pm.get_value(axis, 'tick_number')
-        self.process_ipl_axis_ticks(tick_number, axis_item)
 
     def update_original_axis_limits(self, axis, impl_plot, ax_idx):
         logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.original_begin} and {axis.original_end}")

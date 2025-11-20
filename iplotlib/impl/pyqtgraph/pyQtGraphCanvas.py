@@ -547,14 +547,19 @@ class PyQtGraphParser(BackendParserBase):
             # Legend processing for downsampled data when drawing
             fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
             ix_legend = 0
-            for signal in signals:
-                for line in self._signal_impl_shape_lut.get(id(signal)):
-                    plot.legend.items[ix_legend][1].setAttr(attr='size', value=f'{fs}pt')
-                    legend_label = line.name()
-                    if signal.isDownsampled:
-                        legend_label += '*'
-                    plot.legend.items[ix_legend][1].setText(legend_label)
-                    ix_legend += 1
+            if plot.legend and plot.legend.items:
+                for signal in signals:
+                    for line in self._signal_impl_shape_lut.get(id(signal)):
+                        label_item = plot.legend.items[ix_legend][1]
+                        label_item.setAttr(attr='size', value=f'{fs}pt')
+                        legend_label = line.name()
+                        if signal.isDownsampled:
+                            legend_label += '*'
+                        label_item.setText(legend_label)
+                        size = label_item.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None)
+                        label_item.resize(size)
+                        ix_legend += 1
+                plot.legend.updateSize()
 
             # Observe the axis limit change events
             vb = plot.getViewBox()
@@ -603,44 +608,33 @@ class PyQtGraphParser(BackendParserBase):
             }
             legend.anchor(pos_map[position][0], pos_map[position][1])
 
-        def set_legend_layout(legend, layout_type: str):
-            grid = legend.layout
-            items = []
-            for row in range(grid.rowCount()):
-                for col in range(grid.columnCount()):
-                    item = grid.itemAtPosition(row, col)
-                    if item:
-                        items.append(item)
-            # Clean
-            for item in items:
-                grid.removeItem(item)
-            # Relocate
-            if layout_type.lower() == 'vertical':
-                for i, item in enumerate(items):
-                    grid.addItem(item, i, 0)
-            else:  # horizontal
-                for i, item in enumerate(items):
-                    grid.addItem(item, 0, i)
-
         # Show the plot legend if enabled
         show_legend = self._pm.get_value(i_plot, 'legend')
         if not show_legend:
             plot.legend = None
             return
 
-        plot.addLegend(horSpacing=10)
+        plot_leg_position = self._pm.get_value(i_plot, 'legend_position')
+        canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
+        plot_leg_layout = self._pm.get_value(i_plot, 'legend_layout')
+        canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
+
+        if plot_leg_position == 'same as canvas':
+            plot_leg_position = canvas_leg_position
+        if plot_leg_layout == 'same as canvas':
+            plot_leg_layout = canvas_leg_layout
+
+        if plot_leg_layout == 'horizontal':
+            col_count = len(signals)
+        else:
+            col_count = 1
+
+        plot.addLegend(horSpacing=25, colCount=col_count)
         legend = plot.legend
         legend.layout.setContentsMargins(3, 0, 0, 0)
 
-        leg_position = self._pm.get_value(i_plot, 'legend_position')
-        # Check for 'same as canvas' value
-        if leg_position == 'same as canvas':
-            leg_position = 'upper right'
-        set_legend_position(legend, leg_position)
-        # leg_layout = self._pm.get_value(plot, 'legend_layout')
-        # set_legend_layout(legend, leg_layout)
-
         # Set aspect legend
+        set_legend_position(legend, plot_leg_position)
         legend.setBrush(pg.mkBrush(255, 255, 255, 120))
         legend.setPen(pg.mkPen(color='k'))
 
@@ -694,15 +688,15 @@ class PyQtGraphParser(BackendParserBase):
             plot_item = axis_item.parentItem()
             plot_item.setLogMode(x=False, y=True)
 
-    def process_ipl_axis_params(self, fc, fs, axis: Axis, axis_item: AxisItem):
-        tick_props = dict()  # TODO: add color to tick values
+    def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, axis_item: AxisItem):
+        tick_props = dict(maxTickLevel=0)
         label_props = dict(color=fc)
 
         # Set ticks on the top and right axis
         if self._pm.get_value(self.canvas, 'ticks_position'):
-            tick_props['maxTickLevel'] = 2
+            tick_props['tickLength'] = -5
         else:
-            tick_props['maxTickLevel'] = 1
+            tick_props['tickLength'] = 5
 
         # Set color and font
         if fs is not None and fs > 0:
@@ -720,13 +714,16 @@ class PyQtGraphParser(BackendParserBase):
 
         axis_item.setStyle(**tick_props)
 
+        # Set color to tick values
+        axis_item.setTextPen(pg.mkPen(fc))
+
+        # Set number of ticks and labels
+        if isinstance(axis_item, NanosecondDateFormatter):
+            axis_item.set_ticks_number(tick_number)
+
     def process_ipl_axis_formatter(self, impl_plot: PlotItem, impl_axis: NanosecondDateFormatter, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         impl_axis.set_offset(ci.offsets[ax_idx])
-
-    def process_ipl_axis_ticks(self, tick_number, axis_item: AxisItem):
-        # axis_item.setStyle()
-        return
 
     def process_ipl_signal_impl_plot(self, signal: Signal):
         plot = self._signal_impl_plot_lut.get(signal.uid)  # type: PlotItem
