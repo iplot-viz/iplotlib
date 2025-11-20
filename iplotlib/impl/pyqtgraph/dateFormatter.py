@@ -109,6 +109,9 @@ class NanosecondDateFormatter(pg.AxisItem):
 
         return 0
 
+    def set_ticks_number(self, tick_number: int):
+        self.n_ticks = tick_number
+
     def tickValues(self, minVal, maxVal, size):
         # Detect range change
         minVal = minVal
@@ -157,7 +160,6 @@ class NanosecondDateFormatter(pg.AxisItem):
         return values
 
     def get_real_value(self, value):
-
         if self.offset == 100_000:
             return value * self.offset
         else:
