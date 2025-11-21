@@ -306,7 +306,7 @@ class MatplotlibParser(BackendParserBase):
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
 
-        self.figure.suptitle(title, font_size=font_size, font_color=font_color)
+        self.figure.suptitle(title, fontsize=font_size, color=font_color)
 
     def process_ipl_plot_xy(self):
         pass
