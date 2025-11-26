@@ -140,13 +140,13 @@ class PyQtGraphParser(BackendParserBase):
             legend_label.setText(legend_text + '*')
 
     @staticmethod
-    def _get_visible_data(xd, yd, lo, hi):
-        pass
-
-    @staticmethod
     def _update_marker_by_point_count(marker_line: PlotDataItem, signal_x_data, signal_style: dict):
-        # TODO: implement
-        pass
+        if len(signal_x_data) == 1:
+            marker_line.setSymbol('x')
+            marker_line.setSymbolSize(5)
+        else:
+            symbol = signal_style.get('symbol')
+            marker_line.setSymbol(symbol or None)
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
         return [draw_fn(x=x_data, y=y_data, **style)]

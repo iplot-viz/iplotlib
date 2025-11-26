@@ -101,12 +101,6 @@ class MatplotlibParser(BackendParserBase):
             legend_label.set_text(legend_text + '*')
 
     @staticmethod
-    def _get_visible_data(xd, yd, lo, hi):
-        x_displayed = xd[((xd > lo) & (xd < hi))]
-        y_displayed = yd[((xd > lo) & (xd < hi))]
-        return x_displayed, y_displayed
-
-    @staticmethod
     def _update_marker_by_point_count(marker_line: Line2D, signal_x_data, signal_style: dict):
         if len(signal_x_data) == 1:
             marker_line.set_marker('x')

@@ -599,9 +599,11 @@ class BackendParserBase(ABC):
             self.set_impl_x_axis_label_text(impl_plot, xaxis._label)
 
     @staticmethod
-    @abstractmethod
     def _get_visible_data(xd, yd, lo, hi):
-        pass
+        mask = (xd > lo) & (xd < hi)
+        x_displayed = xd[mask]
+        y_displayed = yd[mask]
+        return x_displayed, y_displayed
 
     @staticmethod
     @abstractmethod
@@ -649,8 +651,9 @@ class BackendParserBase(ABC):
         # Processed signals already use the visible range.
         # Skip this step in case of streaming mode, as x_data and y_data may be empty and lead to errors.
 
-        # if not signal.extremities and not self.canvas.streaming and impl_plot.get_xlim() != (-0.05, 0.05):
-        # x_data, y_data = self._get_visible_data(x_data, y_data, *impl_plot.get_xlim())
+        if not signal.extremities and not self.canvas.streaming:
+            x_limits = self.get_impl_x_axis_limits(impl_plot)
+            x_data, y_data = self._get_visible_data(x_data, y_data, *x_limits)
 
         if plot_lines is not None:
             # Reflect downsampling in legend
