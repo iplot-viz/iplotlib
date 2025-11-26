@@ -375,7 +375,7 @@ class Canvas(ABC):
                                 x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
                             else:
                                 timeframe = pd.Series(format_ts, name=f"{col_name}.time")
-                                if np.isscalar(y_data)==False and len(y_data[0]) > 1:
+                                if np.isscalar(y_data[0])==False and len(y_data[0]) > 1:
                                     dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data.{i}" for i in range(
                                         len(y_data[0]))])  # we could use x data in header
                                 else:
