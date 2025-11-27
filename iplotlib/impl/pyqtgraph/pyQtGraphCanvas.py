@@ -94,6 +94,7 @@ class PyQtGraphParser(BackendParserBase):
         self._layout_stacks = {}  # (row, col, stack_id) -> PlotItem
         self._slider_placeholders = {}  # (row, col) -> QGraphicsProxyWidget
         self._impl_plot_ranges_hash = dict()
+        self._row_offset = 0
 
         if tight_layout:
             self.enable_tight_layout()
@@ -106,7 +107,8 @@ class PyQtGraphParser(BackendParserBase):
         if cell_gl is None:
             rspan = max(1, rowspan)
             cspan = max(1, colspan)
-            end_row = row + rspan - 1
+            layout_row = row + self._row_offset
+            end_row = layout_row + rspan - 1
             end_col = col + cspan - 1
 
             lay = self.figure.ci.layout
@@ -114,7 +116,7 @@ class PyQtGraphParser(BackendParserBase):
             lay.setColumnStretchFactor(end_col, 1)
 
             cell_gl = pg.GraphicsLayout()
-            self.figure.addItem(cell_gl, row=row, col=col, rowspan=rowspan, colspan=colspan)
+            self.figure.addItem(cell_gl, row=layout_row, col=col, rowspan=rowspan, colspan=colspan)
             self._cell_gl[key] = cell_gl
         return cell_gl
 
@@ -402,8 +404,13 @@ class PyQtGraphParser(BackendParserBase):
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
         suptitle = pg.LabelItem(justify='center')
-        self.figure.addItem(suptitle, row=0, col=0, colspan=3)
-        suptitle.setText("Título general (suptitle)", size='16pt', bold=True)
+        cols = self._grid_shape[1] if hasattr(self, "_grid_shape") else 1
+        self.figure.addItem(suptitle, row=0, col=0, colspan=cols)
+
+        if font_size:
+            suptitle.setText(title, size=f'{font_size}pt', color=font_color)
+        else:
+            suptitle.setText(title, color=font_color)
 
     def set_impl_plot_limits(self, impl_plot: PlotItem, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, PlotItem):
@@ -970,8 +977,16 @@ class PyQtGraphParser(BackendParserBase):
     def set_canvas_gridspec(self, rows: int, cols: int):
         self._grid_shape = (rows, cols)
         lay = self.figure.ci.layout
+
+        if self._pm.get_value(self.canvas, 'title') is not None:
+            self._row_offset = 1
+            lay.setRowStretchFactor(0, 0)
+        else:
+            self._row_offset = 0
+
         for r in range(rows):
-            lay.setRowStretchFactor(r, 1)
+            layout_row = r + self._row_offset
+            lay.setRowStretchFactor(layout_row, 1)
         for c in range(cols):
             lay.setColumnStretchFactor(c, 1)
 
