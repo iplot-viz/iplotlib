@@ -913,9 +913,6 @@ class MatplotlibParser(BackendParserBase):
     def get_line_label(self, line: Line2D):
         return line.get_label()
 
-    def get_line_xdata(self, line: Any):
-        return line.get_xdata()
-
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):
             return impl_plot.get_xaxis()

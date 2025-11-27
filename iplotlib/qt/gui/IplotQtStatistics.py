@@ -140,13 +140,6 @@ class IplotQtStatistics(QWidget):
                 # Insert new row
                 self.table.insertRow(idx)
 
-                # The rows correspond to the signals and their corresponding stacks
-                if isinstance(impl_plot, PlotItem):
-                    signal_name = f"{line.name()}, {stack}"
-                else:
-                    signal_name = f"{line.get_label()}, {stack}"
-                self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
-
                 # Add Statistics to the table
                 if has_envelope > 0:
                     line = line[0]
@@ -156,10 +149,15 @@ class IplotQtStatistics(QWidget):
                         x_data = line.getData()[0]
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
                         y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
+                        signal_name = f"{line.name()}, {stack}"
                     else:
                         x_data = line.get_xdata()
                         lo, hi = impl_plot.get_xlim()
                         y_lo, y_hi = impl_plot.get_ylim()
+                        signal_name = f"{line.get_label()}, {stack}"
+
+                    # The rows correspond to the signals and their corresponding stacks
+                    self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
                     y_min = np.array(signal.data_store[1])
                     y_max = np.array(signal.data_store[2])
@@ -192,21 +190,29 @@ class IplotQtStatistics(QWidget):
                     # Base case
                     # Differentiate methods
                     if isinstance(impl_plot, PlotItem):
-                        x_data = line.getData()[0]
-                        y_data = line.getData()[1]
+                        x_data = line.getData()[0] if line.getData()[0] is not None else []
+                        y_data = line.getData()[1] if line.getData()[1] is not None else []
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
                         y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
+                        signal_name = f"{line.name()}, {stack}"
                     else:
                         x_data = line.get_xdata()
                         y_data = line.get_ydata()
                         lo, hi = impl_plot.get_xlim()
                         y_lo, y_hi = impl_plot.get_ylim()
+                        signal_name = f"{line.get_label()}, {stack}"
+
+                    # The rows correspond to the signals and their corresponding stacks
+                    self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
                     # Filter values
-                    mask = ((x_data > lo) & (x_data < hi) &
-                            (y_data > y_lo) & (y_data < y_hi))
-                    y_displayed = y_data[mask]
-                    samples = y_displayed.size
+                    if (len(x_data), len(y_data)) != (0, 0):
+                        mask = ((x_data > lo) & (x_data < hi) &
+                                (y_data > y_lo) & (y_data < y_hi))
+                        y_displayed = y_data[mask]
+                        samples = y_displayed.size
+                    else:
+                        samples = 0
 
                     if samples > 0:
                         # NumPy scalars → float
@@ -215,7 +221,6 @@ class IplotQtStatistics(QWidget):
                         max_val = np.max(y_displayed).item()
                         first_val = y_displayed[0].item()
                         last_val = y_displayed[-1].item()
-
                         self._set_stats(idx, min_val, avg_val, max_val, first_val, last_val, samples)
                     else:
                         # Indicate that there is no data

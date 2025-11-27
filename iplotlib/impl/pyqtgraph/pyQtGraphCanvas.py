@@ -257,9 +257,6 @@ class PyQtGraphParser(BackendParserBase):
     def get_line_label(self, line: PlotDataItem):
         return line.name()
 
-    def get_line_xdata(self, line: Any):
-        return line.getData()[0]
-
     def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
         return y_data[plot.slider.value()]
 
@@ -562,7 +559,7 @@ class PyQtGraphParser(BackendParserBase):
                     for line in self._signal_impl_shape_lut.get(id(signal)):
                         label_item = plot.legend.items[ix_legend][1]
                         label_item.setAttr(attr='size', value=f'{fs}pt')
-                        legend_label = line.name()
+                        legend_label = line.name() if not isinstance(line, Collection) else line[0].name()
                         if signal.isDownsampled:
                             legend_label += '*'
                         label_item.setText(legend_label)
@@ -977,9 +974,6 @@ class PyQtGraphParser(BackendParserBase):
             lay.setRowStretchFactor(r, 1)
         for c in range(cols):
             lay.setColumnStretchFactor(c, 1)
-
-    def disable_tight_layout(self):
-        pass
 
     def set_focus_plot(self, impl_plot: PlotItem):
         un_focus = self._focus_plot is not None or impl_plot is None

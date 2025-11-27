@@ -719,10 +719,6 @@ class BackendParserBase(ABC):
     def get_line_label(self, line: Any):
         """"""
 
-    @abstractmethod
-    def get_line_xdata(self, line: Any):
-        """"""
-
     def add_marker_scaled(self, impl_plot: Any, plot: PlotXY, x_coord, y_coord):
         """
         Function that returns the nearest point of the plot to create the corresponding marker.
@@ -746,8 +742,8 @@ class BackendParserBase(ABC):
         # With the new X axis limits, we obtain the points within that range
         for signal_ref in signals:
             signal = signal_ref()
+            x_data = signal.x_data
             for idx_line, line in enumerate(signal.lines):
-                x_data = self.get_line_xdata(line)
                 idx1 = np.searchsorted(x_data, ranges[0])
                 idx2 = np.searchsorted(x_data, ranges[1])
 
@@ -1092,13 +1088,13 @@ class BackendParserBase(ABC):
                 if not impl_list:
                     continue
                 for impl_plot in impl_list:
-                    plot_lims = self.get_plot_limits(impl_plot)
+                    plot_lims = self.get_plot_limits(impl_plot, True)
                     if not isinstance(plot_lims, IplPlotViewLimits):
                         continue
                     all_limits.append(plot_lims)
         return all_limits
 
-    def get_plot_limits(self, impl_plot: Any) -> Optional[IplPlotViewLimits]:
+    def get_plot_limits(self, impl_plot: Any, canvas_flag: bool = False) -> Optional[IplPlotViewLimits]:
         """
         Return limits for the given plot. The `which` argument can be `original` or `current`
         """
@@ -1123,10 +1119,21 @@ class BackendParserBase(ABC):
         pos = stacked_plots.index(impl_plot)
         y_begin, y_end = plot.axes[1][pos].get_limits('current')
 
-        if (y_oaw_begin, y_oaw_end) == (y_begin, y_end):
-            plot_lims.axes_ranges.append(IplAxisLimits(y_oaw_begin, y_oaw_end))
-        else:
-            plot_lims.axes_ranges.append(IplAxisLimits(y_begin, y_end))  # Case modify Axis preferences
+        if canvas_flag:  # Apply preferences case
+            # Check Y axis limits at canvas level
+            if (y_oaw_begin, y_oaw_end) == (y_begin, y_end):
+                begin = self.canvas.canvas_begin if self.canvas.canvas_begin is not None else y_oaw_begin
+                end = self.canvas.canvas_end if self.canvas.canvas_end is not None else y_oaw_end
+                plot_lims.axes_ranges.append(IplAxisLimits(begin, end))
+            else:
+                plot_lims.axes_ranges.append(IplAxisLimits(y_begin, y_end))  # Case modify Axis preferences
+
+        else:  # Zoom case
+            # Check Y axis limits at canvas level
+            if (y_oaw_begin, y_oaw_end) == (y_begin, y_end):
+                plot_lims.axes_ranges.append(IplAxisLimits(y_oaw_begin, y_oaw_end))
+            else:
+                plot_lims.axes_ranges.append(IplAxisLimits(y_begin, y_end))  # Case modify Axis preferences
 
         # IplSliderLimits
         if isinstance(plot, PlotXYWithSlider):

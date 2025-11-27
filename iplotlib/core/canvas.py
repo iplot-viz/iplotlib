@@ -139,6 +139,8 @@ class Canvas(ABC):
     equivalent_units: bool = None
     color_map: str = None
     contour_levels: int = None
+    canvas_begin: any = None
+    canvas_end: any = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -220,6 +222,8 @@ class Canvas(ABC):
         self.equivalent_units = Canvas.equivalent_units
         self.color_map = Canvas.color_map
         self.contour_levels = Canvas.contour_levels
+        self.canvas_begin = Canvas.canvas_begin
+        self.canvas_end = Canvas.canvas_end
         # Specific attributes
         self.title = Canvas.title
         self.shared_x_axis = Canvas.shared_x_axis
@@ -268,6 +272,8 @@ class Canvas(ABC):
         self.equivalent_units = old_canvas['equivalent_units']
         self.color_map = old_canvas['color_map']
         self.contour_levels = old_canvas['contour_levels']
+        self.canvas_begin = old_canvas['canvas_begin']
+        self.canvas_end = old_canvas['canvas_end']
         # Specific attributes
         self.title = old_canvas['title']
         self.shared_x_axis = old_canvas['shared_x_axis']
@@ -279,7 +285,7 @@ class Canvas(ABC):
         self.crosshair_color = old_canvas['crosshair_color']
         self.full_mode_all_stack = old_canvas['full_mode_all_stack']
         self.focus_plot = old_canvas['focus_plot']
-        self.max_diff = old_canvas['contour_levels']
+        self.max_diff = old_canvas['max_diff']
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
