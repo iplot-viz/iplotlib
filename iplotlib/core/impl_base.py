@@ -468,13 +468,30 @@ class BackendParserBase(ABC):
         if ax_idx != 1 or not self.canvas.streaming:  # In case of Streaming, just set X limits at the start
             if axis.begin is None and axis.end is None:
                 self.update_original_axis_limits(axis, impl_plot, ax_idx)
-                begin, end = axis.original_begin, axis.original_end
+                padding_begin, padding_end = True, True
+
+                # Only Y axis has canvas override
+                if ax_idx == 1:
+                    canvas_begin = self.canvas.canvas_begin
+                    canvas_end = self.canvas.canvas_end
+
+                    begin = canvas_begin if canvas_begin is not None else axis.original_begin
+                    end = canvas_end if canvas_end is not None else axis.original_end
+
+                    if canvas_begin is not None:
+                        padding_begin = False
+                    if canvas_end is not None:
+                        padding_end = False
+
+                else:
+                    begin = axis.original_begin
+                    end = axis.original_end
 
                 # Adjust initial padding for Y axis
                 if ax_idx == 1 and not isinstance(plot, PlotContour):
                     h = end - begin
-                    begin -= 0.1 * h
-                    end += 0.1 * h
+                    begin = begin - 0.1 * h if padding_begin else begin
+                    end = end + 0.1 * h if padding_end else end
             else:
                 begin, end = axis.begin, axis.end
 
