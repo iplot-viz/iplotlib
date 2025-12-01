@@ -981,6 +981,12 @@ class PyQtGraphParser(BackendParserBase):
         self._grid_shape = (rows, cols)
         lay = self.figure.ci.layout
 
+        # Reset previous layout
+        for r in range(lay.rowCount()):
+            lay.setRowStretchFactor(r, 0)
+        for c in range(lay.columnCount()):
+            lay.setColumnStretchFactor(c, 0)
+
         if self._pm.get_value(self.canvas, 'title') is not None:
             self._row_offset = 1
             lay.setRowStretchFactor(0, 0)
