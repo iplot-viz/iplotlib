@@ -96,6 +96,9 @@ class PyQtGraphParser(BackendParserBase):
         self._impl_plot_ranges_hash = dict()
         self._row_offset = 0
 
+        # Line size default value for PyQtGraph backend
+        self._pm.default['line_size'] = 2
+
         if tight_layout:
             self.enable_tight_layout()
         else:
