@@ -605,11 +605,21 @@ class PyQtGraphParser(BackendParserBase):
     def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
         if not visible_stacks:
             return
+
+        max_stack = max(visible_stacks)
+        stack_dict = self._layout_stacks.get((row, col), {})
+
         for s_id in set(visible_stacks):
-            if s_id == max(visible_stacks):
-                self._layout_stacks[(row, col)][s_id].getAxis('bottom').setStyle(showValues=True)
-            else:
-                self._layout_stacks[(row, col)][s_id].getAxis('bottom').setStyle(showValues=False)
+            plot_item = stack_dict.get(s_id)
+            if plot_item is None:
+                continue
+
+            axis = plot_item.getAxis('bottom')
+            show = (s_id == max_stack)
+
+            axis.setStyle(showValues=show)
+            if axis.label is not None:
+                axis.label.setVisible(show)
 
     def set_plot_title(self, i_plot: Plot, plot: PlotItem, stack_id: int):
         if i_plot.plot_title is None or stack_id != 0:
