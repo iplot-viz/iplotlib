@@ -507,31 +507,43 @@ class PyQtGraphParser(BackendParserBase):
         l_key = (row, col)
         stack_map = self._layout_stacks.setdefault(l_key, {})
 
+        full_mode_all_stack = self._pm.get_value(self.canvas, "full_mode_all_stack")
+        focus_stack_key = self._focus_plot_stack_key
+
         for stack_id, key in enumerate(i_plot.signals):
+            if focus_stack_key is not None and not full_mode_all_stack and key != focus_stack_key:
+                continue
+
             if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
                 axis_items["bottom"] = NanosecondDateFormatter(orientation='bottom')
 
             signals = i_plot.signals.get(key) or list()
-            visible_stack_ids.append(stack_id)
 
-            if stack_id not in stack_map:
+            if focus_stack_key is not None and not full_mode_all_stack:
+                row_id = 0
+            else:
+                row_id = stack_id
+
+            visible_stack_ids.append(row_id)
+
+            if row_id not in stack_map:
                 pi = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
-                cell_gl.addItem(pi, row=stack_id, col=0)
-                if stack_id > 0:
+                cell_gl.addItem(pi, row=row_id, col=0)
+                if row_id > 0:
                     pi.getAxis('bottom').setStyle(showValues=False)
-                stack_map[stack_id] = pi
+                stack_map[row_id] = pi
 
             # Slider creation only if it doesn't exist
             if isinstance(i_plot, PlotXYWithSlider):
                 cell_gl = self.process_ipl_plot_xy_slider(i_plot, row, col, visible_stack_ids, cell_gl)
 
-            plot = stack_map[stack_id]
+            plot = stack_map[row_id]
             plot.enableAutoRange(x=False, y=False)
             plot.hideButtons()
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
 
             # Keep references to iplotlib instances for ease of access in callbacks.
-            self._impl_plot_cache_table.register(plot, self.canvas, i_plot, stack_id, signals)
+            self._impl_plot_cache_table.register(plot, self.canvas, i_plot, key, signals)
 
             self.set_plot_title(i_plot, plot, stack_id)
 
@@ -1004,11 +1016,13 @@ class PyQtGraphParser(BackendParserBase):
         all_stack = self._pm.get_value(self.canvas, "full_mode_all_stack")
         if un_focus:
             self._focus_plot = None
+            self._focus_plot_stack_key = None
             row, col, stack_id = None, None, None
         else:
             ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
             plot = ci.plot()
             self._focus_plot = plot
+            self._focus_plot_stack_key = ci.stack_key
             row = plot.row - 1
             col = plot.col - 1
             stack_id = ci.stack_key
