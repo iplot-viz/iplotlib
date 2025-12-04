@@ -446,7 +446,7 @@ class PyQtGraphParser(BackendParserBase):
         v_layout.addWidget(slider)
         v_layout.addLayout(h_layout)
         proxy.setWidget(container)
-        last_row_id = max(visible_stack_ids) + 1
+        last_row_id = max(visible_stack_ids) + 2
         cell_gl.addItem(proxy, row=last_row_id, col=0)
         self._slider_placeholders[rc_key] = proxy
 
