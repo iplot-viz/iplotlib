@@ -304,7 +304,7 @@ class PyQtGraphParser(BackendParserBase):
                 bar.setImageItem(img)
 
                 for idx, v in enumerate(contour_levels):
-                    # Colores de las isocurvas
+                    # Isocurves colors
                     norm_values = (v - np.min(z_data)) / (np.max(z_data) - np.min(z_data))
                     color = color_map.map(norm_values, mode='float')
                     color_rgba = tuple(int(c * 255) for c in color)
@@ -316,35 +316,27 @@ class PyQtGraphParser(BackendParserBase):
                     plot_item.addItem(iso_curve)
                     curves.append(iso_curve)
 
-                # plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
-
-                # if legend_format == 'in_lines':
-                # if not contour_filled:
-                # plt.clabel(plot_lines, inline=1, fontsize=10)
-            # if equivalent_units:
-            # mpl_axes.set_aspect('equal', adjustable='box')
-            # self.figure.canvas.draw_idle()
         else:
             if contour_filled:
                 # draw_fn = mpl_axes.contourf
-                pass
+                img = pg.ImageItem()
             else:
-                # draw_fn = mpl_axes.contour
                 img = pg.ImageItem(z_data)
-                img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
+                # Set rectangle view for the img. Values are: x, y, w, h
+                img.setRect(QtCore.QRectF(np.min(x_data).item(), np.min(y_data).item(), np.ptp(x_data), np.ptp(y_data)))
+                # img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
                 plot_item.addItem(img)
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                # plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
-
                 colormap_obj = pg.colormap.get('viridis')
                 bar = pg.ColorBarItem(values=(np.min(z_data)[0], np.max(z_data)[0]),
                                       colorMap=colormap_obj,
                                       label='Z value',
                                       interactive=False)
                 bar.setImageItem(img)
-                levels = np.linspace(np.min(z_data)[0], np.max(z_data)[0], contour_levels)
 
+                # Isocurves creation
+                levels = np.linspace(np.min(z_data)[0], np.max(z_data)[0], contour_levels)
                 for i, v in enumerate(levels):
                     """
                     # Colores de las isocurvas
@@ -356,29 +348,20 @@ class PyQtGraphParser(BackendParserBase):
                     """
 
                     iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
-                    # TODO: pendiente add antialiasing para isocurvas
+                    # TODO: pendant add antialiasing for isocurves
                     # Scaled data
 
-                    scale_x = np.ptp(x_data) / z_data.shape[1]
-                    scale_y = np.ptp(y_data) / z_data.shape[0]
-                    iso_curve.setTransform(
-                        pg.Qt.QtGui.QTransform().scale(scale_x, scale_y).translate(np.min(x_data)[0] / scale_x,
-                                                                                   np.min(y_data)[0] / scale_y))
+                    # scale_x = np.ptp(x_data) / z_data.shape[1]
+                    # scale_y = np.ptp(y_data) / z_data.shape[0]
+                    # iso_curve.setTransform(
+                    #     pg.Qt.QtGui.QTransform().scale(scale_x, scale_y).translate(np.min(x_data)[0] / scale_x,
+                    #                                                                np.min(y_data)[0] / scale_y))
 
                     iso_curve.setParentItem(img)
                     iso_curve.setZValue(10)
 
-                    plot_item.addItem(iso_curve)
+                    # plot_item.addItem(iso_curve)
                     curves.append(iso_curve)
-
-                # if legend_format == 'color_bar':
-                # color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
-                # color_bar.set_label(z_data.unit, size=self.legend_size)
-                # else:
-                # if not contour_filled:
-                # plt.clabel(plot_lines, inline=1, fontsize=10)
-            # if equivalent_units:
-            # mpl_axes.set_aspect('equal', adjustable='box')
 
         return curves
 
@@ -516,6 +499,10 @@ class PyQtGraphParser(BackendParserBase):
 
             if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
                 axis_items["bottom"] = NanosecondDateFormatter(orientation='bottom')
+            else:
+                axis_items["bottom"] = NanosecondDateFormatter(is_date=False, orientation='bottom')
+
+            axis_items["left"] = NanosecondDateFormatter(is_date=False, orientation='left')
 
             signals = i_plot.signals.get(key) or list()
 
@@ -528,7 +515,12 @@ class PyQtGraphParser(BackendParserBase):
 
             if row_id not in stack_map:
                 pi = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
-                cell_gl.addItem(pi, row=row_id, col=0)
+                # Add space for expo
+                if stack_id == 0:
+                    cell_gl.addItem(axis_items["left"].common_label, row=0, col=0)
+
+                # Add Plot Item
+                cell_gl.addItem(pi, row=row_id + 1, col=0)
                 if row_id > 0:
                     pi.getAxis('bottom').setStyle(showValues=False)
                 stack_map[row_id] = pi
@@ -598,7 +590,7 @@ class PyQtGraphParser(BackendParserBase):
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
         if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
-            cell_gl.addItem(axis_items["bottom"].common_label, row=len(i_plot.signals), col=0)
+            cell_gl.addItem(axis_items["bottom"].common_label, row=len(i_plot.signals) + 1, col=0)
 
         self.align_y_axis(col)
 
@@ -1180,7 +1172,7 @@ class PyQtGraphParser(BackendParserBase):
             vb = p.getViewBox()
             y0, y1 = vb.viewRange()[1]
 
-            tv = ax.tickValues(y0, y1, vb.height())
+            tv = ax.tickValues(y0, y1, vb.height()) if vb.height() != 0.0 else None
             if not tv:
                 max_w = max(max_w, ax.width())
                 continue

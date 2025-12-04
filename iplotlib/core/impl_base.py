@@ -685,7 +685,10 @@ class BackendParserBase(ABC):
                     self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):
-                    self.set_line_data(line, x_data, y_data[:, i])
+                    if y_data.shape == (0, 0):  # Case: no data for 2 dim y_data
+                        self.set_line_data(line, x_data, y_data)
+                    else:
+                        self.set_line_data(line, x_data, y_data[:, i])
                     self._update_marker_by_point_count(line, x_data, style)
 
             if self.canvas.streaming:
