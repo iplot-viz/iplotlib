@@ -992,24 +992,33 @@ class PyQtGraphParser(BackendParserBase):
         glw.ci.layout.setSpacing(0)
 
     def set_canvas_gridspec(self, rows: int, cols: int):
+        prev_shape = getattr(self, "_grid_shape", (0, 0))
+        prev_offset = getattr(self, "_row_offset", 0)
+        prev_rows, prev_cols = prev_shape
+
         self._grid_shape = (rows, cols)
         lay = self.figure.ci.layout
 
-        # Reset previous layout
-        for r in range(lay.rowCount()):
+        has_title = self._pm.get_value(self.canvas, 'title') is not None
+        new_offset = 1 if has_title else 0
+        self._row_offset = new_offset
+
+        prev_total_rows = prev_rows + prev_offset
+        new_total_rows = rows + new_offset
+
+        reset_rows = max(lay.rowCount(), prev_total_rows, new_total_rows)
+        reset_cols = max(lay.columnCount(), prev_cols, cols)
+
+        for r in range(reset_rows):
             lay.setRowStretchFactor(r, 0)
-        for c in range(lay.columnCount()):
+        for c in range(reset_cols):
             lay.setColumnStretchFactor(c, 0)
 
-        if self._pm.get_value(self.canvas, 'title') is not None:
-            self._row_offset = 1
+        if has_title:
             lay.setRowStretchFactor(0, 0)
-        else:
-            self._row_offset = 0
 
         for r in range(rows):
-            layout_row = r + self._row_offset
-            lay.setRowStretchFactor(layout_row, 1)
+            lay.setRowStretchFactor(r + new_offset, 1)
         for c in range(cols):
             lay.setColumnStretchFactor(c, 1)
 
