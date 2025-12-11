@@ -290,10 +290,10 @@ class PyQtGraphParser(BackendParserBase):
                 tp.remove()
             # TODO: Check size z_data
             if contour_filled:
-                pass
-                # draw_fn = mpl_axes.contourf
+                img = pg.ImageItem(z_data)
             else:
                 img = pg.ImageItem(z_data)
+                # img = pg.ImageItem()
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
                 plot_item.addItem(img)
@@ -318,50 +318,32 @@ class PyQtGraphParser(BackendParserBase):
 
         else:
             if contour_filled:
-                # draw_fn = mpl_axes.contourf
-                img = pg.ImageItem()
+                img = pg.ImageItem(z_data)
             else:
                 img = pg.ImageItem(z_data)
-                # Set rectangle view for the img. Values are: x, y, w, h
-                img.setRect(QtCore.QRectF(np.min(x_data).item(), np.min(y_data).item(), np.ptp(x_data), np.ptp(y_data)))
-                # img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
-                plot_item.addItem(img)
+                # img = pg.ImageItem()
+
+            # Set rectangle view for the image. Values correspond to: x, y, w, h
+            img.setRect(QtCore.QRectF(np.min(x_data).item(), np.min(y_data).item(), np.ptp(x_data), np.ptp(y_data)))
+            plot_item.addItem(img)
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                colormap_obj = pg.colormap.get('viridis')
+                colormap_obj = pg.colormap.get(color_map)
                 bar = pg.ColorBarItem(values=(np.min(z_data)[0], np.max(z_data)[0]),
                                       colorMap=colormap_obj,
                                       label='Z value',
                                       interactive=False)
                 bar.setImageItem(img)
 
-                # Isocurves creation
-                levels = np.linspace(np.min(z_data)[0], np.max(z_data)[0], contour_levels)
-                for i, v in enumerate(levels):
-                    """
-                    # Colores de las isocurvas
-                    norm_values = (v - np.min(z_data)) / (np.max(z_data) - np.min(z_data))
-                    color = colormapp.map(norm_values, mode='float')
-                    color_rgba = tuple(int(c * 255) for c in color) 
-                    pen_color = pg.mkColor(color_rgba)
-                    pen = pg.mkPen(color=pen_color, width=2)
-                    """
-
-                    iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
-                    # TODO: pendant add antialiasing for isocurves
-                    # Scaled data
-
-                    # scale_x = np.ptp(x_data) / z_data.shape[1]
-                    # scale_y = np.ptp(y_data) / z_data.shape[0]
-                    # iso_curve.setTransform(
-                    #     pg.Qt.QtGui.QTransform().scale(scale_x, scale_y).translate(np.min(x_data)[0] / scale_x,
-                    #                                                                np.min(y_data)[0] / scale_y))
-
-                    iso_curve.setParentItem(img)
-                    iso_curve.setZValue(10)
-
-                    # plot_item.addItem(iso_curve)
-                    curves.append(iso_curve)
+                # Isocurve creation
+                # levels = np.linspace(np.min(z_data)[0], np.max(z_data)[0], contour_levels)
+                # for i, v in enumerate(levels):
+                #     # TODO: pendant add antialiasing for isocurves
+                #     iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
+                #     iso_curve.setParentItem(img)
+                #     iso_curve.setZValue(10)
+                #     plot_item.addItem(iso_curve)
+                #     curves.append(iso_curve)
 
         return curves
 
