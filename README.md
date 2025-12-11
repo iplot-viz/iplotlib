@@ -1,11 +1,11 @@
 # iplotlib- ITER plotting library
 A high-level abstract plotting library. In development
 
-| Graphics|GUI|
-|----------|:-------------:|
-| matplotlib|PyQt5, PySide2, PySide6|
-| gnuplot|PyQt5|
-| vtk|PyQt5, PySide2|
+| Graphics   |           GUI           |
+|------------|:-----------------------:|
+| matplotlib | PyQt5, PySide2, PySide6 |
+| gnuplot    |          PyQt5          |
+| PyQtGraph  |  PyQt5, PyQt6, PySide6  |
 
 # Requirements
 See [requirements.txt](https://git.iter.org/projects/VIS/repos/iplotlib/browse/requirements.txt)

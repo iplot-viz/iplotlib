@@ -40,6 +40,7 @@ setuptools.setup(
         "pandas >= 1.1.4",
         "PySide6 >= 6.2.3",
         "vtk >= 9.1.0",
+        "pyqtgraph >= 0.13.7",
     ],
     entry_points={
         "console_scripts": [
