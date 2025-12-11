@@ -11,6 +11,7 @@ from iplotlib.impl.vtk.tests.qVTKAppTestAdapter import QVTKAppTestAdapter
 from iplotlib.impl.vtk.tests.vtk_hints import vtk_is_headless
 
 
+@unittest.skip("VTK backend currently disable")
 class VTKCanvasTesting(QVTKAppTestAdapter):
 
     def setUp(self):
