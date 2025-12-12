@@ -22,7 +22,7 @@ setuptools.setup(
     author_email="jaswant.panchumarti@iter.org",
     description="ITER plotting library",
     long_description=long_description,
-    url="https://git.iter.org/scm/vis/iplotlib.git",
+    url="https://github.com/iplot-viz/iplotlib.git",
     project_urls={
         "Bug Tracker": "https://jira.iter.org/issues/?jql=project+%3D+IDV+AND+component+%3D+iplotlib",
     },
