@@ -14,7 +14,7 @@ maintainers = [
     { name = "Mario Gómez Ballesteros", email = "mgomezb@minsait.com" },
 ]
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">= 3.11"
+requires-python = ">= 3.9"
 license = { text = "MIT" }
 keywords = ["IDS", "CBS", "Matplotlib", "PyQtGraph", "Data Visualization"]
 classifiers = [
