@@ -6,12 +6,12 @@ build-backend = "setuptools.build_meta"
 name = "iplotlib"
 description = "ITER plotting library"
 authors = [
-    { name = "Lana Abadie", email = "lana.abadie@iter.org" },
+    { name = "ITER Organization", email = "jscabanilla@minsait.com" },
 ]
 maintainers = [
     { name = "Jhon Steeven Cabanilla Alvarado", email = "jscabanilla@minsait.com" },
     { name = "Pablo Martin Villares", email = "pmartin@minsait.com" },
-    { name = "Mario Gómez Ballesteros", email = "mgomezb@minsait.com" },
+    { name = "Mario Gomez Ballesteros", email = "mgomezb@minsait.com" },
 ]
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">= 3.9"
@@ -23,7 +23,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "iplotProcessing >= 0.4.0",
+    "iplotProcessing >= 1.1.5",
     "packaging>=20.0",
     "matplotlib >= 3.5.1",
     "pandas >= 1.2.0",
