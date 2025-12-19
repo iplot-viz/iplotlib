@@ -54,6 +54,7 @@ include = ["iplotlib*"]
 [tool.setuptools.package-data]
 "iplotlib.core" = ["data/default_properties.json"]
 "iplotlib.qt" = ["icons/*.png", "icons/*.svg"]
+"iplotlib.standalone" = ["examples_json/*"]
 
 [project.scripts]
 iplotlib-qt-canvas = "iplotlib.standalone.iplotQtStandaloneCanvas:main"
