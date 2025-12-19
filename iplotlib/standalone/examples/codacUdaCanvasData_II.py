@@ -17,4 +17,7 @@ def get_canvas():
         c = Canvas.from_dict(canvas_dict)
         # Set title
         c.title = os.path.basename(__file__).replace('.py', '')
+        for col in c.plots:
+            for plot in col:
+                plot.parent = c
         return c
