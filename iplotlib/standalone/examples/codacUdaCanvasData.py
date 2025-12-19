@@ -45,5 +45,10 @@ def get_canvas():
                 c.title = os.path.basename(__file__).replace('.py', '')
                 for col in c.plots:
                     for plot in col:
-                        plot.parent = weakref.ref(c)
+                        if plot:
+                            plot.parent = weakref.ref(c)
+                            for signals in plot.signals.values():
+                                for signal in signals:
+                                    signal.parent = weakref.ref(plot)
+
                 return c
