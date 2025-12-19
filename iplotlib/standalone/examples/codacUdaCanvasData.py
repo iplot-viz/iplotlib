@@ -5,6 +5,7 @@ Demonstrate usage of iplotlib by plotting data obtained from a CODAC-UDA server,
 import os
 import tempfile
 import json
+import weakref
 
 from iplotDataAccess.dataAccess import DataAccess
 from iplotlib.core import Canvas
@@ -44,5 +45,5 @@ def get_canvas():
                 c.title = os.path.basename(__file__).replace('.py', '')
                 for col in c.plots:
                     for plot in col:
-                        plot.parent = c
+                        plot.parent = weakref.ref(c)
                 return c
