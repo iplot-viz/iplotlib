@@ -1,84 +1,64 @@
-# iplotlib- ITER plotting library
-A high-level abstract plotting library. In development
+# ITER plotting library
 
-| Graphics|GUI|
-|----------|:-------------:|
-| matplotlib|PyQt5, PySide2, PySide6|
-| gnuplot|PyQt5|
-| vtk|PyQt5, PySide2|
+A high-level abstract plotting library.
 
-# Requirements
-See [requirements.txt](https://git.iter.org/projects/VIS/repos/iplotlib/browse/requirements.txt)
+| Graphics   |           GUI           |
+|------------|:-----------------------:|
+| matplotlib | PyQt5, PySide2, PySide6 |
+| gnuplot    |          PyQt5          |
+| vtk        |     PyQt5, PySide2      |
 
-# Install on sdcc-login nodes
-1. Download repository
-    ```bash
-    git clone ssh://git@git.iter.org/vis/iplotlib.git
-    ```
+## Requirements
 
-Note: If you plan on developing the IDV components, clone other repositories like so:
-```bash
-# Your dev root should look like this.
-iplotlib/
-    |-iplotlib
-    |-setup.py
-    |-...
-iplotdataaccess
-    |-iplotDataAccess
-    |-setup.py
-    |-...
-iplotprocessing
-    |-iplotProcessing
-    |-setup.py
-    |-...
-iplotlogging
-    |-iplotLogging
-    |-setup.py
-    |-...
-mint
-    |-mint
-    |-setup.py
-    |-...
-$ cd iplotlib
-$ source development/setup-sdcc-dev.sh
-# To build documentation, execute this script
-$ ./development/setup-iplotlib-docs.sh
-# If you wish to exit, run
-$ idv_env_deactivate
-```
+1. **python <= 3.11**
+2. **Dependencies**: Managed
+   via [pyproject.toml](https://github.com/iplot-viz/iplotlib/blob/develop/pyproject.toml).
 
-The remaining steps below are not required if your are developing iplotlib.
+## Installation
 
-2. Prepare your environment.
-    ``` bash
-    cd iplotlib
-    source environ.sh  # loads reuired modules on sdcc
-    ```
-3. Install requirements.
-    For strict versioning:
-    ```bash
-    pip install -r requirements.txt
-    ```
+Install the package from PyPi:
 
-4. Install `iplotlib`
-    ``` bash
-    pip install --user .
-    ```
-5. For developer installation (no copy)
-    ``` bash
-    pip install --user -e .
-    ```
-6. For system-wide installs with Easybuild
-    1. Use PythonPackage easyblock with `use_pip=True`
-    2. Prepare module file with dependencies from environ.sh
+  ```bash
+  pip install iplotlib
+  ```
 
-# Run tests
-```bash
-pytest iplotlib
-```
+## Usage Example
 
-# Run examples
+  ```bash
+   from iplotlib.core import Canvas, PlotXY, SimpleSignal
+   from iplotlib.qt.gui.iplotQtStandaloneCanvas import QStandaloneCanvas
+   import numpy as np
+   
+   x = np.linspace(-1, 1, 1000)
+   y = (1 - x ** 2) + 100 * (2 - x ** 2) ** 2
+   
+   s = SimpleSignal(label='signal_1', x_data=x, y_data=y)
+   
+   c = Canvas(rows=3, title='My Iplotlib Canvas')
+   
+   p = PlotXY()
+   p.add_signal(s)
+   c.add_plot(p)
+   
+   app = QStandaloneCanvas('matplotlib', use_toolbar=True)
+   app.prepare()
+   app.add_canvas(c)
+   app.run()
+  ```
+
+## Run examples
+
 ```bash
 iplotlib-qt-canvas -t
 ```
+
 Click on canvas menu to switch between examples.
+
+
+## Contributing
+
+1. Fork it!
+2. Create your feature branch: ```git checkout -b my-new-feature ```
+3. Commit your changes: ```git commit -am 'Add some feature' ```
+4. Push to the branch:```git push origin my-new-feature ```
+5. Submit a pull request

@@ -14,6 +14,7 @@ from PySide6.QtCore import QPoint
 from PySide6.QtTest import QTest
 
 
+@unittest.skip("VTK backend currently disable")
 class VTKCanvasTesting(QVTKAppTestAdapter):
 
     def setUp(self):

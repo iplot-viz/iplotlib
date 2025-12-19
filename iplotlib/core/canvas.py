@@ -279,7 +279,7 @@ class Canvas(ABC):
         self.crosshair_color = old_canvas['crosshair_color']
         self.full_mode_all_stack = old_canvas['full_mode_all_stack']
         self.focus_plot = old_canvas['focus_plot']
-        self.max_diff = old_canvas['contour_levels']
+        self.max_diff = old_canvas['max_diff']
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
