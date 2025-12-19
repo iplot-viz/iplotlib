@@ -56,7 +56,7 @@ include = ["iplotlib*"]
 "iplotlib.qt" = ["icons/*.png", "icons/*.svg"]
 
 [project.scripts]
-iplotlib-qt-canvas = "iplotlib.qt.gui.iplotQtStandaloneCanvas:main"
+iplotlib-qt-canvas = "iplotlib.standalone.iplotQtStandaloneCanvas:main"
 
 [tool.pytest.ini_options]
 addopts = "-rA -s -v"
