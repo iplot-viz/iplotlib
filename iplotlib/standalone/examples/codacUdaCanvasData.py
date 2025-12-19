@@ -10,14 +10,17 @@ from iplotDataAccess.dataAccess import DataAccess
 from iplotlib.core import Canvas
 from iplotlib.interface import AccessHelper
 
-dscfg = """[codacuda]
-conninfo=host=io-ls-udasrv1.iter.org,port=3090
-varprefix=
-rturl=http://io-ls-udaweb1.iter.org/dashboard/backend/sse
-rtheaders=REMOTE_USER:$USERNAME,User-Agent:python_client
-rtauth=None
-default=true
-"""
+dscfg = """{
+    "codacuda": {
+        "type": "CODAC_UDA",
+        "host": "io-ls-udasrv1.iter.org",
+        "port": 3090,
+        "rturl": "http://io-ls-udaweb1.iter.org/dashboard/backend/sse",
+        "rtheaders": "REMOTE_USER:$USERNAME,User-Agent:python_client",
+        "rtauth": null,
+        "default": true
+    }
+}"""
 
 
 def get_canvas():
