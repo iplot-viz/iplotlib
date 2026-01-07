@@ -592,28 +592,42 @@ class BackendParserBase(ABC):
             units = set(units) if len(set(units)) == 1 else units
             return '[{}]'.format(']['.join(units)) if len(units) else None
 
-        yaxis = self.get_impl_y_axis(impl_plot)
-        if hasattr(yaxis, "_label") and not yaxis._label:
-            label = group_data_units(impl_plot)
-            if label:
-                self.set_impl_y_axis_label_text(impl_plot, label)
-        xaxis = self.get_impl_x_axis(impl_plot)
-        put_label = False
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        if hasattr(ci, 'plot') and ci.plot():
-            if hasattr(ci.plot(), 'axes'):
-                xax = ci.plot().axes[0]
-                if isinstance(xax, LinearAxis):
-                    put_label |= (not xax.is_date)
+        plot = ci.plot() if ci else None
 
-        if put_label and hasattr(signal, 'x_data'):
-            if hasattr(signal.x_data, 'unit'):
-                label = f"[{signal.x_data.unit or '?'}]"
-                if label and not isinstance(ci.plot(), PlotXYWithSlider):
-                    self.set_impl_x_axis_label_text(impl_plot, label)
-        # label from preferences takes precedence.
-        if hasattr(xaxis, "_label") and xaxis._label:
-            self.set_impl_x_axis_label_text(impl_plot, xaxis._label)
+        # Y axis
+        y_auto = group_data_units(impl_plot)
+        if plot and len(plot.axes) > 1:
+            stacked_plots = self._plot_impl_plot_lut.get(id(plot), [])
+            pos = stacked_plots.index(impl_plot) if impl_plot in stacked_plots else 0
+            y_axis = plot.axes[1][pos] if isinstance(plot.axes[1], Collection) else plot.axes[1]
+            if y_axis.label == "":
+                y_text = ""
+            elif y_axis.label:
+                y_text = y_axis.label
+            else:
+                y_text = y_auto or ""
+                if y_auto:
+                    y_axis._auto_label = y_auto
+            self.set_impl_y_axis_label_text(impl_plot, y_text)
+
+        # X axis
+        x_auto = None
+        if plot and hasattr(plot, 'axes') and len(plot.axes) > 0:
+            x_axis = plot.axes[0]
+            if isinstance(x_axis, LinearAxis) and not x_axis.is_date:
+                if hasattr(signal, 'x_data') and hasattr(signal.x_data, 'unit'):
+                    if not isinstance(plot, PlotXYWithSlider):
+                        x_auto = f"[{signal.x_data.unit or '? '}]"
+            if x_axis.label == "":
+                x_text = ""
+            elif x_axis.label:
+                x_text = x_axis.label
+            else:
+                x_text = x_auto or ""
+                if x_auto:
+                    x_axis._auto_label = x_auto
+            self.set_impl_x_axis_label_text(impl_plot, x_text)
 
     @staticmethod
     def _get_visible_data(xd, yd, lo, hi):

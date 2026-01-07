@@ -54,6 +54,9 @@ class BeanItemModel(QStandardItemModel):
         if isinstance(self._pyObject, SignalXY) and property_name == 'color' and value is None:
             return PropertyManager().get_value(self._pyObject, 'original_color')
 
+        if property_name == 'label' and value is None:
+            value = getattr(self._pyObject, '_auto_label', None)
+
         if isinstance(widget, QComboBox):
             keys = [widget.itemData(i, Qt.ItemDataRole.UserRole) for i in range(widget.count())]
             try:
