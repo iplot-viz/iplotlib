@@ -263,20 +263,19 @@ class MatplotlibParser(BackendParserBase):
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+            if z_data.ndim == 2:
                 plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'in_lines':
                     if not contour_filled:
                         plt.clabel(plot_lines, inline=1, fontsize=10)
             if equivalent_units:
                 mpl_axes.set_aspect('equal', adjustable='box')
-            self.figure.canvas.draw_idle()
         else:
             if contour_filled:
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+            if z_data.ndim == 2:
                 plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'color_bar':
                     color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
@@ -289,6 +288,7 @@ class MatplotlibParser(BackendParserBase):
                 # self.proxies = [Line2D([], [], color=c) for c in ['viridis']]
             if equivalent_units:
                 mpl_axes.set_aspect('equal', adjustable='box')
+        self.figure.canvas.draw_idle()
 
         return plot_lines
 
