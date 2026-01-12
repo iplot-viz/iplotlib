@@ -12,12 +12,13 @@ logger = Sl.get_logger(__name__)
 
 class CanvasStreamer:
 
-    def __init__(self, da):
+    def __init__(self, da, append = True):
         self.da = da
         self.stop_flag = False
         self.signals = {}
         self.collectors = []
         self.streamers = []
+        self.append = append
 
     def start(self, canvas, callback):
         self.stop_flag = False
@@ -64,7 +65,7 @@ class CanvasStreamer:
             for varname in varnames:
                 dobj = self.da.get_next_data(ds, varname)
 
-                if dobj is not None and dobj.xdata is not None and len(dobj.xdata) > 0 and callback is not None:
+                if dobj is not None and callback is not None:
                     callback(varname, dobj)
             time.sleep(0.1)
 
@@ -92,12 +93,12 @@ class CanvasStreamer:
                 },
                     d0=dobj.xdata,
                     d1=dobj.ydata,
-                    d2=[],
+                    d2=dobj.zdata,
                     d3=[],
                     d0_unit=dobj.xunit,
                     d1_unit=dobj.yunit,
-                    d2_unit='',
+                    d2_unit=dobj.zunit,
                     d3_unit='')
-                signal.inject_external(append=True, **result)
+                signal.inject_external(append=self.append, **result)
                 logger.debug(f"Updated {varname} with {len(dobj.xdata)} new samples")
                 callback(signal)
