@@ -28,6 +28,8 @@ class IplotQtCanvas(QWidget):
     Base class for all Qt related canvas implementations
     """
     cmdDone = Signal(IplotCommand)
+    # Signal emitted when user requests to shift a signal: (signal_uid, dx, dy)
+    signalShiftRequested = Signal(str, float, float)
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent)

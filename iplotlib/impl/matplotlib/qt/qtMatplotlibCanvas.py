@@ -28,6 +28,7 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
+from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
@@ -385,14 +386,32 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     x = self._parser.transform_value(event.inaxes, 0, event.xdata)
                     self._dist_calculator.set_dst(x, event.ydata, plot, ci.stack_key)
                     self._dist_calculator.set_dx_is_datetime(is_date)
-                    box = QMessageBox(self)
-                    box.setWindowTitle('Distance')
                     dx, dy, dz = self._dist_calculator.dist()
                     if any([dx, dy, dz]):
-                        box.setText(f"dx = {dx}\ndy = {dy}\ndz = {dz}")
+                        # Get signals from the current plot only
+                        plot_signals = []
+                        for stack in plot.signals.values():
+                            for sig in stack:
+                                if isinstance(sig, SignalXY):
+                                    plot_signals.append(sig)
+                        dx_numeric = 0.0 if is_date else float(dx)
+                        dialog = SignalShiftDialog(
+                            self,
+                            dx=dx_numeric,
+                            dy=float(dy),
+                            dz=float(dz) if dz else 0.0,
+                            signals=plot_signals,
+                            dx_is_datetime=is_date
+                        )
+                        if is_date:
+                            dialog.set_dx_text(str(dx))
+                        dialog.shiftRequested.connect(self.signalShiftRequested.emit)
+                        dialog.exec()
                     else:
+                        box = QMessageBox(self)
+                        box.setWindowTitle('Distance')
                         box.setText("Invalid selection")
-                    box.exec_()
+                        box.exec_()
                     self._dist_calculator.reset()
                 else:
                     x = self._parser.transform_value(event.inaxes, 0, event.xdata)
