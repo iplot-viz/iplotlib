@@ -208,6 +208,40 @@ class IplotQtCanvas(QWidget):
                                 signal_list.append(signal)
         return signal_list
 
+    def get_visible_plot_signals(self, plot) -> List[SignalXY]:
+        """
+        Get visible signals from a specific plot.
+        Only returns SignalXY instances that are not hidden via legend.
+
+        Args:
+            plot: The plot to get signals from
+
+        Returns:
+            List of visible SignalXY instances
+        """
+        visible_signals = []
+        if not plot or not hasattr(plot, 'signals'):
+            return visible_signals
+
+        for stack in plot.signals.values():
+            for signal in stack:
+                if isinstance(signal, SignalXY) and self._is_signal_visible(signal):
+                    visible_signals.append(signal)
+        return visible_signals
+
+    @abstractmethod
+    def _is_signal_visible(self, signal: SignalXY) -> bool:
+        """
+        Check if a signal is currently visible (not hidden via legend).
+        Backend-specific implementations must override this method.
+
+        Args:
+            signal: The signal to check
+
+        Returns:
+            True if visible, False if hidden
+        """
+
     def check_markers(self, canvas: Canvas):
         # Check if there are signals in the table that are no longer used
         markers_signals = self.get_signals(canvas)

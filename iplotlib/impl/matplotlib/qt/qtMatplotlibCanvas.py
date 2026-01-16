@@ -90,6 +90,12 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self.render()
         super().set_canvas(canvas)
 
+    def _is_signal_visible(self, signal) -> bool:
+        """Check if signal is visible (Matplotlib implementation)."""
+        if not hasattr(signal, 'lines') or not signal.lines:
+            return False
+        return signal.lines[0].get_visible()
+
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: MPLAxes
 
@@ -388,12 +394,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self._dist_calculator.set_dx_is_datetime(is_date)
                     dx, dy, dz = self._dist_calculator.dist()
                     if any([dx, dy, dz]):
-                        # Get signals from the current plot only
-                        plot_signals = []
-                        for stack in plot.signals.values():
-                            for sig in stack:
-                                if isinstance(sig, SignalXY):
-                                    plot_signals.append(sig)
+                        # Get visible signals from the current plot only
+                        plot_signals = self.get_visible_plot_signals(plot)
                         dx_numeric = 0.0 if is_date else float(dx)
                         dialog = SignalShiftDialog(
                             self,
