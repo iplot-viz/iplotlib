@@ -5,7 +5,7 @@ Dialog for displaying distance measurements and applying signal shifts.
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QDoubleSpinBox, QPushButton, QGroupBox, QFormLayout
+    QDoubleSpinBox, QPushButton, QGroupBox, QFormLayout, QCheckBox
 )
 
 
@@ -14,8 +14,8 @@ class SignalShiftDialog(QDialog):
     Dialog that shows dx, dy, dz values and allows selecting a signal to shift.
     """
 
-    # Signal emitted when Apply is clicked: (signal_uid, dx, dy)
-    shiftRequested = Signal(str, float, float)
+    # Signal emitted when Apply is clicked: (signal_uid, signal_name, data_source, pulse_nb, dx, dy, duplicate)
+    shiftRequested = Signal(str, str, str, str, float, float, bool)
 
     def __init__(self, parent=None, dx=0.0, dy=0.0, dz=0.0, signals=None, dx_is_datetime=False):
         super().__init__(parent)
@@ -27,6 +27,7 @@ class SignalShiftDialog(QDialog):
         self._dz_raw = dz
         self._dx_is_datetime = dx_is_datetime
         self._signals = signals or []
+        self._signal_map = {}  # uid -> signal object
 
         self._setup_ui()
 
@@ -59,6 +60,7 @@ class SignalShiftDialog(QDialog):
         for sig in self._signals:
             display_name = getattr(sig, 'label', None) or getattr(sig, 'name', None) or str(sig.uid)[:8]
             self._signal_combo.addItem(display_name, sig.uid)
+            self._signal_map[sig.uid] = sig
         signal_layout.addRow("Signal:", self._signal_combo)
         shift_layout.addLayout(signal_layout)
 
@@ -86,6 +88,11 @@ class SignalShiftDialog(QDialog):
 
         shift_layout.addLayout(values_layout)
         layout.addWidget(shift_group)
+
+        # Duplicate signal checkbox (unchecked by default)
+        self._duplicate_checkbox = QCheckBox("Duplicate signal (keep original visible)")
+        self._duplicate_checkbox.setChecked(False)
+        layout.addWidget(self._duplicate_checkbox)
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -118,8 +125,17 @@ class SignalShiftDialog(QDialog):
         """Emit shift request signal."""
         signal_uid = self._signal_combo.currentData()
         if signal_uid:
+            sig = self._signal_map.get(signal_uid)
+            signal_name = getattr(sig, 'name', '') if sig else ''
+            data_source = getattr(sig, 'data_source', '') if sig else ''
+            pulse_nb = getattr(sig, 'pulse_nb', '') if sig else ''
+            # pulse_nb can be a list, convert to string for matching
+            if isinstance(pulse_nb, list):
+                pulse_nb = pulse_nb[0] if pulse_nb else ''
+            pulse_nb = str(pulse_nb) if pulse_nb else ''
             dx = self._dx_spin.value()
             dy = self._dy_spin.value()
-            self.shiftRequested.emit(signal_uid, dx, dy)
+            duplicate = self._duplicate_checkbox.isChecked()
+            self.shiftRequested.emit(signal_uid, signal_name, data_source, pulse_nb, dx, dy, duplicate)
             self.accept()
 
