@@ -30,6 +30,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._vlayout.addWidget(self._parser.figure)
 
         self.setLayout(self._vlayout)
+        self.set_canvas(kwargs.get('canvas'))
 
         # QMenu
         self.autoscale_menu = None

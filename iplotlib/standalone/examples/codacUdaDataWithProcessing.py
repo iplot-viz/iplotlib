@@ -26,7 +26,11 @@ def get_canvas():
                   ts_start='2021-10-01T01:00:00',
                   ts_end='2021-10-05T08:00:00',
                   plot_type="PlotXY")
-    s4 = SignalXY(name='${36nrp}+${61nrp}+${33nrp}', plot_type="PlotXY")
+    s4 = SignalXY(data_source='codacuda',
+                  name='${36nrp}+${61nrp}+${33nrp}',
+                  ts_start='2021-10-01T01:00:00',
+                  ts_end='2021-10-05T08:00:00',
+                  plot_type="PlotXY")
 
     # Setup the graphics objects for plotting.
     c = Canvas(rows=4, title=os.path.basename(__file__).replace('.py', ''))
@@ -34,14 +38,17 @@ def get_canvas():
     p1 = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis()]])
     p1.add_signal(s1)
     c.add_plot(p1)
+    s1.get_data()
 
     p2 = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis()]])
     p2.add_signal(s2)
     c.add_plot(p2)
+    s2.get_data()
 
     p3 = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis()]])
     p3.add_signal(s3)
     c.add_plot(p3)
+    s3.get_data()
 
     p4 = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis()]])
     p4.add_signal(s4)
