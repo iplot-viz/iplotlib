@@ -114,7 +114,7 @@ class IplotSignalAdapter(ProcessingSignal):
     envelope: bool = False
     isDownsampled: bool = False
     x_expr: str = '${self}.time'
-    y_expr: str = '${self}.data_store[1]'
+    y_expr: str = '${self}.data'
     z_expr: str = '${self}.data_store[2]'
     extremities: bool = False
     plot_type: str = ''
@@ -225,7 +225,7 @@ class IplotSignalAdapter(ProcessingSignal):
         # Evaluate each expression.
         for key, expr in kwargs.items():
             try:
-                if self.x_expr == '${self}.time' and self.y_expr == '${self}.data_store[1]' and self.z_expr == '${self}.data_store[2]':
+                if self.x_expr == '${self}.time' and self.y_expr == '${self}.data' and self.z_expr == '${self}.data_store[2]':
                     logger.debug(f"No processing needed to compute key={key} expr={expr}")
                     data_arrays.update({key: self.data_store[correspondance[key]]})
                 else:
