@@ -173,7 +173,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_fontsize_widget():
-        return IplotPreferencesForm.create_spinbox(min=4, max=15)
+        return IplotPreferencesForm.create_spinbox(min=0, max=15)
 
     @staticmethod
     def default_linesize_widget():
