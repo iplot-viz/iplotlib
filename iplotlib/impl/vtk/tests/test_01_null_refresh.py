@@ -3,6 +3,7 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.impl.vtk.vtkCanvas import VTKParser
 
 
+@unittest.skip("VTK backend currently disable")
 class VTKParserTesting(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()

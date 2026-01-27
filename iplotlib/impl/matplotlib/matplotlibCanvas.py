@@ -84,22 +84,21 @@ class MatplotlibParser(BackendParserBase):
         """
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
+        legend = mpl_axes.get_legend()
+        if legend is None:
+            return
+
         # Filter out '_child' lines from mpl_axes, which are added in envelope plots
         # These lines should not be considered when matching lines to legend entries
         valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
         pos = valid_lines.index(plot_lines)
+        legend_label = legend.get_texts()[pos]
+        legend_text = legend.get_texts()[pos].get_text()
 
-        legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
         if legend_text.endswith('*') and not signal.isDownsampled:
-            mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
+            legend_label.set_text(legend_text[:-1])
         elif not legend_text.endswith('*') and signal.isDownsampled:
-            mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
-
-    @staticmethod
-    def _get_visible_data(xd, yd, lo, hi):
-        x_displayed = xd[((xd > lo) & (xd < hi))]
-        y_displayed = yd[((xd > lo) & (xd < hi))]
-        return x_displayed, y_displayed
+            legend_label.set_text(legend_text + '*')
 
     @staticmethod
     def _update_marker_by_point_count(marker_line: Line2D, signal_x_data, signal_style: dict):
@@ -148,7 +147,7 @@ class MatplotlibParser(BackendParserBase):
         end = self.transform_value(impl_plot, 0, now, inverse=True)
         impl_plot.set_xlim(begin, end)
 
-    def set_line_data(self, line: Line2D, x_data, y_data, style: dict):
+    def set_line_data(self, line: Line2D, x_data, y_data):
         """
         Set the data for a Line2D
         """
@@ -158,12 +157,15 @@ class MatplotlibParser(BackendParserBase):
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
         return draw_fn(x_data, y_data, **style)
 
-    def create_plot_lines_2D(self, draw_fn, x_data, y_data, style):
-        lines = draw_fn(x_data, y_data, **style)
-        plot_lines = [line for line in lines]
-        for i, line in enumerate(plot_lines):
-            # line[0].set_label(f"{signal.label}[{i}]")
+    def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
+        plot_lines = []
+        for i in range(y_data.shape[1]):
+            style_i = dict(**style)
+            style_i['color'] = PlotXY._color_cycle[i % len(PlotXY._color_cycle)]
+            line = draw_fn(x_data, y_data[:, i], **style_i)  # List[Line2D]
+            line[0].set_label(f"{signal.label}[{i}]")
             self._update_marker_by_point_count(line[0], x_data, style)
+            plot_lines.append(line[0])
 
         return plot_lines
 
@@ -298,7 +300,7 @@ class MatplotlibParser(BackendParserBase):
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
 
-        self.figure.suptitle(title, font_size=font_size, font_color=font_color)
+        self.figure.suptitle(title, fontsize=font_size, color=font_color)
 
     def process_ipl_plot_xy(self):
         pass
@@ -625,7 +627,7 @@ class MatplotlibParser(BackendParserBase):
                 y_minor = LogLocator(base=10, subs=(1.0,))
                 mpl_axis.set_minor_locator(y_minor)
 
-    def process_ipl_axis_params(self, fc, fs, axis: Axis, mpl_axis: MPLAxis):
+    def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, mpl_axis: MPLAxis):
         label_props = dict(color=fc)
 
         # Set ticks on the top and right axis
@@ -645,14 +647,14 @@ class MatplotlibParser(BackendParserBase):
 
         mpl_axis.set_tick_params(**tick_props)
 
+        # Set number of ticks and labels
+        mpl_axis.set_major_locator(MaxNLocator(tick_number))
+
     def process_ipl_axis_formatter(self, impl_plot: MPLAxes, mpl_axis: MPLAxis, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx,
                                                              offset_lut=ci.offsets,
                                                              roundh=self._pm.get_value(self.canvas, 'round_hour')))
-
-    def process_ipl_axis_ticks(self, tick_number, mpl_axis: MPLAxis):
-        mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
     def process_ipl_signal_impl_plot(self, signal: Signal):
         mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
@@ -898,6 +900,8 @@ class MatplotlibParser(BackendParserBase):
         style['linewidth'] = self._pm.get_value(signal, 'line_size')
         style['linestyle'] = (self._pm.get_value(signal, 'line_style')).lower()
         style['marker'] = self._pm.get_value(signal, 'marker')
+        if style['marker'] == 'None':
+            style['marker'] = None
         style['markersize'] = self._pm.get_value(signal, 'marker_size')
         step = self._pm.get_value(signal, 'step')
         if step is None:
@@ -906,8 +910,8 @@ class MatplotlibParser(BackendParserBase):
 
         return style
 
-    def markers_valid_lines(self, impl_plot: MPLAxes):
-        return [line.get_label() for line in impl_plot.get_lines()]
+    def get_line_label(self, line: Line2D):
+        return line.get_label()
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):

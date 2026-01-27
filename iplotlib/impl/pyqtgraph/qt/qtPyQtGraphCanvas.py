@@ -1,10 +1,10 @@
 from PySide6.QtCore import QMargins, Qt, Signal, QEvent
-from PySide6.QtWidgets import QVBoxLayout, QMenu
+from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox
 
 from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY
+from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
-from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
 from pyqtgraph import PlotItem, TextItem
 
@@ -19,12 +19,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def __init__(self, parent=None, tight_layout=True, **kwargs):
         super().__init__(parent, **kwargs)
 
+        self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
-        self._marker_window = IplotQtMarker()
-        self._marker_window.dropMarker.connect(self.draw_marker_label)
-        self._marker_window.deleteMarker.connect(self.delete_marker_label)
 
-        self.info_shared_x_dialog = False
         self._parser = PyQtGraphParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
 
         self._vlayout = QVBoxLayout(self)
@@ -52,8 +49,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
-        self.canvas = canvas
-
         # Connect events
         for stack in self._parser._layout_stacks.values():
             for plot in stack.values():
@@ -61,17 +56,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 vb.pressed.connect(self._impl_mouse_press_handler)
                 vb.released.connect(self._impl_mouse_release_handler)
 
-        # self._parser.figure.clear()
-        # for i, col in enumerate(self.canvas.plots):
-        #     for j, plot in enumerate(col):
-        #         if not plot:
-        #             continue
-        #         p = pg.PlotItem()
-        #
-        #         self._parser.figure.addItem(p, row=j, col=i)
-        #         for key, signal in plot.signals.items():
-        #             print(signal)
-        #             p.plot(signal[0].x_data, signal[0].y_data, pen=signal[0].color)
+        super().set_canvas(canvas)
 
     def get_base_plot(self) -> PlotItem:
         for stack in self._parser._layout_stacks.values():
@@ -222,6 +207,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._parser.set_view_box_pan()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
             self._parser.set_view_box_zoom()
+        elif mode == Canvas.MOUSE_MODE_DIST:
+            self._parser.set_view_box()
         elif mode == Canvas.MOUSE_MODE_MARKER:
             self._parser.set_view_box()
             if not self._marker_window.isVisible():
@@ -256,15 +243,15 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
         plot = ci.plot()
+        if not plot:
+            self._dist_calculator.reset()
+            return
 
         if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER,
                                Canvas.MOUSE_MODE_CROSSHAIR]:
                 if event.button() == Qt.MouseButton.RightButton:
                     return
-
-                ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
-                plot = ci.plot()
 
                 # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
                 system_coord = view_box.mapSceneToView(event.scenePos())
@@ -274,10 +261,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 # Markers can only be created if the property 'marker' is not None
                 if impl_plot.listDataItems()[0].opts['symbol'] != 'None':  # TODO: review
                     # Check if the marker coordinates are correct and if the marker has not already been created
-                    new_marker, marker_signal = self._parser.add_marker_scaled(impl_plot, plot, x_value, y_value)
+                    new_marker, marker_signal, label_line = self._parser.add_marker_scaled(impl_plot, plot, x_value, y_value)
                     if new_marker is not None:
                         if new_marker not in self._marker_window.get_markers():
-                            self._marker_window.add_marker(marker_signal, new_marker)
+                            self._marker_window.add_marker(marker_signal, new_marker, label_line)
                             if not self._marker_window.isVisible():
                                 self._marker_window.show()
                             elif self._marker_window.isMinimized():
@@ -308,8 +295,36 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     self.stage_view_lim_cmd(impl_plot)
                     return
 
-            elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
+            elif self._mmode == Canvas.MOUSE_MODE_SELECT:
                 self.autoscale_menu = None
+
+            elif self._mmode == Canvas.MOUSE_MODE_DIST:
+                # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
+                system_coord = view_box.mapSceneToView(event.scenePos())
+                x_value = system_coord.x()
+                y_value = system_coord.y()
+
+                if self._dist_calculator.plot1 is not None:
+                    try:
+                        is_date = plot.axes[0].is_date
+                    except (AttributeError, IndexError):
+                        is_date = False
+                    x = self._parser.transform_value(impl_plot, 0, x_value)
+                    self._dist_calculator.set_dst(x, y_value, plot, ci.stack_key)
+                    self._dist_calculator.set_dx_is_datetime(is_date)
+                    box = QMessageBox(self)
+                    box.setWindowTitle('Distance')
+                    dx, dy, dz = self._dist_calculator.dist()
+                    if any([dx, dy, dz]):
+                        box.setText(f"dx = {dx}\ndy = {dy}\ndz = {dz}")
+                    else:
+                        box.setText("Invalid selection")
+                    box.exec_()
+                    self._dist_calculator.reset()
+                else:
+                    x = self._parser.transform_value(impl_plot, 0, x_value)
+                    self._dist_calculator.set_src(x, y_value, plot, ci.stack_key)
+
 
     def _impl_mouse_release_handler(self, view_box, event):
         # self._debug_log_event(event, "Mouse released")
@@ -340,11 +355,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 else:
                     self.autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
                 self.autoscale_menu.popup(event.screenPos().toPoint())
-
-    def unfocus_plot(self):
-        """Quita el focus del plot actual."""
-        if self._parser:
-            self._parser.set_focus_plot(None)
 
     def mouse_clicked(self, event):
         if not event.currentItem:

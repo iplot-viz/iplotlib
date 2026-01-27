@@ -26,8 +26,6 @@
 #              - The alignment modifies the data_store. After evaluation, restore the original buffers.
 #  Feb 2023:   Changes by Alberto Luengo
 #              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
-import copy
-from collections import defaultdict
 from dataclasses import dataclass, field, fields
 import numpy as np
 import os
@@ -559,7 +557,7 @@ class IplotSignalAdapter(ProcessingSignal):
         if self.status_info.result == Result.INVALID:
             return False
 
-        # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
+        # no name implies there is no need to request data (we don't have a variable to ask the data source)
         nonempty_name = string_classifier.is_non_empty(self.name)
         if nonempty_name and self.data_access_enabled:
 

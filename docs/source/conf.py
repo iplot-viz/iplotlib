@@ -27,8 +27,8 @@ version = open(version_file).readline().replace('__version__ = ', '')
 # -- Project information -----------------------------------------------------
 
 project = 'iplotlib'
-copyright = '2021, Jaswant Panchumarti, Lana Abadie, Piotr Mazur'
-author = 'Jaswant Panchumarti, Lana Abadie, Piotr Mazur'
+copyright = '2021, Jaswant Panchumarti, Lana Abadie, Piotr Mazur, Jhon Cabanilla, Pablo Martin'
+author = 'Jaswant Panchumarti, Lana Abadie, Piotr Mazur, Jhon Cabanilla, Pablo Martin'
 
 # The full version, including alpha/beta/rc tags
 release = version
@@ -143,4 +143,4 @@ napoleon_use_rtype = False
 
 autodoc_member_order = 'bysource'
 # this is in order to support numpy and friends documentation on RTD
-autodoc_mock_imports = ['pandas', 'numpy', 'scipy', 'iplotLogging', 'matplotlib', 'vtk', 'PySide6']
+autodoc_mock_imports = ['pandas', 'numpy', 'scipy', 'iplotLogging', 'matplotlib', 'pyqtgraph', 'vtk', 'PySide6']

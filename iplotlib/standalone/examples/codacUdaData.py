@@ -11,14 +11,17 @@ from iplotlib.core import Canvas, PlotXY, SignalXY
 from iplotlib.core.axis import LinearAxis
 from iplotlib.interface import AccessHelper
 
-dscfg = """[codacuda]
-conninfo=host=io-ls-udasrv1.iter.org,port=3090
-varprefix=
-rturl=http://io-ls-udaweb1.iter.org/dashboard/backend/sse
-rtheaders=REMOTE_USER:$USERNAME,User-Agent:python_client
-rtauth=None
-default=true
-"""
+dscfg = """{
+    "codacuda": {
+        "type": "CODAC_UDA",
+        "host": "io-ls-udasrv1.iter.org",
+        "port": 3090,
+        "rturl": "http://io-ls-udaweb1.iter.org/dashboard/backend/sse",
+        "rtheaders": "REMOTE_USER:$USERNAME,User-Agent:python_client",
+        "rtauth": null,
+        "default": true
+    }
+}"""
 
 
 def get_canvas():
@@ -42,7 +45,7 @@ def get_canvas():
 
             # Setup the graphics objects for plotting.
             c = Canvas(rows=3, title=os.path.basename(__file__).replace('.py', ''))
-            p = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis(autoscale=True)]])
+            p = PlotXY(axes=[LinearAxis(is_date=True), [LinearAxis()]])
             p.add_signal(s)
             c.add_plot(p)
 

@@ -94,6 +94,10 @@ class PyQtGraphParser(BackendParserBase):
         self._layout_stacks = {}  # (row, col, stack_id) -> PlotItem
         self._slider_placeholders = {}  # (row, col) -> QGraphicsProxyWidget
         self._impl_plot_ranges_hash = dict()
+        self._row_offset = 0
+
+        # Line size default value for PyQtGraph backend
+        self._pm.default['line_size'] = 2
 
         if tight_layout:
             self.enable_tight_layout()
@@ -104,9 +108,18 @@ class PyQtGraphParser(BackendParserBase):
         key = (row, col)
         cell_gl = self._cell_gl.get(key)
         if cell_gl is None:
+            rspan = max(1, rowspan)
+            cspan = max(1, colspan)
+            layout_row = row + self._row_offset
+            end_row = layout_row + rspan - 1
+            end_col = col + cspan - 1
+
+            lay = self.figure.ci.layout
+            lay.setRowStretchFactor(end_row, 1)
+            lay.setColumnStretchFactor(end_col, 1)
+
             cell_gl = pg.GraphicsLayout()
-            # sublayout anclado a (row, col) con spans reales
-            self.figure.addItem(cell_gl, row=row, col=col, rowspan=rowspan, colspan=colspan)
+            self.figure.addItem(cell_gl, row=layout_row, col=col, rowspan=rowspan, colspan=colspan)
             self._cell_gl[key] = cell_gl
         return cell_gl
 
@@ -118,33 +131,46 @@ class PyQtGraphParser(BackendParserBase):
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
         legend = impl_plot.legend
+        if not legend:
+            return
+
         lines = [lines[0].item.name() for lines in legend.items]
         pos = lines.index(plot_lines.name())
-
+        legend_label = legend.items[pos][1]
         legend_text = legend.items[pos][1].text
-        if legend_text.endswith('*') and not signal.isDownsampled:
-            legend.items[pos][1].setText(legend_text[:-1])
-        elif not legend_text.endswith('*') and signal.isDownsampled:
-            legend.items[pos][1].setText(legend_text + '*')
 
-    @staticmethod
-    def _get_visible_data(xd, yd, lo, hi):
-        pass
+        if legend_text.endswith('*') and not signal.isDownsampled:
+            legend_label.setText(legend_text[:-1])
+        elif not legend_text.endswith('*') and signal.isDownsampled:
+            legend_label.setText(legend_text + '*')
 
     @staticmethod
     def _update_marker_by_point_count(marker_line: PlotDataItem, signal_x_data, signal_style: dict):
-        # TODO: implement
-        pass
+        if len(signal_x_data) == 1:
+            marker_line.setSymbol('x')
+            marker_line.setSymbolSize(5)
+        else:
+            symbol = signal_style.get('symbol')
+            marker_line.setSymbol(symbol or None)
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
         return [draw_fn(x=x_data, y=y_data, **style)]
 
-    def create_plot_lines_2D(self, draw_fn, x_data, y_data, style):
+    def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
         plot_lines = []
         for i in range(y_data.shape[1]):
-            curve = draw_fn(x=x_data, y=y_data[:, i], **style)
-            plot_lines.append(curve)
+            style_i = dict(**style)
+            line_color = PlotXY._color_cycle[i % len(PlotXY._color_cycle)]
+            pen = pg.mkPen(style_i['pen'])
+            pen.setColor(line_color)
+            style_i['pen'] = pen
+            style_i['symbolPen'] = line_color
+            style_i['symbolBrush'] = line_color
+
+            curve = draw_fn(x=x_data, y=y_data[:, i], **style_i)
+            curve.opts["name"] = f"{signal.label}[{i}]"
             self._update_marker_by_point_count(curve, x_data, style)
+            plot_lines.append(curve)
 
         return plot_lines
 
@@ -179,14 +205,11 @@ class PyQtGraphParser(BackendParserBase):
         end = self.transform_value(impl_plot, 0, now, inverse=True)
         vb.setXRange(begin, end, padding=0)
 
-    def set_line_data(self, line: PlotDataItem, x_data, y_data, style: dict):
+    def set_line_data(self, line: PlotDataItem, x_data, y_data):
         """
         Set the data for a PlotDataItem based on the attributes of SignalXY.
         """
-        line.setData(x=x_data, y=y_data, stepMode=style['stepMode'])
-
-        # Update the line style after setting the data
-        self.set_line_style(style, line)
+        line.setData(x=x_data, y=y_data)
 
     @staticmethod
     def set_line_style(style: dict, line: PlotDataItem):
@@ -206,9 +229,10 @@ class PyQtGraphParser(BackendParserBase):
         """
         style = {'name': signal.label}
 
-        color = self._pm.get_value(signal, 'color')
+        signal_color = self._pm.get_value(signal, 'color')
+        color = signal_color if signal_color is not None else signal.original_color
         line_size = self._pm.get_value(signal, 'line_size')
-        line_style = (self._pm.get_value(signal, 'line_style') or 'solid').lower()
+        line_style = self._pm.get_value(signal, 'line_style').lower()
         if line_size == 0 or line_style == 'none':
             pen = None
         else:
@@ -221,10 +245,12 @@ class PyQtGraphParser(BackendParserBase):
         style['pen'] = pen
 
         marker = self._pm.get_value(signal, 'marker')
-        if marker:
+        if marker != 'None':
             style['symbol'] = self._pm.get_value(signal, 'marker')
             style['symbolSize'] = self._pm.get_value(signal, 'marker_size')
-            style['symbolBrush'] = self._pm.get_value(signal, 'color')
+            marker_color = self._pm.get_value(signal, 'color')
+            style['symbolPen'] = marker_color
+            style['symbolBrush'] = marker_color
 
         step = self._pm.get_value(signal, 'step') or 'linear'
         step_mode = STEP_MAP_PG.get(step)
@@ -233,8 +259,8 @@ class PyQtGraphParser(BackendParserBase):
 
         return style
 
-    def markers_valid_lines(self, impl_plot: PlotItem):
-        return [item.name() for item in impl_plot.listDataItems()]
+    def get_line_label(self, line: PlotDataItem):
+        return line.name()
 
     def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
         return y_data[plot.slider.value()]
@@ -264,10 +290,10 @@ class PyQtGraphParser(BackendParserBase):
                 tp.remove()
             # TODO: Check size z_data
             if contour_filled:
-                pass
-                # draw_fn = mpl_axes.contourf
+                img = pg.ImageItem(z_data)
             else:
                 img = pg.ImageItem(z_data)
+                # img = pg.ImageItem()
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
                 plot_item.addItem(img)
@@ -278,7 +304,7 @@ class PyQtGraphParser(BackendParserBase):
                 bar.setImageItem(img)
 
                 for idx, v in enumerate(contour_levels):
-                    # Colores de las isocurvas
+                    # Isocurves colors
                     norm_values = (v - np.min(z_data)) / (np.max(z_data) - np.min(z_data))
                     color = color_map.map(norm_values, mode='float')
                     color_rgba = tuple(int(c * 255) for c in color)
@@ -290,69 +316,34 @@ class PyQtGraphParser(BackendParserBase):
                     plot_item.addItem(iso_curve)
                     curves.append(iso_curve)
 
-                # plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
-
-                # if legend_format == 'in_lines':
-                # if not contour_filled:
-                # plt.clabel(plot_lines, inline=1, fontsize=10)
-            # if equivalent_units:
-            # mpl_axes.set_aspect('equal', adjustable='box')
-            # self.figure.canvas.draw_idle()
         else:
             if contour_filled:
-                # draw_fn = mpl_axes.contourf
-                pass
-            else:
-                # draw_fn = mpl_axes.contour
                 img = pg.ImageItem(z_data)
-                img.setRect(QtCore.QRectF(np.min(x_data)[0], np.min(y_data)[0], np.ptp(x_data), np.ptp(y_data)))
-                plot_item.addItem(img)
+            else:
+                img = pg.ImageItem(z_data)
+                # img = pg.ImageItem()
+
+            # Set rectangle view for the image. Values correspond to: x, y, w, h
+            img.setRect(QtCore.QRectF(np.min(x_data).item(), np.min(y_data).item(), np.ptp(x_data), np.ptp(y_data)))
+            plot_item.addItem(img)
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                # plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
-
-                colormap_obj = pg.colormap.get('viridis')
+                colormap_obj = pg.colormap.get(color_map)
                 bar = pg.ColorBarItem(values=(np.min(z_data)[0], np.max(z_data)[0]),
                                       colorMap=colormap_obj,
                                       label='Z value',
                                       interactive=False)
                 bar.setImageItem(img)
-                levels = np.linspace(np.min(z_data)[0], np.max(z_data)[0], contour_levels)
 
-                for i, v in enumerate(levels):
-                    """
-                    # Colores de las isocurvas
-                    norm_values = (v - np.min(z_data)) / (np.max(z_data) - np.min(z_data))
-                    color = colormapp.map(norm_values, mode='float')
-                    color_rgba = tuple(int(c * 255) for c in color) 
-                    pen_color = pg.mkColor(color_rgba)
-                    pen = pg.mkPen(color=pen_color, width=2)
-                    """
-
-                    iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
-                    # TODO: pendiente add antialiasing para isocurvas
-                    # Scaled data
-
-                    scale_x = np.ptp(x_data) / z_data.shape[1]
-                    scale_y = np.ptp(y_data) / z_data.shape[0]
-                    iso_curve.setTransform(
-                        pg.Qt.QtGui.QTransform().scale(scale_x, scale_y).translate(np.min(x_data)[0] / scale_x,
-                                                                                   np.min(y_data)[0] / scale_y))
-
-                    iso_curve.setParentItem(img)
-                    iso_curve.setZValue(10)
-
-                    plot_item.addItem(iso_curve)
-                    curves.append(iso_curve)
-
-                # if legend_format == 'color_bar':
-                # color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
-                # color_bar.set_label(z_data.unit, size=self.legend_size)
-                # else:
-                # if not contour_filled:
-                # plt.clabel(plot_lines, inline=1, fontsize=10)
-            # if equivalent_units:
-            # mpl_axes.set_aspect('equal', adjustable='box')
+                # Isocurve creation
+                # levels = np.linspace(np.min(z_data)[0], np.max(z_data)[0], contour_levels)
+                # for i, v in enumerate(levels):
+                #     # TODO: pendant add antialiasing for isocurves
+                #     iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
+                #     iso_curve.setParentItem(img)
+                #     iso_curve.setZValue(10)
+                #     plot_item.addItem(iso_curve)
+                #     curves.append(iso_curve)
 
         return curves
 
@@ -381,8 +372,13 @@ class PyQtGraphParser(BackendParserBase):
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
         suptitle = pg.LabelItem(justify='center')
-        self.figure.addItem(suptitle, row=0, col=0, colspan=3)
-        suptitle.setText("Título general (suptitle)", size='16pt', bold=True)
+        cols = self._grid_shape[1] if hasattr(self, "_grid_shape") else 1
+        self.figure.addItem(suptitle, row=0, col=0, colspan=cols)
+
+        if font_size:
+            suptitle.setText(title, size=f'{font_size}pt', color=font_color)
+        else:
+            suptitle.setText(title, color=font_color)
 
     def set_impl_plot_limits(self, impl_plot: PlotItem, ax_idx: int, limits: tuple) -> bool:
         if not isinstance(impl_plot, PlotItem):
@@ -432,7 +428,7 @@ class PyQtGraphParser(BackendParserBase):
         v_layout.addWidget(slider)
         v_layout.addLayout(h_layout)
         proxy.setWidget(container)
-        last_row_id = max(visible_stack_ids) + 1
+        last_row_id = max(visible_stack_ids) + 2
         cell_gl.addItem(proxy, row=last_row_id, col=0)
         self._slider_placeholders[rc_key] = proxy
 
@@ -474,35 +470,54 @@ class PyQtGraphParser(BackendParserBase):
         axis_items = {}
         plot = None
         l_key = (row, col)
-        for stack_id, key in enumerate(sorted(i_plot.signals.keys())):
+        stack_map = self._layout_stacks.setdefault(l_key, {})
+
+        full_mode_all_stack = self._pm.get_value(self.canvas, "full_mode_all_stack")
+        focus_stack_key = self._focus_plot_stack_key
+
+        for stack_id, key in enumerate(i_plot.signals):
+            if focus_stack_key is not None and not full_mode_all_stack and key != focus_stack_key:
+                continue
 
             if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
                 axis_items["bottom"] = NanosecondDateFormatter(orientation='bottom')
+            else:
+                axis_items["bottom"] = NanosecondDateFormatter(is_date=False, orientation='bottom')
+
+            axis_items["left"] = NanosecondDateFormatter(is_date=False, orientation='left')
 
             signals = i_plot.signals.get(key) or list()
-            visible_stack_ids.append(stack_id)
 
-            if l_key not in self._layout_stacks:
-                plot = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
-                cell_gl.addItem(plot, row=0, col=0)
-                self._layout_stacks.setdefault(l_key, {})[stack_id] = plot
-            elif stack_id not in self._layout_stacks[l_key]:
+            if focus_stack_key is not None and not full_mode_all_stack:
+                row_id = 0
+            else:
+                row_id = stack_id
+
+            visible_stack_ids.append(row_id)
+
+            if row_id not in stack_map:
                 pi = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
-                cell_gl.addItem(pi, row=stack_id, col=0)
-                pi.getAxis('bottom').setStyle(showValues=False)
-                self._layout_stacks[l_key][stack_id] = pi
+                # Add space for expo
+                if stack_id == 0:
+                    cell_gl.addItem(axis_items["left"].common_label, row=0, col=0)
+
+                # Add Plot Item
+                cell_gl.addItem(pi, row=row_id + 1, col=0)
+                if row_id > 0:
+                    pi.getAxis('bottom').setStyle(showValues=False)
+                stack_map[row_id] = pi
 
             # Slider creation only if it doesn't exist
             if isinstance(i_plot, PlotXYWithSlider):
                 cell_gl = self.process_ipl_plot_xy_slider(i_plot, row, col, visible_stack_ids, cell_gl)
 
-            plot = self._layout_stacks[l_key][stack_id]
+            plot = stack_map[row_id]
             plot.enableAutoRange(x=False, y=False)
             plot.hideButtons()
             self._plot_impl_plot_lut[id(i_plot)].append(plot)
 
             # Keep references to iplotlib instances for ease of access in callbacks.
-            self._impl_plot_cache_table.register(plot, self.canvas, i_plot, stack_id, signals)
+            self._impl_plot_cache_table.register(plot, self.canvas, i_plot, key, signals)
 
             self.set_plot_title(i_plot, plot, stack_id)
 
@@ -533,19 +548,20 @@ class PyQtGraphParser(BackendParserBase):
                 self.process_ipl_signal(signal)
 
             # Legend processing for downsampled data when drawing
-            if plot.legend is not None:
-                fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
-                ix_legend = 0
+            fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
+            ix_legend = 0
+            if plot.legend and plot.legend.items:
                 for signal in signals:
-                    label_item = plot.legend.items[ix_legend][1]
-                    label_item.setAttr(attr='size', value=f'{fs}pt')
-                    legend_label = label_item.text
-                    if signal.isDownsampled:
-                        legend_label += '*'
-                    label_item.setText(legend_label)
-                    size = label_item.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None)
-                    label_item.resize(size)
-                    ix_legend += 1
+                    for line in self._signal_impl_shape_lut.get(id(signal)):
+                        label_item = plot.legend.items[ix_legend][1]
+                        label_item.setAttr(attr='size', value=f'{fs}pt')
+                        legend_label = line.name() if not isinstance(line, Collection) else line[0].name()
+                        if signal.isDownsampled:
+                            legend_label += '*'
+                        label_item.setText(legend_label)
+                        size = label_item.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None)
+                        label_item.resize(size)
+                        ix_legend += 1
                 plot.legend.updateSize()
                 self._auto_adjust_legend_layout(plot, i_plot, signals)
 
@@ -556,19 +572,28 @@ class PyQtGraphParser(BackendParserBase):
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
         if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
-            cell_gl.addItem(axis_items["bottom"].common_label, row=len(i_plot.signals), col=0)
+            cell_gl.addItem(axis_items["bottom"].common_label, row=len(i_plot.signals) + 1, col=0)
 
-        # MODIFIED
-        self.align_y_axis(row, col)
+        self.align_y_axis(col)
 
     def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
         if not visible_stacks:
             return
+
+        max_stack = max(visible_stacks)
+        stack_dict = self._layout_stacks.get((row, col), {})
+
         for s_id in set(visible_stacks):
-            if s_id == max(visible_stacks):
-                self._layout_stacks[(row, col)][s_id].getAxis('bottom').setStyle(showValues=True)
-            else:
-                self._layout_stacks[(row, col)][s_id].getAxis('bottom').setStyle(showValues=False)
+            plot_item = stack_dict.get(s_id)
+            if plot_item is None:
+                continue
+
+            axis = plot_item.getAxis('bottom')
+            show = (s_id == max_stack)
+
+            axis.setStyle(showValues=show)
+            if axis.label is not None:
+                axis.label.setVisible(show)
 
     def set_plot_title(self, i_plot: Plot, plot: PlotItem, stack_id: int):
         if i_plot.plot_title is None or stack_id != 0:
@@ -684,10 +709,9 @@ class PyQtGraphParser(BackendParserBase):
         current_plot = view_box.parentItem()  # type: PlotItem
         super()._y_axis_update_callback(current_plot)
 
-        # MODIFIED
         for (r, c), stacks in self._layout_stacks.items():
             if current_plot in stacks.values():
-                self.align_y_axis(r, c)
+                self.align_y_axis(c)
                 break
 
     def _x_axis_update_callback(self, view_box: ViewBox):
@@ -704,15 +728,15 @@ class PyQtGraphParser(BackendParserBase):
             plot_item = axis_item.parentItem()
             plot_item.setLogMode(x=False, y=True)
 
-    def process_ipl_axis_params(self, fc, fs, axis: Axis, axis_item: AxisItem):
-        tick_props = dict(maxTickLevel=0)  # TODO: add color to tick values
+    def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, axis_item: AxisItem):
+        tick_props = dict(maxTickLevel=0)
         label_props = dict(color=fc)
 
         # Set ticks on the top and right axis
         if self._pm.get_value(self.canvas, 'ticks_position'):
-            tick_props['maxTickLevel'] = 2
+            tick_props['tickLength'] = -5
         else:
-            tick_props['maxTickLevel'] = 0
+            tick_props['tickLength'] = 5
 
         # Set color and font
         if fs is not None and fs > 0:
@@ -726,17 +750,20 @@ class PyQtGraphParser(BackendParserBase):
 
         # Font size for UTC label
         if isinstance(axis_item, NanosecondDateFormatter):
-            axis_item.common_label.setText(axis_item.offset_str, size=f'{fs}pt')
+            axis_item.common_label.setText(axis_item.offset_str, size=f'{fs}pt', color=fc)
 
         axis_item.setStyle(**tick_props)
+
+        # Set color to tick values
+        axis_item.setTextPen(pg.mkPen(fc))
+
+        # Set number of ticks and labels
+        if isinstance(axis_item, NanosecondDateFormatter):
+            axis_item.set_ticks_number(tick_number)
 
     def process_ipl_axis_formatter(self, impl_plot: PlotItem, impl_axis: NanosecondDateFormatter, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         impl_axis.set_offset(ci.offsets[ax_idx])
-
-    def process_ipl_axis_ticks(self, tick_number, axis_item: AxisItem):
-        # axis_item.setStyle()
-        return
 
     def process_ipl_signal_impl_plot(self, signal: Signal):
         plot = self._signal_impl_plot_lut.get(signal.uid)  # type: PlotItem
@@ -937,21 +964,58 @@ class PyQtGraphParser(BackendParserBase):
             """
 
     def enable_tight_layout(self):
-        pass
+        glw = self.figure
+        glw.ci.layout.setContentsMargins(6, 6, 6, 6)
+        glw.ci.layout.setSpacing(4)
 
     def disable_tight_layout(self):
-        pass
+        glw = self.figure
+        glw.ci.layout.setContentsMargins(0, 0, 0, 0)
+        glw.ci.layout.setSpacing(0)
+
+    def set_canvas_gridspec(self, rows: int, cols: int):
+        prev_shape = getattr(self, "_grid_shape", (0, 0))
+        prev_offset = getattr(self, "_row_offset", 0)
+        prev_rows, prev_cols = prev_shape
+
+        self._grid_shape = (rows, cols)
+        lay = self.figure.ci.layout
+
+        has_title = self._pm.get_value(self.canvas, 'title') is not None
+        new_offset = 1 if has_title else 0
+        self._row_offset = new_offset
+
+        prev_total_rows = prev_rows + prev_offset
+        new_total_rows = rows + new_offset
+
+        reset_rows = max(lay.rowCount(), prev_total_rows, new_total_rows)
+        reset_cols = max(lay.columnCount(), prev_cols, cols)
+
+        for r in range(reset_rows):
+            lay.setRowStretchFactor(r, 0)
+        for c in range(reset_cols):
+            lay.setColumnStretchFactor(c, 0)
+
+        if has_title:
+            lay.setRowStretchFactor(0, 0)
+
+        for r in range(rows):
+            lay.setRowStretchFactor(r + new_offset, 1)
+        for c in range(cols):
+            lay.setColumnStretchFactor(c, 1)
 
     def set_focus_plot(self, impl_plot: PlotItem):
         un_focus = self._focus_plot is not None or impl_plot is None
         all_stack = self._pm.get_value(self.canvas, "full_mode_all_stack")
         if un_focus:
             self._focus_plot = None
+            self._focus_plot_stack_key = None
             row, col, stack_id = None, None, None
         else:
             ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
             plot = ci.plot()
             self._focus_plot = plot
+            self._focus_plot_stack_key = ci.stack_key
             row = plot.row - 1
             col = plot.col - 1
             stack_id = ci.stack_key
@@ -1073,47 +1137,57 @@ class PyQtGraphParser(BackendParserBase):
             vb = plot.getViewBox()
             vb.setYRange(limits[0], limits[1], padding=0)
 
-    # MODIFIED
-    def align_y_axis(self, row: int, col: int) -> None:
-        stacks = self._layout_stacks.get((row, col))
-        if not stacks:
+    def align_y_axis(self, col: int) -> None:
+        """
+        Synchronizes the Y-axis width across all plots in a column.
+        """
+        # Collect all plots from the specified column
+        column_plots = [
+            p for (r, c), stack_dict in self._layout_stacks.items()
+            if c == col
+            for p in stack_dict.values()
+            if p
+        ]
+
+        if not column_plots:
             return
 
-        for p in stacks.values():
-            if p:
-                p.getAxis('left').setWidth(None)
+        # Reset widths to allow PyQtGraph to recalculate
+        for p in column_plots:
+            p.getAxis('left').setWidth(None)
 
+        # Calculate maximum required width based on current tick labels
         max_w = 0.0
-        for p in stacks.values():
-            if not p:
-                continue
+        for p in column_plots:
             ax = p.getAxis('left')
             vb = p.getViewBox()
             y0, y1 = vb.viewRange()[1]
-            if y0 == 0 and y1 == 1:
-                continue
-            tv = ax.tickValues(y0, y1, vb.height())
+
+            tv = ax.tickValues(y0, y1, vb.height()) if vb.height() != 0.0 else None
             if not tv:
+                max_w = max(max_w, ax.width())
                 continue
+
             spacing, values = tv[0]
             labels = ax.tickStrings(values, scale=1.0, spacing=spacing)
+
+            # Measure tick label text width
             fm = QFontMetricsF(ax.style.get('tickFont') or QtWidgets.QApplication.font())
             text_w = max((fm.horizontalAdvance(str(s)) for s in labels), default=0.0)
+
+            # Add axis label width if visible
             label_w = ax.label.boundingRect().height() if ax.label.isVisible() else 0.0
-            if text_w + label_w > max_w:
-                max_w = text_w + label_w
+
+            # Update maximum (including margin for ticks and padding)
+            max_w = max(max_w, text_w + label_w + 15)
 
         if max_w <= 0:
             return
 
+        # Apply maximum width to all axes in column
         w = int(max_w)
-        for p in stacks.values():
-            if p:
-                p.getAxis('left').setWidth(w)
-
-        gl = getattr(self, '_graphics_layout', None)
-        if gl:
-            gl.updateGeometry()
+        for p in column_plots:
+            p.getAxis('left').setWidth(w)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to

@@ -5,7 +5,7 @@ from pyqtgraph import PlotItem, InfiniteLine, TextItem, PlotDataItem
 from pyqtgraph.Qt import QtGui
 from iplotlib.core.impl_base import ImplementationPlotCacheTable
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
-
+from PySide6.QtCore import QPointF
 
 class pyQtCrosshair:
     def __init__(self,
@@ -63,16 +63,18 @@ class pyQtCrosshair:
                 vb.addItem(line, ignoreBounds=True)
                 self.h_lines.append(line)
             if x_label:
-                arrow = TextItem(anchor=(0.5, 1.0), color=text_color, border=color, fill=color)
+                axis_b = ax.getAxis("bottom")
+                arrow = TextItem(anchor=(0.5, 0.0), color=text_color, border=color, fill=color)
                 arrow.textItem.setFont(font)
                 arrow.setZValue(2000)
-                vb.addItem(arrow, ignoreBounds=True)
+                arrow.setParentItem(axis_b)
                 self.x_arrows.append(arrow)
             if y_label:
-                arrow = TextItem(anchor=(0.0, 0.5), color=text_color, border=color, fill=color)
+                axis_l = ax.getAxis("left")
+                arrow = TextItem(anchor=(1.0, 0.5), color=text_color, border=color, fill=color)
                 arrow.textItem.setFont(font)
                 arrow.setZValue(2000)
-                vb.addItem(arrow, ignoreBounds=True)
+                arrow.setParentItem(axis_l)
                 self.y_arrows.append(arrow)
             if val_label and self._cache_table:
                 self._create_value_annotations(ax, vb, font)
@@ -104,7 +106,8 @@ class pyQtCrosshair:
                         self.value_annotations.append(annotation)
 
     def on_move(self, pos):
-        if not self._is_active: return
+        if not self._is_active:
+            return
 
         active_plot = None
         mouse_point = None
@@ -130,7 +133,8 @@ class pyQtCrosshair:
         for line in self.h_lines: line.setPos(y); line.setVisible(True)
 
         for i, plot in enumerate(self.plots):
-            if not plot.scene(): continue
+            if not plot.scene():
+                continue
             vb = plot.getViewBox()
             [[xmin, xmax], [ymin, ymax]] = vb.viewRange()
 
@@ -155,28 +159,37 @@ class pyQtCrosshair:
                     ts = axis.tickStrings([x], 1.0, 1) if isinstance(axis, NanosecondDateFormatter) else None
                     new_text = ts[0] if ts else f"{x:.6g}"
                     if current_text != new_text:
-                        arrow.setText(new_text)
+                        self.x_arrows[i].setText(new_text)
                         self._text_cache[text_key] = new_text
-                    arrow.setPos(x, ymin)
-                    arrow.setVisible(True)
+
+                    vr = vb.sceneBoundingRect()
+                    x_scene = vb.mapViewToScene(QPointF(x, ymin)).x()
+                    y_scene = vr.bottom()
+                    self.x_arrows[i].setPos(axis.mapFromScene(QPointF(x_scene, y_scene)))
+                    self.x_arrows[i].setVisible(True)
 
             if self.y_label and i < len(self.y_arrows):
-                arrow = self.y_arrows[i]
                 if ymin < y < ymax:
+                    axis_l = plot.getAxis("left")
                     text_key = f"y{i}"
                     current_text = self._text_cache.get(text_key)
                     new_text = f"{y:.6g}"
                     if current_text != new_text:
-                        arrow.setText(new_text)
+                        self.y_arrows[i].setText(new_text)
                         self._text_cache[text_key] = new_text
-                    arrow.setPos(xmin, y)
-                    arrow.setVisible(True)
+
+                    vr = vb.sceneBoundingRect()
+                    y_scene = vb.mapViewToScene(QPointF(xmin, y)).y()
+                    x_scene = vr.left()
+                    self.y_arrows[i].setPos(axis_l.mapFromScene(QPointF(x_scene, y_scene)))
+                    self.y_arrows[i].setVisible(True)
                 else:
-                    arrow.setVisible(False)
+                    self.y_arrows[i].setVisible(False)
 
         if self.value_label:
             for annotation in self.value_annotations:
-                if not annotation.scene(): continue
+                if not annotation.scene():
+                    continue
                 line = annotation.line
                 x_data, y_data = line.getData()
                 if x_data is None or len(x_data) == 0:
@@ -189,9 +202,16 @@ class pyQtCrosshair:
                 idx = min(idx, len(x_data) - 1)
 
                 vb = annotation.viewbox
-                [[xmin, xmax], _] = vb.viewRange()
-                if abs(x - x_data[idx]) < (xmax - xmin) * self.val_tolerance:
-                    annotation.setPos(x_data[idx], y_data[idx])
+                [[xmin, xmax], [ymin, ymax]] = vb.viewRange()
+                dx = xmax - xmin
+                if abs(x - x_data[idx]) < dx * self.val_tolerance:
+                    xp = min(max(x_data[idx], xmin), xmax)
+                    yp = min(max(y_data[idx], ymin), ymax)
+                    ax = 0.0 if (xp - xmin) < (xmax - xp) else 1.0
+                    if getattr(annotation, "_last_anchor", None) != (ax, 0.5):
+                        annotation.setAnchor((ax, 0.5))
+                        annotation._last_anchor = (ax, 0.5)
+                    annotation.setPos(xp, yp)
                     annotation.setText(f"{y_data[idx]:.6g}")
                     annotation.setVisible(True)
                 else:

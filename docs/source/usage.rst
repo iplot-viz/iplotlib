@@ -1,7 +1,7 @@
 Usage
 =====
 
-The example iplotlib scripts are under `iplotlib/examples/*.py`. You can run the examples with
+The example iplotlib scripts are under `iplotlib/standalone/examples/*.py`. You can run the examples with
 
 .. code-block:: bash
 

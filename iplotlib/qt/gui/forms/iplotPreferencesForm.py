@@ -202,7 +202,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_marker_widget():
-        return IplotPreferencesForm.create_combo_box({None: "None", "o": "o", "x": "x"})
+        return IplotPreferencesForm.create_combo_box({"None": "None", "o": "o", "x": "x"})
 
     @staticmethod
     def default_linepath_widget():

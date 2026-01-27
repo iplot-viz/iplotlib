@@ -1,6 +1,9 @@
 import pyqtgraph as pg
+import pyqtgraph.functions as fn
 from datetime import datetime, timedelta
 import pandas
+from math import ceil
+import numpy as np
 
 import iplotLogging.setupLogger as Sl
 
@@ -23,7 +26,7 @@ class NanosecondDateFormatter(pg.AxisItem):
     """Formats for each date segment"""
     formats = ["{:4d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:03d}", "{:03d}", "{:03d}"]
 
-    def __init__(self, postfix_end=True, postfix_start=False, roundh=False, *args, **kwargs):
+    def __init__(self, postfix_end=True, postfix_start=False, roundh=False, is_date=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.postfix_end = postfix_end
         self.postfix_start = postfix_start
@@ -31,14 +34,24 @@ class NanosecondDateFormatter(pg.AxisItem):
         self.offset_ns = 0
         self.cut_start = 0
         self._round = roundh
-        self.common_label = pg.LabelItem(text='', justify='right')
         self.last_values = []
         self.n_ticks = 7
         self.last_range = 0
         self.offset = 0
+        self.is_date = is_date
+        if kwargs['orientation'] == 'bottom':
+            self.common_label = pg.LabelItem(text='', justify='right')
+        else:
+            self.common_label = pg.LabelItem(text='', justify='left')
+
+        self.labelUnit = ''
+        self.enableAutoSIPrefix(False)
 
     def __call__(self, x, pos=None):
-        return self.date_fmt(int(x), self.cut_start + 1, self.cut_start + 4)
+        if self.is_date:
+            return self.date_fmt(int(x), self.cut_start + 1, self.cut_start + 4)
+        else:
+            return f"{x:g}"
 
     def set_offset(self, offset):
         self.offset = offset
@@ -109,24 +122,28 @@ class NanosecondDateFormatter(pg.AxisItem):
 
         return 0
 
+    def set_ticks_number(self, tick_number: int):
+        self.n_ticks = tick_number
+
     def tickValues(self, minVal, maxVal, size):
         # Detect range change
-        minVal = minVal
-        maxVal = maxVal
         last_range = maxVal - minVal
 
         # If it has changed, we need to recalculate ticks
         if len(self.last_values) == 0 or last_range != self.last_range:
             # First time we generate evenly spaced values
-            spacing = last_range / self.n_ticks
-            values = [minVal + spacing / 2 + i * spacing for i in range(self.n_ticks)]
+            if self.is_date:
+                spacing = last_range / self.n_ticks
+                values = [minVal + spacing / 2 + i * spacing for i in range(self.n_ticks)]
+            else:
+                spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]  # Major ticks level
+                start = (ceil((minVal - offset) / spacing) * spacing) + offset
+                values = (np.arange(self.n_ticks) * spacing + start).tolist()
             self.last_range = last_range
         else:
             # Adjust previous ticks to new range
-            values = []
-            for v in self.last_values:
-                if minVal <= v <= maxVal:
-                    values.append(v)
+            values = [v for v in self.last_values if minVal <= v <= maxVal]
+
             # Add new ticks if needed
             while len(values) < self.n_ticks:
                 # Add to the end or to the beginning
@@ -141,23 +158,50 @@ class NanosecondDateFormatter(pg.AxisItem):
         # Save current state
         self.last_values = values
 
-        self.cut_start = self.lcp(self.get_real_value(int(values[0])), self.get_real_value(int(values[-1])))
+        if self.is_date:
+            self.cut_start = self.lcp(self.get_real_value(int(values[0])), self.get_real_value(int(values[-1])))
 
-        self.offset_str = 'UTC:' + self.date_fmt(self.get_real_value(values[0]), self.YEAR, self.cut_start,
-                                                 postfix_end=self.postfix_end, postfix_start=self.postfix_start)
+            self.offset_str = 'UTC:' + self.date_fmt(self.get_real_value(values[0]), self.YEAR, self.cut_start,
+                                                     postfix_end=self.postfix_end, postfix_start=self.postfix_start)
 
-        spacing = (maxVal - minVal) / max(len(values) - 1, 1)
-        print(min(values), max(values), max(values) - min(values), spacing)
-        return [(spacing, values)]
+            spacing = (maxVal - minVal) / max(len(values) - 1, 1)
+        else:
+            if self.logMode:
+                _range = 10**np.array(self.range)
+            else:
+                _range = self.range
+            (scale, prefix) = fn.siScale(max(abs(_range[0] * self.scale), abs(_range[1] * self.scale)))
+            self.set_scale(scale, prefix)
+
+            spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
+
+        return [(spacing, values)]  # major ticks
 
     def tickStrings(self, values, scale, spacing):
-        values = list(
-            map(lambda v: self.date_fmt(self.get_real_value(int(v)), self.cut_start + 1, self.cut_start + 5), values))
-        self.common_label.setText(self.offset_str)
+        if self.is_date:
+            values = list(
+                map(lambda v: self.date_fmt(self.get_real_value(int(v)), self.cut_start + 1, self.cut_start + 5),
+                    values))
+            self.common_label.setText(self.offset_str)
+        else:
+            if self.labelUnit in ['', 'm', 'k']:  # wait until 1e6 before scaling
+                values = list(f"{v:g}" for v in values)
+                self.common_label.setText("")
+            else:
+                values = super().tickStrings(values, scale, spacing)
+                # Check str exponent to avoid set the same text multiple times
+                current_text = self.common_label.text
+                if current_text != self.offset_str:
+                    self.common_label.setText(self.offset_str)
+
         return values
 
-    def get_real_value(self, value):
+    def set_scale(self, scale, prefix):
+        self.offset_str = f"{1/scale:.0e}"
+        self.autoSIPrefixScale = scale
+        self.labelUnit = prefix
 
+    def get_real_value(self, value):
         if self.offset == 100_000:
             return value * self.offset
         else:

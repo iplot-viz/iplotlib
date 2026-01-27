@@ -83,8 +83,11 @@ class BeanItemModel(QStandardItemModel):
                 return True
             else:
                 if hasattr(self._pyObject, property_name):
-                    type_func = type(getattr(self._pyObject, property_name))
-                    value = ConversionHelper.asType(value, type_func)
+                    if property_name in ["canvas_begin", "canvas_end"]:
+                        value = ConversionHelper.asType(value, float)
+                    else:
+                        type_func = type(getattr(self._pyObject, property_name))
+                        value = ConversionHelper.asType(value, type_func)
 
                 setattr(self._pyObject, property_name, value)
                 self.dataChanged.emit(index, index)

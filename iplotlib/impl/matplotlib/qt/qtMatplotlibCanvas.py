@@ -10,7 +10,7 @@
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
-from collections import defaultdict
+
 from collections.abc import Collection
 
 from PySide6.QtCore import QMargins, Qt, Slot, Signal
@@ -28,7 +28,6 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
-from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
@@ -44,11 +43,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
-        self._marker_window = IplotQtMarker()
-        self._marker_window.dropMarker.connect(self.draw_marker_label)
-        self._marker_window.deleteMarker.connect(self.delete_marker_label)
-
-        self.info_shared_x_dialog = False
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
@@ -93,57 +87,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             return
 
         self.render()
-
-        # Check if plots share time axis
-        ranges = []
-        plot_stack = []
-
-        if not canvas:
-            return
-        if not self._parser._pm.get_value(canvas, 'shared_x_axis'):
-            self.info_shared_x_dialog = False
-        else:
-            if self.info_shared_x_dialog:
-                return
-            self.info_shared_x_dialog = True
-            relative = False
-            for row_idx, col in enumerate(canvas.plots, start=1):
-                for col_idx, plot in enumerate(col, start=1):
-                    if plot:
-                        axis = plot.axes[0]
-                        if not axis.is_date and not isinstance(plot, PlotXYWithSlider):
-                            relative = True
-                        ranges.append((axis.original_begin, axis.original_end))
-                        plot_stack.append(f"{col_idx}.{row_idx}")
-
-            dict_ranges = defaultdict(list)
-            # Need to differentiate if it is absolute or relative
-            if relative:
-                max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff')
-            else:
-                max_diff_ns = self._parser._pm.get_value(canvas, 'max_diff') * 1e9
-            for idx, uniq_range in enumerate(ranges):
-                if uniq_range == ranges[0]:
-                    dict_ranges[uniq_range].append(plot_stack[idx])
-                # If the difference of the ranges is less than 1 second, we consider them equal
-                elif abs(uniq_range[0] - ranges[0][0]) <= max_diff_ns and abs(
-                        uniq_range[1] - ranges[0][1]) <= max_diff_ns:
-                    dict_ranges[ranges[0]].append(plot_stack[idx])
-                else:
-                    dict_ranges[uniq_range].append(plot_stack[idx])
-
-            # If there is more than one element in the dictionary it means that there is more than one time
-            # range
-            if len(dict_ranges) > 1:
-                box = QMessageBox()
-                box.setIcon(QMessageBox.Icon.Information)
-                message = "There are plots with different time range:\n"
-                for i, stacks in enumerate(dict_ranges.values(), start=1):
-                    plots_str = ", ".join(stacks)
-                    message += f"Time range {i}: Plots {plots_str}\n"
-
-                box.setText(message)
-                box.exec_()
+        super().set_canvas(canvas)
 
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: MPLAxes
@@ -294,10 +238,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._parser.redo()
         self.render()
 
-    def unfocus_plot(self):
-        self._parser.set_focus_plot(None)
-        self.info_shared_x_dialog = False
-
     @Slot()
     def render(self):
         self._mpl_renderer.draw()
@@ -386,10 +326,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # Markers can only be created if the property 'marker' is not None
                 if mpl_axes.get_lines()[0].get_marker() != 'None':
                     # Check if the marker coordinates are correct and if the marker has not already been created
-                    new_marker, marker_signal = self._parser.add_marker_scaled(mpl_axes, plot, x_value, y_value)
+                    new_marker, marker_signal, label_line = self._parser.add_marker_scaled(mpl_axes, plot, x_value, y_value)
                     if new_marker is not None:
                         if new_marker not in self._marker_window.get_markers():
-                            self._marker_window.add_marker(marker_signal, new_marker)
+                            self._marker_window.add_marker(marker_signal, new_marker, label_line)
                             if not self._marker_window.isVisible():
                                 self._marker_window.show()
                             elif self._marker_window.isMinimized():

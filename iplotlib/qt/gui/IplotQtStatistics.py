@@ -129,93 +129,104 @@ class IplotQtStatistics(QWidget):
         """
         self.table.setRowCount(0)
         self._current_info_stats = info_stats
+        idx = 0
 
-        for idx, (signal, impl_plot) in enumerate(info_stats):
-            # Insert new row
-            self.table.insertRow(idx)
-
-            # The rows correspond to the signals and their corresponding stacks
+        for signal, impl_plot in info_stats:
+            lines = signal.lines
             stack = signal.get_stack()
-            signal_name = f"{signal.label}, {stack}"
-            self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
-
-            # Add Statistics to the table
             has_envelope = signal.data_store[2].size > 0 and signal.data_store[3].size > 0
 
-            if has_envelope > 0:
-                line = signal.lines[0][0]
+            for line in lines:
+                # Insert new row
+                self.table.insertRow(idx)
 
-                # Differentiate methods
-                if isinstance(impl_plot, PlotItem):
-                    x_data = line.getData()[0]
-                    lo, hi = impl_plot.getViewBox().viewRange()[0]
-                    y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
+                # Add Statistics to the table
+                if has_envelope > 0:
+                    line = line[0]
+
+                    # Differentiate methods
+                    if isinstance(impl_plot, PlotItem):
+                        x_data = line.getData()[0]
+                        lo, hi = impl_plot.getViewBox().viewRange()[0]
+                        y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
+                        signal_name = f"{line.name()}, {stack}"
+                    else:
+                        x_data = line.get_xdata()
+                        lo, hi = impl_plot.get_xlim()
+                        y_lo, y_hi = impl_plot.get_ylim()
+                        signal_name = f"{line.get_label()}, {stack}"
+
+                    # The rows correspond to the signals and their corresponding stacks
+                    self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
+
+                    y_min = np.array(signal.data_store[1])
+                    y_max = np.array(signal.data_store[2])
+                    y_mean = np.array(signal.data_store[3])
+
+                    # Filter values
+                    mask = ((x_data > lo) & (x_data < hi) &
+                            (y_min > y_lo) & (y_min < y_hi) &
+                            (y_mean > y_lo) & (y_mean < y_hi) &
+                            (y_max > y_lo) & (y_max < y_hi))
+
+                    y_min_displayed = y_min[mask]
+                    y_max_displayed = y_max[mask]
+                    y_mean_displayed = y_mean[mask]
+                    samples = y_mean_displayed.size
+
+                    if samples > 0:
+                        # NumPy scalars → float
+                        min_val = np.min(y_min_displayed).item()
+                        avg_val = np.mean(y_mean_displayed).item()
+                        max_val = np.max(y_max_displayed).item()
+                        first = (y_min_displayed[0].item(), y_mean_displayed[0].item(), y_max_displayed[0].item())
+                        last = (y_min_displayed[-1].item(), y_mean_displayed[-1].item(), y_max_displayed[-1].item())
+                        self._set_stats(idx, min_val, avg_val, max_val, first, last, samples)
+                    else:
+                        # Indicate that there is no data
+                        self.table.setItem(idx, 6, self._create_item(samples))
+
                 else:
-                    x_data = line.get_xdata()
-                    lo, hi = impl_plot.get_xlim()
-                    y_lo, y_hi = impl_plot.get_ylim()
+                    # Base case
+                    # Differentiate methods
+                    if isinstance(impl_plot, PlotItem):
+                        x_data = line.getData()[0] if line.getData()[0] is not None else []
+                        y_data = line.getData()[1] if line.getData()[1] is not None else []
+                        lo, hi = impl_plot.getViewBox().viewRange()[0]
+                        y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
+                        signal_name = f"{line.name()}, {stack}"
+                    else:
+                        x_data = line.get_xdata()
+                        y_data = line.get_ydata()
+                        lo, hi = impl_plot.get_xlim()
+                        y_lo, y_hi = impl_plot.get_ylim()
+                        signal_name = f"{line.get_label()}, {stack}"
 
-                y_min = np.array(signal.data_store[1])
-                y_max = np.array(signal.data_store[2])
-                y_mean = np.array(signal.data_store[3])
+                    # The rows correspond to the signals and their corresponding stacks
+                    self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
-                # Filter values
-                mask = ((x_data > lo) & (x_data < hi) &
-                        (y_min > y_lo) & (y_min < y_hi) &
-                        (y_mean > y_lo) & (y_mean < y_hi) &
-                        (y_max > y_lo) & (y_max < y_hi))
+                    # Filter values
+                    if (len(x_data), len(y_data)) != (0, 0):
+                        mask = ((x_data > lo) & (x_data < hi) &
+                                (y_data > y_lo) & (y_data < y_hi))
+                        y_displayed = y_data[mask]
+                        samples = y_displayed.size
+                    else:
+                        samples = 0
 
-                y_min_displayed = y_min[mask]
-                y_max_displayed = y_max[mask]
-                y_mean_displayed = y_mean[mask]
-                samples = y_mean_displayed.size
+                    if samples > 0:
+                        # NumPy scalars → float
+                        min_val = np.min(y_displayed).item()
+                        avg_val = np.mean(y_displayed).item()
+                        max_val = np.max(y_displayed).item()
+                        first_val = y_displayed[0].item()
+                        last_val = y_displayed[-1].item()
+                        self._set_stats(idx, min_val, avg_val, max_val, first_val, last_val, samples)
+                    else:
+                        # Indicate that there is no data
+                        self.table.setItem(idx, 6, self._create_item(samples))
 
-                if samples > 0:
-                    # NumPy scalars → float
-                    min_val = np.min(y_min_displayed).item()
-                    avg_val = np.mean(y_mean_displayed).item()
-                    max_val = np.max(y_max_displayed).item()
-                    first = (y_min_displayed[0].item(), y_mean_displayed[0].item(), y_max_displayed[0].item())
-                    last = (y_min_displayed[-1].item(), y_mean_displayed[-1].item(), y_max_displayed[-1].item())
-                    self._set_stats(idx, min_val, avg_val, max_val, first, last, samples)
-                else:
-                    # Indicate that there is no data
-                    self.table.setItem(idx, 6, self._create_item(samples))
-
-            else:
-                # Base case
-                line = signal.lines[0]
-
-                # Differentiate methods
-                if isinstance(impl_plot, PlotItem):
-                    x_data = line.getData()[0]
-                    y_data = line.getData()[1]
-                    lo, hi = impl_plot.getViewBox().viewRange()[0]
-                    y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
-                else:
-                    x_data = line.get_xdata()
-                    y_data = line.get_ydata()
-                    lo, hi = impl_plot.get_xlim()
-                    y_lo, y_hi = impl_plot.get_ylim()
-
-                # Filter values
-                mask = ((x_data > lo) & (x_data < hi) &
-                        (y_data > y_lo) & (y_data < y_hi))
-                y_displayed = y_data[mask]
-                samples = y_displayed.size
-
-                if samples > 0:
-                    # NumPy scalars → float
-                    min_val = np.min(y_displayed).item()
-                    avg_val = np.mean(y_displayed).item()
-                    max_val = np.max(y_displayed).item()
-                    first_val = y_displayed[0].item()
-                    last_val = y_displayed[-1].item()
-
-                    self._set_stats(idx, min_val, avg_val, max_val, first_val, last_val, samples)
-                else:
-                    # Indicate that there is no data
-                    self.table.setItem(idx, 6, self._create_item(samples))
+                idx += 1
 
         # Apply formatting with the current decimal setting
         self.update_table_format()

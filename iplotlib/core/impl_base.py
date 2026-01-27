@@ -174,7 +174,6 @@ class BackendParserBase(ABC):
         except Empty:
             logger.debug("Nothing to do.")
 
-
     @abstractmethod
     def get_impl_data(self, curve):
         pass
@@ -219,7 +218,7 @@ class BackendParserBase(ABC):
         if bot == np.inf and top == -np.inf:
             bot, top = 0, 1
 
-        return bot,top
+        return bot, top
 
     @abstractmethod
     def export_image(self, filename: str, **kwargs):
@@ -427,17 +426,13 @@ class BackendParserBase(ABC):
         """
 
     @abstractmethod
-    def process_ipl_axis_params(self, fc, fs, axis: Axis, impl_axis: Any):
+    def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, impl_axis: Any):
         """
         param
         """
 
     @abstractmethod
     def process_ipl_axis_formatter(self, impl_plot: Any, axis_item: Any, ax_idx: int):
-        pass
-
-    @abstractmethod
-    def process_ipl_axis_ticks(self, tick_number, impl_plot: Any):
         pass
 
     def process_ipl_axis(self, axis: LinearAxis, ax_idx: int, plot: Plot, impl_plot: Any):
@@ -466,19 +461,37 @@ class BackendParserBase(ABC):
         axis_item._font_size = fs
         axis_item._label = axis.label
 
-        self.process_ipl_axis_params(fc, fs, axis, axis_item)
+        tick_number = self._pm.get_value(axis, 'tick_number')
+        self.process_ipl_axis_params(fc, fs, tick_number, axis, axis_item)
 
         # Set axis limits
         if ax_idx != 1 or not self.canvas.streaming:  # In case of Streaming, just set X limits at the start
             if axis.begin is None and axis.end is None:
                 self.update_original_axis_limits(axis, impl_plot, ax_idx)
-                begin, end = axis.original_begin, axis.original_end
+                padding_begin, padding_end = True, True
+
+                # Only Y axis has canvas override
+                if ax_idx == 1:
+                    canvas_begin = self.canvas.canvas_begin
+                    canvas_end = self.canvas.canvas_end
+
+                    begin = canvas_begin if canvas_begin is not None else axis.original_begin
+                    end = canvas_end if canvas_end is not None else axis.original_end
+
+                    if canvas_begin is not None:
+                        padding_begin = False
+                    if canvas_end is not None:
+                        padding_end = False
+
+                else:
+                    begin = axis.original_begin
+                    end = axis.original_end
 
                 # Adjust initial padding for Y axis
-                if ax_idx == 1:
+                if ax_idx == 1 and not isinstance(plot, PlotContour):
                     h = end - begin
-                    begin -= 0.1 * h
-                    end += 0.1 * h
+                    begin = begin - 0.1 * h if padding_begin else begin
+                    end = end + 0.1 * h if padding_end else end
             else:
                 begin, end = axis.begin, axis.end
 
@@ -489,10 +502,6 @@ class BackendParserBase(ABC):
         # Process Nanoseconds Axis
         if axis.is_date:
             self.process_ipl_axis_formatter(impl_plot, axis_item, ax_idx)
-
-        # Set number of ticks and labels
-        tick_number = self._pm.get_value(axis, 'tick_number')
-        self.process_ipl_axis_ticks(tick_number, axis_item)
 
     def update_original_axis_limits(self, axis, impl_plot, ax_idx):
         logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.original_begin} and {axis.original_end}")
@@ -607,9 +616,11 @@ class BackendParserBase(ABC):
             self.set_impl_x_axis_label_text(impl_plot, xaxis._label)
 
     @staticmethod
-    @abstractmethod
     def _get_visible_data(xd, yd, lo, hi):
-        pass
+        mask = (xd > lo) & (xd < hi)
+        x_displayed = xd[mask]
+        y_displayed = yd[mask]
+        return x_displayed, y_displayed
 
     @staticmethod
     @abstractmethod
@@ -630,7 +641,7 @@ class BackendParserBase(ABC):
 
         if len(x_data) > 0 and last_x != x_data[-1]:  # New data
             self._streaming_impl_plot_lut[signal.uid] = [x_data[-1], y_data[-1]]
-            self.set_line_data(plot_lines[0], x_data, y_data, style)
+            self.set_line_data(plot_lines[0], x_data, y_data)
             self._update_marker_by_point_count(plot_lines[0], x_data, style)
 
         elif len(x_data) > 0 and last_x == x_data[-1]:  # No new data
@@ -638,7 +649,7 @@ class BackendParserBase(ABC):
             new_x = self.transform_value(impl_plot, 0, now, inverse=True)
             const_x = np.append(x_data, new_x)
             const_y = np.append(y_data, last_y)
-            self.set_line_data(plot_lines[0], const_x, const_y, style)
+            self.set_line_data(plot_lines[0], const_x, const_y)
 
         return plot_lines
 
@@ -657,8 +668,9 @@ class BackendParserBase(ABC):
         # Processed signals already use the visible range.
         # Skip this step in case of streaming mode, as x_data and y_data may be empty and lead to errors.
 
-        # if not signal.extremities and not self.canvas.streaming and impl_plot.get_xlim() != (-0.05, 0.05):
-        # x_data, y_data = self._get_visible_data(x_data, y_data, *impl_plot.get_xlim())
+        if not signal.extremities and not self.canvas.streaming:
+            x_limits = self.get_impl_x_axis_limits(impl_plot)
+            x_data, y_data = self._get_visible_data(x_data, y_data, *x_limits)
 
         if plot_lines is not None:
             # Reflect downsampling in legend
@@ -669,13 +681,15 @@ class BackendParserBase(ABC):
                 if self.canvas.streaming and len(x_data) > 0:
                     plot_lines = self.update_plot_line_streaming(signal, impl_plot, plot_lines, x_data, y_data, style)
                 else:
-                    self.set_line_data(plot_lines[0], x_data, y_data, style)
+                    self.set_line_data(plot_lines[0], x_data, y_data)
                     self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                for i, line in enumerate(plot_lines):  # TODO: pendant for PYQTGRAPH
-                    line[0].set_xdata(x_data)
-                    line[0].set_ydata(y_data[:, i])
-                    self._update_marker_by_point_count(line[0], x_data, style)
+                for i, line in enumerate(plot_lines):
+                    if y_data.shape == (0, 0):  # Case: no data for 2 dim y_data
+                        self.set_line_data(line, x_data, y_data)
+                    else:
+                        self.set_line_data(line, x_data, y_data[:, i])
+                    self._update_marker_by_point_count(line, x_data, style)
 
             if self.canvas.streaming:
                 self.do_impl_streaming(impl_plot, plot, cache_item)
@@ -687,7 +701,7 @@ class BackendParserBase(ABC):
                 plot_lines = self.create_plot_lines_1D(draw_fn, x_data, y_data, style)
                 self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                plot_lines = self.create_plot_lines_2D(draw_fn, x_data, y_data, style)
+                plot_lines = self.create_plot_lines_2D(draw_fn, signal, x_data, y_data, style)
 
         signal.lines = plot_lines
 
@@ -702,7 +716,7 @@ class BackendParserBase(ABC):
         pass
 
     @abstractmethod
-    def set_line_data(self, line: Any, x_data, y_data, style: dict):
+    def set_line_data(self, line: Any, x_data, y_data):
         pass
 
     @abstractmethod
@@ -710,7 +724,7 @@ class BackendParserBase(ABC):
         pass
 
     @abstractmethod
-    def create_plot_lines_2D(self, draw_fn, x_data, y_data, style):
+    def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
         pass
 
     @abstractmethod
@@ -722,8 +736,8 @@ class BackendParserBase(ABC):
         pass
 
     @abstractmethod
-    def markers_valid_lines(self, impl_plot: Any):
-        pass
+    def get_line_label(self, line: Any):
+        """"""
 
     def add_marker_scaled(self, impl_plot: Any, plot: PlotXY, x_coord, y_coord):
         """
@@ -735,6 +749,7 @@ class BackendParserBase(ABC):
         ranges = []
         marker_signal = None
         nearest_point = None
+        nearest_line_label = None
         minor_dist = float('inf')
 
         for ax_idx, ax in enumerate(plot.axes):
@@ -742,18 +757,22 @@ class BackendParserBase(ABC):
                 ranges = ax.get_limits()
 
         # Get the lines that are actually located in the current mpl_axes
-        valid_lines = self.markers_valid_lines(impl_plot)
+        signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
 
         # With the new X axis limits, we obtain the points within that range
-        for stack in plot.signals.values():
-            for signal in stack:
-                if signal.label not in valid_lines:
-                    continue
-                idx1 = np.searchsorted(signal.x_data, ranges[0])
-                idx2 = np.searchsorted(signal.x_data, ranges[1])
+        for signal_ref in signals:
+            signal = signal_ref()
+            x_data = signal.x_data
+            for idx_line, line in enumerate(signal.lines):
+                idx1 = np.searchsorted(x_data, ranges[0])
+                idx2 = np.searchsorted(x_data, ranges[1])
 
                 x_zoom = signal.data_store[0][idx1:idx2]
-                y_zoom = signal.data_store[1][idx1:idx2]
+                y_data = signal.data_store[1]
+                if y_data.ndim == 1:
+                    y_zoom = y_data[idx1:idx2]
+                else:  # ndim = 2
+                    y_zoom = y_data[idx1:idx2, idx_line]
 
                 # If the number of samples per signal is less than 100 we continue, if not the user shall keep zooming
                 if len(x_zoom) > 100:
@@ -787,8 +806,9 @@ class BackendParserBase(ABC):
                     minor_dist = distances[idx_result]
                     nearest_point = points[idx_result]
                     marker_signal = signal
+                    nearest_line_label = self.get_line_label(line)
 
-        return nearest_point, marker_signal
+        return nearest_point, marker_signal, nearest_line_label
 
     def do_impl_line_plot_xy_slider(self, signal: SignalXY, impl_plot: Any, plot: PlotXYWithSlider, cache_item,
                                     x_data, y_data, z_data):
@@ -804,7 +824,7 @@ class BackendParserBase(ABC):
 
         if isinstance(plot_lines, list):
             if x_data.ndim == 1 and ysub_data.ndim == 1:
-                self.set_line_data(plot_lines[0], x_data, ysub_data, style)
+                self.set_line_data(plot_lines[0], x_data, ysub_data)
                 # _update_marker_by_point_count(line, x_data, style)
             elif x_data.ndim == 1 and ysub_data.ndim == 2:  # TODO: pendant
                 for i, line in enumerate(plot_lines):
@@ -858,8 +878,8 @@ class BackendParserBase(ABC):
             self.legend_downsampled_signal(signal, impl_plot, shapes[0][0])
 
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
-                self.set_line_data(shapes[0][0], x_data, y1_data, style)
-                self.set_line_data(shapes[0][1], x_data, y2_data, style2)
+                self.set_line_data(shapes[0][0], x_data, y1_data)
+                self.set_line_data(shapes[0][1], x_data, y2_data)
                 self.update_area_envelope_1D(shapes, impl_plot, x_data, y1_data, y2_data, style)
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
         else:
@@ -1088,13 +1108,13 @@ class BackendParserBase(ABC):
                 if not impl_list:
                     continue
                 for impl_plot in impl_list:
-                    plot_lims = self.get_plot_limits(impl_plot)
+                    plot_lims = self.get_plot_limits(impl_plot, True)
                     if not isinstance(plot_lims, IplPlotViewLimits):
                         continue
                     all_limits.append(plot_lims)
         return all_limits
 
-    def get_plot_limits(self, impl_plot: Any) -> Optional[IplPlotViewLimits]:
+    def get_plot_limits(self, impl_plot: Any, canvas_flag: bool = False) -> Optional[IplPlotViewLimits]:
         """
         Return limits for the given plot. The `which` argument can be `original` or `current`
         """
@@ -1119,10 +1139,21 @@ class BackendParserBase(ABC):
         pos = stacked_plots.index(impl_plot)
         y_begin, y_end = plot.axes[1][pos].get_limits('current')
 
-        if (y_oaw_begin, y_oaw_end) == (y_begin, y_end):
-            plot_lims.axes_ranges.append(IplAxisLimits(y_oaw_begin, y_oaw_end))
-        else:
-            plot_lims.axes_ranges.append(IplAxisLimits(y_begin, y_end))  # Case modify Axis preferences
+        if canvas_flag:  # Apply preferences case
+            # Check Y axis limits at canvas level
+            if (y_oaw_begin, y_oaw_end) == (y_begin, y_end):
+                begin = self.canvas.canvas_begin if self.canvas.canvas_begin is not None else y_oaw_begin
+                end = self.canvas.canvas_end if self.canvas.canvas_end is not None else y_oaw_end
+                plot_lims.axes_ranges.append(IplAxisLimits(begin, end))
+            else:
+                plot_lims.axes_ranges.append(IplAxisLimits(y_begin, y_end))  # Case modify Axis preferences
+
+        else:  # Zoom case
+            # Check Y axis limits at canvas level
+            if (y_oaw_begin, y_oaw_end) == (y_begin, y_end):
+                plot_lims.axes_ranges.append(IplAxisLimits(y_oaw_begin, y_oaw_end))
+            else:
+                plot_lims.axes_ranges.append(IplAxisLimits(y_begin, y_end))  # Case modify Axis preferences
 
         # IplSliderLimits
         if isinstance(plot, PlotXYWithSlider):

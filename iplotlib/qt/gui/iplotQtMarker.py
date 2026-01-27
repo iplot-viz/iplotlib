@@ -75,7 +75,7 @@ class IplotQtMarker(QWidget):
         # If the user cancels the selection, remove it from the history
         self.selection_history = [row for row in self.selection_history if row in selected_rows]
 
-    def add_marker(self, signal, marker_coordinates):
+    def add_marker(self, signal, marker_coordinates, label_line):
         """
         Adds to the table the necessary information about the markers
         """
@@ -103,7 +103,7 @@ class IplotQtMarker(QWidget):
         plot_data.setData(Qt.ItemDataRole.UserRole, id_marker)
 
         # 3- Signal name
-        signal_data = QTableWidgetItem(signal.label)
+        signal_data = QTableWidgetItem(label_line)
         signal_data.setData(Qt.ItemDataRole.UserRole, signal.uid)
 
         # 4- Marker coordinates
