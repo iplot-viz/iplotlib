@@ -665,7 +665,7 @@ class PyQtGraphParser(BackendParserBase):
             cols = range(len(signals), 0, -1)
         else:
             max_cols = min(4, len(signals))
-            cols = range(1, max_cols, 1)
+            cols = range(1, max_cols + 1)
 
         vb_rect = plot.getViewBox().sceneBoundingRect()
 
