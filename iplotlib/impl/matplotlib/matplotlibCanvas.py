@@ -947,9 +947,7 @@ class MatplotlibParser(BackendParserBase):
         else:
             return None
 
-    def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
-        if not isinstance(impl_plot, MPLAxes):
-            return
+    def set_impl_x_axis_label_text(self, impl_plot: MPLAxes, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         i_plot = ci.plot() if ci else None
         fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
