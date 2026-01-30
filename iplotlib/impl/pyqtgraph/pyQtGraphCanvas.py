@@ -134,7 +134,13 @@ class PyQtGraphParser(BackendParserBase):
         if not legend:
             return
 
+        # Skip if line is not visible (hidden signals are not in legend)
+        if not plot_lines.isVisible():
+            return
+
         lines = [lines[0].item.name() for lines in legend.items]
+        if plot_lines.name() not in lines:
+            return
         pos = lines.index(plot_lines.name())
         legend_label = legend.items[pos][1]
         legend_text = legend.items[pos][1].text
