@@ -228,11 +228,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def _full_screen_mode_on(self, impl_plot):
         self._parser.set_focus_plot(impl_plot)
         self.refresh()
-        # self.stats(self.get_canvas())
+        self.stats(self.get_canvas())
 
     def _full_screen_mode_off(self):
         self._parser.set_focus_plot(None)
         self.refresh()
+        self.stats(self.get_canvas())
 
     def _impl_mouse_press_handler(self, view_box, event):
         # self._debug_log_event(event, "Mouse released")
