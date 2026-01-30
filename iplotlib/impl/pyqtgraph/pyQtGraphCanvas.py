@@ -730,7 +730,6 @@ class PyQtGraphParser(BackendParserBase):
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, axis_item: AxisItem):
         tick_props = dict(maxTickLevel=0)
-        label_props = dict(color=fc)
 
         # Set ticks on the top and right axis
         if self._pm.get_value(self.canvas, 'ticks_position'):
@@ -743,10 +742,6 @@ class PyQtGraphParser(BackendParserBase):
             tick_font = QFont()
             tick_font.setPointSize(int(fs))
             tick_props.update({'tickFont': tick_font})
-            label_props.update({'font-size': f'{int(fs)}pt'})
-
-        if axis.label is not None:
-            axis_item.setLabel(axis.label, **label_props)
 
         # Font size for UTC label
         if isinstance(axis_item, NanosecondDateFormatter):
@@ -760,6 +755,16 @@ class PyQtGraphParser(BackendParserBase):
         # Set number of ticks and labels
         if isinstance(axis_item, NanosecondDateFormatter):
             axis_item.set_ticks_number(tick_number)
+
+    def process_ipl_axis_params_label(self, axis_item: AxisItem, text, fc, fs):
+        if text is None:
+            return
+        label_props = {}
+        if fc:
+            label_props['color'] = fc
+        if fs and fs > 0:
+            label_props['font-size'] = f'{int(fs)}pt'
+        axis_item.setLabel(text, **label_props)
 
     def process_ipl_axis_formatter(self, impl_plot: PlotItem, impl_axis: NanosecondDateFormatter, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
@@ -1122,7 +1127,11 @@ class PyQtGraphParser(BackendParserBase):
         return plot.getViewBox().viewRange()[1]
 
     def set_impl_x_axis_label_text(self, plot: PlotItem, text: str):
-        self.get_impl_x_axis(plot).setLabel(text)
+        ci = self._impl_plot_cache_table.get_cache_item(plot)
+        i_plot = ci.plot() if ci else None
+        fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
+        fs = self._pm.get_value(i_plot, 'font_size') if i_plot else None
+        self.process_ipl_axis_params_label(self.get_impl_x_axis(plot), text, fc, fs)
 
     def set_impl_x_axis_limits(self, plot: PlotItem, limits: tuple):
         if isinstance(plot, PlotItem):
@@ -1130,7 +1139,11 @@ class PyQtGraphParser(BackendParserBase):
             vb.setXRange(limits[0], limits[1], padding=0)
 
     def set_impl_y_axis_label_text(self, plot: PlotItem, text: str):
-        self.get_impl_y_axis(plot).setLabel(text)
+        ci = self._impl_plot_cache_table.get_cache_item(plot)
+        i_plot = ci.plot() if ci else None
+        fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
+        fs = self._pm.get_value(i_plot, 'font_size') if i_plot else None
+        self.process_ipl_axis_params_label(self.get_impl_y_axis(plot), text, fc, fs)
 
     def set_impl_y_axis_limits(self, plot: PlotItem, limits: tuple):
         if isinstance(plot, PlotItem):
