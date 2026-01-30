@@ -180,7 +180,10 @@ class BackendParserBase(ABC):
 
     def get_bottom_top(self, x_line, lo, hi):
         xd, yd = self.get_impl_data(x_line)
-        y_displayed = yd[((xd > lo) & (xd < hi))]
+        if xd is not None and yd is not None:
+            y_displayed = yd[((xd > lo) & (xd < hi))]
+        else:
+            y_displayed = []
 
         # Check if the visible Y data contains valid values
         if len(y_displayed) > 0:
