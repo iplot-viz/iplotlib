@@ -882,6 +882,11 @@ class BackendParserBase(ABC):
                                   z_data):
         """"""
 
+    @abstractmethod
+    def do_impl_line_plot_contour_slider(self, signal: SignalContour, impl_plot: Any, plot: PlotContourWithSlider,
+                                         x_data, y_data, z_data):
+        """"""
+
     def do_impl_envelope_plot(self, signal: Signal, impl_plot: Any, x_data, y1_data, y2_data):
         # TODO: check if Signal is a SignalXY. If not raise WARNING
         shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Any]]
@@ -932,7 +937,10 @@ class BackendParserBase(ABC):
             else:
                 plot_lines = self.do_impl_line_plot_xy(signal, impl_plot, plot, cache_item, data[0], data[1])
         elif isinstance(signal, SignalContour):
-            plot_lines = self.do_impl_line_plot_contour(signal, impl_plot, plot, data[0], data[1], data[2])
+            if isinstance(plot, PlotContourWithSlider):
+                plot_lines = self.do_impl_line_plot_contour_slider(signal, impl_plot, plot, data[0], data[1], data[2])
+            else:
+                plot_lines = self.do_impl_line_plot_contour(signal, impl_plot, plot, data[0], data[1], data[2])
 
         self._signal_impl_shape_lut.update({id(signal): plot_lines})
 
