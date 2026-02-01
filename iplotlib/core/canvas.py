@@ -14,6 +14,7 @@ from iplotlib.core.persistence import JSONExporter
 from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.signal import Signal
 import pandas as pd
+import weakref
 
 logger = setupLogger.get_logger(__name__)
 
@@ -149,7 +150,7 @@ class Canvas(ABC):
         Add a plot to this canvas.
         """
         if plot:
-            plot.parent = self
+            plot.parent = weakref.ref(self)
         if col >= len(self.plots):
             raise Exception("Cannot add plot to column {}: Canvas has only {} column(s)".format(col, len(self.plots)))
         if len(self.plots[col]) >= self.rows:
@@ -278,7 +279,7 @@ class Canvas(ABC):
         self.crosshair_color = old_canvas['crosshair_color']
         self.full_mode_all_stack = old_canvas['full_mode_all_stack']
         self.focus_plot = old_canvas['focus_plot']
-        self.max_diff = old_canvas['contour_levels']
+        self.max_diff = old_canvas['max_diff']
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):

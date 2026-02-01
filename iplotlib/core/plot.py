@@ -12,6 +12,7 @@ from abc import ABC
 import typing
 from dataclasses import dataclass
 from typing import Dict, List, Collection, Union, Tuple
+import weakref
 
 from iplotlib.core.axis import Axis, LinearAxis
 from matplotlib.widgets import Slider
@@ -75,12 +76,12 @@ class Plot(ABC):
         if self.axes is None:
             self.axes = [LinearAxis(), [LinearAxis()]]
 
-        self.axes[0].parent = self
+        self.axes[0].parent = weakref.ref(self)
         for axe in self.axes[1]:
-            axe.parent = self
+            axe.parent = weakref.ref(self)
 
     def add_signal(self, signal, stack: int = 1):
-        signal.parent = self
+        signal.parent = weakref.ref(self)
         if stack not in self.signals:
             self.signals[stack] = []
         self.signals[stack].append(signal)
@@ -178,13 +179,13 @@ class PlotContour(Plot):
         self.color_map = PlotContour.color_map
         self.contour_levels = PlotContour.contour_levels
 
-    def merge(self, old_plot: 'PlotContour'):
+    def merge(self, old_plot: dict):
         super().merge(old_plot)
-        self.contour_filled = old_plot.contour_filled
-        self.legend_format = old_plot.legend_format
-        self.equivalent_units = old_plot.equivalent_units
-        self.color_map = old_plot.color_map
-        self.contour_levels = old_plot.contour_levels
+        self.contour_filled = old_plot['contour_filled']
+        self.legend_format = old_plot['legend_format']
+        self.equivalent_units = old_plot['equivalent_units']
+        self.color_map = old_plot['color_map']
+        self.contour_levels = old_plot['contour_levels']
 
 
 @dataclass
@@ -254,7 +255,7 @@ class PlotSurface(Plot):
     def reset_preferences(self):
         super().reset_preferences()
 
-    def merge(self, old_plot: 'PlotSurface'):
+    def merge(self, old_plot: dict):
         super().merge(old_plot)
 
 
@@ -265,7 +266,7 @@ class PlotImage(Plot):
     def reset_preferences(self):
         super().reset_preferences()
 
-    def merge(self, old_plot: 'PlotImage'):
+    def merge(self, old_plot: dict):
         super().merge(old_plot)
 
 
@@ -301,7 +302,7 @@ class PlotXYWithSlider(PlotXY):
     def reset_preferences(self):
         super().reset_preferences()
 
-    def merge(self, old_plot: 'PlotXYWithSlider'):
+    def merge(self, old_plot: dict):
         super().merge(old_plot)
         self.slider_last_val = 0
 

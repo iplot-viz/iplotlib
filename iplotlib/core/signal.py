@@ -7,7 +7,7 @@ plotting XY or XYZ data.
 :data:`~iplotlib.core.signal.ArraySignal` is a commonly used concrete class 
 for when you wish to take over the data customization.
 """
-import dataclasses
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List
@@ -65,18 +65,6 @@ class Signal(ABC):
 
     def merge(self, old_signal: dict):
         pass
-
-    def set_properties(self, properties: dict):
-        for key, value in properties.items():
-            if hasattr(self, key) and key not in ['_type']:
-                attr = getattr(self, key)
-
-                if dataclasses.is_dataclass(attr) and isinstance(value, dict):
-                    for sub_key, sub_value in value.items():
-                        if hasattr(attr, sub_key):
-                            setattr(attr, sub_key, sub_value)
-                else:
-                    setattr(self, key, value)
 
 
 @dataclass
@@ -137,7 +125,6 @@ class SignalXY(Signal, IplotSignalAdapter):
         self.marker = old_signal['marker']
         self.marker_size = old_signal['marker_size']
         self.step = old_signal['step']
-        self.markers_list = old_signal['markers_list']
 
     def add_marker(self, marker: Marker):
         self.markers_list.append(marker)
@@ -173,7 +160,7 @@ class SignalContour(Signal, IplotSignalAdapter):
         self.color_map = SignalContour.color_map
         self.contour_levels = SignalContour.contour_levels
 
-    def merge(self, old_signal: 'SignalContour'):
+    def merge(self, old_signal: dict):
         super().merge(old_signal)
-        self.color_map = old_signal.color_map
-        self.contour_levels = old_signal.contour_levels
+        self.color_map = old_signal['color_map']
+        self.contour_levels = old_signal['contour_levels']

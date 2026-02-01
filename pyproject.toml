@@ -1,6 +1,68 @@
 [build-system]
-requires = ["setuptools>=42.0", "wheel"]
+requires = ["setuptools>=42.0", "wheel", "versioneer[toml]"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "iplotlib"
+description = "ITER plotting library"
+authors = [
+    { name = "ITER Organization", email = "jscabanilla@minsait.com" },
+]
+maintainers = [
+    { name = "Jhon Steeven Cabanilla Alvarado", email = "jscabanilla@minsait.com" },
+    { name = "Pablo Martin Villares", email = "pmartin@minsait.com" },
+    { name = "Mario Gomez Ballesteros", email = "mgomezb@minsait.com" },
+]
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">= 3.9"
+license = { text = "MIT" }
+keywords = ["IDS", "CBS", "Matplotlib", "PyQtGraph", "Data Visualization"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "iplotProcessing >= 1.1.5",
+    "iplotDataAccess >= 1.3.1",
+    "packaging>=20.0",
+    "matplotlib >= 3.5.1",
+    "pandas >= 1.2.0",
+    "PySide6 >= 6.2.3",
+    "vtk >= 9.1.0",
+    "pyqtgraph >= 0.13.7",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+test = ["pytest >= 6.0"]
+docs = [
+    "sphinx>=6.0.0,<7.0.0",
+    "sphinx-autosummary-accessors>=0.1.2",
+    "sphinx-immaterial>=0.11.0,<0.12",
+    "sphinx-click",
+]
+
+[project.urls]
+Homepage = "https://github.com/iplot-viz/iplotlib"
+Repository = "https://github.com/iplot-viz/iplotlib.git"
+Issues = "https://github.com/iplot-viz/iplotlib/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["iplotlib*"]
+
+[tool.setuptools.package-data]
+"iplotlib.core" = ["data/default_properties.json"]
+"iplotlib.qt" = ["icons/*.png", "icons/*.svg"]
+"iplotlib.standalone" = ["examples_json/*"]
+
+[project.scripts]
+iplotlib-qt-canvas = "iplotlib.standalone.iplotQtStandaloneCanvas:main"
+
+[tool.pytest.ini_options]
+addopts = "-rA -s -v  --ignore=iplotlib/impl/vtk/tests"
+testpaths = "iplotlib"
 
 [tool.versioneer]
 VCS = "git"
@@ -9,4 +71,3 @@ versionfile_source = "iplotlib/_version.py"
 versionfile_build = "iplotlib/_version.py"
 tag_prefix = ""
 parentdir_prefix = ""
-

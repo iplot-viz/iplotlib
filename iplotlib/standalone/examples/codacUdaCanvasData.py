@@ -5,19 +5,23 @@ Demonstrate usage of iplotlib by plotting data obtained from a CODAC-UDA server,
 import os
 import tempfile
 import json
+import weakref
 
 from iplotDataAccess.dataAccess import DataAccess
 from iplotlib.core import Canvas
 from iplotlib.interface import AccessHelper
 
-dscfg = """[codacuda]
-conninfo=host=io-ls-udasrv1.iter.org,port=3090
-varprefix=
-rturl=http://io-ls-udaweb1.iter.org/dashboard/backend/sse
-rtheaders=REMOTE_USER:$USERNAME,User-Agent:python_client
-rtauth=None
-default=true
-"""
+dscfg = """{
+    "codacuda": {
+        "type": "CODAC_UDA",
+        "host": "io-ls-udasrv1.iter.org",
+        "port": 3090,
+        "rturl": "http://io-ls-udaweb1.iter.org/dashboard/backend/sse",
+        "rtheaders": "REMOTE_USER:$USERNAME,User-Agent:python_client",
+        "rtauth": null,
+        "default": true
+    }
+}"""
 
 
 def get_canvas():
@@ -39,4 +43,12 @@ def get_canvas():
                 c = Canvas.from_dict(canvas_dict)
                 # Set title
                 c.title = os.path.basename(__file__).replace('.py', '')
+                for col in c.plots:
+                    for plot in col:
+                        if plot:
+                            plot.parent = weakref.ref(c)
+                            for signals in plot.signals.values():
+                                for signal in signals:
+                                    signal.parent = weakref.ref(plot)
+
                 return c
