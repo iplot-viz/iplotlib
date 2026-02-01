@@ -8,14 +8,15 @@ one might want to use when plotting data.
 # Changelog:
 #   Jan 2023:   -Added legend position and layout properties [Alberto Luengo]
 
-from abc import ABC
+from abc import ABC, abstractmethod
 import typing
+from typing import Dict, List, Collection, Union
 from dataclasses import dataclass
-from typing import Dict, List, Collection, Union, Tuple
 import weakref
 
+import pandas as pd
+
 from iplotlib.core.axis import Axis, LinearAxis
-from matplotlib.widgets import Slider
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 
 
@@ -51,10 +52,10 @@ class Plot(ABC):
     _type : str
         type of the plot
     """
-
+    row: int = 1
+    col: int = 1
     row_span: int = 1
     col_span: int = 1
-    id: Tuple[int, int] = None
     plot_title: str = None
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None
@@ -132,24 +133,18 @@ class Plot(ABC):
 
         # signals are merged at canvas level to handle move between plots
 
-    def set_properties(self, properties: dict):
-        for key, value in properties.items():
-            # Plot Properties
-            if hasattr(self, key) and key not in ['axes', 'signals', '_type']:
-                setattr(self, key, value)
+    @abstractmethod
+    def get_signals_as_df(self, row, col):
+        """"""
 
-        # Axis properties
-        for idxAxis, axis in enumerate(self.axes):
-            if isinstance(axis, Collection) and isinstance(self.axes[idxAxis], Collection):
-                for idxSubAxis, subAxis in enumerate(axis):
-                    subAxis.set_properties(properties['axes'][1][idxSubAxis])
-            else:
-                axis.set_properties(properties['axes'][0])
+    def set_x_axes_limits(self, limits, which='current'):
+        self.axes[0].set_limits(*limits)
 
-        # Signal properties
-        for idxSignal, signal in enumerate(list(self.signals.values())):
-            for idxSig, sig in enumerate(signal):
-                sig.set_properties(properties['signals'][str(idxSignal + 1)][idxSig])
+    def get_x_axis(self):
+        return self.axes[0]
+
+    def get_y_axis(self):
+        return self.axes[1]
 
 
 @dataclass
@@ -186,6 +181,31 @@ class PlotContour(Plot):
         self.equivalent_units = old_plot['equivalent_units']
         self.color_map = old_plot['color_map']
         self.contour_levels = old_plot['contour_levels']
+
+    def get_signals_as_df(self, row, col):
+        x = pd.DataFrame()
+        for p, plot in enumerate(self.signals.values()):
+            for s, pl_signal in enumerate(plot):
+                col_name = f"plot{row + 1}.{col + 1}"
+                if len(self.signals) > 1:
+                    col_name += f".{p + 1}"
+                if pl_signal.alias:
+                    col_name += f"_{pl_signal.alias}"
+                else:
+                    col_name += f"_{pl_signal.name}"
+
+                # Refresh limits
+                x_data = pl_signal.x_data
+                y_data = pl_signal.y_data
+                z_data = pl_signal.z_data
+
+                dataframe_x = pd.DataFrame(x_data, columns=[f"{col_name}.data.{i}" for i in range(x_data[0].size)])
+                dataframe_y = pd.DataFrame(y_data, columns=[f"{col_name}.data.{i}" for i in range(y_data[0].size)])
+                dataframe_z = pd.DataFrame(z_data, columns=[f"{col_name}.data.{i}" for i in range(z_data[0].size)])
+
+                x = pd.concat([x, dataframe_x, dataframe_y, dataframe_z], axis=1)
+
+        return x
 
 
 @dataclass
@@ -247,6 +267,55 @@ class PlotXY(Plot):
         self.marker_size = old_plot['marker_size']
         self.step = old_plot['step']
 
+    def get_signals_as_df(self, row, col):
+        x = pd.DataFrame()
+        for p, plot in enumerate(self.signals.values()):
+            for s, pl_signal in enumerate(plot):
+                col_name = f"plot{row + 1}.{col + 1}"
+                if len(self.signals) > 1:
+                    col_name += f".{p + 1}"
+                if pl_signal.alias:
+                    col_name += f"_{pl_signal.alias}"
+                else:
+                    col_name += f"_{pl_signal.name}"
+
+                # Refresh limits
+                # Now when using pulses, if no start time or end time are specified, the default is set to
+                # 0 and None respectively. For that reason, it is necessary to check the ts_end of the
+                # different signals and create the mask depending on the circumstances.
+                if pl_signal.ts_end is None:
+                    mask = pl_signal.x_data >= pl_signal.ts_start
+                else:
+                    mask = (pl_signal.x_data >= pl_signal.ts_start) & (pl_signal.x_data <= pl_signal.ts_end)
+
+                timerange = pl_signal.x_data[mask]
+                y_data = pl_signal.y_data[mask]
+
+                # Check min and max dates
+                if timerange.size > 0 and bool(min(timerange) > (1 << 53) and max(timerange) < pd.Timestamp.max.value):
+                    timestamps = [pd.Timestamp(value) for value in timerange]
+                    format_ts = [ts.strftime("%Y-%m-%dT%H:%M:%S.%f") + "{:03d}".format(ts.nanosecond) + "Z" for ts in
+                                 timestamps]
+                else:
+                    format_ts = timerange
+
+                if pl_signal.envelope:
+                    result = []
+                    for i in range(len(pl_signal.y_data)):
+                        min_values = pl_signal.y_data[i]
+                        max_values = pl_signal.z_data[i]
+                        avg_values = pl_signal.data_store[3][i]
+                        result.append(f"({min_values};{avg_values};{max_values})")
+                    x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
+                    x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
+                else:
+                    timeframe = pd.Series(format_ts, name=f"{col_name}.time")
+                    dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data"])
+
+                    x = pd.concat([x, timeframe, dataframe], axis=1)
+
+        return x
+
 
 @dataclass
 class PlotSurface(Plot):
@@ -257,6 +326,9 @@ class PlotSurface(Plot):
 
     def merge(self, old_plot: dict):
         super().merge(old_plot)
+
+    def get_signals_as_df(self, row, col):
+        """"""
 
 
 @dataclass
@@ -269,9 +341,12 @@ class PlotImage(Plot):
     def merge(self, old_plot: dict):
         super().merge(old_plot)
 
+    def get_signals_as_df(self, row, col):
+        """"""
+
 
 class SliderMixin:
-    slider: typing.Optional[Slider] = None
+    slider: typing.Optional = None
     slider_last_val: int = None
     slider_last_min: int = None
     slider_last_max: int = None
@@ -289,8 +364,7 @@ class PlotXYWithSlider(PlotXY):
     """
     A concrete Plot class specialized for 2D plottling with slider.
     """
-
-    slider: typing.Optional[Slider] = None
+    slider: typing.Optional = None
     slider_last_val: int = None
     slider_last_min: int = None
     slider_last_max: int = None
@@ -309,6 +383,37 @@ class PlotXYWithSlider(PlotXY):
     def clean_slider(self):
         self.slider = None
 
+    def get_signals_as_df(self, row, col):
+        x = pd.DataFrame()
+        for p, plot in enumerate(self.signals.values()):
+            for s, pl_signal in enumerate(plot):
+                col_name = f"plot{row + 1}.{col + 1}"
+                if len(self.signals) > 1:
+                    col_name += f".{p + 1}"
+                if pl_signal.alias:
+                    col_name += f"_{pl_signal.alias}"
+                else:
+                    col_name += f"_{pl_signal.name}"
+
+                # Refresh limits
+                timerange = pl_signal.time
+                y_data = pl_signal.y_data
+
+                # Check min and max dates
+                if timerange.size > 0 and bool(min(timerange) > (1 << 53) and max(timerange) < pd.Timestamp.max.value):
+                    timestamps = [pd.Timestamp(value) for value in timerange]
+                    format_ts = [ts.strftime("%Y-%m-%dT%H:%M:%S.%f") + "{:03d}".format(ts.nanosecond) + "Z" for ts in
+                                 timestamps]
+                else:
+                    format_ts = timerange
+
+                timeframe = pd.Series(format_ts, name=f"{col_name}.time")
+                dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data.{i}" for i in range(y_data[0].size)])
+
+                x = pd.concat([x, timeframe, dataframe], axis=1)
+
+        return x
+
 
 @dataclass
 class PlotContourWithSlider(PlotContour):
@@ -316,7 +421,7 @@ class PlotContourWithSlider(PlotContour):
     A concrete Plot class specialized for 2D plottling with slider.
     """
 
-    slider: typing.Optional[Slider] = None
+    slider: typing.Optional = None
     slider_last_val: int = None
     slider_last_min: int = None
     slider_last_max: int = None
@@ -329,7 +434,7 @@ class PlotContourWithSlider(PlotContour):
     def reset_preferences(self):
         super().reset_preferences()
 
-    def merge(self, old_plot: 'PlotContourWithSlider'):
+    def merge(self, old_plot: dict):
         super().merge(old_plot)
         self.slider_last_val = 0
 

@@ -5,6 +5,10 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, Q
     QAbstractItemView, QPushButton, QMenu, QSpinBox, QLabel, QFrame
 
 import iplotLogging.setupLogger as Sl
+from pyqtgraph import PlotItem
+
+from iplotlib.impl.matplotlib. dateFormatter import NanosecondDateFormatter as MPLDateFormatter
+from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter as PGDateFormatter
 
 logger = Sl.get_logger(__name__)
 
@@ -16,11 +20,11 @@ class IplotQtStatistics(QWidget):
         self.resize(1050, 500)
         self.setWindowTitle("Statistics table")
 
-        self.column_names = ['Signal name', 'Min', 'Avg', 'Max', 'First', 'Last', 'Samples']
+        self.column_names = ['Signal name', 'Min', 'Avg', 'Max', 'First', 'Last', 'Samples', 'First Time', 'Last Time']
 
         # Marker table creation
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels(self.column_names)
 
         # Disable cell modification
@@ -100,18 +104,41 @@ class IplotQtStatistics(QWidget):
 
         if isinstance(value, float):
             item = QTableWidgetItem(fmt(value))
-            item.setData(Qt.UserRole, value)
+            item.setData(Qt.ItemDataRole.UserRole, value)
         elif isinstance(value, tuple):
             val = f"({', '.join(fmt(v) for v in value)})"
             item = QTableWidgetItem(val)
-            item.setData(Qt.UserRole, value)
+            item.setData(Qt.ItemDataRole.UserRole, value)
         else:
             item = QTableWidgetItem(fmt(value))
-            item.setData(Qt.UserRole, float(value))
+            item.setData(Qt.ItemDataRole.UserRole, float(value))
 
         return item
 
-    def _set_stats(self, idx, min_data, avg_data, max_data, first, last, samples):
+    def _create_timestamp_item(self, timestamp, is_date, impl_plot):
+        """
+        Creates QTableWidgetItem for timestamp with proper formatting
+        """
+        if is_date:
+            # Use the appropriate formatter based on backend
+            if isinstance(impl_plot, PlotItem):
+                formatter = PGDateFormatter(orientation='bottom')
+            else:
+                formatter = MPLDateFormatter(ax_idx=0)
+
+            # Format the timestamp to human readable
+            formatted = formatter.date_fmt(int(timestamp), formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
+            item = QTableWidgetItem(formatted)
+        else:
+            # Relative time (pulse) - data comes in milliseconds
+            seconds = timestamp / 1000.0  # Convert from milliseconds to seconds
+            item = QTableWidgetItem(f"{seconds:.6f} s")
+
+        item.setData(Qt.ItemDataRole.UserRole, timestamp)
+        return item
+
+    def _set_stats(self, idx, min_data, avg_data, max_data, first, last, samples, first_time, last_time, is_date,
+                   impl_plot):
         """
             Set statistics row
         """
@@ -121,6 +148,8 @@ class IplotQtStatistics(QWidget):
         self.table.setItem(idx, 4, self._create_item(first))
         self.table.setItem(idx, 5, self._create_item(last))
         self.table.setItem(idx, 6, self._create_item(samples))
+        self.table.setItem(idx, 7, self._create_timestamp_item(first_time, is_date, impl_plot))
+        self.table.setItem(idx, 8, self._create_timestamp_item(last_time, is_date, impl_plot))
 
     def fill_table(self, info_stats: list):
         """
@@ -128,71 +157,173 @@ class IplotQtStatistics(QWidget):
         """
         self.table.setRowCount(0)
         self._current_info_stats = info_stats
+        idx = 0
 
-        for idx, (signal, impl_plot) in enumerate(info_stats):
-            # Insert new row
-            self.table.insertRow(idx)
-
-            # The rows correspond to the signals and their corresponding stacks
-            stack = f"{signal.parent().id[0]}.{signal.parent().id[1]}.{signal.id}"
-            signal_name = f"{signal.label}, {stack}"
-            self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
-
-            # Add Statistics to the table
+        for signal, impl_plot in info_stats:
+            lines = signal.lines
+            stack = signal.get_stack()
             has_envelope = signal.data_store[2].size > 0 and signal.data_store[3].size > 0
-            line = signal.lines[0][0]
-            x_data = line.get_xdata()
-            lo, hi = impl_plot.get_xlim()
 
-            if has_envelope > 0:
-                y_min = np.array(signal.data_store[1])
-                y_max = np.array(signal.data_store[2])
-                y_mean = np.array(signal.data_store[3])
+            for line in lines:
+                # Insert new row
+                self.table.insertRow(idx)
 
-                # Filter values
-                y_lo, y_hi = impl_plot.get_ylim()
-                mask = ((x_data > lo) & (x_data < hi) &
-                        (y_min > y_lo) & (y_min < y_hi) &
-                        (y_mean > y_lo) & (y_mean < y_hi) &
-                        (y_max > y_lo) & (y_max < y_hi))
-                y_min_displayed = y_min[mask]
-                y_max_displayed = y_max[mask]
-                y_mean_displayed = y_mean[mask]
-                samples = y_mean_displayed.size
+                # Add Statistics to the table
+                if has_envelope > 0:
+                    line = line[0]
 
-                if samples > 0:
-                    # NumPy scalars → float
-                    min_val = np.min(y_min_displayed).item()
-                    avg_val = np.mean(y_mean_displayed).item()
-                    max_val = np.max(y_max_displayed).item()
-                    first = (y_min_displayed[0].item(), y_mean_displayed[0].item(), y_max_displayed[0].item())
-                    last = (y_min_displayed[-1].item(), y_mean_displayed[-1].item(), y_max_displayed[-1].item())
-                    self._set_stats(idx, min_val, avg_val, max_val, first, last, samples)
+                    # Differentiate methods
+                    if isinstance(impl_plot, PlotItem):
+                        x_data = line.getData()[0]
+                        lo, hi = impl_plot.getViewBox().viewRange()[0]
+                        y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
+                        signal_name = f"{line.name()}, {stack}"
+                    else:
+                        x_data = line.get_xdata()
+                        lo, hi = impl_plot.get_xlim()
+                        y_lo, y_hi = impl_plot.get_ylim()
+                        signal_name = f"{line.get_label()}, {stack}"
+
+                    # The rows correspond to the signals and their corresponding stacks
+                    self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
+
+                    y_min = np.array(signal.data_store[1])
+                    y_max = np.array(signal.data_store[2])
+                    y_mean = np.array(signal.data_store[3])
+
+                    # Filter values
+                    mask = ((x_data > lo) & (x_data < hi) &
+                            (y_min > y_lo) & (y_min < y_hi) &
+                            (y_mean > y_lo) & (y_mean < y_hi) &
+                            (y_max > y_lo) & (y_max < y_hi))
+
+                    y_min_displayed = y_min[mask]
+                    y_max_displayed = y_max[mask]
+                    y_mean_displayed = y_mean[mask]
+                    samples = y_mean_displayed.size
+
+                    if samples > 0:
+                        # NumPy scalars → float
+                        min_val = np.min(y_min_displayed).item()
+                        avg_val = np.mean(y_mean_displayed).item()
+                        max_val = np.max(y_max_displayed).item()
+                        first = (y_min_displayed[0].item(), y_mean_displayed[0].item(), y_max_displayed[0].item())
+                        last = (y_min_displayed[-1].item(), y_mean_displayed[-1].item(), y_max_displayed[-1].item())
+
+                        # Get timestamps from transformed data
+                        x_displayed = x_data[mask]
+                        if len(x_displayed) > 0:
+                            first_time_raw = x_displayed[0].item()
+                            last_time_raw = x_displayed[-1].item()
+
+                            # Apply inverse transformation if there's an offset
+                            if hasattr(impl_plot, '_ipl_cache_item'):
+                                ci = impl_plot._ipl_cache_item
+                                offset = ci.offsets.get(0, 0) if hasattr(ci, 'offsets') else 0
+                                if offset == 100_000:
+                                    first_time = first_time_raw * offset
+                                    last_time = last_time_raw * offset
+                                elif offset != 0:
+                                    first_time = first_time_raw + offset
+                                    last_time = last_time_raw + offset
+                                else:
+                                    first_time = first_time_raw
+                                    last_time = last_time_raw
+                            else:
+                                first_time = first_time_raw
+                                last_time = last_time_raw
+                        else:
+                            first_time = 0
+                            last_time = 0
+
+                        # Check if it's date axis
+                        ci = impl_plot._ipl_cache_item if hasattr(impl_plot, '_ipl_cache_item') else None
+                        plot = ci.plot() if ci else None
+                        is_date = plot.axes[0].is_date if plot and hasattr(plot, 'axes') and len(
+                            plot.axes) > 0 else False
+
+                        self._set_stats(idx, min_val, avg_val, max_val, first, last, samples, first_time, last_time,
+                                        is_date, impl_plot)
+                    else:
+                        # Indicate that there is no data
+                        self.table.setItem(idx, 6, self._create_item(samples))
+
                 else:
-                    # Indicate that there is no data
-                    self.table.setItem(idx, 6, self._create_item(samples))
+                    # Base case
+                    # Differentiate methods
+                    if isinstance(impl_plot, PlotItem):
+                        x_data = line.getData()[0] if line.getData()[0] is not None else []
+                        y_data = line.getData()[1] if line.getData()[1] is not None else []
+                        lo, hi = impl_plot.getViewBox().viewRange()[0]
+                        y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
+                        signal_name = f"{line.name()}, {stack}"
+                    else:
+                        x_data = line.get_xdata()
+                        y_data = line.get_ydata()
+                        lo, hi = impl_plot.get_xlim()
+                        y_lo, y_hi = impl_plot.get_ylim()
+                        signal_name = f"{line.get_label()}, {stack}"
 
-            else:
-                # Base case
-                y_data = line.get_ydata()
-                y_lo, y_hi = impl_plot.get_ylim()
-                mask = ((x_data > lo) & (x_data < hi) &
-                        (y_data > y_lo) & (y_data < y_hi))
-                y_displayed = y_data[mask]
-                samples = y_displayed.size
+                    # The rows correspond to the signals and their corresponding stacks
+                    self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
-                if samples > 0:
-                    # NumPy scalars → float
-                    min_val = np.min(y_displayed).item()
-                    avg_val = np.mean(y_displayed).item()
-                    max_val = np.max(y_displayed).item()
-                    first_val = y_displayed[0].item()
-                    last_val = y_displayed[-1].item()
+                    # Filter values
+                    if (len(x_data), len(y_data)) != (0, 0):
+                        mask = ((x_data > lo) & (x_data < hi) &
+                                (y_data > y_lo) & (y_data < y_hi))
+                        y_displayed = y_data[mask]
+                        samples = y_displayed.size
+                    else:
+                        samples = 0
 
-                    self._set_stats(idx, min_val, avg_val, max_val, first_val, last_val, samples)
-                else:
-                    # Indicate that there is no data
-                    self.table.setItem(idx, 6, self._create_item(samples))
+                    if samples > 0:
+                        # NumPy scalars → float
+                        min_val = np.min(y_displayed).item()
+                        avg_val = np.mean(y_displayed).item()
+                        max_val = np.max(y_displayed).item()
+                        first_val = y_displayed[0].item()
+                        last_val = y_displayed[-1].item()
+
+                        # Get timestamps from transformed data
+                        x_displayed = x_data[mask]
+                        if len(x_displayed) > 0:
+                            first_time_raw = x_displayed[0].item()
+                            last_time_raw = x_displayed[-1].item()
+
+                            # Apply inverse transformation if there's an offset
+                            if hasattr(impl_plot, '_ipl_cache_item'):
+                                ci = impl_plot._ipl_cache_item
+                                offset = ci.offsets.get(0, 0) if hasattr(ci, 'offsets') else 0
+                                if offset == 100_000:
+                                    first_time = first_time_raw * offset
+                                    last_time = last_time_raw * offset
+                                elif offset != 0:
+                                    first_time = first_time_raw + offset
+                                    last_time = last_time_raw + offset
+                                else:
+                                    first_time = first_time_raw
+                                    last_time = last_time_raw
+                            else:
+                                first_time = first_time_raw
+                                last_time = last_time_raw
+                        else:
+                            first_time = 0
+                            last_time = 0
+
+                        # Check if it's date axis
+                        ci = impl_plot._ipl_cache_item if hasattr(impl_plot, '_ipl_cache_item') else None
+                        plot = ci.plot() if ci else None
+                        is_date = plot.axes[0].is_date if plot and hasattr(plot, 'axes') and len(
+                            plot.axes) > 0 else False
+
+                        self._set_stats(idx, min_val, avg_val, max_val, first_val, last_val, samples, first_time,
+                                        last_time, is_date, impl_plot)
+                    else:
+                        # Indicate that there is no data
+                        self.table.setItem(idx, 6, self._create_item(samples))
+
+                idx += 1
+
         # Apply formatting with the current decimal setting
         self.update_table_format()
 
@@ -206,9 +337,12 @@ class IplotQtStatistics(QWidget):
 
         for row in range(rows):
             for col in range(1, cols):
+                # Skip timestamp columns
+                if col in [7, 8]:
+                    continue
                 item = self.table.item(row, col)
                 if item is not None:
-                    data = item.data(Qt.UserRole)
+                    data = item.data(Qt.ItemDataRole.UserRole)
 
                     # Format tuple of value in case of envelope
                     if isinstance(data, tuple):

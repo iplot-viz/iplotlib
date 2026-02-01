@@ -113,7 +113,7 @@ class IplotPreferencesForm(QWidget):
         Set the python object that will be sourced by the data widgets.
         The python object should be an instance of the core iplotlib Canvas class for tthe sourcing mechanism to
         function.
-        The `QModelIndex` should've encapsulated a python object for the `Qt.UserRole`.
+        The `QModelIndex` should've encapsulated a python object for the `Qt.ItemDataRole.UserRole`.
         This encapsulation is done in :data:`~iplotlib.qt.gui.iplotQtCanvasAssembly.IplotQtCanvasAssembly.setCanvasData`
         """
         py_object = idx.data(Qt.ItemDataRole.UserRole)
@@ -181,7 +181,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_markersize_widget():
-        return IplotPreferencesForm.create_spinbox(min=0, max=10)
+        return IplotPreferencesForm.create_spinbox(min=0, max=20)
 
     @staticmethod
     def default_ticknumber_widget():
@@ -218,8 +218,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_plot_legend_position_widget():
-        return IplotPreferencesForm.create_combo_box({'same as canvas': 'Same as canvas',
-                                                      'upper right': 'Upper right', 'upper left': 'Upper left',
+        return IplotPreferencesForm.create_combo_box({'upper right': 'Upper right', 'upper left': 'Upper left',
                                                       'upper center': 'Upper center', 'lower right': 'Lower right',
                                                       'lower left': 'Lower left', 'lower center': 'Lower center',
                                                       'center right': 'Center right', 'center left': 'Center left',
@@ -245,5 +244,5 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_plot_legend_layout_widget():
-        return IplotPreferencesForm.create_combo_box({'same as canvas': 'Same as canvas', 'vertical': 'Vertical',
+        return IplotPreferencesForm.create_combo_box({'vertical': 'Vertical',
                                                       'horizontal': 'Horizontal'})

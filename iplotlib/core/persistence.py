@@ -97,7 +97,7 @@ class DataclassNumpyJSONEncoder(JSONEncoder):
                 name = field.name
                 value = getattr(o, name)
 
-                # Evitar serializar Sliders
+                # Avoid serializing Sliders
                 if name == "slider" or name.startswith("slider_"):
                     result[name] = None
                     continue

@@ -26,8 +26,6 @@
 #              - The alignment modifies the data_store. After evaluation, restore the original buffers.
 #  Feb 2023:   Changes by Alberto Luengo
 #              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
-import copy
-from collections import defaultdict
 from dataclasses import dataclass, field, fields
 import numpy as np
 import os
@@ -559,7 +557,7 @@ class IplotSignalAdapter(ProcessingSignal):
         if self.status_info.result == Result.INVALID:
             return False
 
-        # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
+        # no name implies there is no need to request data (we don't have a variable to ask the data source)
         nonempty_name = string_classifier.is_non_empty(self.name)
         if nonempty_name and self.data_access_enabled:
 
@@ -683,7 +681,7 @@ class AccessHelper:
                 if isinstance(value, np.datetime64):
                     return value
                 if isinstance(value, (int, float)) and value > 10 ** 15:
-                    return np.datetime64(value, 'ns')
+                    return np.datetime64(int(value), 'ns')
         except Exception as e:
             logger.error(f"Error {e}: Unable to convert value {value} to string timestamp")
 
@@ -993,9 +991,9 @@ class ParserHelper:
         p.substitute_var(tmp_local_env, ParserHelper.dict_result)
         p.eval_expr()
         if p.has_time_units:
-            result =  p.result.astype('int64')
+            result = p.result.astype('int64')
         else:
-            result =  p.result
+            result = p.result
         p.clear_expr()
         return result
 

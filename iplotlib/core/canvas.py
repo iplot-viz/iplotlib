@@ -139,6 +139,8 @@ class Canvas(ABC):
     equivalent_units: bool = None
     color_map: str = None
     contour_levels: int = None
+    canvas_begin: any = None
+    canvas_end: any = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -220,6 +222,8 @@ class Canvas(ABC):
         self.equivalent_units = Canvas.equivalent_units
         self.color_map = Canvas.color_map
         self.contour_levels = Canvas.contour_levels
+        self.canvas_begin = Canvas.canvas_begin
+        self.canvas_end = Canvas.canvas_end
         # Specific attributes
         self.title = Canvas.title
         self.shared_x_axis = Canvas.shared_x_axis
@@ -268,6 +272,8 @@ class Canvas(ABC):
         self.equivalent_units = old_canvas['equivalent_units']
         self.color_map = old_canvas['color_map']
         self.contour_levels = old_canvas['contour_levels']
+        self.canvas_begin = old_canvas['canvas_begin']
+        self.canvas_end = old_canvas['canvas_end']
         # Specific attributes
         self.title = old_canvas['title']
         self.shared_x_axis = old_canvas['shared_x_axis']
@@ -332,73 +338,9 @@ class Canvas(ABC):
         focus_plot = self.focus_plot
         for c, column in enumerate(self.plots):
             for r, row in enumerate(column):
-                if row and (not focus_plot or row == focus_plot):
-                    for p, plot in enumerate(row.signals.values()):
-                        for s, pl_signal in enumerate(plot):
-                            col_name = f"plot{r + 1}.{c + 1}"
-                            if len(row.signals) > 1:
-                                col_name += f".{p + 1}"
-                            if pl_signal.alias:
-                                col_name += f"_{pl_signal.alias}"
-                            else:
-                                col_name += f"_{pl_signal.name}"
+                if not row or (focus_plot and row != focus_plot):
+                    continue
+                df = row.get_signals_as_df(r, c)
+                x = pd.concat([x, df], axis=1)
 
-                            # Refresh limits
-                            # Now when using pulses, if no start time or end time are specified, the default is set to
-                            # 0 and None respectively. For that reason, it is necessary to check the ts_end of the
-                            # different signals and create the mask depending on the circumstances.
-                            if isinstance(row, PlotXYWithSlider) or isinstance(row, PlotContourWithSlider):
-                                timerange = pl_signal.time
-                                y_data = pl_signal.y_data
-                            else:
-                                if pl_signal.ts_end is None:
-                                    mask = pl_signal.x_data >= pl_signal.ts_start
-                                else:
-                                    mask = (pl_signal.x_data >= pl_signal.ts_start) & (
-                                            pl_signal.x_data <= pl_signal.ts_end)
-                                timerange = pl_signal.x_data[mask]
-                                y_data = pl_signal.y_data[mask]
-
-                            # Check min and max dates
-                            if timerange.size > 0 and bool(min(timerange) > (1 << 53) and
-                                                           max(timerange) < pd.Timestamp.max.value):
-                                timestamps = [pd.Timestamp(value) for value in timerange]
-                                format_ts = [ts.strftime("%Y-%m-%dT%H:%M:%S.%f") + "{:03d}".format(ts.nanosecond) + "Z"
-                                             for ts in timestamps]
-                            else:
-                                format_ts = timerange
-
-                            if pl_signal.envelope:
-                                result = []
-                                for i in range(len(pl_signal.y_data)):
-                                    min_values = pl_signal.y_data[i]
-                                    max_values = pl_signal.z_data[i]
-                                    avg_values = pl_signal.data_store[3][i]
-                                    result.append(f"({min_values};{avg_values};{max_values})")
-                                x[f"{col_name}.time"] = pd.Series(format_ts, name=f"{col_name}.time")
-                                x[f"{col_name}.data"] = pd.Series(result, name=f"{col_name}.data")
-                            else:
-                                timeframe = pd.Series(format_ts, name=f"{col_name}.time")
-                                if len(y_data[0]) > 1:
-                                    dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data.{i}" for i in range(
-                                        len(y_data[0]))])  # we could use x data in header
-                                else:
-                                    dataframe = pd.DataFrame(y_data, columns=[f"{col_name}.data"])
-                                x = pd.concat([x, timeframe, dataframe], axis=1)
         return x.to_csv(index=False)
-
-    def update_canvas_properties(self, properties: dict):
-        for property_name, value in properties.items():
-            if hasattr(self, property_name):
-                setattr(self, property_name, value)
-
-    def set_properties(self, properties: dict):
-        for key, value in properties.items():
-            if hasattr(self, key) and key not in ['plots']:
-                setattr(self, key, value)
-
-        # Plot level
-        for idxCol, col in enumerate(self.plots):
-            for idxPlot, plot in enumerate(col):
-                if properties['plots'][idxCol]:
-                    plot.set_properties(properties['plots'][idxCol][idxPlot])

@@ -16,10 +16,10 @@ class BeanItem(QStandardItem):
     """
     This class encapsulates various roles of a BeanItem.
     """
-    ConverterRole = Qt.UserRole + 40  #: The converter function.
-    LabelRole = Qt.UserRole + 10  #: The label string used in a GUI form
-    PropertyRole = Qt.UserRole + 20  #: The python property name.
-    WidgetRole = Qt.UserRole + 30  #: The Qt widget that exposes the python object's property.
+    ConverterRole = Qt.ItemDataRole.UserRole + 40  #: The converter function.
+    LabelRole = Qt.ItemDataRole.UserRole + 10  #: The label string used in a GUI form
+    PropertyRole = Qt.ItemDataRole.UserRole + 20  #: The python property name.
+    WidgetRole = Qt.ItemDataRole.UserRole + 30  #: The Qt widget that exposes the python object's property.
 
     def __init__(self, text: str, prototype: dict = None):
         if prototype is None:
@@ -31,7 +31,7 @@ class BeanItem(QStandardItem):
                       BeanItem.PropertyRole: prototype.get('property'),
                       BeanItem.WidgetRole: prototype.get('widget')}
 
-    def setData(self, value: typing.Any, role: int = Qt.UserRole):
+    def setData(self, value: typing.Any, role: int = Qt.ItemDataRole.UserRole):
         if role in self._data.keys():
             self._data[role] = value
         else:

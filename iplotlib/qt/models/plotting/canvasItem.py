@@ -18,7 +18,7 @@ class CanvasItem(QStandardItem):
         super().__init__(text)
         self.auto_name = auto_name
 
-    def setData(self, value: typing.Any, role: int = Qt.UserRole):
+    def setData(self, value: typing.Any, role: int = Qt.ItemDataRole.UserRole):
         super().setData(value, role=role)
         if not isinstance(value, Canvas):
             return
@@ -39,8 +39,7 @@ class CanvasItem(QStandardItem):
                     continue
                 plot_item = PlotItem(f'Plot {plot_idx + 1}', self.auto_name)
                 plot_item.setEditable(False)
-                plot_item.setData(plot, Qt.UserRole)
-                plot.id = [column_idx + 1, plot_idx + 1]
+                plot_item.setData(plot, Qt.ItemDataRole.UserRole)
 
                 if self.auto_name and plot.plot_title:
                     plot_item.setText(plot.plot_title)

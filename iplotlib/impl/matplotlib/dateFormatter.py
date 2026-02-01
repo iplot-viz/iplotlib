@@ -48,18 +48,28 @@ class NanosecondDateFormatter(ScalarFormatter):
         if locs is None or len(locs) == 0:
             return
 
-        self.cut_start = self.lcp(self.offset_ns + int(locs[0]), self.offset_ns + int(locs[-1]))
-
-        self.offset_str = 'UTC:' + self.date_fmt(self.offset_ns + locs[0], self.YEAR, self.cut_start,
+        if self.offset_ns == 100_000:
+            self.cut_start = self.lcp(self.offset_ns * int(locs[0]), self.offset_ns * int(locs[-1]))
+            self.offset_str = 'UTC:' + self.date_fmt(self.offset_ns * locs[0], self.YEAR, self.cut_start,
+                                                     postfix_end=self.postfix_end, postfix_start=self.postfix_start)
+        else:
+            self.cut_start = self.lcp(self.offset_ns + int(locs[0]), self.offset_ns + int(locs[-1]))
+            self.offset_str = 'UTC:' + self.date_fmt(self.offset_ns + locs[0], self.YEAR, self.cut_start,
                                                  postfix_end=self.postfix_end, postfix_start=self.postfix_start)
 
         super().set_locs(locs)
 
     def __call__(self, x, pos=None):
-        return self.date_fmt(int(self.offset_ns) + int(x), self.cut_start + 1, self.cut_start + self.label_segments)
+        if self.offset_ns == 100_000:
+            return self.date_fmt(int(self.offset_ns) * int(x), self.cut_start + 1, self.cut_start + self.label_segments)
+        else:
+            return self.date_fmt(int(self.offset_ns) + int(x), self.cut_start + 1, self.cut_start + self.label_segments)
 
     def format_data_short(self, value):
-        return self.date_fmt(int(self.offset_ns) + int(value), self.cut_start + 1, self.cut_start + self.label_segments)
+        if self.offset_ns == 100_000:
+            return self.date_fmt(int(self.offset_ns) * int(value), self.cut_start + 1, self.cut_start + self.label_segments)
+        else:
+            return self.date_fmt(int(self.offset_ns) + int(value), self.cut_start + 1, self.cut_start + self.label_segments)
 
     def format_data(self, value):
         return super().format_data(value)

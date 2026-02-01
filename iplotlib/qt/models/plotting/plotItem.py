@@ -21,7 +21,7 @@ class PlotItem(QStandardItem):
         super().__init__(text)
         self.auto_name = auto_name
 
-    def setData(self, value: typing.Any, role: int = Qt.UserRole):
+    def setData(self, value: typing.Any, role: int = Qt.ItemDataRole.UserRole):
         super().setData(value, role=role)
 
         if not isinstance(value, Plot):
@@ -32,8 +32,8 @@ class PlotItem(QStandardItem):
             for signal_id, signal in enumerate(stack):
                 signal_item = SignalItem(f'Signal {signal_id + 1} | stack {stack_id + 1}', self.auto_name)
                 signal_item.setEditable(False)
-                signal_item.setData(signal, Qt.UserRole)
-                signal.id = stack_id + 1
+                signal_item.setData(signal, Qt.ItemDataRole.UserRole)
+                signal.stack = stack_id + 1
                 if self.auto_name and signal.title:
                     signal_item.setText(signal.title)
                 self.appendRow(signal_item)
@@ -58,7 +58,7 @@ class PlotItem(QStandardItem):
 
         for name, axis_object in axis_plan.items():
             axis_item = AxisItem(name, self.auto_name)
-            axis_item.setData(axis_object, Qt.UserRole)
+            axis_item.setData(axis_object, Qt.ItemDataRole.UserRole)
             if self.auto_name and axis_object.label:
                 axis_item.setText(axis_object.label)
             self.appendRow(axis_item)

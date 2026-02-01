@@ -63,21 +63,15 @@ class CanvasStreamer:
         while not self.stop_flag:
             for varname in varnames:
                 dobj = self.da.get_next_data(ds, varname)
-
-                if dobj is not None and dobj.xdata is not None and len(dobj.xdata) > 0 and callback is not None:
+                if dobj is not None:
                     callback(varname, dobj)
-            time.sleep(0.1)
+            time.sleep(0.1)  # 100 ms
 
         logger.info("Issuing stop subscription...")
 
         # self.da.stopSubscription(ds)
         stopping_thread = Thread(name="stopper", target=self.da.stop_subscription, args=(ds,))
         stopping_thread.start()
-
-    def stop(self):
-        self.stop_flag = True
-        self.collectors.clear()
-        self.streamers.clear()
 
     def handler(self, callback, varname, dobj):
         signals_by_name = self.signals.get(varname)
@@ -101,3 +95,8 @@ class CanvasStreamer:
                 signal.inject_external(append=True, **result)
                 logger.debug(f"Updated {varname} with {len(dobj.xdata)} new samples")
                 callback(signal)
+
+    def stop(self):
+        self.stop_flag = True
+        self.collectors.clear()
+        self.streamers.clear()

@@ -31,7 +31,6 @@ class IplotAxesRangeCmd(IplotCommand):
         self._parser.canvas.undo_redo = True
         for limits in self.new_lim:
             self._parser.set_plot_limits(limits)
-
         self._parser.canvas.undo_redo = False
 
     def undo(self):
