@@ -61,10 +61,6 @@ class Axis:
         self.font_color = old_axis['font_color']
         self.tick_number = old_axis['tick_number']
 
-    def set_properties(self, properties: dict):
-        for key, value in properties.items():
-            if hasattr(self, key) and key not in ['_type']:
-                setattr(self, key, value)
 
 @dataclass
 class RangeAxis(Axis):
