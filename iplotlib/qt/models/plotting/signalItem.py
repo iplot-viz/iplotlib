@@ -15,5 +15,5 @@ class SignalItem(QStandardItem):
         super().__init__(text)
         self.auto_name = auto_name
 
-    def setData(self, value: typing.Any, role: int = Qt.UserRole):
+    def setData(self, value: typing.Any, role: int = Qt.ItemDataRole.UserRole):
         super().setData(value, role=role)

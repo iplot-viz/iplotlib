@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
-from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider
+from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.qt.gui.forms import (IplotPreferencesForm, AxisForm, CanvasForm, PlotXYForm, PlotContourForm,
                                    SignalXYForm, SignalContourForm)
 
@@ -59,6 +59,7 @@ class IplotQtPreferencesWindow(QMainWindow):
             PlotXY: PlotXYForm(self),
             PlotXYWithSlider: PlotXYForm(self),
             PlotContour: PlotContourForm(self),
+            PlotContourWithSlider: PlotContourForm(self),
             LinearAxis: AxisForm(self),
             SignalXY: SignalXYForm(self),
             SignalContour: SignalContourForm(self),
@@ -97,7 +98,7 @@ class IplotQtPreferencesWindow(QMainWindow):
 
     def set_canvas_from_preferences(self):
         # Get the current canvas in order to preserve the preferences if these are reset
-        original_canvas = self.treeView.model().item(0, 0).data(Qt.UserRole)
+        original_canvas = self.treeView.model().item(0, 0).data(Qt.ItemDataRole.UserRole)
         self.current_canvas = original_canvas.to_dict()
 
     def get_collective_m_time(self):
@@ -150,7 +151,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         return super().showEvent(event)
 
     def reset_prefs(self, idx: int):
-        canvas = self.treeView.model().item(idx, 0).data(Qt.UserRole)
+        canvas = self.treeView.model().item(idx, 0).data(Qt.ItemDataRole.UserRole)
         if not isinstance(canvas, Canvas):
             return
         canvas.merge(self.current_canvas)

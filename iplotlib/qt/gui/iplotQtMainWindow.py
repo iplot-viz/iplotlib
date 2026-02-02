@@ -61,7 +61,7 @@ class IplotQtMainWindow(QMainWindow):
     def wire_connections(self):
         self.toolBar.undoAction.triggered.connect(self.undo)
         self.toolBar.redoAction.triggered.connect(self.redo)
-        self.toolBar.statistics.triggered.connect(lambda x: [self.canvasStack.widget(0).show_stats()])
+        self.toolBar.statistics.triggered.connect(self.show_stats)
         self.toolBar.toolActivated.connect(
             lambda tool_name:
             [self.canvasStack.widget(i).set_mouse_mode(tool_name) for i in range(self.canvasStack.count())])
@@ -96,6 +96,12 @@ class IplotQtMainWindow(QMainWindow):
         w.stats(w.get_canvas())
         QApplication.restoreOverrideCursor()
         self.check_history(w)
+
+    def show_stats(self):
+        w = self.canvasStack.currentWidget()
+        if not w:
+            return
+        w.show_stats()
 
     def drop_history(self):
         w = self.canvasStack.currentWidget()

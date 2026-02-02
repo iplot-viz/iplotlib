@@ -54,6 +54,9 @@ class BeanItemModel(QStandardItemModel):
         if isinstance(self._pyObject, SignalXY) and property_name == 'color' and value is None:
             return PropertyManager().get_value(self._pyObject, 'original_color')
 
+        if property_name == 'label' and value is None:
+            value = getattr(self._pyObject, '_auto_label', None)
+
         if isinstance(widget, QComboBox):
             keys = [widget.itemData(i, Qt.ItemDataRole.UserRole) for i in range(widget.count())]
             try:
@@ -83,8 +86,11 @@ class BeanItemModel(QStandardItemModel):
                 return True
             else:
                 if hasattr(self._pyObject, property_name):
-                    type_func = type(getattr(self._pyObject, property_name))
-                    value = ConversionHelper.asType(value, type_func)
+                    if property_name in ["canvas_begin", "canvas_end"]:
+                        value = ConversionHelper.asType(value, float)
+                    else:
+                        type_func = type(getattr(self._pyObject, property_name))
+                        value = ConversionHelper.asType(value, type_func)
 
                 setattr(self._pyObject, property_name, value)
                 self.dataChanged.emit(index, index)

@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List
 
+import numpy as np
+
 from iplotlib.core.marker import Marker
 from iplotlib.interface import IplotSignalAdapter
 
@@ -43,7 +45,7 @@ class Signal(ABC):
     lines = []
     _type: str = None
     parent = None
-    id: int = None
+    stack: int = None
 
     def __post_init__(self):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
@@ -65,6 +67,12 @@ class Signal(ABC):
 
     def merge(self, old_signal: dict):
         pass
+
+    def get_id(self):
+        return [self.parent().col, self.parent().row, self.stack]
+
+    def get_stack(self) -> str:
+        return ".".join(map(str, self.get_id()))
 
 
 @dataclass
@@ -131,6 +139,27 @@ class SignalXY(Signal, IplotSignalAdapter):
 
     def delete_marker(self, index):
         self.markers_list.pop(index)
+
+    def set_limits(self, ranges):
+        if self.x_expr != '${self}.time' and len(self.data_store[0]) > 0 and len(self.x_data) > 0:
+            # Make sure that the x_data array is filter and sorted
+            x_data = self.x_data[~np.isnan(self.x_data)]
+            x_data_sorted = np.sort(x_data)
+
+            idx1 = np.searchsorted(x_data_sorted, ranges[0])
+            idx2 = np.searchsorted(x_data_sorted, ranges[1])
+
+            if idx1 != 0:
+                idx1 -= 1
+            if idx2 != len(self.x_data):
+                idx2 += 1
+
+            signal_begin = self.data_store[0][idx1:idx2][0]
+            signal_end = self.data_store[0][idx1:idx2][-1]
+
+            self.set_xranges([signal_begin, signal_end])
+        else:
+            self.set_xranges(ranges)
 
 
 @dataclass

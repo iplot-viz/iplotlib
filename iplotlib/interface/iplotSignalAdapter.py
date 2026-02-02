@@ -26,8 +26,6 @@
 #              - The alignment modifies the data_store. After evaluation, restore the original buffers.
 #  Feb 2023:   Changes by Alberto Luengo
 #              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
-import copy
-from collections import defaultdict
 from dataclasses import dataclass, field, fields
 import numpy as np
 import os
@@ -237,7 +235,7 @@ class IplotSignalAdapter(ProcessingSignal):
                 logger.error(f"Error {e} in {expr}")
                 continue
 
-        # Clear the diccionary result
+        # Clear the dictionary result
         ParserHelper.dict_result.clear()
 
         return data_arrays
@@ -444,7 +442,7 @@ class IplotSignalAdapter(ProcessingSignal):
         if self.data_access_enabled and self.status_info.result != Result.SUCCESS:
             return
 
-        # 2.Handle child signals.
+        # 2.Handle child signals
         # Note: In this case, `self.name` is an expression, so prior to applying x,y,z we evaluate `self.name`
         if len(self.children):
             vm = dict(self._local_env)
@@ -452,11 +450,10 @@ class IplotSignalAdapter(ProcessingSignal):
             vm['self'] = self
 
             # 2.1 Ensure all child signals have their time, data vectors (if DA enabled)
-            backup = []
-            for child in self.children:
-                backup.append([ds.copy() for ds in child.data_store])
+            # Note: Before, a backup was used to get back original data for all child. Now, we use a dict called
+            # dict_result which contains the processed data, avoiding to modify the original data of the child.
 
-            # 2.2 Align all signals onto a common grid (adaptado con logs)
+            # 2.2 Check if children are aligned in time
             tmp_local_env = dict(vm)
             tmp_local_env['self'] = self
             dependencies = []
@@ -464,7 +461,6 @@ class IplotSignalAdapter(ProcessingSignal):
                 if hasattr(child, "data_store") and len(child.data_store[0]) != 0:
                     dependencies.append(child)
 
-            # Check if all signals are aligned in time
             needs_realign = False
             for sig1, sig2 in zip(dependencies[:-1], dependencies[1:]):
                 if not np.array_equal(sig1.data_store[0], sig2.data_store[0]):
@@ -476,16 +472,8 @@ class IplotSignalAdapter(ProcessingSignal):
                 if 'self' in ParserHelper.dict_result:
                     self.data_store[0] = ParserHelper.dict_result['self']['time']
                     self.data_store[1] = ParserHelper.dict_result['self']['data']
-            else:
-                ParserHelper.dict_result = {}
-                for sig in dependencies:
-                    key = 'self' if sig.label == self.label else sig.label
-                    ParserHelper.dict_result[key] = {
-                        'time': sig.data_store[0],
-                        'data': sig.data_store[1]
-                    }
 
-            # 2.3 Evaluate self.name. It is an expression combining multiple other signals.
+            # 2.3 Evaluate 'self.name'. It is an expression combining multiple other signals
             try:
                 p = Parser()
                 p.inject(Parser.get_member_list(type(self)))
@@ -494,20 +482,25 @@ class IplotSignalAdapter(ProcessingSignal):
                 p.set_expression(self.name, True)
                 p.substitute_var(tmp_local_env, ParserHelper.dict_result)
                 p.eval_expr()
+
                 if isinstance(p.result, ProcessingSignal):
                     # Update first four buffers via slice assignment, auto-expanding as needed
                     self.data_store[:4] = p.result.data_store[:4]
+                elif isinstance(p.result, BufferObject):
+                    if ParserHelper.dict_result:
+                        result = ParserHelper.dict_result
+                        self.data_store[0] = result[list(result.keys())[0]]['time']
+                        self.data_store[1] = p.result
+                    else:
+                        self.data_store[0] = dependencies[0].time
+                        self.data_store[1] = p.result
                 else:
                     self.set_proc_fail(f"Result of expression={self.name} is not an instance of {type(self).__name__}")
                     return
             except Exception as e:
                 self.set_proc_fail(msg=str(e))
             finally:
-                # restore backup.
-                for child, saved_data in zip(self.children, backup):
-                    child.data_store.clear()
-                    for ds in saved_data:
-                        child.data_store.append(ds)
+                ParserHelper.dict_result.clear()
 
         if self.status_info.result == Result.FAIL:
             return
@@ -559,7 +552,7 @@ class IplotSignalAdapter(ProcessingSignal):
         if self.status_info.result == Result.INVALID:
             return False
 
-        # no name implies there is no need to request data. (we don't have a variable to ask the data source.)
+        # no name implies there is no need to request data (we don't have a variable to ask the data source)
         nonempty_name = string_classifier.is_non_empty(self.name)
         if nonempty_name and self.data_access_enabled:
 
@@ -683,7 +676,7 @@ class AccessHelper:
                 if isinstance(value, np.datetime64):
                     return value
                 if isinstance(value, (int, float)) and value > 10 ** 15:
-                    return np.datetime64(value, 'ns')
+                    return np.datetime64(int(value), 'ns')
         except Exception as e:
             logger.error(f"Error {e}: Unable to convert value {value} to string timestamp")
 
@@ -993,9 +986,9 @@ class ParserHelper:
         p.substitute_var(tmp_local_env, ParserHelper.dict_result)
         p.eval_expr()
         if p.has_time_units:
-            result =  p.result.astype('int64')
+            result = p.result.astype('int64')
         else:
-            result =  p.result
+            result = p.result
         p.clear_expr()
         return result
 

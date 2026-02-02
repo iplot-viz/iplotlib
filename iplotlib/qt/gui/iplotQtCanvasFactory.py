@@ -24,15 +24,15 @@ class IplotQtCanvasFactory:
     def new(backend: str, *args, **kwargs) -> IplotQtCanvas:
         """
         The backend can be any one of "matplotlib", "mpl", "mplot", "mplib" for matplotlib.
-        For VTK, the backend can be "vtk".
+        For PyQtGraph, the backend can be "pyqt".
         .. note :: This function is case-insensitive. It converts to lower case.
         """
         if backend.lower() in ["matplotlib", "mpl", "mplot", "mplib"]:
             from iplotlib.impl.matplotlib.qt import QtMatplotlibCanvas
             return QtMatplotlibCanvas(*args, **kwargs)
-        elif backend.lower() in ["vtk"]:
-            from iplotlib.impl.vtk.qt import QtVTKCanvas
-            return QtVTKCanvas(*args, **kwargs)
+        elif backend.lower() in ["pyqt"]:
+            from iplotlib.impl.pyqtgraph.qt import QtPyQtGraphCanvas
+            return QtPyQtGraphCanvas(*args, **kwargs)
         else:
-            logger.error(f"Unrecognized or unsupported backend: {backend}. Available backend: matplotlib, vtk")
+            logger.error(f"Unrecognized or unsupported backend: {backend}. Available backend: matplotlib, pyqt")
             raise InvalidBackend

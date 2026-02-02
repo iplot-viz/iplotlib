@@ -1,10 +1,11 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
-
+from datetime import datetime
 from typing import Any, Callable, Collection, List
 import pandas
 import gc
 import numpy as np
+import matplotlib as mpl
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis
 from matplotlib.axis import Axis as MPLAxis
@@ -16,10 +17,10 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator, LogLocator
 from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
-from iplotProcessing.core import BufferObject
 from iplotlib.core import (Axis,
                            LinearAxis,
                            RangeAxis,
@@ -29,16 +30,22 @@ from iplotlib.core import (Axis,
                            PlotXY,
                            PlotContour,
                            PlotXYWithSlider,
+                           PlotContourWithSlider,
+                           PlotImage,
                            Signal,
                            SignalXY,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
-from iplotlib.core.impl_base import ImplementationPlotCacheTable
 
 logger = setupLogger.get_logger(__name__)
+
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
             "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
+
+
+# mpl.rcParams['path.simplify'] = True
+# mpl.rcParams['path.simplify_threshold'] = 1.0
 
 
 class MatplotlibParser(BackendParserBase):
@@ -76,179 +83,144 @@ class MatplotlibParser(BackendParserBase):
         self.process_ipl_canvas(kwargs.get('canvas'))
         self.figure.savefig(filename)
 
-    def legend_downsampled_signal(self, signal, mpl_axes, plot_lines):
+    def legend_downsampled_signal(self, signal, mpl_axes: MPLAxes, plot_lines: Line2D):
         """
         Add or removes a '*' in the legend label to indicate if the signal is downsampled or not
         """
-        if mpl_axes.get_legend():
-            # Filter out '_child' lines from mpl_axes, which are automatically added in envelope plots
-            # These auxiliary lines should not be considered when matching lines to legend entries
-            valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
-            pos = valid_lines.index(plot_lines[0][0])
+        legend = mpl_axes.get_legend()
+        if legend is None:
+            return
 
-            legend_text = mpl_axes.get_legend().get_texts()[pos].get_text()
-            if legend_text.endswith('*') and not signal.isDownsampled:
-                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text[:-1])
-            elif not legend_text.endswith('*') and signal.isDownsampled:
-                mpl_axes.get_legend().get_texts()[pos].set_text(legend_text + '*')
+        # Filter out '_child' lines from mpl_axes, which are added in envelope plots
+        # These lines should not be considered when matching lines to legend entries
+        valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
+        pos = valid_lines.index(plot_lines)
+        legend_label = legend.get_texts()[pos]
+        legend_text = legend.get_texts()[pos].get_text()
 
-    def do_mpl_line_plot(self, signal: Signal, mpl_axes: MPLAxes, data: List[BufferObject]):
-        try:
-            cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
-            plot = cache_item.plot()
-        except AttributeError:
-            cache_item = None
-            plot = None
+        if legend_text.endswith('*') and not signal.isDownsampled:
+            legend_label.set_text(legend_text[:-1])
+        elif not legend_text.endswith('*') and signal.isDownsampled:
+            legend_label.set_text(legend_text + '*')
 
-        plot_lines = None
-        if isinstance(signal, SignalXY):
-            if isinstance(plot, PlotXYWithSlider):
-                plot_lines = self.do_mpl_line_plot_xy_slider(signal, mpl_axes, plot, cache_item, data[0], data[1],
-                                                             data[2])
-            else:
-                plot_lines = self.do_mpl_line_plot_xy(signal, mpl_axes, plot, cache_item, data[0], data[1])
-        elif isinstance(signal, SignalContour):
-            plot_lines = self.do_mpl_line_plot_contour(signal, mpl_axes, plot, data[0], data[1], data[2])
-
-        self._signal_impl_shape_lut.update({id(signal): plot_lines})
-
-    def do_mpl_line_plot_xy(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXY, cache_item, x_data, y_data):
-
-        def _get_visible_data(xd, yd, lo, hi):
-            x_displayed = xd[((xd > lo) & (xd < hi))]
-            y_displayed = yd[((xd > lo) & (xd < hi))]
-            return x_displayed, y_displayed
-
-        def _update_marker_by_point_count(marker_line: Line2D, signal_x_data, signal_style: dict):
-            if len(signal_x_data) == 1:
-                marker_line.set_marker('x')
-                marker_line.set_markersize(5)
-            else:
-                marker_line.set_marker(signal_style.get('marker') or "")
-                marker_line.set_markersize(signal_style.get('markersize'))
-
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
-        style = self.get_signal_style(signal)
-        params = dict(**style)
-        draw_fn = mpl_axes.plot
-        # Reflect downsampling in legend
-        self.legend_downsampled_signal(signal, mpl_axes, plot_lines)
-
-        # Review to implement directly in PlotXY class
-        if signal.color is None:
-            # It means that the color has been reset but must keep the original color
-            signal.color = signal.original_color
-
-        # Visible data is adjusted based on extremities, but only for unprocessed signals.
-        # Processed signals already use the visible range.
-        # Skip this step in case of streaming mode, as x_data and y_data may be empty and lead to errors.
-        if not signal.extremities and not self.canvas.streaming and mpl_axes.get_xlim() != (-0.05, 0.05):
-            x_data, y_data = _get_visible_data(x_data, y_data, *mpl_axes.get_xlim())
-
-        if isinstance(plot_lines, list):
-            if x_data.ndim == 1 and y_data.ndim == 1:
-                line = plot_lines[0][0]
-                line.set_xdata(x_data)
-                line.set_ydata(y_data)
-                _update_marker_by_point_count(line, x_data, style)
-            elif x_data.ndim == 1 and y_data.ndim == 2:
-                for i, line in enumerate(plot_lines):
-                    line[0].set_xdata(x_data)
-                    line[0].set_ydata(y_data[:, i])
-                    _update_marker_by_point_count(line[0], x_data, style)
-
-            # Put this out in a method only for streaming
-            if self.canvas.streaming:
-                ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
-                all_y_data = []
-                for signal in plot.signals[cache_item.stack_key]:
-                    if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
-                        max_x_data = signal.x_data.max()[0]
-                        for x_temp, y_temp in zip(signal.x_data, signal.y_data):
-                            if max_x_data - ax_window <= x_temp <= max_x_data:
-                                all_y_data.append(y_temp)
-                if all_y_data:
-                    diff = (max(all_y_data) - min(all_y_data)) / 15
-                    mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
-                mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
-            self.figure.canvas.draw_idle()
-            # Preserve visible status for lines
-            for new, old in zip(plot_lines, signal.lines):
-                for n, o in zip(new, old):
-                    n.set_visible(o.get_visible())
+    @staticmethod
+    def _update_marker_by_point_count(marker_line: Line2D, signal_x_data, signal_style: dict):
+        if len(signal_x_data) == 1:
+            marker_line.set_marker('x')
+            marker_line.set_markersize(5)
         else:
-            if x_data.ndim == 1 and y_data.ndim == 1:
-                plot_lines = [draw_fn(x_data, y_data, **params)]
-                _update_marker_by_point_count(plot_lines[0][0], x_data, style)
-            elif x_data.ndim == 1 and y_data.ndim == 2:
-                lines = draw_fn(x_data, y_data, **params)
-                plot_lines = [[line] for line in lines]
-                for i, line in enumerate(plot_lines):
-                    line[0].set_label(f"{signal.label}[{i}]")
-                    _update_marker_by_point_count(line[0], x_data, style)
+            marker_line.set_marker(signal_style.get('marker') or "")
+            marker_line.set_markersize(signal_style.get('markersize'))
 
-        signal.lines = plot_lines
+    def visible_status(self, plot_lines, signal):
+        self.figure.canvas.draw_idle()
 
-        return plot_lines
-
-    def do_mpl_line_plot_xy_slider(self, signal: SignalXY, mpl_axes: MPLAxes, plot: PlotXYWithSlider, cache_item,
-                                   x_data, y_data, z_data):
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
-
-        # plot.slider.valtext.set_text(pandas.Timestamp(z_data[plot.slider.val]))
-        ysub_data = y_data[plot.slider.val]
-
-        # Review to implement directly in PlotXY class
-        if signal.color is None:
-            signal.color = plot.get_next_color()
-
-        if isinstance(plot_lines, list):
-            if x_data.ndim == 1 and ysub_data.ndim == 1:
-                line = plot_lines[0][0]
-                line.set_xdata(x_data)
-                line.set_ydata(ysub_data)
-            elif x_data.ndim == 1 and ysub_data.ndim == 2:
-                for i, line in enumerate(plot_lines):
-                    line[0].set_xdata(x_data)
-                    line[0].set_ydata(ysub_data[:, i])
-
-            # Put this out in a method only for streaming
-            if self.canvas.streaming:
-                ax_window = mpl_axes.get_xlim()[1] - mpl_axes.get_xlim()[0]
-                all_y_data = []
-                for signal in plot.signals[cache_item.stack_key]:
-                    if signal.lines[0][0].get_visible() and len(signal.x_data) > 0:
-                        max_x_data = signal.x_data.max()[0]
-                        for x_temp, y_temp in zip(signal.x_data, signal.y_data):
-                            if max_x_data - ax_window <= x_temp <= max_x_data:
-                                all_y_data.append(y_temp)
-                if all_y_data:
-                    diff = (max(all_y_data) - min(all_y_data)) / 15
-                    mpl_axes.set_ylim(min(all_y_data) - diff, max(all_y_data) + diff)
-                mpl_axes.set_xlim(max(x_data) - ax_window, max(x_data))
-            self.figure.canvas.draw_idle()
-        else:
-            style = self.get_signal_style(signal)
-            params = dict(**style)
-            draw_fn = mpl_axes.plot
-            if x_data.ndim == 1 and ysub_data.ndim == 1:
-                plot_lines = [draw_fn(x_data, ysub_data, **params)]
-            elif x_data.ndim == 1 and ysub_data.ndim == 2:
-                lines = draw_fn(x_data, ysub_data, **params)
-                plot_lines = [[line] for line in lines]
-                for i, line in enumerate(plot_lines):
-                    line[0].set_label(f"{signal.label}[{i}]")
-
+        # Preserve visible status for lines
         for new, old in zip(plot_lines, signal.lines):
-            for n, o in zip(new, old):
-                n.set_visible(o.get_visible())
+            # for n, o in zip(new, old):
+            new.set_visible(old.get_visible())
 
-        signal.lines = plot_lines
+    def do_impl_streaming(self, impl_plot: MPLAxes, plot: Plot, cache_item):
+        """
+        Updates the X and Y view ranges of the Axes based on the most recent data received from the Streaming
+        """
+        ax_window = impl_plot.get_xlim()[1] - impl_plot.get_xlim()[0]
+
+        # Time window
+        now = int(datetime.now().timestamp() * 1e9)
+        min_time = now - int(ax_window)
+
+        all_y_data = []
+        for signal_ref in cache_item.signals:
+            signal = signal_ref()
+            if signal.lines[0].get_visible() and len(signal.x_data) > 0:
+                mask = (signal.x_data >= min_time) & (signal.x_data <= now)
+                all_y_data.extend(signal.y_data[mask])
+
+        if all_y_data:
+            y_max = np.nanmax(all_y_data).item()
+            y_min = np.nanmin(all_y_data).item()
+            if y_max == y_min:
+                diff = y_max * 0.05
+            else:
+                diff = (y_max - y_min) * 0.1
+            impl_plot.set_ylim(y_min - diff, y_max + diff)
+
+        begin = self.transform_value(impl_plot, 0, min_time, inverse=True)
+        end = self.transform_value(impl_plot, 0, now, inverse=True)
+        impl_plot.set_xlim(begin, end)
+
+    def set_line_data(self, line: Line2D, x_data, y_data):
+        """
+        Set the data for a Line2D
+        """
+        line.set_xdata(x=x_data)
+        line.set_ydata(y=y_data)
+
+    def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
+        return draw_fn(x_data, y_data, **style)
+
+    def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
+        plot_lines = []
+        for i in range(y_data.shape[1]):
+            style_i = dict(**style)
+            style_i['color'] = PlotXY._color_cycle[i % len(PlotXY._color_cycle)]
+            line = draw_fn(x_data, y_data[:, i], **style_i)  # List[Line2D]
+            line[0].set_label(f"{signal.label}[{i}]")
+            self._update_marker_by_point_count(line[0], x_data, style)
+            plot_lines.append(line[0])
 
         return plot_lines
 
-    def do_mpl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
-                                 z_data):
+    def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
+        return y_data[plot.slider.val]
+
+    def create_slider_plot_lines_1D(self, draw_fn, x_data, ysub_data, style) -> List[Line2D]:
+        return draw_fn(x_data, ysub_data, **style)
+
+    def create_slider_plot_lines_2D(self, draw_fn, x_data, ysub_data, style):
+        pass
+        # lines = draw_fn(x_data, ysub_data, **style)
+        # plot_lines = [[line] for line in lines]
+        # for i, line in enumerate(plot_lines):
+        #     line[0].set_label(f"{signal.label}[{i}]")
+        #
+        # return plot_lines
+
+    def slider_visible_status(self, plot_lines, signal):
+        for new, old in zip(plot_lines, signal.lines):
+            # for n, o in zip(new, old):
+            new.set_visible(old.get_visible())
+
+    def set_image_limits(self, ax_idx, signal, impl_plot: MPLAxes):
+        data = np.arange(0, len(signal.x_data)).astype(float)
+        data[0] -= 0.5
+        data[-1] += 0.5
+
+        return data
+
+    def create_image(self, impl_plot: MPLAxes, plot: PlotImage, cache_item, data):
+        interpolation = self._pm.get_value(plot, 'interpolation')
+        origin = self._pm.get_value(plot, 'origin')
+
+        img = impl_plot.imshow(data,
+                               origin=origin,
+                               interpolation=interpolation)  # type: AxesImage
+
+        divider = make_axes_locatable(impl_plot)
+
+        cax = divider.append_axes(
+            position='right',
+            size='5%',
+            pad=0.2
+        )
+
+        self.figure.colorbar(img, cax=cax)
+
+        return img
+
+    def do_impl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
+                                  z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
         contour_filled = self._pm.get_value(plot, 'contour_filled')
         legend_format = self._pm.get_value(plot, "legend_format")
@@ -292,64 +264,104 @@ class MatplotlibParser(BackendParserBase):
 
         return plot_lines
 
-    def do_mpl_envelope_plot(self, signal: Signal, mpl_axes: MPLAxes, x_data, y1_data, y2_data):
-        shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Line2D]]
-        try:
-            cache_item = self._impl_plot_cache_table.get_cache_item(mpl_axes)
-            plot = cache_item.plot()
-        except AttributeError:
-            plot = None
+    def do_impl_line_plot_contour_slider(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContourWithSlider,
+                                        x_data, y_data, z_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
 
-        # Reflect downsampling in legend
-        self.legend_downsampled_signal(signal, mpl_axes, shapes)
+        xsub_data = x_data[plot.slider.val]
+        ysub_data = y_data[plot.slider.val]
+        zsub_data = z_data[plot.slider.val]
 
-        style = dict()
-        if isinstance(signal, SignalXY):
-            style = self.get_signal_style(signal)
+        contour_filled = self._pm.get_value(plot, 'contour_filled')
+        legend_format = self._pm.get_value(plot, "legend_format")
+        equivalent_units = self._pm.get_value(plot, "equivalent_units")
+        contour_levels = self._pm.get_value(signal, 'contour_levels')
+        color_map = self._pm.get_value(signal, 'color_map')
 
-        if shapes is not None:
-            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
-                shapes[0][0].set_xdata(x_data)
-                shapes[0][0].set_ydata(y1_data)
-                shapes[0][1].set_xdata(x_data)
-                shapes[0][1].set_ydata(y2_data)
-                shapes[0][2].remove()
-                shapes[0][2] = mpl_axes.fill_between(x_data, y1_data, y2_data,
-                                                     alpha=0.3,
-                                                     color=shapes[0][0].get_color(),
-                                                     step=STEP_MAP[style['drawstyle']])
-                shapes[0][2].set_visible(shapes[0][0].get_visible())
+        if isinstance(plot_lines, QuadContourSet):
+            for tp in plot_lines.collections:
+                tp.remove()
+            """    
+            if plot.contour_legend:
+                if isinstance(plot.contour_legend, list):
+                    for clabel in plot.contour_legend:
+                        clabel.remove()
+                else:
+                    plot.contour_legend.remove()
+            """
+            if contour_filled:
+                draw_fn = mpl_axes.contourf
+            else:
+                draw_fn = mpl_axes.contour
 
+            if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
+                plot_lines = draw_fn(xsub_data, ysub_data, zsub_data, levels=contour_levels, cmap=color_map)
+                if legend_format == 'in_lines':
+                    if not contour_filled:
+                        plt.clabel(plot_lines, inline=1, fontsize=10)
+                        # plot.contour_legend = clabels
+                # else:
+                # color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
+                # color_bar.set_label(zsub_data.unit, size=self.legend_size)
+                # plot.contour_legend = color_bar
+            if equivalent_units:
+                mpl_axes.set_aspect('equal', adjustable='box')
             self.figure.canvas.draw_idle()
-
-            # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
         else:
-            params = dict(**style)
-            draw_fn = mpl_axes.plot
-            # if step is not None and step != 'None':
-            #   params.update({'where': step})
-            #  draw_fn = mpl_axes.step
+            if contour_filled:
+                draw_fn = mpl_axes.contourf
+            else:
+                draw_fn = mpl_axes.contour
 
-            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
-                line_1 = draw_fn(x_data, y1_data, **params)
-                params2 = params.copy()
-                signal.color = line_1[0].get_color()
-                params2.update(color=signal.color, label='')
-                line_2 = draw_fn(x_data, y2_data, **params2)
-                area = mpl_axes.fill_between(x_data, y1_data, y2_data,
-                                             alpha=0.3,
-                                             color=params2['color'],
-                                             step=STEP_MAP[style['drawstyle']])
-                lines = [line_1 + line_2 + [area]]
-                for new, old in zip(lines, signal.lines):
-                    for n, o in zip(new, old):
-                        n.set_visible(o.get_visible())
-                signal.lines = lines
-                self._signal_impl_shape_lut.update({id(signal): lines})
-            # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
+            if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
+                plot_lines = draw_fn(xsub_data, ysub_data, zsub_data, levels=contour_levels, cmap=color_map)
+                if legend_format == 'color_bar':
+                    color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
+                    color_bar.set_label(zsub_data.unit, size=self.legend_size)
+                    # plot.contour_legend = color_bar
+                else:
+                    if not contour_filled:
+                        plt.clabel(plot_lines, inline=1, fontsize=10)
+                        # plot.contour_legend = clabels
+            if equivalent_units:
+                mpl_axes.set_aspect('equal', adjustable='box')
+
+        return plot_lines
+
+    def update_area_envelope_1D(self, shapes, impl_plot: MPLAxes, x_data, y1_data, y2_data, style):
+        shapes[0][2].remove()
+        shapes[0][2] = impl_plot.fill_between(x_data, y1_data, y2_data,
+                                              alpha=0.3,
+                                              color=shapes[0][0].get_color(),
+                                              step=STEP_MAP[style['drawstyle']])
+        shapes[0][2].set_visible(shapes[0][0].get_visible())
+        self.figure.canvas.draw_idle()
+
+    def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, style, style2):
+        line_1 = draw_fn(x_data, y1_data, **style)  # type: List[Line2D]
+        signal.color = line_1[0].get_color()
+        style2 = dict(style)
+        style2.update(color=signal.color, label='')
+        line_2 = draw_fn(x_data, y2_data, **style2)  # type: List[Line2D]
+
+        area = impl_plot.fill_between(x_data, y1_data, y2_data,
+                                      alpha=0.3,
+                                      color=style2['color'],
+                                      step=STEP_MAP[style['drawstyle']])
+
+        lines = [line_1 + line_2 + [area]]
+        for new, old in zip(lines, signal.lines):
+            new.set_visible(old.get_visible())
+
+        return lines
 
     def clear(self):
         super().clear()
+
+        # remove any active multi‑cursors
+        for c in self._cursors:
+            c.remove()
+        self._cursors.clear()
 
         # drop cache items and remove each Axes to release all artists and callbacks
         # for ax in list(self.figure.axes):
@@ -361,14 +373,9 @@ class MatplotlibParser(BackendParserBase):
                     continue
                 for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
                     signal.lines.clear()
-        # remove any active multi‑cursors
-        for c in self._cursors:
-            c.remove()
-        self._cursors.clear()
 
         self.map_legend_to_ax.clear()
         self._impl_plot_ranges_hash.clear()
-        self._stale_citems.clear()
 
         gc.collect()
 
@@ -378,88 +385,16 @@ class MatplotlibParser(BackendParserBase):
         self.set_oaw_axis_limits(impl_plot, ax_idx, limits)
         return True
 
-    def _get_all_shared_axes(self, base_mpl_axes: MPLAxes):
-        if not isinstance(self.canvas, Canvas):
-            return []
+    def get_canvas_plots(self):
+        return list(self.figure.axes)
 
-        cache_item = self._impl_plot_cache_table.get_cache_item(base_mpl_axes)
-        if not hasattr(cache_item, 'plot'):
-            return
-        base_plot = cache_item.plot()
-        if not isinstance(base_plot, Plot):
-            return
-        if isinstance(base_plot, PlotXYWithSlider):
-            return []
-        shared = list()
-        base_limits = self.get_plot_limits(base_plot, which='original')
-        base_begin, base_end = base_limits.axes_ranges[0].begin, base_limits.axes_ranges[0].end
+    def set_canvas_gridspec(self, rows: int, cols: int):
+        """Set the canvas gridspec to the given rows and columns."""
+        self._layout = self.figure.add_gridspec(rows, cols)
 
-        if (base_begin, base_end) != (None, None) or (base_begin, base_end) == (None, None):
-            for axes in self.figure.axes:
-                cache_item = self._impl_plot_cache_table.get_cache_item(axes)
-                if not hasattr(cache_item, 'plot'):
-                    continue
-                plot = cache_item.plot()
-                if not isinstance(plot, Plot):
-                    continue
-                limits = self.get_plot_limits(plot, which='original')
-                begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
-                # Check if it is date and the max difference is 1 second
-                # Need to differentiate if it is absolute or relative
-                max_diff = self._pm.get_value(self.canvas, 'max_diff')
-                max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot, PlotXYWithSlider) else max_diff
-                if ((begin, end) == (base_begin, base_end) or (
-                        abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
-                    shared.append(axes)
-        return shared
+    def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
 
-    def process_ipl_canvas(self, canvas: Canvas):
-        """This method analyzes the iplotlib canvas data structure and maps it
-        onto an internal matplotlib.figure.Figure instance.
-
-        """
-        if canvas is not None:
-            logger.debug(f"ipl_canvas 1: {self._pm.get_value(canvas, 'step')}")
-        super().process_ipl_canvas(canvas)
-        if canvas is None:
-            self.canvas = canvas
-            self.clear()
-            return
-
-        # 1. Clear layout.
-        self.clear()
-
-        # 2. Allocate
-        self.canvas = canvas
-        if self._focus_plot is None:
-            self.canvas.focus_plot = None
-            self._layout = self.figure.add_gridspec(canvas.rows, canvas.cols)
-        else:
-            self.canvas.focus_plot = self._focus_plot
-            self._layout = self.figure.add_gridspec(1, 1)
-
-        # 3. Fill the canvas with plots.
-        stop_drawing = False
-        for i, col in enumerate(canvas.plots):
-
-            for j, plot in enumerate(col):
-
-                if self._focus_plot is not None:
-                    if self._focus_plot == plot:
-                        logger.debug(f"Focusing on plot: {plot}")
-                        self.process_ipl_plot(plot, 0, 0)
-                    elif isinstance(plot, PlotXYWithSlider):
-                        plot.slider = None
-                else:
-                    self.process_ipl_plot(plot, i, j)
-
-        # 4. Update the title at the top of canvas.
-        if self._pm.get_value(self.canvas, 'title') is not None:
-            if not self._pm.get_value(self.canvas, 'font_size'):
-                canvas.font_size = None
-            self.figure.suptitle(self._pm.get_value(self.canvas, 'title'),
-                                 size=self._pm.get_value(self.canvas, 'font_size'),
-                                 color=self._pm.get_value(self.canvas, 'font_color') or 'black')
+        self.figure.suptitle(title, fontsize=font_size, color=font_color)
 
     def process_ipl_plot_xy(self):
         pass
@@ -467,8 +402,8 @@ class MatplotlibParser(BackendParserBase):
     def process_ipl_plot_contour(self):
         pass
 
-    def process_ipl_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider, grid_item: SubplotSpec, stack_sz: int,
-                                   h_space: float):
+    def process_ipl_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider | PlotContourWithSlider,
+                                   grid_item: SubplotSpec, stack_sz: int, h_space: float):
         # Configure slider height and calculate the space for plot
         slider_height = 0.06
         plot_height = 1.0 - slider_height
@@ -483,76 +418,114 @@ class MatplotlibParser(BackendParserBase):
         slider_ax = self.figure.add_subplot(sub_subgrid_item[0, 0])
         slider_ax.set_label("slider")
 
-        # Get data for the slider
-        slider_values = plot_with_slider.signals[1][0].z_data
-        min_value = pandas.Timestamp(slider_values[0])
-        max_value = pandas.Timestamp(slider_values[-1])
+        # Case for PlotContourWithSlider
+        if isinstance(plot_with_slider, PlotContourWithSlider):
+            # Get data for the slider
+            slider_values = plot_with_slider.signals[1][0].time
+            min_value = slider_values[0]
+            max_value = slider_values[-1]
 
-        # Format start, current and end timestamps
-        # Reduced format for current value and end value
-        formatter = NanosecondDateFormatter(ax_idx=0)
-        start_format = formatter.date_fmt(min_value.value, formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
-        current_format = formatter.date_fmt(min_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
-                                            postfix_end=True)
-        end_format = formatter.date_fmt(max_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
-                                        postfix_end=True)
+            # Annotate labels along the slider axis
+            slider_ax.annotate(str(min_value), xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=8)
+            current_label = slider_ax.annotate(str(min_value), xy=(0.425, -0.3), xycoords='axes fraction', ha='left',
+                                               va='center', fontsize=8)
+            slider_ax.annotate(str(max_value), xy=(0.85, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=8)
 
-        # Annotate labels along the slider axis
-        slider_ax.annotate(start_format, xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center', fontsize=8)
-        current_label = slider_ax.annotate(current_format, xy=(0.425, -0.3), xycoords='axes fraction', ha='left',
-                                           va='center', fontsize=8)
-        slider_ax.annotate(end_format, xy=(0.85, -0.3), xycoords='axes fraction', ha='left', va='center',
-                           fontsize=8)
-
-        # Check if there was a previous plot_with_slider with a value
-        if plot_with_slider.slider_last_val is not None:
-            value = plot_with_slider.slider_last_val
-        else:
-            value = 0
-
-        # Maximum index value for the slider based on the y-data length
-        val_max = plot_with_slider.signals[1][0].y_data.shape[0] - 1
-
-        # Slider creation
-        plot_with_slider.slider = Slider(slider_ax, '', 0, val_max, valinit=value, valstep=1)
-
-        # Register the callback function to update the plot when the slider value changes
-        plot_with_slider.slider.on_changed(
-            lambda val: self._update_slider(val, plot_with_slider, slider_values, current_label, formatter)
-        )
-
-        # Check if the PlotXYWithSlider had a previously defined min/max range for the slider
-        slider_min = plot_with_slider.slider_last_min
-        slider_max = plot_with_slider.slider_last_max
-
-        if slider_min is not None and slider_max is not None:
-            # If the minimum and maximum values of a PlotXYWithSlider differ from their original values, it means
-            # they were modified due to a zoom action performed on a PlotXY that shares the same shared time.
-            # Therefore, when the PlotXYWithSlider is processed again, the red highlighted area should continue
-            # to be displayed, provided that the shared time is still active.
-            if (slider_min != 0 or slider_max != val_max) and self._pm.get_value(self.canvas, 'shared_x_axis'):
-                # Highlight the selected area in the slider
-                plot_with_slider.slider.ax.axvspan(slider_min, slider_max, color='red', alpha=0.3)
-
-                # Update the slider range based on previous limits
-                plot_with_slider.slider.valmin = slider_min
-                plot_with_slider.slider.valmax = slider_max
-
-                # Set current value according to slider limits
-                val = plot_with_slider.slider.val
-                if val < slider_min:
-                    val = slider_min
-                elif val > slider_max:
-                    val = slider_max
-
-                plot_with_slider.slider.set_val(val)
+            # Check if there was a previous plot_with_slider with a value
+            if plot_with_slider.slider_last_val is not None:
+                value = plot_with_slider.slider_last_val
             else:
+                value = 0
+
+            # Maximum index value for the slider based on the y-data length
+            val_max = plot_with_slider.signals[1][0].time.shape[0] - 1
+
+            # Slider creation
+            plot_with_slider.slider = Slider(slider_ax, '', 0, val_max, valinit=value, valstep=1)
+
+            # Register the callback function to update the plot when the slider value changes
+            plot_with_slider.slider.on_changed(
+                lambda val: self._update_slider_contour(val, plot_with_slider, slider_values, current_label))
+
+        # Case for PlotXYWithSlider
+        else:
+            # Get data for the slider
+            slider_values = plot_with_slider.signals[1][0].z_data
+            min_value = pandas.Timestamp(slider_values[0])
+            max_value = pandas.Timestamp(slider_values[-1])
+
+            # Format start, current and end timestamps
+            # Reduced format for current value and end value
+            formatter = NanosecondDateFormatter(ax_idx=0)
+            start_format = formatter.date_fmt(min_value.value, formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
+            current_format = formatter.date_fmt(min_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                                postfix_end=True)
+            end_format = formatter.date_fmt(max_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                            postfix_end=True)
+
+            # Font size for slider labels
+            fs = self._pm.get_value(plot_with_slider, 'font_size')
+
+            # Annotate labels along the slider axis
+            slider_ax.annotate(start_format, xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=fs)
+            current_label = slider_ax.annotate(current_format, xy=(0.425, -0.3), xycoords='axes fraction', ha='left',
+                                               va='center', fontsize=fs)
+            slider_ax.annotate(end_format, xy=(0.85, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=fs)
+
+            # Check if there was a previous plot_with_slider with a value
+            if plot_with_slider.slider_last_val is not None:
+                value = plot_with_slider.slider_last_val
+            else:
+                value = 0
+
+            # Maximum index value for the slider based on the y-data length
+            val_max = plot_with_slider.signals[1][0].y_data.shape[0] - 1
+
+            # Slider creation
+            plot_with_slider.slider = Slider(slider_ax, '', 0, val_max, valinit=value, valstep=1)
+            plot_with_slider.slider.valtext.set_visible(False)  # Hide slider value text
+
+            # Register the callback function to update the plot when the slider value changes
+            plot_with_slider.slider.on_changed(
+                lambda val: self._update_slider(val, plot_with_slider, slider_values, current_label, formatter)
+            )
+
+            # Check if the PlotXYWithSlider had a previously defined min/max range for the slider
+            slider_min = plot_with_slider.slider_last_min
+            slider_max = plot_with_slider.slider_last_max
+
+            if slider_min is not None and slider_max is not None:
+                # If the minimum and maximum values of a PlotXYWithSlider differ from their original values, it means
+                # they were modified due to a zoom action performed on a PlotXY that shares the same shared time.
+                # Therefore, when the PlotXYWithSlider is processed again, the red highlighted area should continue
+                # to be displayed, provided that the shared time is still active.
+                if (slider_min != 0 or slider_max != val_max) and self._pm.get_value(self.canvas, 'shared_x_axis'):
+                    # Highlight the selected area in the slider
+                    plot_with_slider.slider.ax.axvspan(slider_min, slider_max, color='red', alpha=0.3)
+
+                    # Update the slider range based on previous limits
+                    plot_with_slider.slider.valmin = slider_min
+                    plot_with_slider.slider.valmax = slider_max
+
+                    # Set current value according to slider limits
+                    val = plot_with_slider.slider.val
+                    if val < slider_min:
+                        val = slider_min
+                    elif val > slider_max:
+                        val = slider_max
+
+                    plot_with_slider.slider.set_val(val)
+                else:
+                    plot_with_slider.slider_last_min = 0
+                    plot_with_slider.slider_last_max = val_max
+            else:
+                # Initialize the PlotXYWithSlider range when no previous limits are set
                 plot_with_slider.slider_last_min = 0
                 plot_with_slider.slider_last_max = val_max
-        else:
-            # Initialize the PlotXYWithSlider range when no previous limits are set
-            plot_with_slider.slider_last_min = 0
-            plot_with_slider.slider_last_max = val_max
 
         return subgrid_item
 
@@ -572,14 +545,13 @@ class MatplotlibParser(BackendParserBase):
             stack_sz = len(plot.signals.keys())
             h_space = 0.3
 
-        if isinstance(plot, PlotXYWithSlider):
+        if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
             subgrid_item = self.process_ipl_plot_xy_slider(plot, grid_item, stack_sz, h_space)
         else:
             # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
             subgrid_item = grid_item.subgridspec(stack_sz, 1, hspace=0)  # type: GridSpecFromSubplotSpec
 
         mpl_axes = None
-        mpl_axes_prev = None
         for stack_id, key in enumerate(sorted(plot.signals.keys())):
             is_stack_plot_focused = self._focus_plot_stack_key == key
 
@@ -591,9 +563,9 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     row_id = stack_id
 
-                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0], sharex=mpl_axes_prev)
-                mpl_axes_prev = mpl_axes
+                mpl_axes = self.figure.add_subplot(subgrid_item[row_id, 0])
                 self._plot_impl_plot_lut[id(plot)].append(mpl_axes)
+
                 # Keep references to iplotlib instances for ease of access in callbacks.
                 self._impl_plot_cache_table.register(mpl_axes, self.canvas, plot, key, signals)
                 mpl_axes.set_xmargin(0)
@@ -638,8 +610,8 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     mpl_axes.grid(show_grid, which='both')
 
-                x_axis = None
                 # Update properties of the plot axes
+                x_axis = None
                 for ax_idx in range(len(plot.axes)):
                     if isinstance(plot.axes[ax_idx], Collection):
                         y_axis = plot.axes[ax_idx][stack_id]
@@ -649,12 +621,11 @@ class MatplotlibParser(BackendParserBase):
                         self.process_ipl_axis(x_axis, ax_idx, plot, mpl_axes)
 
                 for signal in signals:
-                    # self._signal_impl_plot_lut.update({id(signal): mpl_axes})
                     self._signal_impl_plot_lut.update({signal.uid: mpl_axes})
                     self.process_ipl_signal(signal)
 
-                # Set limits for processed signals
-                if isinstance(x_axis, RangeAxis) and x_axis.begin is None and x_axis.end is None:
+                # Set limits for processed signals  TODO: no more needed
+                if isinstance(x_axis, RangeAxis) and x_axis.original_begin is None and x_axis.original_end is None:
                     self.update_range_axis(x_axis, 0, mpl_axes, which='current')
                     if isinstance(plot, PlotXYWithSlider):
                         # In the case of PlotXYWithSlider, the 'original' limits must correspond to the dates stored
@@ -672,7 +643,7 @@ class MatplotlibParser(BackendParserBase):
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value(plot, 'legend')
-                if show_legend and mpl_axes.get_lines():
+                if show_legend and mpl_axes.get_lines():  # TODO improve
                     plot_leg_position = self._pm.get_value(plot, 'legend_position')
                     canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
                     plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
@@ -722,6 +693,7 @@ class MatplotlibParser(BackendParserBase):
                             new_text = current_text.replace("$", r"\$")
                             line.set_text(new_text)
 
+                    fs = self._pm.get_value(plot, 'font_size')  # Font size fot legend lines
                     legend_lines = leg.get_lines()
                     ix_legend = 0
                     for signal in signals:
@@ -735,18 +707,20 @@ class MatplotlibParser(BackendParserBase):
                             if signal.isDownsampled:
                                 legend_label = leg.texts[ix_legend].get_text() + '*'
                                 leg.texts[ix_legend].set_text(legend_label)
+                            leg.get_texts()[ix_legend].set_fontsize(fs)
                             ix_legend += 1
 
-        # Observe the axis limit change events
-        if not self.canvas.streaming:
-            for axes in mpl_axes.get_shared_x_axes().get_siblings(mpl_axes):
-                axes.callbacks.connect('xlim_changed', self._axis_update_callback)
-                axes.callbacks.connect('ylim_changed', self._axis_update_callback)
+            # Observe the axis limit change events
+            if not self.canvas.streaming:
+                mpl_axes.callbacks.connect('xlim_changed', self._x_axis_update_callback)
+                mpl_axes.callbacks.connect('ylim_changed', self._y_axis_update_callback)
 
     def _update_slider(self, val, plot, slider_values, current_label, formatter):
         for c_row in plot.signals.values():
             for c_signal in c_row:
                 self.process_ipl_signal(c_signal)
+
+        # Refresh current label value
         current_value = pandas.Timestamp(slider_values[int(val)])
         current_label.set_text(
             formatter.date_fmt(current_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
@@ -766,235 +740,136 @@ class MatplotlibParser(BackendParserBase):
                 else:
                     plot_with_slider.slider_last_val = val
 
-    def _axis_update_callback(self, mpl_axes):
+    def _update_slider_contour(self, val, plot, slider_values, current_label):
+        for c_row in plot.signals.values():
+            for c_signal in c_row:
+                self.process_ipl_signal(c_signal)
 
-        affected_axes = mpl_axes.get_shared_x_axes().get_siblings(mpl_axes)
-        if self._pm.get_value(self.canvas, 'shared_x_axis') and not self.canvas.undo_redo:
-            other_axes = self._get_all_shared_axes(mpl_axes)
-            for other_axis in other_axes:
-                cur_x_limits = self.get_oaw_axis_limits(mpl_axes, 0)
-                other_x_limits = self.get_oaw_axis_limits(other_axis, 0)
-                if cur_x_limits[0] != other_x_limits[0] or cur_x_limits[1] != other_x_limits[1]:
-                    # In case of PlotXYWithSlider, update the slider limits
-                    ci = self._impl_plot_cache_table.get_cache_item(other_axis)
-                    if not hasattr(ci, 'plot'):
-                        continue
-                    if isinstance(ci.plot(), PlotXYWithSlider):
-                        self.update_slider_limits(ci.plot(), *cur_x_limits)
-                    else:
-                        self.set_oaw_axis_limits(other_axis, 0, cur_x_limits)
+        current_value = slider_values[int(val)]
+        current_label.set_text(str(current_value))
 
-        for a in affected_axes:
-            ranges_hash = hash((*a.get_xlim(), *a.get_ylim()))
-            current_hash = self._impl_plot_ranges_hash.get(id(a))
+        plot.slider_last_val = val
 
-            if current_hash is not None and (ranges_hash == current_hash):
-                continue
-
-            self._impl_plot_ranges_hash[id(a)] = ranges_hash
-
-            ci = self._impl_plot_cache_table.get_cache_item(a)
-            if not hasattr(ci, 'plot'):
-                continue
-            if not isinstance(ci.plot(), Plot):
-                continue
-            ranges = []
-
-            for ax_idx, ax in enumerate(ci.plot().axes):
-                if isinstance(ax, Collection):
-                    self.update_multi_range_axis(ax, ax_idx, a)
-                elif isinstance(ax, RangeAxis):
-                    self.update_range_axis(ax, ax_idx, a)
-                    ranges = ax.get_limits()
-            if ci not in self._stale_citems:
-                self._stale_citems.append(ci)
-            if self.canvas.undo_redo:
-                continue
-            if isinstance(ci.plot(), PlotXYWithSlider):
-                continue
-            if not hasattr(ci, 'signals'):
-                continue
-            if not ci.signals:
-                continue
-            for signal_ref in ci.signals:
-                signal = signal_ref()
-                if hasattr(signal, "set_xranges") and isinstance(signal, SignalXY):
-                    if signal.x_expr != '${self}.time' and len(signal.data_store[0]) > 0 and len(signal.x_data) > 0:
-                        idx1 = np.searchsorted(signal.x_data, ranges[0])
-                        idx2 = np.searchsorted(signal.x_data, ranges[1])
-
-                        if idx1 != 0:
-                            idx1 -= 1
-                        if idx2 != len(signal.x_data):
-                            idx2 += 1
-
-                        signal_begin = signal.data_store[0][idx1:idx2][0]
-                        signal_end = signal.data_store[0][idx1:idx2][-1]
-
-                        signal.set_xranges([signal_begin, signal_end])
-                    else:
-                        signal.set_xranges(ranges)
-
-                    logger.debug(f"callback update {ranges[0]} axis range to {ranges[1]}")
-
-    def process_ipl_axis(self, axis: Axis, ax_idx, plot: Plot, impl_plot: MPLAxes):
-        super().process_ipl_axis(axis, ax_idx, plot, impl_plot)
-        mpl_axis = self.get_impl_axis(impl_plot, ax_idx)  # type: MPLAxis
-        self._axis_impl_plot_lut.update({id(axis): impl_plot})
-
-        if isinstance(axis, Axis):
-
-            if isinstance(mpl_axis, YAxis):
-                log_scale = self._pm.get_value(plot, 'log_scale')
-                if log_scale:
-                    mpl_axis.axes.set_yscale('log')
-                    # Format for minor ticks
-                    y_minor = LogLocator(base=10, subs=(1.0,))
-                    mpl_axis.set_minor_locator(y_minor)
-
-            fc = self._pm.get_value(axis, 'font_color')
-            fs = self._pm.get_value(axis, 'font_size')
-
-            mpl_axis._font_color = fc
-            mpl_axis._font_size = fs
-            mpl_axis._label = axis.label
-
-            label_props = dict(color=fc)
-            # Set ticks on the top and right axis
-            if self._pm.get_value(self.canvas, 'ticks_position'):
-                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
-            else:
-                tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
-
-            if fs is not None and fs > 0:
-                label_props.update({'fontsize': fs})
-                tick_props.update({'labelsize': fs})
-            if axis.label is not None:
-                mpl_axis.set_label_text(axis.label, **label_props)
-
-            mpl_axis.set_tick_params(**tick_props)
-
-        if isinstance(axis, RangeAxis) and axis.begin is not None and axis.end is not None:
-            if self._pm.get_value(self.canvas, 'autoscale') and ax_idx == 1:
-                self.autoscale_y_axis(impl_plot)
-            else:
-                logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.begin} and {axis.end}")
-                self.set_oaw_axis_limits(impl_plot, ax_idx, [axis.begin, axis.end])
-        if isinstance(axis, LinearAxis) and axis.is_date:
-            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-            mpl_axis.set_major_formatter(
-                NanosecondDateFormatter(ax_idx, offset_lut=ci.offsets,
-                                        roundh=self._pm.get_value(self.canvas, 'round_hour')))
-
-        # Configurate number of ticks and labels
-        tick_number = self._pm.get_value(axis, 'tick_number')
-        mpl_axis.set_major_locator(MaxNLocator(tick_number))
-
-    @BackendParserBase.run_in_one_thread
-    def process_ipl_signal(self, signal: Signal):
-        """Refresh a specific signal. This will repaint the necessary items after the signal
-            data has changed.
-
-        Args:
-            signal (Signal): An object derived from abstract iplotlib.core.signal.Signal
-        """
-
-        if not isinstance(signal, Signal):
+        if self._pm.get_value(plot, 'sync_slider'):
             return
 
-        # mpl_axes = self._signal_impl_plot_lut.get(id(signal))  # type: MPLAxes
+        if self._pm.get_value(self.canvas, 'shared_x_axis'):
+            plot_with_slider_shared = self.get_shared_plot_xy_slider(plot)
+            for plot_with_slider in plot_with_slider_shared:
+                if not self.canvas.focus_plot:
+                    plot_with_slider.sync_slider = True
+                    plot_with_slider.slider.set_val(val)
+                    plot_with_slider.sync_slider = False
+                else:
+                    plot_with_slider.slider_last_val = val
+
+    def _x_axis_update_callback(self, current_plot: MPLAxes):
+        super()._x_axis_update_callback(current_plot)
+
+    def _y_axis_update_callback(self, current_plot: MPLAxes):
+        super()._y_axis_update_callback(current_plot)
+
+    def process_ipl_log_axis(self, mpl_axis: MPLAxis, plot: Plot):
+        if isinstance(mpl_axis, YAxis):
+            log_scale = self._pm.get_value(plot, 'log_scale')
+            if log_scale:
+                mpl_axis.axes.set_yscale('log')
+                # Format for minor ticks
+                y_minor = LogLocator(base=10, subs=(1.0,))
+                mpl_axis.set_minor_locator(y_minor)
+
+    def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, mpl_axis: MPLAxis):
+        label_props = dict(color=fc)
+
+        # Set ticks on the top and right axis
+        if self._pm.get_value(self.canvas, 'ticks_position'):
+            tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=True, direction='in')
+        else:
+            tick_props = dict(color=fc, labelcolor=fc, tick1On=True, tick2On=False)
+
+        if fs is not None and fs > 0:
+            label_props.update({'fontsize': fs})
+            tick_props.update({'labelsize': fs})
+        if axis.label is not None:
+            mpl_axis.set_label_text(axis.label, **label_props)
+
+        # Font size for UTC label
+        mpl_axis.get_offset_text().set_fontsize(fs)
+
+        mpl_axis.set_tick_params(**tick_props)
+
+        # Set number of ticks and labels
+        mpl_axis.set_major_locator(MaxNLocator(tick_number))
+
+    def process_ipl_axis_formatter(self, impl_plot: MPLAxes, mpl_axis: MPLAxis, ax_idx: int):
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx,
+                                                             offset_lut=ci.offsets,
+                                                             roundh=self._pm.get_value(self.canvas, 'round_hour')))
+
+    def process_ipl_signal_impl_plot(self, signal: Signal):
         mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
         if not isinstance(mpl_axes, MPLAxes):
             logger.error(f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
+        return mpl_axes
 
-        # All good, make a data access request.
-        # logger.debug(f"\tprocessipsignal before ts_start {signal.ts_start} ts_end {signal.ts_end}
-        # status: {signal.status_info.result} ")
-        signal_data = signal.get_data()
+    def process_ipl_signal_annotations(self, signal: Signal, impl_plot: MPLAxes):
+        if not isinstance(signal, SignalXY) or isinstance(signal.parent(), PlotImage):
+            return
 
-        data = self.transform_data(mpl_axes, signal_data)
+        if impl_plot.get_lines()[0].get_marker() == 'None':
+            return
 
-        if hasattr(signal, 'envelope') and signal.envelope:
-            if len(data) != 3:
-                logger.error(f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data"
-                             f" arrays (==3). {signal}")
-                return
-            self.do_mpl_envelope_plot(signal, mpl_axes, data[0], data[1], data[2])
-        else:
-            if len(data) < 2:
-                logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
-                             f"arrays (<2). {signal}")
-                return
-            self.do_mpl_line_plot(signal, mpl_axes, data)
+        if signal.markers_list:
+            annotations_names = [child.get_text() for child in impl_plot.get_children() if
+                                 isinstance(child, plt.Annotation)]
+            for marker in signal.markers_list:
+                if marker.visible:
+                    # Draw marker with correct offset to right display
+                    x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
+                    y = marker.xy[1]
 
-        self.update_axis_labels_with_units(mpl_axes, signal)
+                    # Create annotation if not present (import case)
+                    if marker.name not in annotations_names:
+                        impl_plot.annotate(text=marker.name,
+                                           xy=(x, y),
+                                           xytext=(x, y),
+                                           bbox=dict(boxstyle="round,pad=0.3",
+                                                     edgecolor="black",
+                                                     facecolor=marker.color))
+                    else:
+                        # Update position if annotation already exists
+                        prev_annotation = [child for child in impl_plot.get_children() if isinstance(child,
+                                                                                                     plt.Annotation) and child.get_text() == marker.name]  # type: List[plt.Annotation]
 
-        # Check for annotations if the marker labels are visible
-        if isinstance(signal, SignalXY):
-            if mpl_axes.get_lines()[0].get_marker() == 'None':
-                return
-            if signal.markers_list:
-                annotations_names = [child.get_text() for child in mpl_axes.get_children() if
-                                     isinstance(child, plt.Annotation)]
-                for marker in signal.markers_list:
-                    if marker.visible:
-                        # Check if the marker is already drawn
-                        if marker.name not in annotations_names:
-                            x = self.transform_value(mpl_axes, 0, marker.xy[0], inverse=True)
-                            y = marker.xy[1]
-                            mpl_axes.annotate(text=marker.name,
-                                              xy=(x, y),
-                                              xytext=(x, y),
-                                              bbox=dict(boxstyle="round,pad=0.3", edgecolor="black",
-                                                        facecolor=marker.color))
+                        prev_annotation[0].xy = (x, y)
+                        prev_annotation[0].set_position((x, y))
 
-    def autoscale_y_axis(self, impl_plot, margin=0.1):
-        """This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
-        ax -- a matplotlib axes object
-        margin -- the fraction of the total height of the y-data to pad the upper and lower ylims"""
+    def get_impl_data(self, line: Line2D):
+        return line.get_xdata(), line.get_ydata()
 
-        def get_bottom_top(x_line):
-            xd = x_line.get_xdata()
-            yd = x_line.get_ydata()
-            lo, hi = impl_plot.get_xlim()
-            y_displayed = yd[((xd > lo) & (xd < hi))]
-
-            # Check if the visible Y data contains valid values
-            if len(y_displayed) > 0:
-                # Check if there exist NaN values in the y_displayed array
-                if np.isnan(y_displayed).any():
-                    y_displayed = y_displayed[~np.isnan(y_displayed)]
-                min_bot = np.min(y_displayed)
-                max_top = np.max(y_displayed)
-            else:
-                min_bot = np.inf
-                max_top = -np.inf
-            return min_bot, max_top
-
+    def get_impl_lines(self, impl_plot: MPLAxes):
         lines = impl_plot.get_lines()
         lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY"]]
-        bot, top = np.inf, -np.inf
+        lo, hi = impl_plot.get_xlim()
+        return lines, lo, hi
 
-        for line in lines:
-            new_bot, new_top = get_bottom_top(line)
-            if new_bot < bot:
-                bot = new_bot
-            if new_top > top:
-                top = new_top
-
-        # Apply default Y limits in case of missing or invalid data
-        if bot == np.inf and top == -np.inf:
-            bot, top = 0, 1
+    def autoscale_y_axis(self, impl_plot: MPLAxes, padding=0.1):
+        """
+        This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
+        ax -- a matplotlib axes object
+        padding -- the fraction of the total height of the y-data to pad the upper and lower ylims
+        """
+        bot, top = super().autoscale_y_axis(impl_plot)
 
         # Compute final margin
         h = (top - bot)
-        n_new_bot = bot - margin * h
-        n_new_top = top + margin * h
+        n_new_bot = bot - padding * h
+        n_new_top = top + padding * h
 
         # Set new Y axis limits
-        if lines:
-            self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
+        self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
         """
@@ -1176,6 +1051,8 @@ class MatplotlibParser(BackendParserBase):
         style['linewidth'] = self._pm.get_value(signal, 'line_size')
         style['linestyle'] = (self._pm.get_value(signal, 'line_style')).lower()
         style['marker'] = self._pm.get_value(signal, 'marker')
+        if style['marker'] == 'None':
+            style['marker'] = None
         style['markersize'] = self._pm.get_value(signal, 'marker_size')
         step = self._pm.get_value(signal, 'step')
         if step is None:
@@ -1184,70 +1061,8 @@ class MatplotlibParser(BackendParserBase):
 
         return style
 
-    def add_marker_scaled(self, mpl_axes: MPLAxes, plot: PlotXY, x_coord, y_coord):
-        """
-        Function that returns the nearest point of the plot to create the corresponding marker.
-        As the scale of the axes is very different, a normalization of the data is done to adjust the data to a
-        common scale.
-        """
-
-        ranges = []
-        marker_signal = None
-        nearest_point = None
-        minor_dist = float('inf')
-
-        for ax_idx, ax in enumerate(plot.axes):
-            if isinstance(ax, RangeAxis):
-                ranges = ax.get_limits()
-
-        # Get the lines that are actually located in the current mpl_axes
-        valid_lines = [line.get_label() for line in mpl_axes.get_lines()]
-
-        # With the new X axis limits, we obtain the points within that range
-        for stack in plot.signals.values():
-            for signal in stack:
-                if signal.label not in valid_lines:
-                    continue
-                idx1 = np.searchsorted(signal.x_data, ranges[0])
-                idx2 = np.searchsorted(signal.x_data, ranges[1])
-
-                x_zoom = signal.data_store[0][idx1:idx2]
-                y_zoom = signal.data_store[1][idx1:idx2]
-
-                # If the number of samples per signal is less than 50 we continue, if not the user shall keep zooming
-                if len(x_zoom) > 50:
-                    return None, len(x_zoom)
-
-                # If there are no data points in the zoomed region, skip this signal
-                if not len(x_zoom):
-                    continue
-
-                # Get the points (x,y) for each signal
-                points = list(zip(x_zoom, y_zoom))
-
-                # Normalization of the points
-                x_min, x_max = min(x_zoom), max(x_zoom)
-                y_min, y_max = min(y_zoom), max(y_zoom)
-
-                x_range = x_max - x_min if x_max != x_min else 1
-                y_range = y_max - y_min if y_max != y_min else 1
-                scaled_points = [((px - x_min) / x_range, (py - y_min) / y_range) for px, py in points]
-
-                # Normalization of the coordinates where the user clicked
-                x_coord_transform = self.transform_value(mpl_axes, 0, x_coord)
-                scaled_x = (x_coord_transform - x_min) / x_range
-                scaled_y = (y_coord - y_min) / y_range
-
-                # Get the nearest point using the Euclidian distance
-                distances = [np.sqrt((px - scaled_x) ** 2 + (py - scaled_y) ** 2) for px, py in scaled_points]
-                idx_result = np.argmin(distances)
-
-                if distances[idx_result] < minor_dist:
-                    minor_dist = distances[idx_result]
-                    nearest_point = points[idx_result]
-                    marker_signal = signal
-
-        return nearest_point, marker_signal
+    def get_line_label(self, line: Line2D):
+        return line.get_label()
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):
@@ -1273,84 +1088,46 @@ class MatplotlibParser(BackendParserBase):
         else:
             return None
 
-    def get_oaw_axis_limits(self, impl_plot, ax_idx: int):
-        """Offset-aware version of implementation's get_x_limit, get_y_limit"""
-        begin, end = (None, None)
-        if ax_idx == 0:
-            begin, end = self.get_impl_x_axis_limits(impl_plot)
-        elif ax_idx == 1:
-            begin, end = self.get_impl_y_axis_limits(impl_plot)
-        return self.transform_value(impl_plot, ax_idx, begin), self.transform_value(impl_plot, ax_idx, end)
-
-    def set_impl_x_axis_limits(self, impl_plot: Any, limits: tuple):
+    def set_impl_x_axis_limits(self, impl_plot: MPLAxes, limits: tuple):
         if isinstance(impl_plot, MPLAxes):
             impl_plot.set_xlim(limits[0], limits[1])
 
-    def set_impl_y_axis_limits(self, impl_plot: Any, limits: tuple):
+    def set_impl_y_axis_limits(self, impl_plot: MPLAxes, limits: tuple):
         if isinstance(impl_plot, MPLAxes):
             impl_plot.set_ylim(limits[0], limits[1])
         else:
             return None
 
-    def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits) -> None:
+    def set_impl_x_axis_label_text(self, impl_plot: MPLAxes, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        if ci.offsets[ax_idx] is None:
-            ci.offsets[ax_idx] = self.create_offset(limits)
-
-        if ci.offsets[ax_idx] is not None:
-            begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
-            end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
-            logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 0")
-        else:
-            begin = limits[0]
-            end = limits[1]
-            logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx} case 1")
-        if ax_idx == 0:
-            if begin == end and begin is not None:
-                begin = end - 1
-            self.set_impl_x_axis_limits(impl_plot, (begin, end))
-        elif ax_idx == 1:
-            self.set_impl_y_axis_limits(impl_plot, (begin, end))
-
-    def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
-        """Implementations should set the x_axis label text"""
-        self.get_impl_x_axis(impl_plot).set_label_text(text)
+        i_plot = ci.plot() if ci else None
+        fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
+        fs = self._pm.get_value(i_plot, 'font_size') if i_plot else None
+        label_props = {}
+        if fc:
+            label_props['color'] = fc
+        if fs and fs > 0:
+            label_props['fontsize'] = fs
+        self.get_impl_x_axis(impl_plot).set_label_text(text, **label_props)
 
     def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
-        """Implementations should set the y_axis label text"""
-        self.get_impl_y_axis(impl_plot).set_label_text(text)
+        if not isinstance(impl_plot, MPLAxes):
+            return
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        i_plot = ci.plot() if ci else None
+        fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
+        fs = self._pm.get_value(i_plot, 'font_size') if i_plot else None
+        label_props = {}
+        if fc:
+            label_props['color'] = fc
+        if fs and fs > 0:
+            label_props['fontsize'] = fs
+        self.get_impl_y_axis(impl_plot).set_label_text(text, **label_props)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
         return self._impl_plot_cache_table.transform_value(impl_plot, ax_idx, value, inverse=inverse)
-
-    def transform_data(self, impl_plot: Any, data):
-        """This function post processes data if it cannot be plotted with matplotlib directly.
-        Currently, it transforms data if it is a large integer which can cause overflow in matplotlib"""
-        ret = []
-        if isinstance(data, Collection):
-            ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-            for i, d in enumerate(data):
-                logger.debug(f"\t transform data i={i} d = {d} ")
-
-                offset = None
-                if ci:
-                    offset = ci.offsets[i]
-                    if offset is None and i == 0:
-                        offset = self.create_offset(d)
-                        ci.offsets[i] = offset
-
-                if ci and offset is not None:
-                    logger.debug(f"\tApplying data offsets {offset} to plot {id(impl_plot)} ax_idx: {i}")
-                    if isinstance(d, Collection) and not isinstance(d, (str, bytes)):
-                        arr = np.asarray(d, dtype=np.int64)
-                        ret.append(BufferObject(arr - offset))
-                    else:
-                        ret.append(np.int64(d) - offset)
-                else:
-                    ret.append(d)
-        return ret
 
 
 def get_data_range(data, axis_idx):

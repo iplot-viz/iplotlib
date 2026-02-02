@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Collection
 import numpy as np
 
 from matplotlib.axes import Axes as MPLAxes
@@ -150,7 +150,7 @@ class IplotMultiCursor(Widget):
                                                           xycoords="data",  # xytext=(-200, 0),
                                                           verticalalignment="top", horizontalalignment="left",
                                                           **value_arrow_props)
-                            value_annotation.line = line
+                            value_annotation.line = line if isinstance(line, Collection) else [line]
                             ax.add_artist(value_annotation)
                             self.value_annotations.append(value_annotation)
 
@@ -230,6 +230,22 @@ class IplotMultiCursor(Widget):
 
         if self.x_label:
             for arrow, ax in zip(self.x_arrows, self.axes):
+                ci = self._cache_table.get_cache_item(ax)
+                ip = ci.plot()
+                is_last = True
+                for ax2 in self.axes:
+                    ci2 = self._cache_table.get_cache_item(ax2)
+                    ip2 = ci2.plot()
+                    if (getattr(ip2, "row", None) == getattr(ip, "row", None)
+                            and getattr(ip2, "col", None) == getattr(ip, "col", None)
+                            and ci2.stack_key > ci.stack_key):
+                        is_last = False
+                        break
+
+                if not is_last:
+                    arrow.set_visible(False)
+                    continue
+
                 x_min, x_max = ax.get_xbound()
                 if x_min < event.xdata < x_max and ax.get_xaxis().get_visible():
                     arrow.set_position((event.xdata, arrow.get_position()[1]))
