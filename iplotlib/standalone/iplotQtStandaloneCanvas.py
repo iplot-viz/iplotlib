@@ -116,7 +116,7 @@ class QStandaloneCanvas:
             self.prepare()
         self.show()
         logger.warning('The main thread is now blocked. You can no longer add canvases.')
-        return self.app.exec_()
+        return self.app.exec()
 
 
 args = None
@@ -137,7 +137,9 @@ def proxy_main():
         if hasattr(module, 'skip'):
             continue
         if hasattr(module, 'get_canvas'):
-            canvas_app.add_canvas(module.get_canvas())
+            canvas = module.get_canvas()
+            if canvas is not None:
+                canvas_app.add_canvas(canvas)
     canvas_app.show()
     return canvas_app.run()
 
