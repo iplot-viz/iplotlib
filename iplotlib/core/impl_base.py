@@ -27,7 +27,7 @@ from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits, IplSliderLimits
-from iplotlib.core.plot import Plot, PlotXY, PlotXYWithSlider, PlotContour, PlotImage
+from iplotlib.core.plot import Plot, PlotXY, PlotXYWithSlider, PlotContour, PlotImage, PlotContourWithSlider
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 import iplotLogging.setupLogger as Sl
 
@@ -633,7 +633,8 @@ class BackendParserBase(ABC):
             x_axis = plot.axes[0]
             if isinstance(x_axis, LinearAxis) and not x_axis.is_date:
                 if hasattr(signal, 'x_data') and hasattr(signal.x_data, 'unit'):
-                    if not isinstance(plot, PlotXYWithSlider):
+                    if not (
+                            isinstance(ci.plot(), PlotXYWithSlider) or isinstance(ci.plot(), PlotContourWithSlider)):
                         x_auto = f"[{signal.x_data.unit or '? '}]"
             if x_axis.label == "":
                 x_text = ""
@@ -913,6 +914,11 @@ class BackendParserBase(ABC):
                                   z_data):
         """"""
 
+    @abstractmethod
+    def do_impl_line_plot_contour_slider(self, signal: SignalContour, impl_plot: Any, plot: PlotContourWithSlider,
+                                         x_data, y_data, z_data):
+        """"""
+
     def do_impl_envelope_plot(self, signal: Signal, impl_plot: Any, x_data, y1_data, y2_data):
         # TODO: check if Signal is a SignalXY. If not raise WARNING
         shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Any]]
@@ -965,7 +971,10 @@ class BackendParserBase(ABC):
             else:
                 plot_lines = self.do_impl_line_plot_xy(signal, impl_plot, plot, cache_item, data[0], data[1])
         elif isinstance(signal, SignalContour):
-            plot_lines = self.do_impl_line_plot_contour(signal, impl_plot, plot, data[0], data[1], data[2])
+            if isinstance(plot, PlotContourWithSlider):
+                plot_lines = self.do_impl_line_plot_contour_slider(signal, impl_plot, plot, data[0], data[1], data[2])
+            else:
+                plot_lines = self.do_impl_line_plot_contour(signal, impl_plot, plot, data[0], data[1], data[2])
 
         self._signal_impl_shape_lut.update({id(signal): plot_lines})
 
@@ -1042,7 +1051,8 @@ class BackendParserBase(ABC):
         base_begin, base_end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
         for col in self.canvas.plots:
             for plot in col:
-                if not isinstance(plot, PlotXYWithSlider) or plot == plot_with_slider:
+                if not (isinstance(plot, PlotXYWithSlider) or isinstance(plot,
+                                                                         PlotContourWithSlider)) or plot == plot_with_slider:
                     continue
                 limits = self.get_plot_limits(plot, 'original')
                 begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
@@ -1207,7 +1217,7 @@ class BackendParserBase(ABC):
                 plot_lims.axes_ranges.append(IplAxisLimits(y_begin, y_end))  # Case modify Axis preferences
 
         # IplSliderLimits
-        if isinstance(plot, PlotXYWithSlider):
+        if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
             plot_lims.sliders_ranges.append(IplSliderLimits(plot.slider_last_min, plot.slider_last_max))
 
         return plot_lims

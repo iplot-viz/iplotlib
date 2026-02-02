@@ -30,6 +30,7 @@ from iplotlib.core import (Axis,
                            PlotXY,
                            PlotContour,
                            PlotXYWithSlider,
+                           PlotContourWithSlider,
                            PlotImage,
                            Signal,
                            SignalXY,
@@ -263,6 +264,70 @@ class MatplotlibParser(BackendParserBase):
 
         return plot_lines
 
+    def do_impl_line_plot_contour_slider(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContourWithSlider,
+                                        x_data, y_data, z_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
+
+        xsub_data = x_data[plot.slider.val]
+        ysub_data = y_data[plot.slider.val]
+        zsub_data = z_data[plot.slider.val]
+
+        contour_filled = self._pm.get_value(plot, 'contour_filled')
+        legend_format = self._pm.get_value(plot, "legend_format")
+        equivalent_units = self._pm.get_value(plot, "equivalent_units")
+        contour_levels = self._pm.get_value(signal, 'contour_levels')
+        color_map = self._pm.get_value(signal, 'color_map')
+
+        if isinstance(plot_lines, QuadContourSet):
+            for tp in plot_lines.collections:
+                tp.remove()
+            """    
+            if plot.contour_legend:
+                if isinstance(plot.contour_legend, list):
+                    for clabel in plot.contour_legend:
+                        clabel.remove()
+                else:
+                    plot.contour_legend.remove()
+            """
+            if contour_filled:
+                draw_fn = mpl_axes.contourf
+            else:
+                draw_fn = mpl_axes.contour
+
+            if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
+                plot_lines = draw_fn(xsub_data, ysub_data, zsub_data, levels=contour_levels, cmap=color_map)
+                if legend_format == 'in_lines':
+                    if not contour_filled:
+                        plt.clabel(plot_lines, inline=1, fontsize=10)
+                        # plot.contour_legend = clabels
+                # else:
+                # color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
+                # color_bar.set_label(zsub_data.unit, size=self.legend_size)
+                # plot.contour_legend = color_bar
+            if equivalent_units:
+                mpl_axes.set_aspect('equal', adjustable='box')
+            self.figure.canvas.draw_idle()
+        else:
+            if contour_filled:
+                draw_fn = mpl_axes.contourf
+            else:
+                draw_fn = mpl_axes.contour
+
+            if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
+                plot_lines = draw_fn(xsub_data, ysub_data, zsub_data, levels=contour_levels, cmap=color_map)
+                if legend_format == 'color_bar':
+                    color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
+                    color_bar.set_label(zsub_data.unit, size=self.legend_size)
+                    # plot.contour_legend = color_bar
+                else:
+                    if not contour_filled:
+                        plt.clabel(plot_lines, inline=1, fontsize=10)
+                        # plot.contour_legend = clabels
+            if equivalent_units:
+                mpl_axes.set_aspect('equal', adjustable='box')
+
+        return plot_lines
+
     def update_area_envelope_1D(self, shapes, impl_plot: MPLAxes, x_data, y1_data, y2_data, style):
         shapes[0][2].remove()
         shapes[0][2] = impl_plot.fill_between(x_data, y1_data, y2_data,
@@ -337,8 +402,8 @@ class MatplotlibParser(BackendParserBase):
     def process_ipl_plot_contour(self):
         pass
 
-    def process_ipl_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider, grid_item: SubplotSpec, stack_sz: int,
-                                   h_space: float):
+    def process_ipl_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider | PlotContourWithSlider,
+                                   grid_item: SubplotSpec, stack_sz: int, h_space: float):
         # Configure slider height and calculate the space for plot
         slider_height = 0.06
         plot_height = 1.0 - slider_height
@@ -353,80 +418,114 @@ class MatplotlibParser(BackendParserBase):
         slider_ax = self.figure.add_subplot(sub_subgrid_item[0, 0])
         slider_ax.set_label("slider")
 
-        # Get data for the slider
-        slider_values = plot_with_slider.signals[1][0].z_data
-        min_value = pandas.Timestamp(slider_values[0])
-        max_value = pandas.Timestamp(slider_values[-1])
+        # Case for PlotContourWithSlider
+        if isinstance(plot_with_slider, PlotContourWithSlider):
+            # Get data for the slider
+            slider_values = plot_with_slider.signals[1][0].time
+            min_value = slider_values[0]
+            max_value = slider_values[-1]
 
-        # Format start, current and end timestamps
-        # Reduced format for current value and end value
-        formatter = NanosecondDateFormatter(ax_idx=0)
-        start_format = formatter.date_fmt(min_value.value, formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
-        current_format = formatter.date_fmt(min_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
-                                            postfix_end=True)
-        end_format = formatter.date_fmt(max_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
-                                        postfix_end=True)
+            # Annotate labels along the slider axis
+            slider_ax.annotate(str(min_value), xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=8)
+            current_label = slider_ax.annotate(str(min_value), xy=(0.425, -0.3), xycoords='axes fraction', ha='left',
+                                               va='center', fontsize=8)
+            slider_ax.annotate(str(max_value), xy=(0.85, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=8)
 
-        # Font size for slider labels
-        fs = self._pm.get_value(plot_with_slider, 'font_size')
-
-        # Annotate labels along the slider axis
-        slider_ax.annotate(start_format, xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center', fontsize=fs)
-        current_label = slider_ax.annotate(current_format, xy=(0.425, -0.3), xycoords='axes fraction', ha='left',
-                                           va='center', fontsize=fs)
-        slider_ax.annotate(end_format, xy=(0.85, -0.3), xycoords='axes fraction', ha='left', va='center',
-                           fontsize=fs)
-
-        # Check if there was a previous plot_with_slider with a value
-        if plot_with_slider.slider_last_val is not None:
-            value = plot_with_slider.slider_last_val
-        else:
-            value = 0
-
-        # Maximum index value for the slider based on the y-data length
-        val_max = plot_with_slider.signals[1][0].y_data.shape[0] - 1
-
-        # Slider creation
-        plot_with_slider.slider = Slider(slider_ax, '', 0, val_max, valinit=value, valstep=1)
-        plot_with_slider.slider.valtext.set_visible(False)  # Hide slider value text
-
-        # Register the callback function to update the plot when the slider value changes
-        plot_with_slider.slider.on_changed(
-            lambda val: self._update_slider(val, plot_with_slider, slider_values, current_label, formatter)
-        )
-
-        # Check if the PlotXYWithSlider had a previously defined min/max range for the slider
-        slider_min = plot_with_slider.slider_last_min
-        slider_max = plot_with_slider.slider_last_max
-
-        if slider_min is not None and slider_max is not None:
-            # If the minimum and maximum values of a PlotXYWithSlider differ from their original values, it means
-            # they were modified due to a zoom action performed on a PlotXY that shares the same shared time.
-            # Therefore, when the PlotXYWithSlider is processed again, the red highlighted area should continue
-            # to be displayed, provided that the shared time is still active.
-            if (slider_min != 0 or slider_max != val_max) and self._pm.get_value(self.canvas, 'shared_x_axis'):
-                # Highlight the selected area in the slider
-                plot_with_slider.slider.ax.axvspan(slider_min, slider_max, color='red', alpha=0.3)
-
-                # Update the slider range based on previous limits
-                plot_with_slider.slider.valmin = slider_min
-                plot_with_slider.slider.valmax = slider_max
-
-                # Set current value according to slider limits
-                val = plot_with_slider.slider.val
-                if val < slider_min:
-                    val = slider_min
-                elif val > slider_max:
-                    val = slider_max
-
-                plot_with_slider.slider.set_val(val)
+            # Check if there was a previous plot_with_slider with a value
+            if plot_with_slider.slider_last_val is not None:
+                value = plot_with_slider.slider_last_val
             else:
+                value = 0
+
+            # Maximum index value for the slider based on the y-data length
+            val_max = plot_with_slider.signals[1][0].time.shape[0] - 1
+
+            # Slider creation
+            plot_with_slider.slider = Slider(slider_ax, '', 0, val_max, valinit=value, valstep=1)
+
+            # Register the callback function to update the plot when the slider value changes
+            plot_with_slider.slider.on_changed(
+                lambda val: self._update_slider_contour(val, plot_with_slider, slider_values, current_label))
+
+        # Case for PlotXYWithSlider
+        else:
+            # Get data for the slider
+            slider_values = plot_with_slider.signals[1][0].z_data
+            min_value = pandas.Timestamp(slider_values[0])
+            max_value = pandas.Timestamp(slider_values[-1])
+
+            # Format start, current and end timestamps
+            # Reduced format for current value and end value
+            formatter = NanosecondDateFormatter(ax_idx=0)
+            start_format = formatter.date_fmt(min_value.value, formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
+            current_format = formatter.date_fmt(min_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                                postfix_end=True)
+            end_format = formatter.date_fmt(max_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                            postfix_end=True)
+
+            # Font size for slider labels
+            fs = self._pm.get_value(plot_with_slider, 'font_size')
+
+            # Annotate labels along the slider axis
+            slider_ax.annotate(start_format, xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=fs)
+            current_label = slider_ax.annotate(current_format, xy=(0.425, -0.3), xycoords='axes fraction', ha='left',
+                                               va='center', fontsize=fs)
+            slider_ax.annotate(end_format, xy=(0.85, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=fs)
+
+            # Check if there was a previous plot_with_slider with a value
+            if plot_with_slider.slider_last_val is not None:
+                value = plot_with_slider.slider_last_val
+            else:
+                value = 0
+
+            # Maximum index value for the slider based on the y-data length
+            val_max = plot_with_slider.signals[1][0].y_data.shape[0] - 1
+
+            # Slider creation
+            plot_with_slider.slider = Slider(slider_ax, '', 0, val_max, valinit=value, valstep=1)
+            plot_with_slider.slider.valtext.set_visible(False)  # Hide slider value text
+
+            # Register the callback function to update the plot when the slider value changes
+            plot_with_slider.slider.on_changed(
+                lambda val: self._update_slider(val, plot_with_slider, slider_values, current_label, formatter)
+            )
+
+            # Check if the PlotXYWithSlider had a previously defined min/max range for the slider
+            slider_min = plot_with_slider.slider_last_min
+            slider_max = plot_with_slider.slider_last_max
+
+            if slider_min is not None and slider_max is not None:
+                # If the minimum and maximum values of a PlotXYWithSlider differ from their original values, it means
+                # they were modified due to a zoom action performed on a PlotXY that shares the same shared time.
+                # Therefore, when the PlotXYWithSlider is processed again, the red highlighted area should continue
+                # to be displayed, provided that the shared time is still active.
+                if (slider_min != 0 or slider_max != val_max) and self._pm.get_value(self.canvas, 'shared_x_axis'):
+                    # Highlight the selected area in the slider
+                    plot_with_slider.slider.ax.axvspan(slider_min, slider_max, color='red', alpha=0.3)
+
+                    # Update the slider range based on previous limits
+                    plot_with_slider.slider.valmin = slider_min
+                    plot_with_slider.slider.valmax = slider_max
+
+                    # Set current value according to slider limits
+                    val = plot_with_slider.slider.val
+                    if val < slider_min:
+                        val = slider_min
+                    elif val > slider_max:
+                        val = slider_max
+
+                    plot_with_slider.slider.set_val(val)
+                else:
+                    plot_with_slider.slider_last_min = 0
+                    plot_with_slider.slider_last_max = val_max
+            else:
+                # Initialize the PlotXYWithSlider range when no previous limits are set
                 plot_with_slider.slider_last_min = 0
                 plot_with_slider.slider_last_max = val_max
-        else:
-            # Initialize the PlotXYWithSlider range when no previous limits are set
-            plot_with_slider.slider_last_min = 0
-            plot_with_slider.slider_last_max = val_max
 
         return subgrid_item
 
@@ -446,7 +545,7 @@ class MatplotlibParser(BackendParserBase):
             stack_sz = len(plot.signals.keys())
             h_space = 0.3
 
-        if isinstance(plot, PlotXYWithSlider):
+        if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
             subgrid_item = self.process_ipl_plot_xy_slider(plot, grid_item, stack_sz, h_space)
         else:
             # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
@@ -626,6 +725,29 @@ class MatplotlibParser(BackendParserBase):
         current_label.set_text(
             formatter.date_fmt(current_value.value, formatter.cut_start + 3, formatter.NANOSECOND,
                                postfix_end=True))
+        plot.slider_last_val = val
+
+        if self._pm.get_value(plot, 'sync_slider'):
+            return
+
+        if self._pm.get_value(self.canvas, 'shared_x_axis'):
+            plot_with_slider_shared = self.get_shared_plot_xy_slider(plot)
+            for plot_with_slider in plot_with_slider_shared:
+                if not self.canvas.focus_plot:
+                    plot_with_slider.sync_slider = True
+                    plot_with_slider.slider.set_val(val)
+                    plot_with_slider.sync_slider = False
+                else:
+                    plot_with_slider.slider_last_val = val
+
+    def _update_slider_contour(self, val, plot, slider_values, current_label):
+        for c_row in plot.signals.values():
+            for c_signal in c_row:
+                self.process_ipl_signal(c_signal)
+
+        current_value = slider_values[int(val)]
+        current_label.set_text(str(current_value))
+
         plot.slider_last_val = val
 
         if self._pm.get_value(plot, 'sync_slider'):

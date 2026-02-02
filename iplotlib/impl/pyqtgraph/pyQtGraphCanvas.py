@@ -23,6 +23,7 @@ from iplotlib.core import (Axis,
                            PlotXY,
                            PlotContour,
                            PlotXYWithSlider,
+                           PlotContourWithSlider,
                            PlotImage,
                            Signal,
                            SignalXY,
@@ -375,6 +376,10 @@ class PyQtGraphParser(BackendParserBase):
                 #     curves.append(iso_curve)
 
         return curves
+
+    def do_impl_line_plot_contour_slider(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContourWithSlider,
+                                         x_data, y_data, z_data):
+        """"""
 
     def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
         # Update FillBetweenItem
