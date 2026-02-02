@@ -531,7 +531,7 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.reset()
 
         if len(self.children):
-            isDownsampled = True
+            isDownsampled = False
             # ask child signals to fetch data
             for child in self.children:
                 if child._needs_refresh():
@@ -539,7 +539,7 @@ class IplotSignalAdapter(ProcessingSignal):
                 if child.status_info.result == Result.FAIL:
                     self.set_da_fail(msg=child.status_info.msg)  # get exact reason for failure from child.
                     break
-                isDownsampled &= child.isDownsampled
+                isDownsampled |= child.isDownsampled
             else:  # Fell through, all children succeded
                 self.isDownsampled = isDownsampled
                 self.set_da_success()
@@ -950,7 +950,7 @@ class ParserHelper:
         needs_realign = False
         dependencies = list()
         tmp_local_env = dict()
-        isDownsampled = True
+        isDownsampled = False
 
         for var_name in signal.depends_on:
             tmp_local_env[var_name] = local_env[var_name]
@@ -959,7 +959,7 @@ class ParserHelper:
 
             if var_name != "self":
                 tmp_local_env[var_name].get_data()
-                isDownsampled &= tmp_local_env[var_name].isDownsampled
+                isDownsampled |= tmp_local_env[var_name].isDownsampled
 
             if var_name != 'self' or len(tmp_local_env[var_name].data_store[0]) != 0:
                 dependencies.append(tmp_local_env[var_name])
@@ -967,7 +967,7 @@ class ParserHelper:
         # Set downsampling attribute for processed signal
         if len(signal.depends_on) > 1:
             if signal.name != '':
-                isDownsampled &= signal.isDownsampled
+                isDownsampled |= signal.isDownsampled
                 signal.isDownsampled = isDownsampled
             else:
                 signal.isDownsampled = isDownsampled
