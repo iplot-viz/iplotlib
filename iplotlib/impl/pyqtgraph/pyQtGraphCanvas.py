@@ -600,7 +600,7 @@ class PyQtGraphParser(BackendParserBase):
             vb.sigYRangeChanged.connect(self._y_axis_update_callback)
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
-        if isinstance(i_plot.axes[0], RangeAxis) and i_plot.axes[0].is_date:
+        if isinstance(i_plot.axes[0], RangeAxis):
             cell_gl.addItem(axis_items["bottom"].common_label, row=len(i_plot.signals) + 1, col=0)
 
         self.align_y_axis(col)
