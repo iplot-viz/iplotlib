@@ -976,21 +976,31 @@ class MatplotlibParser(BackendParserBase):
         else:
             return None
 
-    def set_impl_x_axis_label_text(self, impl_plot: Any, text: str):
-        """Implementations should set the x_axis label text"""
-        x_axis = self.get_impl_x_axis(impl_plot)
-        fc = self._pm.get_value(x_axis, 'font_color')
-        fs = self._pm.get_value(x_axis, 'font_size')
-        label_props = dict(fontsize=fs, color=fc)
-        x_axis.set_label_text(text, **label_props)
+    def set_impl_x_axis_label_text(self, impl_plot: MPLAxes, text: str):
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        i_plot = ci.plot() if ci else None
+        fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
+        fs = self._pm.get_value(i_plot, 'font_size') if i_plot else None
+        label_props = {}
+        if fc:
+            label_props['color'] = fc
+        if fs and fs > 0:
+            label_props['fontsize'] = fs
+        self.get_impl_x_axis(impl_plot).set_label_text(text, **label_props)
 
     def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
-        """Implementations should set the y_axis label text"""
-        y_axis = self.get_impl_y_axis(impl_plot)
-        fc = self._pm.get_value(y_axis, 'font_color')
-        fs = self._pm.get_value(y_axis, 'font_size')
-        label_props = dict(fontsize=fs, color=fc)
-        y_axis.set_label_text(text, **label_props)
+        if not isinstance(impl_plot, MPLAxes):
+            return
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        i_plot = ci.plot() if ci else None
+        fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
+        fs = self._pm.get_value(i_plot, 'font_size') if i_plot else None
+        label_props = {}
+        if fc:
+            label_props['color'] = fc
+        if fs and fs > 0:
+            label_props['fontsize'] = fs
+        self.get_impl_y_axis(impl_plot).set_label_text(text, **label_props)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
