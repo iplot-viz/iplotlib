@@ -27,7 +27,7 @@ from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits, IplSliderLimits
-from iplotlib.core.plot import Plot, PlotXY, PlotXYWithSlider, PlotContour, PlotContourWithSlider
+from iplotlib.core.plot import Plot, PlotXY, PlotXYWithSlider, PlotContour, PlotImage, PlotContourWithSlider
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 import iplotLogging.setupLogger as Sl
 
@@ -491,7 +491,7 @@ class BackendParserBase(ABC):
                     end = axis.original_end
 
                 # Adjust initial padding for Y axis
-                if ax_idx == 1 and not isinstance(plot, PlotContour):
+                if ax_idx == 1 and not (isinstance(plot, PlotContour) or isinstance(plot, PlotImage)):
                     h = end - begin
                     begin = begin - 0.1 * h if padding_begin else begin
                     end = end + 0.1 * h if padding_end else end
@@ -515,16 +515,29 @@ class BackendParserBase(ABC):
         for signal_ref in signals:
             signal = signal_ref()
             signal.get_data()
-            if signal.data_store[2].size > 0 and signal.data_store[3].size > 0 and ax_idx == 1:
-                # Envelope case
-                data = signal.z_data
+            if not isinstance(signal.parent(), PlotImage):
+                if signal.data_store[2].size > 0 and signal.data_store[3].size > 0 and ax_idx == 1:
+                    # Envelope case
+                    data = signal.z_data
+                else:
+                    data = signal.x_data if ax_idx == 0 else signal.y_data
             else:
-                data = signal.x_data if ax_idx == 0 else signal.y_data
+                data = self.set_image_limits(ax_idx, signal, impl_plot)
+                origin = self._pm.get_value(signal.parent(), 'origin')
+                if ax_idx == 1 and origin == 'upper':
+                    begin = data[-1]
+                    end = data[0]
+                    break
+
             data = data[~np.isnan(data)]
             begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
 
         axis.original_begin = begin
         axis.original_end = end
+
+    @abstractmethod
+    def set_image_limits(self, ax_idx: int, signal: SignalXY, impl_plot: Any):
+        pass
 
     @abstractmethod
     def process_ipl_signal_impl_plot(self, signal: Signal):
@@ -828,6 +841,25 @@ class BackendParserBase(ABC):
 
         return nearest_point, marker_signal, nearest_line_label
 
+    def do_impl_line_plot_image(self, signal: SignalXY, impl_plot: Any, plot: PlotImage, cache_item, data):
+
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[Any]
+        # style = self.get_signal_style(signal)
+        # draw_fn = impl_plot.plot
+        img = None
+
+        if plot_lines is None:
+            if data.ndim == 2:
+                img = self.create_image(impl_plot, plot, cache_item, data)
+
+        signal.lines = img
+
+        return img
+
+    @abstractmethod
+    def create_image(self, impl_plot: Any, plot: PlotImage, cache_item, data):
+        pass
+
     def do_impl_line_plot_xy_slider(self, signal: SignalXY, impl_plot: Any, plot: PlotXYWithSlider, cache_item,
                                     x_data, y_data, z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[Any]
@@ -934,6 +966,8 @@ class BackendParserBase(ABC):
             if isinstance(plot, PlotXYWithSlider):
                 plot_lines = self.do_impl_line_plot_xy_slider(signal, impl_plot, plot, cache_item, data[0], data[1],
                                                               data[2])
+            elif isinstance(plot, PlotImage):
+                plot_lines = self.do_impl_line_plot_image(signal, impl_plot, plot, cache_item, data[0])
             else:
                 plot_lines = self.do_impl_line_plot_xy(signal, impl_plot, plot, cache_item, data[0], data[1])
         elif isinstance(signal, SignalContour):
