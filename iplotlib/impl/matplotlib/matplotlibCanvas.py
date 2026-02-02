@@ -17,6 +17,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator, LogLocator
 from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
@@ -29,6 +30,7 @@ from iplotlib.core import (Axis,
                            PlotXY,
                            PlotContour,
                            PlotXYWithSlider,
+                           PlotImage,
                            Signal,
                            SignalXY,
                            SignalContour)
@@ -188,6 +190,33 @@ class MatplotlibParser(BackendParserBase):
         for new, old in zip(plot_lines, signal.lines):
             # for n, o in zip(new, old):
             new.set_visible(old.get_visible())
+
+    def set_image_limits(self, ax_idx, signal, impl_plot: MPLAxes):
+        data = np.arange(0, len(signal.x_data)).astype(float)
+        data[0] -= 0.5
+        data[-1] += 0.5
+
+        return data
+
+    def create_image(self, impl_plot: MPLAxes, plot: PlotImage, cache_item, data):
+        interpolation = self._pm.get_value(plot, 'interpolation')
+        origin = self._pm.get_value(plot, 'origin')
+
+        img = impl_plot.imshow(data,
+                               origin=origin,
+                               interpolation=interpolation)  # type: AxesImage
+
+        divider = make_axes_locatable(impl_plot)
+
+        cax = divider.append_axes(
+            position='right',
+            size='5%',
+            pad=0.2
+        )
+
+        self.figure.colorbar(img, cax=cax)
+
+        return img
 
     def do_impl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
                                   z_data):
@@ -664,7 +693,7 @@ class MatplotlibParser(BackendParserBase):
         return mpl_axes
 
     def process_ipl_signal_annotations(self, signal: Signal, impl_plot: MPLAxes):
-        if not isinstance(signal, SignalXY):
+        if not isinstance(signal, SignalXY) or isinstance(signal.parent(), PlotImage):
             return
 
         if impl_plot.get_lines()[0].get_marker() == 'None':

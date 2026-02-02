@@ -333,7 +333,11 @@ class PlotSurface(Plot):
 
 @dataclass
 class PlotImage(Plot):
-    pass
+    interpolation: str = "none"
+    origin: str = "upper"
+
+    def __post_init__(self):
+        super().__post_init__()
 
     def reset_preferences(self):
         super().reset_preferences()

@@ -23,6 +23,7 @@ from iplotlib.core import (Axis,
                            PlotXY,
                            PlotContour,
                            PlotXYWithSlider,
+                           PlotImage,
                            Signal,
                            SignalXY,
                            SignalContour)
@@ -273,6 +274,34 @@ class PyQtGraphParser(BackendParserBase):
 
     def slider_visible_status(self, plot_lines, signal):
         pass
+
+    def set_image_limits(self, ax_idx, signal, impl_plot: PlotItem):
+        data = np.arange(0, len(signal.x_data) + 1).astype(float)
+        # data[0] -= 0.5
+        # data[-1] += 0.5
+
+        origin = self._pm.get_value(signal.parent(), 'origin')
+        if ax_idx == 1 and origin == 'upper':
+            impl_plot.invertY(True)
+
+        return data
+
+    def create_image(self, impl_plot: PlotItem, plot: PlotImage, cache_item, data):
+        origin = self._pm.get_value(plot, 'origin')
+        data = np.asarray(data, dtype=float)
+
+        img = pg.ImageItem(axisOrder='row-major', border='w', colorMap='viridis')  # type: ImageItem
+        impl_plot.addItem(img)
+
+        img.setImage(data)
+
+        vb = impl_plot.getViewBox()
+        # vb.setAspectLocked(True)
+
+        # if origin == 'upper':
+        #     impl_plot.invertY(True)
+
+        return img
 
     def do_impl_line_plot_contour(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContour, x_data, y_data,
                                   z_data):
@@ -776,7 +805,7 @@ class PyQtGraphParser(BackendParserBase):
         if not isinstance(signal, SignalXY):
             return
 
-        if impl_plot.listDataItems()[0].opts['symbol'] == 'None':
+        if impl_plot.listDataItems() and impl_plot.listDataItems()[0].opts['symbol'] is None:
             return
 
         if signal.markers_list:
