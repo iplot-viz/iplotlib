@@ -1199,8 +1199,10 @@ class PyQtGraphParser(BackendParserBase):
     def set_impl_x_axis_label_text(self, plot: PlotItem, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(plot)
         i_plot = ci.plot() if ci else None
-        fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
-        fs = self._pm.get_value(i_plot, 'font_size') if i_plot else None
+        # Get the X axis to retrieve its font properties
+        x_axis = i_plot.axes[0] if i_plot and len(i_plot.axes) > 0 else None
+        fc = self._pm.get_value(x_axis, 'font_color') if x_axis else self._pm.get_value(i_plot, 'font_color') if i_plot else None
+        fs = self._pm.get_value(x_axis, 'font_size') if x_axis else self._pm.get_value(i_plot, 'font_size') if i_plot else None
         self.process_ipl_axis_params_label(self.get_impl_x_axis(plot), text, fc, fs)
 
     def set_impl_x_axis_limits(self, plot: PlotItem, limits: tuple):
@@ -1211,8 +1213,14 @@ class PyQtGraphParser(BackendParserBase):
     def set_impl_y_axis_label_text(self, plot: PlotItem, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(plot)
         i_plot = ci.plot() if ci else None
-        fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
-        fs = self._pm.get_value(i_plot, 'font_size') if i_plot else None
+        # Get the Y axis to retrieve its font properties
+        y_axis = None
+        if i_plot and len(i_plot.axes) > 1:
+            stacked_plots = self._plot_impl_plot_lut.get(id(i_plot), [])
+            pos = stacked_plots.index(plot) if plot in stacked_plots else 0
+            y_axis = i_plot.axes[1][pos] if isinstance(i_plot.axes[1], Collection) else i_plot.axes[1]
+        fc = self._pm.get_value(y_axis, 'font_color') if y_axis else self._pm.get_value(i_plot, 'font_color') if i_plot else None
+        fs = self._pm.get_value(y_axis, 'font_size') if y_axis else self._pm.get_value(i_plot, 'font_size') if i_plot else None
         self.process_ipl_axis_params_label(self.get_impl_y_axis(plot), text, fc, fs)
 
     def set_impl_y_axis_limits(self, plot: PlotItem, limits: tuple):
