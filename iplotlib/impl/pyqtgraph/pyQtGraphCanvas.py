@@ -770,12 +770,26 @@ class PyQtGraphParser(BackendParserBase):
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, axis_item: AxisItem):
         tick_props = dict(maxTickLevel=0)
+        show_all_ticks = self._pm.get_value(self.canvas, 'ticks_position')
 
-        # Set ticks on the top and right axis (compact length for tight layout)
-        if self._pm.get_value(self.canvas, 'ticks_position'):
+        # Set ticks on the top and right axis
+        if show_all_ticks:
             tick_props['tickLength'] = -4
         else:
             tick_props['tickLength'] = 4
+
+        # Configure top and right axes ticks based on ticks_position
+        if axis_item.orientation == 'left':
+            plot_item = axis_item.parentItem()
+            if plot_item:
+                if show_all_ticks:
+                    # Show ticks on top and right axes
+                    plot_item.getAxis('top').setStyle(tickLength=-4, maxTickLevel=0)
+                    plot_item.getAxis('right').setStyle(tickLength=-4, maxTickLevel=0)
+                else:
+                    # Hide ticks on top and right axes
+                    plot_item.getAxis('top').setTicks([])
+                    plot_item.getAxis('right').setTicks([])
 
         # Create font and metrics if font size is valid
         if fs and fs > 0:
