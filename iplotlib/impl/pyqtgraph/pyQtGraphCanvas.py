@@ -121,6 +121,8 @@ class PyQtGraphParser(BackendParserBase):
             lay.setColumnStretchFactor(end_col, 1)
 
             cell_gl = pg.GraphicsLayout()
+            cell_gl.layout.setSpacing(0)  # Reduce vertical spacing between stacked plots
+            cell_gl.layout.setContentsMargins(0, 0, 0, 0)
             self.figure.addItem(cell_gl, row=layout_row, col=col, rowspan=rowspan, colspan=colspan)
             self._cell_gl[key] = cell_gl
         return cell_gl
@@ -531,6 +533,10 @@ class PyQtGraphParser(BackendParserBase):
 
             if row_id not in stack_map:
                 pi = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
+                # Show top and right borders
+                pi.showAxes((True, True, True, True), showValues=(True, False, False, True))
+                # Reduce internal margins for compact layout
+                pi.layout.setContentsMargins(0, 0, 0, 0)
                 # Add space for expo
                 if stack_id == 0:
                     cell_gl.addItem(axis_items["left"].common_label, row=0, col=0)
@@ -765,21 +771,37 @@ class PyQtGraphParser(BackendParserBase):
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, axis_item: AxisItem):
         tick_props = dict(maxTickLevel=0)
 
-        # Set ticks on the top and right axis
+        # Set ticks on the top and right axis (compact length for tight layout)
         if self._pm.get_value(self.canvas, 'ticks_position'):
-            tick_props['tickLength'] = -5
+            tick_props['tickLength'] = -4
         else:
-            tick_props['tickLength'] = 5
+            tick_props['tickLength'] = 4
 
-        # Set color and font
-        if fs is not None and fs > 0:
+        # Create font and metrics if font size is valid
+        if fs and fs > 0:
             tick_font = QFont()
             tick_font.setPointSize(int(fs))
-            tick_props.update({'tickFont': tick_font})
+            font_metrics = QFontMetricsF(tick_font)
+            tick_props['tickFont'] = tick_font
+        else:
+            font_metrics = None
+
+        # Reduce vertical space between tick labels and axis edge
+        if axis_item.orientation == 'bottom':
+            tick_props['tickTextOffset'] = 1
+            if font_metrics:
+                tick_length = tick_props.get('tickLength', 4)
+                axis_item.setHeight(int(font_metrics.height() + abs(tick_length) + 2))
+            else:
+                axis_item.setHeight(16)
 
         # Font size for UTC label
         if isinstance(axis_item, NanosecondDateFormatter):
             axis_item.common_label.setText(axis_item.offset_str, size=f'{fs}pt', color=fc)
+            if font_metrics:
+                axis_item.common_label.setMaximumHeight(int(font_metrics.height() + 2))
+            else:
+                axis_item.common_label.setMaximumHeight(14)
 
         axis_item.setStyle(**tick_props)
 
@@ -1004,8 +1026,8 @@ class PyQtGraphParser(BackendParserBase):
 
     def enable_tight_layout(self):
         glw = self.figure
-        glw.ci.layout.setContentsMargins(6, 6, 6, 6)
-        glw.ci.layout.setSpacing(4)
+        glw.ci.layout.setContentsMargins(4, 4, 4, 4)
+        glw.ci.layout.setSpacing(2)
 
     def disable_tight_layout(self):
         glw = self.figure
