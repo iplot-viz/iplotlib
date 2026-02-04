@@ -132,7 +132,7 @@ class IplotQtStatistics(QWidget):
         else:
             # Relative time (pulse) - data comes in milliseconds
             seconds = timestamp / 1000.0  # Convert from milliseconds to seconds
-            item = QTableWidgetItem(f"{seconds:.6f} s")
+            item = QTableWidgetItem(f"{seconds:.9f} s")
 
         item.setData(Qt.ItemDataRole.UserRole, timestamp)
         return item
