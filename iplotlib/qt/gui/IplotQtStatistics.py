@@ -35,7 +35,7 @@ class IplotQtStatistics(QWidget):
 
         # Adjust column width dynamically
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         # Layout
         main_v_layout = QVBoxLayout()
