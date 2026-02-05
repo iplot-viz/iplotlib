@@ -55,15 +55,9 @@ class SignalShiftCommand(IplotCommand):
 
         # 1. Remove visual line and legend entry
         if self._created_signal and hasattr(self._created_signal, 'lines') and self._created_signal.lines:
-            for line in self._created_signal.lines:
-                if hasattr(line, 'remove'):  # matplotlib
-                    line.remove()
-                elif hasattr(line, 'scene') and line.scene():  # pyqtgraph
-                    line.scene().removeItem(line)
-
-            # Remove from legend separately (pyqtgraph)
-            if impl_plot and hasattr(impl_plot, 'legend') and impl_plot.legend:
-                impl_plot.legend.removeItem(self._created_signal.lines[0])
+            self._parser.remove_signal_lines(self._created_signal)
+            if impl_plot:
+                self._parser.remove_signal_from_legend(impl_plot, self._created_signal)
 
         # 2. Remove signal from plot data structure
         if self._affected_plot and self._created_signal:
@@ -88,20 +82,11 @@ class SignalShiftCommand(IplotCommand):
 
         # 4. Restore original signal visibility and Stack if it was hidden
         if self._original_was_hidden and self._original_signal:
-            # Get impl_plot for original signal
             orig_impl_plot = self._parser._signal_impl_plot_lut.get(self._original_signal.uid)
 
-            if hasattr(self._original_signal, 'lines') and self._original_signal.lines:
-                for line in self._original_signal.lines:
-                    if hasattr(line, 'set_visible'):  # matplotlib
-                        line.set_visible(True)
-                    elif hasattr(line, 'setVisible'):  # pyqtgraph
-                        line.setVisible(True)
-
-                # Re-add to legend (pyqtgraph)
-                if orig_impl_plot and hasattr(orig_impl_plot, 'legend') and orig_impl_plot.legend:
-                    label = getattr(self._original_signal, 'label', '') or getattr(self._original_signal, 'name', '')
-                    orig_impl_plot.legend.addItem(self._original_signal.lines[0], label)
+            self._parser.set_signal_visible(self._original_signal, True)
+            if orig_impl_plot:
+                self._parser.add_signal_to_legend(orig_impl_plot, self._original_signal)
 
             # Restore Stack and PulseId in original row
             df = self._model.get_dataframe()
@@ -155,19 +140,11 @@ class SignalShiftCommand(IplotCommand):
 
         # 3. Hide original again and clear Stack if needed
         if self._original_was_hidden and self._original_signal:
-            # Get impl_plot for original signal
             orig_impl_plot = self._parser._signal_impl_plot_lut.get(self._original_signal.uid)
 
-            if hasattr(self._original_signal, 'lines') and self._original_signal.lines:
-                for line in self._original_signal.lines:
-                    if hasattr(line, 'set_visible'):  # matplotlib
-                        line.set_visible(False)
-                    elif hasattr(line, 'setVisible'):  # pyqtgraph
-                        line.setVisible(False)
-
-                # Remove from legend (pyqtgraph)
-                if orig_impl_plot and hasattr(orig_impl_plot, 'legend') and orig_impl_plot.legend:
-                    orig_impl_plot.legend.removeItem(self._original_signal.lines[0])
+            self._parser.set_signal_visible(self._original_signal, False)
+            if orig_impl_plot:
+                self._parser.remove_signal_from_legend(orig_impl_plot, self._original_signal)
 
             # Clear Stack in original row
             df = self._model.get_dataframe()
@@ -190,6 +167,13 @@ class SignalShiftCommand(IplotCommand):
             if w:
                 w.check_markers(mw.canvas)
                 w.stats(mw.canvas)
+
+                # Rebuild legend if needed
+                if self._affected_plot and hasattr(self._parser, 'rebuild_legend'):
+                    impl_plots = self._parser._plot_impl_plot_lut.get(id(self._affected_plot), [])
+                    if impl_plots:
+                        impl_plot = impl_plots[self._stack_num - 1] if self._stack_num <= len(impl_plots) else impl_plots[0]
+                        self._parser.rebuild_legend(impl_plot, self._affected_plot)
 
     def __str__(self):
         return f"{self.__class__.__name__}({hex(id(self))}) {self.name}"

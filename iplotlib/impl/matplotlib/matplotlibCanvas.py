@@ -100,6 +100,65 @@ class MatplotlibParser(BackendParserBase):
         elif not legend_text.endswith('*') and signal.isDownsampled:
             legend_label.set_text(legend_text + '*')
 
+    def set_signal_visible(self, signal, visible: bool):
+        """Set visibility of signal lines."""
+        if hasattr(signal, 'lines') and signal.lines:
+            for line in signal.lines:
+                line.set_visible(visible)
+
+    def remove_signal_lines(self, signal):
+        """Remove signal lines from the plot."""
+        if hasattr(signal, 'lines') and signal.lines:
+            for line in signal.lines:
+                line.remove()
+
+    def rebuild_legend(self, mpl_axes: MPLAxes, plot: Plot):
+        """
+        Rebuild the legend for the given matplotlib axes with currently visible lines.
+        """
+        # Get visible lines for legend (exclude hidden and internal lines)
+        visible_lines = [line for line in mpl_axes.get_lines()
+                         if line.get_visible() and not line.get_label().startswith(('_', 'CrossX', 'CrossY'))]
+
+        show_legend = self._pm.get_value(plot, 'legend')
+        if show_legend and visible_lines:
+            plot_leg_position = self._pm.get_value(plot, 'legend_position')
+            canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
+            plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
+            canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
+
+            plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' else plot_leg_position
+            plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' else plot_leg_layout
+
+            legend_props = dict(size=self.legend_size)
+            col = len(visible_lines) if plot_leg_layout == 'horizontal' else 1
+
+            leg = mpl_axes.legend(handles=visible_lines, prop=legend_props, loc=plot_leg_position, ncol=col)
+            if self.figure.get_tight_layout():
+                leg.set_in_layout(False)
+
+            # Update map_legend_to_ax for legend click handling
+            legend_lines = leg.get_lines()
+            for ix, line in enumerate(visible_lines):
+                if ix < len(legend_lines):
+                    self.map_legend_to_ax[legend_lines[ix]] = line
+                    legend_lines[ix].set_picker(3)
+        elif not visible_lines:
+            # No visible lines, remove legend
+            existing_legend = mpl_axes.get_legend()
+            if existing_legend:
+                existing_legend.remove()
+
+        self.figure.canvas.draw_idle()
+
+    def register_dynamic_signal(self, impl_plot: MPLAxes, plot: Plot, signal):
+        """Register a dynamically added signal and update legend."""
+        import weakref
+        cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if cache_item and hasattr(cache_item, 'signals'):
+            cache_item.signals.append(weakref.ref(signal))
+        self.rebuild_legend(impl_plot, plot)
+
     @staticmethod
     def _update_marker_by_point_count(marker_line: Line2D, signal_x_data, signal_style: dict):
         if len(signal_x_data) == 1:

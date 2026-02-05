@@ -150,6 +150,30 @@ class PyQtGraphParser(BackendParserBase):
         elif not legend_text.endswith('*') and signal.isDownsampled:
             legend_label.setText(legend_text + '*')
 
+    def set_signal_visible(self, signal, visible: bool):
+        """Set visibility of signal lines."""
+        if hasattr(signal, 'lines') and signal.lines:
+            for line in signal.lines:
+                line.setVisible(visible)
+
+    def remove_signal_lines(self, signal):
+        """Remove signal lines from the plot."""
+        if hasattr(signal, 'lines') and signal.lines:
+            for line in signal.lines:
+                if hasattr(line, 'scene') and line.scene():
+                    line.scene().removeItem(line)
+
+    def remove_signal_from_legend(self, impl_plot: PlotItem, signal):
+        """Remove signal from legend."""
+        if impl_plot.legend and hasattr(signal, 'lines') and signal.lines:
+            impl_plot.legend.removeItem(signal.lines[0])
+
+    def add_signal_to_legend(self, impl_plot: PlotItem, signal):
+        """Add signal to legend."""
+        if impl_plot.legend and hasattr(signal, 'lines') and signal.lines:
+            label = getattr(signal, 'label', '') or getattr(signal, 'name', '')
+            impl_plot.legend.addItem(signal.lines[0], label)
+
     @staticmethod
     def _update_marker_by_point_count(marker_line: PlotDataItem, signal_x_data, signal_style: dict):
         if len(signal_x_data) == 1:

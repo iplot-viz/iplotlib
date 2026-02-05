@@ -739,6 +739,26 @@ class BackendParserBase(ABC):
     def get_line_label(self, line: Any):
         """"""
 
+    def set_signal_visible(self, signal: Signal, visible: bool):
+        """Set visibility of signal lines."""
+        pass
+
+    def remove_signal_lines(self, signal: Signal):
+        """Remove signal lines from the plot."""
+        pass
+
+    def remove_signal_from_legend(self, impl_plot: Any, signal: Signal):
+        """Remove signal from legend."""
+        pass
+
+    def add_signal_to_legend(self, impl_plot: Any, signal: Signal):
+        """Add signal to legend."""
+        pass
+
+    def rebuild_legend(self, impl_plot: Any, plot: Plot):
+        """Rebuild legend for the given plot. Default implementation does nothing."""
+        pass
+
     def add_marker_scaled(self, impl_plot: Any, plot: PlotXY, x_coord, y_coord):
         """
         Function that returns the nearest point of the plot to create the corresponding marker.
