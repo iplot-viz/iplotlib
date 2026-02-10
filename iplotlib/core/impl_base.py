@@ -547,6 +547,10 @@ class BackendParserBase(ABC):
 
         impl_plot = self.process_ipl_signal_impl_plot(signal)
 
+        # impl_plot can be None if signal was removed (e.g. during undo of shift)
+        if impl_plot is None:
+            return
+
         # All good, make a data access request
         signal_data = signal.get_data()
 
