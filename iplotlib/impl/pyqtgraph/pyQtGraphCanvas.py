@@ -49,6 +49,7 @@ STEP_MAP_PG = {
 class QtViewBox(pg.ViewBox):
     pressed = QtSignal(object, object)
     released = QtSignal(object, object)
+    dragged = QtSignal(object, object)  # For drag events during mouse move with button pressed
 
     def __init__(self, parent=None):
         super().__init__(parent=parent, enableMenu=False)
@@ -61,6 +62,15 @@ class QtViewBox(pg.ViewBox):
             return
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
+
+    def mouseMoveEvent(self, ev):
+        super().mouseMoveEvent(ev)
+        # Emit dragged signal when mouse moves (for drag preview)
+        self.dragged.emit(self, ev)
+
+    def mouseReleaseEvent(self, ev):
+        super().mouseReleaseEvent(ev)
+        self.released.emit(self, ev)
 
     def release_event(self):
         self.released.emit(self, None)
@@ -165,14 +175,59 @@ class PyQtGraphParser(BackendParserBase):
 
     def remove_signal_from_legend(self, impl_plot: PlotItem, signal):
         """Remove signal from legend."""
-        if impl_plot.legend and hasattr(signal, 'lines') and signal.lines:
-            impl_plot.legend.removeItem(signal.lines[0])
+        if not impl_plot.legend:
+            return
+        if hasattr(signal, 'lines') and signal.lines:
+            try:
+                impl_plot.legend.removeItem(signal.lines[0])
+            except Exception:
+                pass
+        # Also try by name
+        label = getattr(signal, 'label', '') or getattr(signal, 'name', '')
+        if label:
+            try:
+                impl_plot.legend.removeItem(label)
+            except Exception:
+                pass
 
     def add_signal_to_legend(self, impl_plot: PlotItem, signal):
         """Add signal to legend."""
         if impl_plot.legend and hasattr(signal, 'lines') and signal.lines:
             label = getattr(signal, 'label', '') or getattr(signal, 'name', '')
             impl_plot.legend.addItem(signal.lines[0], label)
+
+    def rebuild_legend(self, impl_plot: PlotItem, plot):
+        """Rebuild legend for PyQtGraph based on visible signals."""
+        if not impl_plot.legend:
+            return
+
+        # Clear existing legend items
+        impl_plot.legend.clear()
+
+        # Get cache item to find signals
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if not ci or not hasattr(ci, 'signals'):
+            return
+
+        # Add visible signals to legend
+        for sig_ref in ci.signals:
+            sig = sig_ref() if sig_ref else None
+            if sig and hasattr(sig, 'lines') and sig.lines:
+                # Check if signal is visible and still in scene
+                line = sig.lines[0]
+                in_scene = hasattr(line, 'scene') and line.scene() is not None
+                if in_scene and hasattr(line, 'isVisible') and line.isVisible():
+                    label = getattr(sig, 'label', '') or getattr(sig, 'name', '')
+                    if label:
+                        impl_plot.legend.addItem(line, label)
+
+    def register_dynamic_signal(self, impl_plot: PlotItem, plot, signal):
+        """Register a dynamically added signal and update legend."""
+        import weakref
+        cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if cache_item and hasattr(cache_item, 'signals'):
+            cache_item.signals.append(weakref.ref(signal))
+        self.rebuild_legend(impl_plot, plot)
 
     @staticmethod
     def _update_marker_by_point_count(marker_line: PlotDataItem, signal_x_data, signal_style: dict):

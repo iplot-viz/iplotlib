@@ -28,8 +28,12 @@ class IplotQtCanvas(QWidget):
     Base class for all Qt related canvas implementations
     """
     cmdDone = Signal(IplotCommand)
-    # Signal emitted when user requests to shift a signal: (signal_uid, signal_name, data_source, pulse_nb, dx, dy, duplicate)
     signalShiftRequested = Signal(str, str, str, str, float, float, bool)
+    # Unified shift signals (work for both drag and DIST)
+    signalShiftApplied = Signal(str, float, float, str)  # (signal_uid, dx, dy, source)
+    signalShiftUndone = Signal(str, float, float, str)   # (signal_uid, dx, dy, source)
+    signalShiftPulseApplied = Signal(str, str, float, float, str)  # (signal_uid, pulse_id, dx, dy, source)
+    signalShiftPulseUndone = Signal(str, str, float, float)  # (signal_uid, pulse_id, previous_dx, previous_dy)
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent)
@@ -48,6 +52,15 @@ class IplotQtCanvas(QWidget):
         self._stats_table = IplotQtStatistics()
 
         self.info_shared_x_dialog = False
+
+        # Drag shift state
+        self._drag_shift_active = False
+        self._drag_shift_signal = None
+        self._drag_shift_impl_plot = None
+        self._drag_shift_start_x = None
+        self._drag_shift_start_y = None
+        self._drag_shift_is_datetime = False
+        self._drag_shift_preview_line = None
 
     @abstractmethod
     def undo(self):
@@ -360,6 +373,116 @@ class IplotQtCanvas(QWidget):
 
     def sizeHint(self):
         return QSize(900, 400)
+
+    def _start_drag_shift(self, impl_plot, signal, start_y, is_datetime=False, start_x=None):
+        """Initialize drag shift state. Called by backend after successful hit-test."""
+        self._drag_shift_active = True
+        self._drag_shift_signal = signal
+        self._drag_shift_impl_plot = impl_plot
+        self._drag_shift_start_x = start_x
+        self._drag_shift_start_y = start_y
+        self._drag_shift_is_datetime = is_datetime
+
+    def _update_drag_shift(self, current_y, current_x=None):
+        """Update drag preview during drag. Called by backend on mouse move."""
+        if not self._drag_shift_active or self._drag_shift_signal is None:
+            return
+        dy_offset = current_y - self._drag_shift_start_y
+        dx_offset = 0.0
+        if not self._drag_shift_is_datetime and self._drag_shift_start_x is not None and current_x is not None:
+            dx_offset = current_x - self._drag_shift_start_x
+        self._create_drag_preview(dy_offset, dx_offset)
+
+    def _end_drag_shift(self, end_y, end_x=None):
+        """Finalize drag shift by storing offset in signal metadata and creating undo command."""
+        if not self._drag_shift_active or self._drag_shift_signal is None:
+            self._cancel_drag_shift()
+            return
+
+        dy = end_y - self._drag_shift_start_y
+
+        # Calculate X offset (only if X is not datetime)
+        dx = 0.0
+        if not self._drag_shift_is_datetime and self._drag_shift_start_x is not None and end_x is not None:
+            dx = end_x - self._drag_shift_start_x
+
+        # Remove preview line first
+        self._remove_drag_preview()
+
+        # Only apply if there was meaningful movement
+        if abs(dy) > 1e-10 or abs(dx) > 1e-10:
+            from iplotlib.core.commands.shift import ShiftCommand
+
+            signal = self._drag_shift_signal
+            signal_uid = signal.uid
+
+            # Detect pulse mode
+            pulse_id = getattr(signal, 'pulse_nb', None)
+            is_pulse_mode = pulse_id is not None and str(pulse_id).strip() != ''
+            if is_pulse_mode:
+                pulse_id = str(pulse_id)
+
+            cmd = ShiftCommand(
+                signal=signal,
+                dx=dx,
+                dy=dy,
+                parser=self._parser,
+                qt_canvas=self,
+                is_pulse_isolation=is_pulse_mode,
+                pulse_id=pulse_id if is_pulse_mode else None,
+                source='drag'
+            )
+
+            # Apply offset via metadata (works for both modes now)
+            previous_dx = getattr(signal, '_drag_shift_dx', 0.0)
+            previous_dy = getattr(signal, '_drag_shift_dy', 0.0)
+            if abs(dx) > 1e-10:
+                signal._drag_shift_dx = previous_dx + dx
+            if abs(dy) > 1e-10:
+                signal._drag_shift_dy = previous_dy + dy
+            self._parser.process_ipl_signal(signal)
+
+            # Update legend to trigger draw_idle (for matplotlib)
+            impl_plot = self._parser._signal_impl_plot_lut.get(signal_uid)
+            plot = signal.parent() if hasattr(signal, 'parent') and callable(signal.parent) else None
+            if impl_plot and plot and hasattr(self._parser, 'rebuild_legend'):
+                self._parser.rebuild_legend(impl_plot, plot)
+
+            # Register with history manager for undo/redo
+            self._parser._hm.done(cmd)
+            self.cmdDone.emit(cmd)
+
+            # Emit signal for table update
+            if is_pulse_mode:
+                self.signalShiftPulseApplied.emit(signal_uid, pulse_id, dx, dy, 'drag')
+            else:
+                self.signalShiftApplied.emit(signal_uid, dx, dy, 'drag')
+
+        self._reset_drag_shift_state()
+
+    def _cancel_drag_shift(self):
+        """Cancel drag shift without applying changes."""
+        self._remove_drag_preview()
+        self._reset_drag_shift_state()
+
+    def _reset_drag_shift_state(self):
+        """Reset all drag shift state variables."""
+        self._drag_shift_active = False
+        self._drag_shift_signal = None
+        self._drag_shift_impl_plot = None
+        self._drag_shift_start_x = None
+        self._drag_shift_start_y = None
+        self._drag_shift_is_datetime = False
+
+    @abstractmethod
+    def _create_drag_preview(self, dy_offset, dx_offset=0.0):
+        """Create/update preview line during drag. Backend-specific."""
+        pass
+
+    @abstractmethod
+    def _remove_drag_preview(self):
+        """Remove preview line. Backend-specific."""
+        pass
 
     def export_dict(self):
         self.clean_canvas()

@@ -1,6 +1,7 @@
-from PySide6.QtCore import QMargins, Qt, Signal, QEvent
+from PySide6.QtCore import QMargins, Qt, Signal
 from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox
 
+import numpy as np
 from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
@@ -8,6 +9,7 @@ from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
 import iplotLogging.setupLogger as Sl
 from pyqtgraph import PlotItem, TextItem
+import pyqtgraph as pg
 
 logger = Sl.get_logger(__name__)
 
@@ -38,11 +40,16 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         # Drag & Drop
         self.setAcceptDrops(True)
 
+        # Track connected ViewBoxes to avoid duplicate connections
+        self._connected_viewboxes = set()
+
     def set_canvas(self, canvas):
         prev_canvas = self._parser.canvas
 
         if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
             self.unfocus_plot()
+            # Clear tracking set since ViewBoxes will be recreated
+            self._connected_viewboxes.clear()
 
         self._parser.deactivate_cursor()
         self._parser.process_ipl_canvas(canvas)
@@ -50,12 +57,16 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
-        # Connect events
+        # Connect events for each plot - only connect if not already connected
         for stack in self._parser._layout_stacks.values():
             for plot in stack.values():
                 vb = plot.getViewBox()
-                vb.pressed.connect(self._impl_mouse_press_handler)
-                vb.released.connect(self._impl_mouse_release_handler)
+                vb_id = id(vb)
+                if vb_id not in self._connected_viewboxes:
+                    vb.pressed.connect(self._impl_mouse_press_handler)
+                    vb.released.connect(self._impl_mouse_release_handler)
+                    vb.dragged.connect(self._impl_mouse_drag_handler)
+                    self._connected_viewboxes.add(vb_id)
 
         super().set_canvas(canvas)
 
@@ -71,8 +82,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def _is_signal_visible(self, signal) -> bool:
         """Check if signal is visible (PyQtGraph implementation)."""
         if not hasattr(signal, 'lines') or not signal.lines:
-            return False
-        return signal.lines[0].isVisible()
+            return True  # Assume visible if no lines yet (signal being processed)
+        try:
+            return signal.lines[0].isVisible()
+        except (IndexError, AttributeError):
+            return True
 
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: PlotItem
@@ -242,8 +256,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self.refresh()
 
     def _impl_mouse_press_handler(self, view_box, event):
-        # self._debug_log_event(event, "Mouse released")
-
+        """Handle mouse press events in PyQtGraph."""
         impl_plot = view_box.parentItem()
         if not impl_plot:
             return
@@ -254,7 +267,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._dist_calculator.reset()
             return
 
-        if event.type() == QEvent.GraphicsSceneMouseDoubleClick:
+        is_double_click = hasattr(event, 'double') and callable(getattr(event, 'double', None)) and event.double()
+
+        if is_double_click:
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER,
                                Canvas.MOUSE_MODE_CROSSHAIR]:
                 if event.button() == Qt.MouseButton.RightButton:
@@ -266,8 +281,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 y_value = system_coord.y()
 
                 # Markers can only be created if the property 'marker' is not None
-                if impl_plot.listDataItems()[0].opts['symbol'] != 'None':  # TODO: review
-                    # Check if the marker coordinates are correct and if the marker has not already been created
+                if impl_plot.listDataItems()[0].opts['symbol'] != 'None':
                     new_marker, marker_signal, label_line = self._parser.add_marker_scaled(impl_plot, plot, x_value, y_value)
                     if new_marker is not None:
                         if new_marker not in self._marker_window.get_markers():
@@ -283,27 +297,36 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                             logger.warning(f"The marker {new_marker} is already created")
                     else:
                         logger.warning(
-                            f"Cannot add marker {new_marker}: found {marker_signal} samples, but the maximum allowed"
-                            f" is 100")
+                            f"Cannot add marker {new_marker}: found {marker_signal} samples, but the maximum allowed is 100")
                 else:
                     logger.warning("Markers must be enabled in the plot to create signal markers")
 
-            elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
+            elif self._mmode == Canvas.MOUSE_MODE_SELECT:
                 self.autoscale_menu = None
         else:
+            # Single click handling
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                if event.type() == QEvent.GraphicsSceneMousePress:
-                    # Stage a command to obtain original view limits
-                    # Disable Zoom and Pan in PlotContour
-                    if isinstance(plot, PlotContour):
-                        return
-                    elif event.button() == Qt.MouseButton.RightButton:
-                        return
-                    self.stage_view_lim_cmd(impl_plot)
+                if isinstance(plot, PlotContour):
                     return
+                if event.button() == Qt.MouseButton.RightButton:
+                    return
+                self.stage_view_lim_cmd(impl_plot)
+                return
 
             elif self._mmode == Canvas.MOUSE_MODE_SELECT:
                 self.autoscale_menu = None
+                # Handle drag shift with left click
+                if event.button() == Qt.MouseButton.LeftButton:
+                    signal, y_coord = self._find_signal_at_event(view_box, event)
+                    if signal is not None:
+                        try:
+                            is_datetime = plot.axes[0].is_date
+                        except (AttributeError, IndexError):
+                            is_datetime = False
+                        system_coord = view_box.mapSceneToView(event.scenePos())
+                        x_coord = system_coord.x()
+                        self._start_drag_shift(impl_plot, signal, y_coord, is_datetime, start_x=x_coord)
+                        event.accept()
 
             elif self._mmode == Canvas.MOUSE_MODE_DIST:
                 # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
@@ -348,9 +371,20 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
 
     def _impl_mouse_release_handler(self, view_box, event):
-        # self._debug_log_event(event, "Mouse released")
-
+        """Handle mouse release events in PyQtGraph."""
         impl_plot = view_box.parentItem()
+
+        # Handle drag shift completion in Select mode
+        if self._drag_shift_active and self._mmode == Canvas.MOUSE_MODE_SELECT:
+            if event is not None:
+                system_coord = view_box.mapSceneToView(event.scenePos())
+                x_value = system_coord.x()
+                y_value = system_coord.y()
+                self._end_drag_shift(y_value, x_value)
+            else:
+                self._cancel_drag_shift()
+            return
+
         if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
             # commit commands from staging.
             while len(self._staging_cmds):
@@ -396,3 +430,130 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def mouse_moved(self, pos):
         pass
+
+    def _impl_mouse_drag_handler(self, view_box, event):
+        """Handle mouse drag events for preview during drag shift."""
+        if not self._drag_shift_active or self._drag_shift_signal is None:
+            return
+
+        impl_plot = view_box.parentItem()
+        if impl_plot != self._drag_shift_impl_plot:
+            return
+
+        if event is None:
+            return
+
+        system_coord = view_box.mapSceneToView(event.scenePos())
+        x_value = system_coord.x()
+        y_value = system_coord.y()
+        if y_value is not None:
+            self._update_drag_shift(y_value, x_value)
+
+    def _find_signal_at_event(self, view_box, event):
+        """
+        Find signal at the event position using hit-testing.
+        Returns (signal, y_data_coord) or (None, None).
+        """
+        impl_plot = view_box.parentItem()
+        if not impl_plot:
+            return None, None
+
+        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        if not ci or not hasattr(ci, 'signals') or not ci.signals:
+            return None, None
+
+        # Get click position in view coordinates
+        scene_pos = event.scenePos()
+        view_pos = view_box.mapSceneToView(scene_pos)
+        click_x = view_pos.x()
+        click_y = view_pos.y()
+
+        scene = view_box.scene()
+        if scene is None:
+            return None, None
+
+        # Check each signal's PlotDataItem
+        for signal_ref in ci.signals:
+            signal = signal_ref()
+            if signal is None or not isinstance(signal, SignalXY):
+                continue
+            if not self._is_signal_visible(signal):
+                continue
+            if not hasattr(signal, 'lines') or not signal.lines:
+                continue
+
+            for line in signal.lines:
+                if not hasattr(line, 'getData'):
+                    continue
+
+                x_data, y_data = line.getData()
+                if x_data is None or y_data is None or len(x_data) == 0:
+                    continue
+
+                x_min, x_max = x_data.min(), x_data.max()
+                if not (x_min <= click_x <= x_max):
+                    continue
+
+                idx = np.searchsorted(x_data, click_x)
+                idx = int(np.clip(idx, 0, len(x_data) - 1))
+                y_at_click = y_data[idx]
+
+                y_range = view_box.viewRange()[1]
+                y_span = abs(y_range[1] - y_range[0]) if y_range[1] != y_range[0] else 1.0
+                tolerance = 0.15 * y_span
+
+                dist = abs(click_y - y_at_click)
+                if dist <= tolerance:
+                    return signal, click_y
+
+
+        return None, None
+
+    def _create_drag_preview(self, dy_offset, dx_offset=0.0):
+        """Create/update preview line during drag for PyQtGraph."""
+        if self._drag_shift_signal is None or self._drag_shift_impl_plot is None:
+            return
+
+        signal = self._drag_shift_signal
+        impl_plot = self._drag_shift_impl_plot
+
+        # Get original line data
+        if not signal.lines:
+            return
+
+        original_line = signal.lines[0]
+        x_data, y_data = original_line.getData()
+        if x_data is None or y_data is None:
+            return
+
+        x_data_shifted = np.array(x_data) + dx_offset if abs(dx_offset) > 1e-10 else x_data
+        y_data_shifted = np.array(y_data) + dy_offset
+
+        # Remove old preview line if exists
+        self._remove_drag_preview()
+
+        # Get line style from original signal
+        pen_color = 'b'
+        pen_width = 2
+        try:
+            original_pen = original_line.opts.get('pen')
+            if original_pen:
+                pen_color = original_pen.color()
+                pen_width = original_pen.width()
+        except Exception:
+            pass
+
+        # Create preview line with dashed style
+        pen = pg.mkPen(color=pen_color, width=pen_width, style=Qt.PenStyle.DashLine)
+        self._drag_shift_preview_line = impl_plot.plot(x_data_shifted, y_data_shifted, pen=pen)
+
+    def _remove_drag_preview(self):
+        """Remove preview line for PyQtGraph."""
+        if self._drag_shift_preview_line is not None:
+            try:
+                if self._drag_shift_impl_plot is not None:
+                    self._drag_shift_impl_plot.removeItem(self._drag_shift_preview_line)
+            except Exception:
+                pass
+            self._drag_shift_preview_line = None
+
