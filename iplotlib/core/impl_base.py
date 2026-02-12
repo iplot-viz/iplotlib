@@ -516,9 +516,9 @@ class BackendParserBase(ABC):
             signal = signal_ref()
             signal.get_data()
             if not isinstance(signal.parent(), PlotImage):
-                if signal.data_store[2].size > 0 and signal.data_store[3].size > 0 and ax_idx == 1:
-                    # Envelope case
-                    data = signal.z_data
+                if signal.envelope > 0 and ax_idx == 1:
+                    # Envelope case Y axis
+                    data = np.array([np.min(signal.data_store[1]).item(), np.max(signal.data_store[2]).item()])
                 else:
                     data = signal.x_data if ax_idx == 0 else signal.y_data
             else:

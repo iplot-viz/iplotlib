@@ -22,7 +22,6 @@ from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
 from iplotlib.core import (Axis,
-                           LinearAxis,
                            RangeAxis,
                            Canvas,
                            BackendParserBase,
