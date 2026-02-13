@@ -354,20 +354,23 @@ class BackendParserBase(ABC):
         for impl_plot in shared_plots:
             plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
 
-            # Set X Axis limits
-            plot.axes[0].set_limits(new_start, new_end, 'current')
+            if isinstance(plot, PlotXYWithSlider) and len(shared_plots) > 1:
+                self.update_slider_limits(plot, new_start, new_end)
+            else:
+                # Set X Axis limits
+                plot.axes[0].set_limits(new_start, new_end, 'current')
 
-            self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
+                self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
 
-            if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
-                self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
+                if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
+                    self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
 
-            signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
-            for signal_ref in signals:
-                signal = signal_ref()
-                if not isinstance(plot, PlotXYWithSlider):
-                    signal.set_limits((new_start, new_end))
-                self.process_ipl_signal(signal)
+                signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+                for signal_ref in signals:
+                    signal = signal_ref()
+                    if not isinstance(plot, PlotXYWithSlider):
+                        signal.set_limits((new_start, new_end))
+                    self.process_ipl_signal(signal)
 
         self._update = False
 
@@ -375,25 +378,40 @@ class BackendParserBase(ABC):
         cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
         base_plot = cache_item.plot()
 
+        # When the base plot is a PlotXYWithSlider, or no base plot is defined, zoom events must not be propagated
+        # to other plots
         if isinstance(base_plot, PlotXYWithSlider) or base_plot is None:
             return []
 
         shared = list()
-        base_begin, base_end = base_plot.axes[0].get_limits("original")
+        base_begin, base_end = base_plot.axes[0].get_limits('original')
 
         plot_list = self.get_canvas_plots()
         for plot_item in plot_list:
             cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
+
+            try:
+                plot = cache_item.plot()
+            except AttributeError:
+                continue
+
             plot = cache_item.plot()
-            begin, end = plot.axes[0].get_limits("original")
+            begin, end = plot.axes[0].get_limits('original')
 
             # Check if it is date and the max difference is 1 second
             # Need to differentiate if it is absolute or relative
+            if isinstance(plot, PlotXYWithSlider):
+                slider_values = plot.signals[1][0].z_data
+                is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
+            else:
+                is_date = plot.axes[0].is_date
+
             max_diff = self._pm.get_value(self.canvas, 'max_diff')
-            max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot,
-                                                                               PlotXYWithSlider) else max_diff
+            max_diff_ns = max_diff * 1e9 if is_date else max_diff
+
             if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
                 shared.append(plot_item)
+
         return shared
 
     @abstractmethod
@@ -487,8 +505,12 @@ class BackendParserBase(ABC):
                         padding_end = False
 
                 else:
-                    begin = axis.original_begin
-                    end = axis.original_end
+                    if isinstance(plot, PlotXYWithSlider):
+                        begin = axis.begin
+                        end = axis.end
+                    else:
+                        begin = axis.original_begin
+                        end = axis.original_end
 
                 # Adjust initial padding for Y axis
                 if ax_idx == 1 and not (isinstance(plot, PlotContour) or isinstance(plot, PlotImage)):
@@ -516,11 +538,18 @@ class BackendParserBase(ABC):
             signal = signal_ref()
             signal.get_data()
             if not isinstance(signal.parent(), PlotImage):
-                if signal.envelope > 0 and ax_idx == 1:
-                    # Envelope case Y axis
-                    data = np.array([np.min(signal.data_store[1]).item(), np.max(signal.data_store[2]).item()])
+                if isinstance(signal.parent(), PlotXYWithSlider) and ax_idx == 0:
+                    data = signal.z_data  # Original values for slider
+                    cur_data = signal.x_data
+                    cur_data = cur_data[~np.isnan(cur_data)]
+                    x_begin, x_end = min(np.min(cur_data).item(), begin), max(np.max(cur_data).item(), end)
+                    axis.set_limits(x_begin, x_end, 'current')
                 else:
-                    data = signal.x_data if ax_idx == 0 else signal.y_data
+                    if signal.envelope > 0 and ax_idx == 1:
+                        # Envelope case Y axis
+                        data = np.array([np.min(signal.data_store[1]).item(), np.max(signal.data_store[2]).item()])
+                    else:
+                        data = signal.x_data if ax_idx == 0 else signal.y_data
             else:
                 data = self.set_image_limits(ax_idx, signal, impl_plot)
                 origin = self._pm.get_value(signal.parent(), 'origin')
@@ -532,8 +561,7 @@ class BackendParserBase(ABC):
             data = data[~np.isnan(data)]
             begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
 
-        axis.original_begin = begin
-        axis.original_end = end
+        axis.set_limits(begin, end, 'original')
 
     @abstractmethod
     def set_image_limits(self, ax_idx: int, signal: SignalXY, impl_plot: Any):
@@ -798,12 +826,17 @@ class BackendParserBase(ABC):
                 idx1 = np.searchsorted(x_data, ranges[0])
                 idx2 = np.searchsorted(x_data, ranges[1])
 
-                x_zoom = signal.data_store[0][idx1:idx2]
-                y_data = signal.data_store[1]
-                if y_data.ndim == 1:
-                    y_zoom = y_data[idx1:idx2]
-                else:  # ndim = 2
-                    y_zoom = y_data[idx1:idx2, idx_line]
+                if isinstance(plot, PlotXYWithSlider):
+                    x_zoom = signal.x_data[idx1:idx2]
+                    y_data = signal.data_store[1]
+                    y_zoom = y_data[self.get_slider_val(plot)][idx1:idx2]
+                else:
+                    x_zoom = signal.data_store[0][idx1:idx2]
+                    y_data = signal.data_store[1]
+                    if y_data.ndim == 1:
+                        y_zoom = y_data[idx1:idx2]
+                    else:  # ndim = 2
+                        y_zoom = y_data[idx1:idx2, idx_line]
 
                 # If the number of samples per signal is less than 100 we continue, if not the user shall keep zooming
                 if len(x_zoom) > 100:
@@ -880,18 +913,30 @@ class BackendParserBase(ABC):
                 for i, line in enumerate(plot_lines):
                     line[0].set_xdata(x_data)
                     line[0].set_ydata(ysub_data[:, i])
+            elif ysub_data.ndim == 0:
+                xsub_data = self.get_ysub_data(plot, x_data)
+                self.set_line_data(plot_lines[0], [xsub_data], [ysub_data])
+                self._update_marker_by_point_count(plot_lines[0], [xsub_data], style)
             # For now, streaming just with Signal XY within a PlotXY
         else:
             if x_data.ndim == 1 and ysub_data.ndim == 1:
                 plot_lines = self.create_slider_plot_lines_1D(draw_fn, x_data, ysub_data, style)
             elif x_data.ndim == 1 and ysub_data.ndim == 2:
                 plot_lines = self.create_slider_plot_lines_2D(draw_fn, x_data, ysub_data, style)
+            elif ysub_data.ndim == 0:
+                xsub_data = self.get_ysub_data(plot, x_data)
+                plot_lines = self.create_slider_plot_lines_1D(draw_fn, [xsub_data], [ysub_data], style)
+                self._update_marker_by_point_count(plot_lines[0], [xsub_data], style)
 
         self.slider_visible_status(plot_lines, signal)
 
         signal.lines = plot_lines
 
         return plot_lines
+
+    @abstractmethod
+    def get_slider_val(self, plot: PlotXYWithSlider):
+        pass
 
     @abstractmethod
     def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
@@ -1019,6 +1064,12 @@ class BackendParserBase(ABC):
         selected region if it does not span the full available range. Used during
         Undo/Redo actions to restore previous slider limits.
         """
+    @abstractmethod
+    def update_slider_limits(self, plot, begin, end):
+        """
+        Updates the slider's minimum and maximum values based on Zoom or Draw with shared time.
+        Highlight the selected area in the slider.
+        """
 
     @abstractmethod
     def set_focus_plot(self, impl_plot: Any):
@@ -1042,26 +1093,34 @@ class BackendParserBase(ABC):
         """
         self._hm.drop()
 
-    def get_shared_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider):
+    def get_shared_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider | PlotContourWithSlider):
         """
         Returns a list of PlotXYWithSlider instances that share the same time range with the given PlotXYWithSlider
         """
         shared = []
-        limits = self.get_plot_limits(plot_with_slider, 'original')
-        base_begin, base_end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
+        base_begin, base_end = plot_with_slider.axes[0].get_limits('original')
         for col in self.canvas.plots:
             for plot in col:
                 if not (isinstance(plot, PlotXYWithSlider) or isinstance(plot,
                                                                          PlotContourWithSlider)) or plot == plot_with_slider:
                     continue
-                limits = self.get_plot_limits(plot, 'original')
-                begin, end = limits.axes_ranges[0].begin, limits.axes_ranges[0].end
 
+                # Check if it is date and the max difference is 1 second
+                # Need to differentiate if it is absolute or relative
+                if isinstance(plot, PlotXYWithSlider):
+                    slider_values = plot.signals[1][0].z_data
+                    is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
+                elif isinstance(plot, PlotContourWithSlider):
+                    slider_values = plot.signals[1][0].time
+                    is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
+                else:
+                    is_date = plot.axes[0].is_date
+
+                begin, end = plot.axes[0].get_limits('original')
                 max_diff = self._pm.get_value(self.canvas, 'max_diff')
-                max_diff_ns = max_diff * 1e9 if plot.axes[0].is_date or isinstance(plot, PlotXYWithSlider) else max_diff
+                max_diff_ns = max_diff * 1e9 if is_date else max_diff
 
-                if ((begin, end) == (base_begin, base_end) or (
-                        abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns)):
+                if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
                     shared.append(plot)
         return shared
 
