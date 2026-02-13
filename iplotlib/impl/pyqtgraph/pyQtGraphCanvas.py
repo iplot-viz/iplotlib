@@ -462,6 +462,7 @@ class PyQtGraphParser(BackendParserBase):
         proxy.setWidget(container)
         last_row_id = max(visible_stack_ids) + 2
         cell_gl.addItem(proxy, row=last_row_id, col=0)
+        cell_gl.layout.setRowMinimumHeight(last_row_id, 30)
         self._slider_placeholders[rc_key] = proxy
 
         # Get data for the slider
