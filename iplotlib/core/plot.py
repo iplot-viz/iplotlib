@@ -241,6 +241,7 @@ class PlotXY(Plot):
             color = self.get_next_color()
             signal.color = color
             signal.original_color = color
+            signal.new_color = False
 
     def get_next_color(self):
         position = self._color_index % len(self._color_cycle)
@@ -248,6 +249,13 @@ class PlotXY(Plot):
         self._color_index += 1
 
         return color_signal
+
+    def get_signal_colors(self):
+        colors = []
+        for stack in self.signals.values():
+            for signal in stack:
+                colors.append(signal.color)
+        return colors
 
     def reset_preferences(self):
         super().reset_preferences()
