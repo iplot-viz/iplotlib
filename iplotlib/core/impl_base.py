@@ -539,7 +539,7 @@ class BackendParserBase(ABC):
             signal.get_data()
             if not isinstance(signal.parent(), PlotImage):
                 if isinstance(signal.parent(), PlotXYWithSlider) and ax_idx == 0:
-                    data = signal.z_data  # Original values for slider
+                    data = signal.time  # Original values for slider
                     cur_data = signal.x_data
                     cur_data = cur_data[~np.isnan(cur_data)]
                     x_begin, x_end = min(np.min(cur_data).item(), begin), max(np.max(cur_data).item(), end)
@@ -931,6 +931,7 @@ class BackendParserBase(ABC):
                 xsub_data = self.get_ysub_data(plot, x_data)
                 plot_lines = self.create_slider_plot_lines_1D(draw_fn, [xsub_data], [ysub_data], style)
                 self._update_marker_by_point_count(plot_lines[0], [xsub_data], style)
+                logger.warning("PlotXYWithSlider created with a single data point per slice")
 
         self.slider_visible_status(plot_lines, signal)
 

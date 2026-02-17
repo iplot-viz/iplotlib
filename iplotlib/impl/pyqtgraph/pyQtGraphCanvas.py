@@ -466,7 +466,7 @@ class PyQtGraphParser(BackendParserBase):
         self._slider_placeholders[rc_key] = proxy
 
         # Get data for the slider
-        slider_values = i_plot.signals[1][0].z_data
+        slider_values = i_plot.signals[1][0].time
         formatter = NanosecondDateFormatter(orientation='bottom')
         is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
 
@@ -519,6 +519,7 @@ class PyQtGraphParser(BackendParserBase):
                 current_label.setText(str(current_value))
         else:
             value = 0
+            i_plot.slider_last_val = value
 
         slider.setValue(value)
 

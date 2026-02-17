@@ -481,7 +481,7 @@ class MatplotlibParser(BackendParserBase):
         # Case for PlotXYWithSlider
         else:
             # Get data for the slider
-            slider_values = plot_with_slider.signals[1][0].z_data
+            slider_values = plot_with_slider.signals[1][0].time
             formatter = NanosecondDateFormatter(ax_idx=0)
             is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
             if is_date:
@@ -528,6 +528,7 @@ class MatplotlibParser(BackendParserBase):
                     current_label.set_text(str(current_value))
             else:
                 value = 0
+                plot_with_slider.slider_last_val = value
 
             # Maximum index value for the slider based on the y-data length
             val_max = plot_with_slider.signals[1][0].y_data.shape[0] - 1
