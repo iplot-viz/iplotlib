@@ -55,7 +55,7 @@ class Axis:
         self.font_color = Axis.font_color
         self.tick_number = Axis.tick_number
 
-    def merge(self, old_axis: dict):
+    def merge(self, old_axis: dict, **kwargs):
         self.label = old_axis['label']
         self.font_size = old_axis['font_size']
         self.font_color = old_axis['font_color']
@@ -114,6 +114,14 @@ class RangeAxis(Axis):
         """
         super().reset_preferences()
 
+    def merge(self, old_axis: dict, merge_limits: bool = False, **kwargs):
+        super().merge(old_axis, **kwargs)
+        if merge_limits:
+            self.begin = old_axis.get('begin', self.begin)
+            self.end = old_axis.get('end', self.end)
+            self.original_begin = old_axis.get('original_begin', self.original_begin)
+            self.original_end = old_axis.get('original_end', self.original_end)
+
 
 @dataclass
 class LinearAxis(RangeAxis):
@@ -138,3 +146,10 @@ class LinearAxis(RangeAxis):
     def __post_init__(self):
         super().__post_init__()
         self.parent = None
+
+    def merge(self, old_axis: dict, merge_limits: bool = False, **kwargs):
+        super().merge(old_axis, merge_limits=merge_limits, **kwargs)
+        self.is_date = old_axis.get('is_date', self.is_date)
+        if merge_limits:
+            self.window = old_axis.get('window', self.window)
+            self.follow = old_axis.get('follow', self.follow)

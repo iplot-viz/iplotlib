@@ -126,10 +126,10 @@ class Plot(ABC):
                     for idxSubAxis, subAxis in enumerate(axis):
                         if subAxis and idxSubAxis < len(old_plot['axes'][idxAxis]):
                             old_axis_properties = old_plot['axes'][idxAxis][idxSubAxis]
-                            subAxis.merge(old_axis_properties)
+                            subAxis.merge(old_axis_properties, merge_limits=(idxAxis == 1))
                 else:
                     old_axis_properties = old_plot['axes'][idxAxis]
-                    axis.merge(old_axis_properties)
+                    axis.merge(old_axis_properties, merge_limits=(idxAxis == 1))
 
         # signals are merged at canvas level to handle move between plots
 
