@@ -173,15 +173,15 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         """
         axes = self._parser.get_canvas_plots()
         for ax in axes:
-            # Stage a command to obtain original view limits
-            self.stage_view_lim_cmd(ax)
-
             ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
             if not hasattr(ci, 'plot'):
                 continue
             plot = ci.plot()
             if not isinstance(plot, PlotXY):
                 continue
+
+            # Stage a command to obtain original view limits
+            self.stage_view_lim_cmd(ax)
 
             # Autoscale on Y axis for the given plot
             self._parser.autoscale_y_axis(ax)

@@ -98,10 +98,9 @@ class DataclassNumpyJSONEncoder(JSONEncoder):
                 value = getattr(o, name)
 
                 # Avoid serializing Sliders
-                if name == "slider" or name.startswith("slider_"):
+                if name == "slider":
                     result[name] = None
                     continue
-
                 try:
                     json.dumps(value, cls=DataclassNumpyJSONEncoder)
                     result[name] = value

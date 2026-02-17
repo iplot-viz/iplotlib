@@ -1,5 +1,6 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
+import gc
 from datetime import datetime
 from typing import Any, Callable, Collection, List, Tuple
 import numpy as np
@@ -121,6 +122,8 @@ class PyQtGraphParser(BackendParserBase):
             lay.setColumnStretchFactor(end_col, 1)
 
             cell_gl = pg.GraphicsLayout()
+            cell_gl.layout.setSpacing(0)  # Reduce vertical spacing between stacked plots
+            cell_gl.layout.setContentsMargins(0, 0, 0, 0)
             self.figure.addItem(cell_gl, row=layout_row, col=col, rowspan=rowspan, colspan=colspan)
             self._cell_gl[key] = cell_gl
         return cell_gl
@@ -434,19 +437,14 @@ class PyQtGraphParser(BackendParserBase):
         pass
 
     def process_ipl_plot_xy_slider(self, i_plot: PlotXYWithSlider, row, col, visible_stack_ids, cell_gl):
-        # Check if there was a previous plot_with_slider with a value
-        if i_plot.slider_last_val is not None:
-            value = i_plot.slider_last_val
-        else:
-            value = 0
+        # Maximum index value for the slider based on the y-data length
+        val_max = i_plot.signals[1][0].y_data.shape[0] - 1
 
         # Slider creation
         slider = QSlider(QtCore.Qt.Orientation.Horizontal)
         slider.setMinimum(0)
-        slider.setMaximum(i_plot.signals[1][0].y_data.shape[0] - 1)
-        slider.setValue(value)
+        slider.setMaximum(val_max)
         slider.setTickInterval(1)
-
         i_plot.slider = slider
 
         # Annotate labels along the slider axis
@@ -464,15 +462,33 @@ class PyQtGraphParser(BackendParserBase):
         proxy.setWidget(container)
         last_row_id = max(visible_stack_ids) + 2
         cell_gl.addItem(proxy, row=last_row_id, col=0)
+        cell_gl.layout.setRowMinimumHeight(last_row_id, 30)
         self._slider_placeholders[rc_key] = proxy
 
         # Get data for the slider
-        slider_values = i_plot.signals[1][0].z_data
+        slider_values = i_plot.signals[1][0].time
+        formatter = NanosecondDateFormatter(orientation='bottom')
+        is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
 
-        # Slider labels
-        min_label = QLabel(f"{pd.Timestamp(slider_values[0])}")
-        max_label = QLabel(f"{pd.Timestamp(slider_values[-1])}")
-        current_label = QLabel(F"{pd.Timestamp(slider_values[0])}")
+        # Set slider labels
+        if is_date:
+            min_value = pd.Timestamp(slider_values[0]).value
+            max_value = pd.Timestamp(slider_values[-1]).value
+
+            # Format start, current and end timestamps
+            # Reduced format for current value and end value
+            start_format = formatter.date_fmt(min_value, formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
+            current_format = formatter.date_fmt(min_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                                postfix_end=True)
+            end_format = formatter.date_fmt(max_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                            postfix_end=True)
+            min_label = QLabel(start_format)
+            max_label = QLabel(end_format)
+            current_label = QLabel(current_format)
+        else:
+            min_label = QLabel(f"{slider_values[0]}")
+            max_label = QLabel(f"{slider_values[-1]}")
+            current_label = QLabel(F"{slider_values[0]}")
 
         # Apply font_size for slider labels
         fs = self._pm.get_value(i_plot, 'font_size')
@@ -489,10 +505,81 @@ class PyQtGraphParser(BackendParserBase):
         h_layout.addStretch()
         h_layout.addWidget(max_label)
 
+        # Check if there was a previous plot_with_slider with a value
+        if i_plot.slider_last_val is not None:
+            value = i_plot.slider_last_val
+            # Update current value label
+            if is_date:
+                current_value = pd.Timestamp(slider_values[int(value)]).value
+                current_label.setText(
+                    formatter.date_fmt(current_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                       postfix_end=True))
+            else:
+                current_value = slider_values[int(value)]
+                current_label.setText(str(current_value))
+        else:
+            value = 0
+            i_plot.slider_last_val = value
+
+        slider.setValue(value)
+
         # Register the callback function to update the plot when the slider value changes
-        slider.valueChanged.connect(lambda val, i_p=i_plot: self._update_slider(val, i_p, slider_values, current_label))
+        slider.valueChanged.connect(
+            lambda val, i_p=i_plot: self._update_slider(val, i_p, slider_values, current_label, formatter))
+
+        # Check if the PlotXYWithSlider had a previously defined min/max range for the slider
+        slider_min = i_plot.slider_last_min
+        slider_max = i_plot.slider_last_max
+
+        if slider_min is not None and slider_max is not None:
+            # If the minimum and maximum values of a PlotXYWithSlider differ from their original values, it means
+            # they were modified due to a zoom action performed on a PlotXY that shares the same shared time.
+            # Therefore, when the PlotXYWithSlider is processed again, the red highlighted area should continue
+            # to be displayed, provided that the shared time is still active.
+            if (slider_min != 0 or slider_max != val_max) and self._pm.get_value(self.canvas, 'shared_x_axis'):
+                # Update the slider range based on previous limits
+                i_plot.slider.setMinimum(slider_min)
+                i_plot.slider.setMaximum(slider_max)
+
+                # Set current value according to slider limits
+                val = i_plot.slider.value()
+                if val < slider_min:
+                    val = slider_min
+                elif val > slider_max:
+                    val = slider_max
+                i_plot.slider.setValue(val)
+
+                # Update min and max label
+                if is_date:
+                    min_value = pd.Timestamp(slider_values[int(slider_min)]).value
+                    min_label.setText(
+                        formatter.date_fmt(min_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                           postfix_end=True))
+                    max_value = pd.Timestamp(slider_values[int(slider_max)]).value
+                    max_label.setText(
+                        formatter.date_fmt(max_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                           postfix_end=True))
+                else:
+                    min_value = slider_values[int(slider_min)]
+                    min_label.setText(str(min_value))
+                    max_value = slider_values[int(slider_max)]
+                    max_label.setText(str(max_value))
+
+                # Update slider limits
+                slider.setMinimum(slider_min)
+                slider.setMaximum(slider_max)
+            else:
+                i_plot.slider_last_min = 0
+                i_plot.slider_last_max = val_max
+        else:
+            # Initialize the PlotXYWithSlider range when no previous limits are set
+            i_plot.slider_last_min = 0
+            i_plot.slider_last_max = val_max
 
         return cell_gl
+
+    def get_slider_val(self, plot: PlotXYWithSlider):
+        return plot.slider.value()
 
     def process_ipl_plot(self, i_plot: Plot, col: int, row: int):
         if not isinstance(i_plot, Plot):
@@ -531,6 +618,10 @@ class PyQtGraphParser(BackendParserBase):
 
             if row_id not in stack_map:
                 pi = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
+                # Show top and right borders
+                pi.showAxes((True, True, True, True), showValues=(True, False, False, True))
+                # Reduce internal margins for compact layout
+                pi.layout.setContentsMargins(0, 0, 0, 0)
                 # Add space for expo
                 if stack_id == 0:
                     cell_gl.addItem(axis_items["left"].common_label, row=0, col=0)
@@ -713,14 +804,20 @@ class PyQtGraphParser(BackendParserBase):
                     and leg_rect.bottom() <= vb_rect.bottom()):
                 break
 
-    def _update_slider(self, val, i_plot: PlotXYWithSlider, slider_values, current_label):
+    def _update_slider(self, val, i_plot: PlotXYWithSlider, slider_values, current_label, formatter):
         for c_row in i_plot.signals.values():
             for c_signal in c_row:
                 self.process_ipl_signal(c_signal)
 
         # Refresh current label value
-        current_value = pd.Timestamp(slider_values[int(val)])
-        current_label.setText(f"{current_value}")
+        is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
+        if is_date:
+            current_value = pd.Timestamp(slider_values[int(val)]).value
+            current_label.setText(formatter.date_fmt(current_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                                     postfix_end=True))
+        else:
+            current_value = slider_values[int(val)]
+            current_label.setText(f"{current_value}")
 
         i_plot.slider_last_val = val
 
@@ -764,22 +861,52 @@ class PyQtGraphParser(BackendParserBase):
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, axis_item: AxisItem):
         tick_props = dict(maxTickLevel=0)
+        show_all_ticks = self._pm.get_value(self.canvas, 'ticks_position')
 
         # Set ticks on the top and right axis
-        if self._pm.get_value(self.canvas, 'ticks_position'):
-            tick_props['tickLength'] = -5
+        if show_all_ticks:
+            tick_props['tickLength'] = -4
         else:
-            tick_props['tickLength'] = 5
+            tick_props['tickLength'] = 4
 
-        # Set color and font
-        if fs is not None and fs > 0:
+        # Configure top and right axes ticks based on ticks_position
+        if axis_item.orientation == 'left':
+            plot_item = axis_item.parentItem()
+            if plot_item:
+                if show_all_ticks:
+                    # Show ticks on top and right axes
+                    plot_item.getAxis('top').setStyle(tickLength=-4, maxTickLevel=0)
+                    plot_item.getAxis('right').setStyle(tickLength=-4, maxTickLevel=0)
+                else:
+                    # Hide ticks on top and right axes
+                    plot_item.getAxis('top').setTicks([])
+                    plot_item.getAxis('right').setTicks([])
+
+        # Create font and metrics if font size is valid
+        if fs and fs > 0:
             tick_font = QFont()
             tick_font.setPointSize(int(fs))
-            tick_props.update({'tickFont': tick_font})
+            font_metrics = QFontMetricsF(tick_font)
+            tick_props['tickFont'] = tick_font
+        else:
+            font_metrics = None
+
+        # Reduce vertical space between tick labels and axis edge
+        if axis_item.orientation == 'bottom':
+            tick_props['tickTextOffset'] = 1
+            if font_metrics:
+                tick_length = tick_props.get('tickLength', 4)
+                axis_item.setHeight(int(font_metrics.height() + abs(tick_length) + 2))
+            else:
+                axis_item.setHeight(16)
 
         # Font size for UTC label
         if isinstance(axis_item, NanosecondDateFormatter):
             axis_item.common_label.setText(axis_item.offset_str, size=f'{fs}pt', color=fc)
+            if font_metrics:
+                axis_item.common_label.setMaximumHeight(int(font_metrics.height() + 2))
+            else:
+                axis_item.common_label.setMaximumHeight(14)
 
         axis_item.setStyle(**tick_props)
 
@@ -860,12 +987,23 @@ class PyQtGraphParser(BackendParserBase):
         self._cell_gl = {}
         self._layout_stacks = {}
         self._slider_placeholders = {}
-        # Clean relevant items from GraphicsLayoutWidget
-        for item in self.figure.items()[:]:
-            try:
-                self.figure.removeItem(item)
-            except Exception:
-                pass
+
+        # Remove all items from the layout and set the current row and column to 0
+        # The clear() method is wrapped from the figure (GraphicsLayoutWidget) internal GraphicsLayout
+        self.figure.clear()
+        for col in self.canvas.plots:
+            for plot in col:
+                if not plot:
+                    continue
+                for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
+                    signal.lines.clear()
+                if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
+                    plot.clean_slider()
+
+        self.map_legend_to_ax.clear()
+        self._impl_plot_ranges_hash.clear()
+
+        gc.collect()
 
     @staticmethod
     def set_grid(plot: PlotItem, grid: bool = True):
@@ -947,65 +1085,88 @@ class PyQtGraphParser(BackendParserBase):
         vb.setYRange(bot, top, padding=padding)
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
-        pass
+        """
+            Apply slider limit changes to a PlotXYWithSlider instance (used in UNDO/REDO operations)
+        """
+        if plot.slider is None:
+            return
+
+        # Update internal and actual slider limits
+        plot.slider_last_min = start
+        plot.slider_last_max = end
+        plot.slider.setMinimum(start)
+        plot.slider.setMaximum(end)
+
+        # Adjust the current slider value
+        val = plot.slider.value()
+        if val < start:
+            val = start
+        elif val > end:
+            val = end
+
+        plot.slider.setValue(val)
+
+        # Update the annotations labels for the slider limits
+        row, col = plot.row - 1, plot.col - 1
+        annotations = self._slider_placeholders[(row, col)].widget().findChildren(QLabel)
+        min_annotation, current_annotation, max_annotation = annotations[:3]
+
+        slider_values = plot.signals[1][0].z_data
+        is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
+        if is_date:
+            min_annotation.setText(f'{pd.Timestamp(slider_values[start])}')
+            current_annotation.setText(f'{pd.Timestamp(slider_values[val])}')
+            max_annotation.setText(f'{pd.Timestamp(slider_values[end])}')
+        else:
+            min_annotation.setText(f'{slider_values[start]}')
+            current_annotation.setText(f'{slider_values[val]}')
+            max_annotation.setText(f'{slider_values[end]}')
 
     def update_slider_limits(self, plot: PlotXYWithSlider, begin, end):
-        if bool(begin > (1 << 53)):
-            # Convert time-based 'begin' and 'end' values to corresponding indices in z_data
-            new_start = np.searchsorted(plot.signals[1][0].z_data, begin)
-            new_end = np.searchsorted(plot.signals[1][0].z_data, end)
+        # Convert time-based 'begin' and 'end' values to corresponding indices in z_data
+        new_start = np.searchsorted(plot.signals[1][0].z_data, begin)
+        new_end = np.searchsorted(plot.signals[1][0].z_data, end)
 
-            # Ensure indices are within the valid range of the signal's time data
-            max_len = len(plot.signals[1][0].z_data) - 1
-            new_start = max(0, min(new_start, max_len))
-            new_end = max(0, min(new_end, max_len))
+        # Ensure indices are within the valid range of the signal's time data
+        max_len = len(plot.signals[1][0].z_data) - 1
+        new_start = max(0, min(new_start, max_len))
+        new_end = max(0, min(new_end, max_len))
 
-            # Adjust current slider value
-            if plot.slider.value() < new_start:
-                val = new_start
-            elif plot.slider.value() > new_end:
-                val = new_end
-            else:
-                val = plot.slider.value()
+        # Adjust current slider value
+        if plot.slider.value() < new_start:
+            val = new_start
+        elif plot.slider.value() > new_end:
+            val = new_end
+        else:
+            val = plot.slider.value()
 
-            # Update slider limits
-            plot.slider_last_min = new_start
-            plot.slider.setRange(new_start, new_end)
-            # plot.slider.setMinimum(new_start)
+        # Update slider limits
+        plot.slider_last_min = new_start
+        plot.slider_last_max = new_end
+        plot.slider.setMinimum(new_start)
+        plot.slider.setMaximum(new_end)
+        plot.slider.setValue(val)
 
-            # plot.slider.setMaximum(new_end)
-            plot.slider_last_max = new_end
+        # Update the annotations labels for the slider limits
+        row, col = plot.row - 1, plot.col - 1
+        annotations = self._slider_placeholders[(row, col)].widget().findChildren(QLabel)
+        min_annotation, current_annotation, max_annotation = annotations[:3]
 
-            plot.slider.setValue(val)
-
-            # Update the annotations labels for the slider limits
-            """
-            annotations = [label for label in plot.slider.ax.get_children() if isinstance(label, plt.Annotation)]
-            min_annotation, current_annotation, max_annotation = annotations[:3]
-            min_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_start])}')
-            current_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[val])}')
-            max_annotation.set_text(f'{pandas.Timestamp(plot.signals[1][0].z_data[new_end])}')
-
-            # Remove any previously highlighted region from the slider axis
-            for child in plot.slider.ax.get_children():
-                if isinstance(child, Patch) and child.get_facecolor()[:3] == (1.0, 0.0, 0.0):
-                    child.remove()
-
-
-            # Highlight the selected area in the slider, avoiding drawing a region if start and end span the full range
-            if plot.slider_last_min != 0 or plot.slider_last_max != max_len:
-                # plot.slider.ax.axvspan(new_start, new_end, color='red', alpha=0.3)
-                painter = QPainter()
-                painter.setBrush(QtGui.QColor(255, 0, 0, 80))
-                painter.drawRect(QtCore.QRect(int(start_x), 0, int(end_x - start_x), plot.slider.height()))
-                painter.end()
-
-            """
+        slider_values = plot.signals[1][0].z_data
+        is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
+        if is_date:
+            min_annotation.setText(f'{pd.Timestamp(slider_values[new_start])}')
+            current_annotation.setText(f'{pd.Timestamp(slider_values[val])}')
+            max_annotation.setText(f'{pd.Timestamp(slider_values[new_end])}')
+        else:
+            min_annotation.setText(f'{slider_values[new_start]}')
+            current_annotation.setText(f'{slider_values[val]}')
+            max_annotation.setText(f'{slider_values[new_end]}')
 
     def enable_tight_layout(self):
         glw = self.figure
-        glw.ci.layout.setContentsMargins(6, 6, 6, 6)
-        glw.ci.layout.setSpacing(4)
+        glw.ci.layout.setContentsMargins(4, 4, 4, 4)
+        glw.ci.layout.setSpacing(2)
 
     def disable_tight_layout(self):
         glw = self.figure
@@ -1163,8 +1324,12 @@ class PyQtGraphParser(BackendParserBase):
     def set_impl_x_axis_label_text(self, plot: PlotItem, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(plot)
         i_plot = ci.plot() if ci else None
-        fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
-        fs = self._pm.get_value(i_plot, 'font_size') if i_plot else None
+        # Get the X axis to retrieve its font properties
+        x_axis = i_plot.axes[0] if i_plot and len(i_plot.axes) > 0 else None
+        fc = self._pm.get_value(x_axis, 'font_color') if x_axis else self._pm.get_value(i_plot,
+                                                                                        'font_color') if i_plot else None
+        fs = self._pm.get_value(x_axis, 'font_size') if x_axis else self._pm.get_value(i_plot,
+                                                                                       'font_size') if i_plot else None
         self.process_ipl_axis_params_label(self.get_impl_x_axis(plot), text, fc, fs)
 
     def set_impl_x_axis_limits(self, plot: PlotItem, limits: tuple):
@@ -1175,8 +1340,16 @@ class PyQtGraphParser(BackendParserBase):
     def set_impl_y_axis_label_text(self, plot: PlotItem, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(plot)
         i_plot = ci.plot() if ci else None
-        fc = self._pm.get_value(i_plot, 'font_color') if i_plot else None
-        fs = self._pm.get_value(i_plot, 'font_size') if i_plot else None
+        # Get the Y axis to retrieve its font properties
+        y_axis = None
+        if i_plot and len(i_plot.axes) > 1:
+            stacked_plots = self._plot_impl_plot_lut.get(id(i_plot), [])
+            pos = stacked_plots.index(plot) if plot in stacked_plots else 0
+            y_axis = i_plot.axes[1][pos] if isinstance(i_plot.axes[1], Collection) else i_plot.axes[1]
+        fc = self._pm.get_value(y_axis, 'font_color') if y_axis else self._pm.get_value(i_plot,
+                                                                                        'font_color') if i_plot else None
+        fs = self._pm.get_value(y_axis, 'font_size') if y_axis else self._pm.get_value(i_plot,
+                                                                                       'font_size') if i_plot else None
         self.process_ipl_axis_params_label(self.get_impl_y_axis(plot), text, fc, fs)
 
     def set_impl_y_axis_limits(self, plot: PlotItem, limits: tuple):
