@@ -547,7 +547,11 @@ class BackendParserBase(ABC):
                 else:
                     if signal.envelope > 0 and ax_idx == 1:
                         # Envelope case Y axis
-                        data = np.array([np.min(signal.data_store[1]).item(), np.max(signal.data_store[2]).item()])
+                        y_min = signal.data_store[1]
+                        y_max = signal.data_store[2]
+                        y_min = y_min[~np.isnan(y_min)]
+                        y_max = y_max[~np.isnan(y_max)]
+                        data = np.array([np.min(y_min).item(), np.max(y_max).item()])
                     else:
                         data = signal.x_data if ax_idx == 0 else signal.y_data
             else:
@@ -1403,6 +1407,7 @@ class BackendParserBase(ABC):
         if ax_idx == 0:
             if begin == end and begin is not None:
                 begin = end - 1
+                end += 1
             self.set_impl_x_axis_limits(impl_plot, (begin, end))
         elif ax_idx == 1:
             self.set_impl_y_axis_limits(impl_plot, (begin, end))
