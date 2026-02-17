@@ -11,7 +11,7 @@ from typing import List, Union, Dict
 
 from iplotLogging import setupLogger
 from iplotlib.core.persistence import JSONExporter
-from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider
+from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.signal import Signal
 import pandas as pd
 import weakref

@@ -197,7 +197,8 @@ class NanosecondDateFormatter(pg.AxisItem):
         return values
 
     def set_scale(self, scale, prefix):
-        self.offset_str = f"{1/scale:.0e}"
+        exponent = int(round(-np.log10(scale)))
+        self.offset_str = f"1e{exponent}"
         self.autoSIPrefixScale = scale
         self.labelUnit = prefix
 

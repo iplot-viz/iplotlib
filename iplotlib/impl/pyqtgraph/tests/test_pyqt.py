@@ -6,10 +6,11 @@ import numpy as np
 from iplotDataAccess.dataAccess import DataAccess
 from iplotlib.core.canvas import Canvas
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
+from iplotlib.impl.pyqtgraph.tests.QAppOffscreenTestAdapter import QAppOffscreenTestAdapter
 from iplotlib.interface import AccessHelper
 
 ROOT = os.path.dirname(__file__)
-data_dir = os.path.join(ROOT, 'csv/ITER')
+data_dir = os.path.join(ROOT, 'csv', 'ITER')
 
 dscfg_csv = """
 {
@@ -20,22 +21,34 @@ dscfg_csv = """
 }
 """
 
-
-class PyQtGraphTesting(unittest.TestCase):
+class PyQtGraphTesting(QAppOffscreenTestAdapter):
     def setUp(self) -> None:
         super().setUp()
 
         self.da = DataAccess()
         self.ds = "csv"
 
-        dscfg = dscfg_csv % data_dir
+        # Use forward slashes for JSON compatibility on all platforms
+        data_dir_escaped = data_dir.replace('\\', '/')
+        dscfg = dscfg_csv % data_dir_escaped
 
-        with tempfile.NamedTemporaryFile(mode='w+') as fp:
-            fp.write(dscfg)
-            fp.seek(0)
-            os.environ.update({'IPLOT_SOURCES_CONFIG': os.path.abspath(fp.name)})
-            if self.da.load_config(fp.name):
-                AccessHelper.da = self.da
+        # Create temp file - on Windows we need to close it before reading
+        self.temp_config_path = tempfile.mktemp(suffix='.cfg')
+        with open(self.temp_config_path, 'w') as f:
+            f.write(dscfg)
+
+        os.environ.update({'IPLOT_SOURCES_CONFIG': os.path.abspath(self.temp_config_path)})
+        if self.da.load_config(self.temp_config_path):
+            AccessHelper.da = self.da
+
+    def tearDown(self) -> None:
+        # Clean up temp file
+        if hasattr(self, 'temp_config_path'):
+            try:
+                os.unlink(self.temp_config_path)
+            except OSError:
+                pass
+        super().tearDown()
 
     # --------------------------
     #           TESTS

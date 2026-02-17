@@ -5,7 +5,7 @@ This file implements a standalone Canvas using iplotlib and PySide6, designed as
 ## Features
 
 - **Standalone Canvas**: Works as a standalone Qt application.
-- **Support for Multiple Graphic Backends**: Designed to be flexible with various backends like `matplotlib`.
+- **Support for Multiple Graphic Backends**: Designed to be flexible with various backends like `matplotlib` or `pyqtgraph` .
 - **Optional Toolbar**: Configurable based on the user's needs.
 - **Predefined Examples**: Ready-to-use examples included in the `examples` and `examples_json` folders.
 - **Menu System**: Interactive menu to select and manage active canvases.
@@ -26,8 +26,8 @@ python iplotQtStandaloneCanvas.py
 
 The application supports the following arguments to customize its behavior:
 
-- `-impl`: Specifies the graphic backend (default: `matplotlib`).
-- `-t`: Enables the toolbar (disabled by default).
+- `-impl`: Specifies the graphic backend like `matplotlib` or `pyqt` (default: `matplotlib`).
+- `-t`: Enables the toolbar (enabled by default).
 - `-use-fallback-samples`: Uses fallback resolution samples for large displays.
 - `-profile`: Activates profiling mode for performance debugging.
 

@@ -235,7 +235,7 @@ class IplotSignalAdapter(ProcessingSignal):
                 logger.error(f"Error {e} in {expr}")
                 continue
 
-        # Clear the diccionary result
+        # Clear the dictionary result
         ParserHelper.dict_result.clear()
 
         return data_arrays
@@ -442,7 +442,7 @@ class IplotSignalAdapter(ProcessingSignal):
         if self.data_access_enabled and self.status_info.result != Result.SUCCESS:
             return
 
-        # 2.Handle child signals.
+        # 2.Handle child signals
         # Note: In this case, `self.name` is an expression, so prior to applying x,y,z we evaluate `self.name`
         if len(self.children):
             vm = dict(self._local_env)
@@ -450,11 +450,10 @@ class IplotSignalAdapter(ProcessingSignal):
             vm['self'] = self
 
             # 2.1 Ensure all child signals have their time, data vectors (if DA enabled)
-            backup = []
-            for child in self.children:
-                backup.append([ds.copy() for ds in child.data_store])
+            # Note: Before, a backup was used to get back original data for all child. Now, we use a dict called
+            # dict_result which contains the processed data, avoiding to modify the original data of the child.
 
-            # 2.2 Align all signals onto a common grid (adaptado con logs)
+            # 2.2 Check if children are aligned in time
             tmp_local_env = dict(vm)
             tmp_local_env['self'] = self
             dependencies = []
@@ -462,7 +461,6 @@ class IplotSignalAdapter(ProcessingSignal):
                 if hasattr(child, "data_store") and len(child.data_store[0]) != 0:
                     dependencies.append(child)
 
-            # Check if all signals are aligned in time
             needs_realign = False
             for sig1, sig2 in zip(dependencies[:-1], dependencies[1:]):
                 if not np.array_equal(sig1.data_store[0], sig2.data_store[0]):
@@ -471,41 +469,55 @@ class IplotSignalAdapter(ProcessingSignal):
 
             if needs_realign and len(dependencies) > 1:
                 ParserHelper.dict_result = align(dependencies, curr_signal=self) or {}
-                if 'self' in ParserHelper.dict_result:
-                    self.data_store[0] = ParserHelper.dict_result['self']['time']
-                    self.data_store[1] = ParserHelper.dict_result['self']['data']
-            else:
-                ParserHelper.dict_result = {}
-                for sig in dependencies:
-                    key = 'self' if sig.label == self.label else sig.label
-                    ParserHelper.dict_result[key] = {
-                        'time': sig.data_store[0],
-                        'data': sig.data_store[1]
-                    }
 
-            # 2.3 Evaluate self.name. It is an expression combining multiple other signals.
+            # 2.3 Evaluate 'self.name'. It is an expression combining multiple other signals
             try:
                 p = Parser()
                 p.inject(Parser.get_member_list(type(self)))
                 p.inject(self.alias_map)
                 p.clear_expr()
-                p.set_expression(self.name, True)
-                p.substitute_var(tmp_local_env, ParserHelper.dict_result)
-                p.eval_expr()
-                if isinstance(p.result, ProcessingSignal):
-                    # Update first four buffers via slice assignment, auto-expanding as needed
-                    self.data_store[:4] = p.result.data_store[:4]
+
+                if 'data' not in self.alias_map.keys():
+                    # Envelope validation: if the result comes from signals that use envelope data, the current signal
+                    # must also be marked as envelope. Otherwise, processing cannot continue and an exception is raised
+                    if not self.envelope:
+                        self.set_proc_fail(
+                            f"Result of expression={self.name} is derived from signals with envelope data. "
+                            f"Ensure the result signal is configured to use envelope.")
+                        return
+                    self.data_store.clear()
+                    if ParserHelper.dict_result:
+                        first_key = next(iter(ParserHelper.dict_result))
+                        self.data_store.append(ParserHelper.dict_result[first_key]['time'])
+                    else:
+                        self.data_store.append(dependencies[0].time)
+                    for idx in self.dependent_accessors:
+                        p.set_expression(self.name, True, True, idx)
+                        p.substitute_var(tmp_local_env, ParserHelper.dict_result, self.alias_map, self.envelope)
+                        p.eval_expr()
+                        # Set envelope data
+                        result = p.result if isinstance(p.result, BufferObject) else BufferObject(p.result)
+                        self.data_store.append(result)
                 else:
-                    self.set_proc_fail(f"Result of expression={self.name} is not an instance of {type(self).__name__}")
-                    return
+                    p.set_expression(self.name, True)
+                    p.substitute_var(tmp_local_env, ParserHelper.dict_result)
+                    p.eval_expr()
+
+                    # Set result
+                    if isinstance(p.result, (BufferObject, np.ndarray)):
+                        if ParserHelper.dict_result:
+                            first_key = next(iter(ParserHelper.dict_result))
+                            self.data_store[0] = ParserHelper.dict_result[first_key]['time']
+                        else:
+                            self.data_store[0] = dependencies[0].time
+                        self.data_store[1] = p.result if isinstance(p.result, BufferObject) else BufferObject(p.result)
+                    else:
+                        self.set_proc_fail(f"Result of expression={self.name} is not an instance of {type(self).__name__}")
+                        return
             except Exception as e:
                 self.set_proc_fail(msg=str(e))
             finally:
-                # restore backup.
-                for child, saved_data in zip(self.children, backup):
-                    child.data_store.clear()
-                    for ds in saved_data:
-                        child.data_store.append(ds)
+                ParserHelper.dict_result.clear()
 
         if self.status_info.result == Result.FAIL:
             return
@@ -536,7 +548,8 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.reset()
 
         if len(self.children):
-            isDownsampled = True
+            isDownsampled = False
+            alias_map = {}
             # ask child signals to fetch data
             for child in self.children:
                 if child._needs_refresh():
@@ -544,9 +557,19 @@ class IplotSignalAdapter(ProcessingSignal):
                 if child.status_info.result == Result.FAIL:
                     self.set_da_fail(msg=child.status_info.msg)  # get exact reason for failure from child.
                     break
-                isDownsampled &= child.isDownsampled
+                if not alias_map:
+                    alias_map = child.alias_map
+                elif alias_map != child.alias_map:
+                    self.set_da_fail(
+                        msg="Cannot process signal with envelope and signal with no envelope")  # get exact reason for failure from child.
+                    break
+                else:
+                    alias_map = child.alias_map
+                isDownsampled |= child.isDownsampled
             else:  # Fell through, all children succeded
                 self.isDownsampled = isDownsampled
+                self.alias_map.clear()
+                self.alias_map.update(alias_map)
                 self.set_da_success()
         else:
             # submit a fetch request for ourself.
@@ -955,7 +978,7 @@ class ParserHelper:
         needs_realign = False
         dependencies = list()
         tmp_local_env = dict()
-        isDownsampled = True
+        isDownsampled = False
 
         for var_name in signal.depends_on:
             tmp_local_env[var_name] = local_env[var_name]
@@ -964,7 +987,7 @@ class ParserHelper:
 
             if var_name != "self":
                 tmp_local_env[var_name].get_data()
-                isDownsampled &= tmp_local_env[var_name].isDownsampled
+                isDownsampled |= tmp_local_env[var_name].isDownsampled
 
             if var_name != 'self' or len(tmp_local_env[var_name].data_store[0]) != 0:
                 dependencies.append(tmp_local_env[var_name])
@@ -972,7 +995,7 @@ class ParserHelper:
         # Set downsampling attribute for processed signal
         if len(signal.depends_on) > 1:
             if signal.name != '':
-                isDownsampled &= signal.isDownsampled
+                isDownsampled |= signal.isDownsampled
                 signal.isDownsampled = isDownsampled
             else:
                 signal.isDownsampled = isDownsampled

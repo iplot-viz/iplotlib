@@ -1,40 +1,68 @@
 .. _installation:
 
-Installation
-------------
+Installing iplotlib
+===========================================
 
-To use iplotlib, follow these steps on an SDCC-login node.
-
-1. Clone the git repository and checkout latest release
+To get started, you can install it from `pypi.org <https://pypi.org/>`_:
 
 .. code-block:: bash
 
-    git clone ssh://git@git.iter.org/vis/iplotlib.git
+    pip install iplotlib
+
+Local installation from sources
+-------
+Clone the iplotlib repository and then run pip install:
+
+.. code-block:: bash
+
+    python3 -m venv ./venv
+    . venv/bin/activate
+
+    git clone https://github.com/iplot-viz/iplotlib.git
     cd iplotlib
-    git checkout x.y.z 
-
-.. note::
-    1. Use ssh-keys to avoid password prompts.
-    2. See output of `git describe --tags `git rev-list --tags --max-count=1`` for the latest tag.
-
-2. Initialize your environment.
-
-.. code-block:: bash
-
-    module load matplotlib/3.3.3-foss-2020b
-    module load VTK/9.1.0-foss-2020b
-    module load PySide2/5.14.2.3-GCCcore-10.2.0
-    module load coverage/5.5-GCCcore-10.2.0
-    module load iplotLogging/0.1.0-GCCcore-10.2.0    
-    
-# 3. Install with pip
-
-.. code-block:: bash
-
     pip install .
 
-.. _devinstallation:
 
+Development installation
+-------
+For development, an installation in editable mode may be more convenient and you will need some extra dependencies to run the test suite and build documentation.
 
-.. note::
-    1. If you wish to develop and contribute to **iplotlib**, checkout the `develop` branch instead of a release tag.
+.. code-block:: bash
+
+    pip install -e .[test,docs]
+
+.. note:: If you plan on developing the IDV components, clone other repositories like so:
+
+.. code-block:: bash
+
+    # Your dev root should look like this.
+    iplotlib/
+        |-iplotlib
+        |-pyproject.toml
+        |-...
+    iplotdataaccess
+        |-iplotDataAccess
+        |-pyproject.toml
+        |-...
+    iplotprocessing
+        |-iplotProcessing
+        |-pyproject.toml
+        |-...
+    iplotlogging
+        |-iplotLogging
+        |-pyproject.toml
+        |-...
+    iplotwidgets
+        |-iplotWidgets
+        |-pyproject.toml
+        |-...
+    mint
+        |-mint
+        |-pyproject.toml
+        |-...
+    $ cd iplotlib
+    $ source development/setup-sdcc-dev.sh
+    # To build documentation, execute this script
+    $ ./development/setup-iplotlib-docs.sh
+    # If you wish to exit, run
+    $ idv_env_deactivate

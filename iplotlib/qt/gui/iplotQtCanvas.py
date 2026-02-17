@@ -11,7 +11,7 @@ from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
 from iplotlib.core.signal import SignalXY
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.plot import PlotXYWithSlider
+from iplotlib.core.plot import PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.command import IplotCommand
 from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
@@ -368,7 +368,7 @@ class IplotQtCanvas(QWidget):
         """
         for col in self.get_canvas().plots:
             for plot in col:
-                if isinstance(plot, PlotXYWithSlider):
+                if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
                     plot.clean_slider()
 
     def sizeHint(self):

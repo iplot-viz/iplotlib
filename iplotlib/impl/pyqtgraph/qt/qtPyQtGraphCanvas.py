@@ -33,6 +33,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._vlayout.addWidget(self._parser.figure)
 
         self.setLayout(self._vlayout)
+        self.set_canvas(kwargs.get('canvas'))
 
         # QMenu
         self.autoscale_menu = None
@@ -193,15 +194,15 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         """
         axes = self._parser.get_canvas_plots()
         for ax in axes:
-            # Stage a command to obtain original view limits
-            self.stage_view_lim_cmd(ax)
-
             ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
             if not hasattr(ci, 'plot'):
                 continue
             plot = ci.plot()
             if not isinstance(plot, PlotXY):
                 continue
+
+            # Stage a command to obtain original view limits
+            self.stage_view_lim_cmd(ax)
 
             # Autoscale on Y axis for the given plot
             self._parser.autoscale_y_axis(ax)
@@ -249,11 +250,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def _full_screen_mode_on(self, impl_plot):
         self._parser.set_focus_plot(impl_plot)
         self.refresh()
-        # self.stats(self.get_canvas())
+        self.stats(self.get_canvas())
 
     def _full_screen_mode_off(self):
         self._parser.set_focus_plot(None)
         self.refresh()
+        self.stats(self.get_canvas())
 
     def _impl_mouse_press_handler(self, view_box, event):
         """Handle mouse press events in PyQtGraph."""

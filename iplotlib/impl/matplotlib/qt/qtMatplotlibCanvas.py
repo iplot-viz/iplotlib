@@ -24,7 +24,7 @@ from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, Mouse
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
-from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider
+from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
@@ -189,15 +189,15 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """
         axes = self._parser.figure.axes
         for ax in axes:
-            # Stage a command to obtain original view limits
-            self.stage_view_lim_cmd(ax)
-
             ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
             if not hasattr(ci, 'plot'):
                 continue
             plot = ci.plot()
             if not isinstance(plot, PlotXY):
                 continue
+
+            # Stage a command to obtain original view limits
+            self.stage_view_lim_cmd(ax)
 
             # Autoscale on Y axis for the given plot
             self._parser.autoscale_y_axis(ax)
@@ -424,7 +424,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # Markers can only be created if the property 'marker' is not None
                 if mpl_axes.get_lines()[0].get_marker() != 'None':
                     # Check if the marker coordinates are correct and if the marker has not already been created
-                    new_marker, marker_signal, label_line = self._parser.add_marker_scaled(mpl_axes, plot, x_value, y_value)
+                    new_marker, marker_signal, label_line = self._parser.add_marker_scaled(mpl_axes, plot, x_value,
+                                                                                           y_value)
                     if new_marker is not None:
                         if new_marker not in self._marker_window.get_markers():
                             self._marker_window.add_marker(marker_signal, new_marker, label_line)
@@ -448,13 +449,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 return
             self._mouse_impl = event.inaxes
             ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+
+            # Slider event
+            if event.inaxes.get_label() == 'slider':
+                self.stats(self.get_canvas())
+                return
+
             if not hasattr(ci, 'plot'):
                 return
             plot = ci.plot()
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
                 # Stage a command to obtain original view limits
-                # Disable Zoom and Pan in PlotContour
-                if isinstance(plot, PlotContour):
+                # Disable Zoom and Pan for PlotContour and for PlotContourWithSlider
+                if isinstance(plot, PlotContour) or isinstance(plot, PlotContourWithSlider):
                     return
                 self.stage_view_lim_cmd(event.inaxes)
                 return
