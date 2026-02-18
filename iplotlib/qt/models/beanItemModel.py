@@ -93,5 +93,10 @@ class BeanItemModel(QStandardItemModel):
                         value = ConversionHelper.asType(value, type_func)
 
                 setattr(self._pyObject, property_name, value)
+
+                # Keep track of color changed
+                if isinstance(self._pyObject, SignalXY) and property_name == 'color' and value:
+                    setattr(self._pyObject, 'new_color', True)
+
                 self.dataChanged.emit(index, index)
                 return True
