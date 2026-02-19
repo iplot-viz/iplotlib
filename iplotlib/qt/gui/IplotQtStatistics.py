@@ -133,16 +133,14 @@ class IplotQtStatistics(QWidget):
         def fmt(val):
             return f"{val:.{digits}f}" if not float(val).is_integer() else str(int(val))
 
-        if isinstance(value, float):
-            item = NumericTableWidgetItem(fmt(value))
-            item.setData(Qt.ItemDataRole.UserRole, value)
-        elif isinstance(value, tuple):
+        if isinstance(value, tuple):
             val = f"({', '.join(fmt(v) for v in value)})"
             item = NumericTableWidgetItem(val)
             item.setData(Qt.ItemDataRole.UserRole, value)
         else:
-            item = NumericTableWidgetItem(fmt(value))
-            item.setData(Qt.ItemDataRole.UserRole, float(value))
+            scalar = float(value)
+            item = NumericTableWidgetItem(fmt(scalar))
+            item.setData(Qt.ItemDataRole.UserRole, scalar)
 
         return item
 
@@ -157,7 +155,7 @@ class IplotQtStatistics(QWidget):
             else:
                 formatter = MPLDateFormatter(ax_idx=0)
 
-            # Format the timestamp to human readable
+            # Format the timestamp
             formatted = formatter.date_fmt(int(timestamp), formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
             item = NumericTableWidgetItem(formatted)
         else:
@@ -414,7 +412,7 @@ class IplotQtStatistics(QWidget):
                         item.setText(text)
 
                     # Format single float value
-                    else:
+                    elif isinstance(data, (int, float)):
                         if not float(data).is_integer():
                             item.setText(f"{data:.{self.decimal_digits}f}")
                         else:
