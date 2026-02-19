@@ -160,10 +160,14 @@ class MatplotlibParser(BackendParserBase):
         return draw_fn(x_data, y_data, **style)
 
     def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
+        plot = signal.parent()
         plot_lines = []
         for i in range(y_data.shape[1]):
             style_i = dict(**style)
-            style_i['color'] = PlotXY._color_cycle[i % len(PlotXY._color_cycle)]
+            if hasattr(plot, "get_next_color"):
+                style_i['color'] = plot.get_next_color()
+            else:
+                style_i['color'] = PlotXY._color_cycle[i % len(PlotXY._color_cycle)]
             line = draw_fn(x_data, y_data[:, i], **style_i)  # List[Line2D]
             line[0].set_label(f"{signal.label}[{i}]")
             self._update_marker_by_point_count(line[0], x_data, style)

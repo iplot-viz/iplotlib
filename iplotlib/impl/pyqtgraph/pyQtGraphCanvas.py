@@ -162,10 +162,14 @@ class PyQtGraphParser(BackendParserBase):
         return [draw_fn(x=x_data, y=y_data, **style)]
 
     def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
+        plot = signal.parent()
         plot_lines = []
         for i in range(y_data.shape[1]):
             style_i = dict(**style)
-            line_color = PlotXY._color_cycle[i % len(PlotXY._color_cycle)]
+            if hasattr(plot, "get_next_color"):
+                line_color = plot.get_next_color()
+            else:
+                line_color = PlotXY._color_cycle[i % len(PlotXY._color_cycle)]
             pen = pg.mkPen(style_i['pen'])
             pen.setColor(line_color)
             style_i['pen'] = pen

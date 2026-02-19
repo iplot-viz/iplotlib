@@ -234,10 +234,17 @@ class PlotXY(Plot):
 
     def __post_init__(self):
         super().__post_init__()
+        for signals in self.signals.values():
+            for signal in signals:
+                if isinstance(signal, SignalXY) and signal.color is None:
+                    color = self.get_next_color()
+                    signal.color = color
+                    signal.original_color = color
+                    signal.new_color = False
 
     def add_signal(self, signal, stack: int = 1):
         super().add_signal(signal, stack)
-        if signal.color is None:
+        if isinstance(signal, SignalXY) and signal.color is None:
             color = self.get_next_color()
             signal.color = color
             signal.original_color = color
@@ -265,6 +272,16 @@ class PlotXY(Plot):
         self.marker = PlotXY.marker
         self.marker_size = PlotXY.marker_size
         self.step = PlotXY.step
+
+        for stack in self.signals.values():
+            for signal in stack:
+                if isinstance(signal, SignalXY):
+                    signal.reset_preferences()
+                    if signal.color is None:
+                        color = self.get_next_color()
+                        signal.color = color
+                        signal.original_color = color
+                        signal.new_color = False
 
     def merge(self, old_plot: dict):
         super().merge(old_plot)

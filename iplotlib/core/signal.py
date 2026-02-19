@@ -128,9 +128,8 @@ class SignalXY(Signal, IplotSignalAdapter):
     def merge(self, old_signal: dict):
         super().merge(old_signal)
         self.new_color = old_signal['new_color']
-        if self.new_color:
-            self.color = old_signal['color']
-            self.original_color = old_signal['original_color']
+        self.color = old_signal['color']
+        self.original_color = old_signal['original_color']
         self.line_style = old_signal['line_style']
         self.line_size = old_signal['line_size']
         self.marker = old_signal['marker']
