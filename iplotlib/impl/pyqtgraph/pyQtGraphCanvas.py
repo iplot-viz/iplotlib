@@ -99,6 +99,13 @@ class PyQtGraphParser(BackendParserBase):
         self._impl_plot_ranges_hash = dict()
         self._row_offset = 0
 
+        # Throttling for range changed callbacks
+        self._range_timer = QtCore.QTimer()
+        self._range_timer.setSingleShot(True)
+        self._range_timer.setInterval(50)  # 50ms throttle
+        self._pending_range_plots = set()
+        self._range_timer.timeout.connect(self._process_pending_ranges)
+
         # Line size default value for PyQtGraph backend
         self._pm.default['line_size'] = 2
 
@@ -159,7 +166,10 @@ class PyQtGraphParser(BackendParserBase):
             marker_line.setSymbol(symbol or None)
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
-        return [draw_fn(x=x_data, y=y_data, **style)]
+        line = draw_fn(x=x_data, y=y_data, **style)
+        line.setDownsampling(ds=True, auto=True, mode='peak')
+        line.setClipToView(True)
+        return [line]
 
     def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
         plot_lines = []
@@ -173,6 +183,8 @@ class PyQtGraphParser(BackendParserBase):
             style_i['symbolBrush'] = line_color
 
             curve = draw_fn(x=x_data, y=y_data[:, i], **style_i)
+            curve.setDownsampling(ds=True, auto=True, mode='peak')
+            curve.setClipToView(True)
             curve.opts["name"] = f"{signal.label}[{i}]"
             self._update_marker_by_point_count(curve, x_data, style)
             plot_lines.append(curve)
@@ -260,7 +272,7 @@ class PyQtGraphParser(BackendParserBase):
         step = self._pm.get_value(signal, 'step') or 'linear'
         step_mode = STEP_MAP_PG.get(step)
         style['stepMode'] = step_mode
-        style['antialias'] = True
+        style['antialias'] = False
 
         return style
 
@@ -271,7 +283,10 @@ class PyQtGraphParser(BackendParserBase):
         return y_data[plot.slider.value()]
 
     def create_slider_plot_lines_1D(self, draw_fn, x_data, ysub_data, style) -> List[PlotDataItem]:
-        return [draw_fn(x_data, ysub_data, **style)]
+        line = draw_fn(x_data, ysub_data, **style)
+        line.setDownsampling(ds=True, auto=True, mode='peak')
+        line.setClipToView(True)
+        return [line]
 
     def create_slider_plot_lines_2D(self, draw_fn, x_data, ysub_data, style):
         pass
@@ -838,18 +853,34 @@ class PyQtGraphParser(BackendParserBase):
         if self.canvas.streaming:
             return
         current_plot = view_box.parentItem()  # type: PlotItem
-        super()._y_axis_update_callback(current_plot)
-
-        for (r, c), stacks in self._layout_stacks.items():
-            if current_plot in stacks.values():
-                self.align_y_axis(c)
-                break
+        self._pending_range_plots.add(current_plot)
+        if not self._range_timer.isActive():
+            self._range_timer.start()
 
     def _x_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
             return
         current_plot = view_box.parentItem()  # type: PlotItem
-        super()._x_axis_update_callback(current_plot)
+        self._pending_range_plots.add(current_plot)
+        if not self._range_timer.isActive():
+            self._range_timer.start()
+
+    def _process_pending_ranges(self):
+        plots_to_process = list(self._pending_range_plots)
+        self._pending_range_plots.clear()
+
+        for plot in plots_to_process:
+            # Verify plot still exists and is registered in the cache table
+            if self._impl_plot_cache_table.get_cache_item(plot) is None:
+                continue
+
+            super()._x_axis_update_callback(plot)
+            super()._y_axis_update_callback(plot)
+
+            for (r, c), stacks in self._layout_stacks.items():
+                if plot in stacks.values():
+                    self.align_y_axis(c)
+                    break
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':
@@ -979,6 +1010,9 @@ class PyQtGraphParser(BackendParserBase):
         """
         super().clear()
 
+        self._range_timer.stop()
+        self._pending_range_plots.clear()
+
         # remove any active multi‑cursors
         for c in self._cursors:
             c.remove()
@@ -991,14 +1025,15 @@ class PyQtGraphParser(BackendParserBase):
         # Remove all items from the layout and set the current row and column to 0
         # The clear() method is wrapped from the figure (GraphicsLayoutWidget) internal GraphicsLayout
         self.figure.clear()
-        for col in self.canvas.plots:
-            for plot in col:
-                if not plot:
-                    continue
-                for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
-                    signal.lines.clear()
-                if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
-                    plot.clean_slider()
+        if self.canvas:
+            for col in self.canvas.plots:
+                for plot in col:
+                    if not plot:
+                        continue
+                    for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
+                        signal.lines.clear()
+                    if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
+                        plot.clean_slider()
 
         self.map_legend_to_ax.clear()
         self._impl_plot_ranges_hash.clear()
@@ -1372,10 +1407,6 @@ class PyQtGraphParser(BackendParserBase):
         if not column_plots:
             return
 
-        # Reset widths to allow PyQtGraph to recalculate
-        for p in column_plots:
-            p.getAxis('left').setWidth(None)
-
         # Calculate maximum required width based on current tick labels
         max_w = 0.0
         for p in column_plots:
@@ -1404,10 +1435,12 @@ class PyQtGraphParser(BackendParserBase):
         if max_w <= 0:
             return
 
-        # Apply maximum width to all axes in column
+        # Apply maximum width to all axes in column if it has changed significantly
         w = int(max_w)
         for p in column_plots:
-            p.getAxis('left').setWidth(w)
+            ax = p.getAxis('left')
+            if ax.width() is None or abs(ax.width() - w) > 1:
+                ax.setWidth(w)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to

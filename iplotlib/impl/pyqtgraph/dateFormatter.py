@@ -56,9 +56,10 @@ class NanosecondDateFormatter(pg.AxisItem):
     def set_offset(self, offset):
         self.offset = offset
 
-    def date_part(self, ts_numeric, part):
-        """Extract date part from numerical timestamp"""
-        ts = pandas.Timestamp(ts_numeric)
+    def date_part(self, ts, part):
+        """Extract date part from numerical timestamp or pandas.Timestamp"""
+        if not isinstance(ts, pandas.Timestamp):
+            ts = pandas.Timestamp(ts)
 
         if part == self.MILISECOND:
             return int(ts.microsecond / 1000)
@@ -72,12 +73,13 @@ class NanosecondDateFormatter(pg.AxisItem):
         ret = ""
         if end is None:
             end = self.NANOSECOND
+        ts = pandas.Timestamp(date)
         for i in range(start, end + 1):
             if i > 0 and i == start and postfix_start:
                 ret += self.postfixes[i - 1]
 
             if i < len(self.formats):
-                ret += self.formats[i].format(self.date_part(date, i))
+                ret += self.formats[i].format(self.date_part(ts, i))
 
             if (i < end or postfix_end) and i < len(self.postfixes):
                 ret += self.postfixes[i]
@@ -114,8 +116,10 @@ class NanosecondDateFormatter(pg.AxisItem):
 
     def lcp(self, start, end):
         """Returns last common segment of two dates given as start and end"""
+        ts_s = pandas.Timestamp(start)
+        ts_e = pandas.Timestamp(end)
         for i in range(self.YEAR, self.NANOSECOND + 1):
-            val_s, val_e = self.date_part(start, i), self.date_part(end, i)
+            val_s, val_e = self.date_part(ts_s, i), self.date_part(ts_e, i)
 
             if val_s != val_e:
                 return i - 1
