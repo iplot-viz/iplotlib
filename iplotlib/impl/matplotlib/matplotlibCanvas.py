@@ -370,12 +370,13 @@ class MatplotlibParser(BackendParserBase):
         # for ax in list(self.figure.axes):
         #     self.figure.delaxes(ax)
         self.figure.clear()
-        for col in self.canvas.plots:
-            for plot in col:
-                if not plot:
-                    continue
-                for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
-                    signal.lines.clear()
+        if self.canvas:
+            for col in self.canvas.plots:
+                for plot in col:
+                    if not plot:
+                        continue
+                    for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
+                        signal.lines.clear()
 
         self.map_legend_to_ax.clear()
         self._impl_plot_ranges_hash.clear()

@@ -241,7 +241,7 @@ class VTKParser(BackendParserBase):
             self._signal_impl_shape_lut.update({id(signal): area})
 
     def clear(self):
-        if self._shared_x_axis:
+        if self.canvas and self._shared_x_axis:
             self.canvas.shared_x_axis = False
             self._refresh_shared_x_axis()
             self.canvas.shared_x_axis = True

@@ -74,6 +74,11 @@ class Plot(ABC):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.signals is None:
             self.signals = {}
+        else:
+            for signals in self.signals.values():
+                for signal in signals:
+                    signal.parent = weakref.ref(self)
+
         if self.axes is None:
             self.axes = [LinearAxis(), [LinearAxis()]]
 
@@ -236,7 +241,6 @@ class PlotXY(Plot):
         super().__post_init__()
         for signals in self.signals.values():
             for signal in signals:
-                signal.parent = weakref.ref(self)
                 if isinstance(signal, SignalXY) and signal.color is None:
                     color = self.get_next_color()
                     signal.color = color
