@@ -10,7 +10,7 @@
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
-
+import typing
 from collections.abc import Collection
 
 import numpy as np
@@ -97,7 +97,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if not hasattr(signal, 'lines') or not signal.lines:
             return True  # Assume visible if no lines yet (signal being processed)
         try:
-            return signal.lines[0].get_visible()
+            lines = signal.lines
+            if isinstance(lines[0], Collection):
+                return lines[0][0].get_visible()  # visibility min data
+            else:
+                return lines[0].get_visible()
         except (IndexError, AttributeError):
             return True
 
@@ -302,6 +306,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             return
 
         original_line = signal.lines[0]
+        if isinstance(original_line, typing.List):
+            original_line = original_line[0]  # min data
         x_data, y_data = original_line.get_data()
         x_data_shifted = np.array(x_data) + dx_offset if abs(dx_offset) > 1e-10 else x_data
         y_data_shifted = np.array(y_data) + dy_offset
@@ -309,12 +315,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # Remove old preview line if exists
         if self._drag_shift_preview_line is not None:
             try:
-                self._drag_shift_preview_line.remove()
+                for line in self._drag_shift_preview_line:
+                    line.remove()
             except ValueError:
                 pass
 
         # Create preview line with dashed style matching original color
-        self._drag_shift_preview_line, = ax.plot(
+        self._drag_shift_preview_line = ax.plot(
             x_data_shifted, y_data_shifted,
             linestyle='--',
             alpha=0.6,
@@ -327,7 +334,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Remove preview line for Matplotlib."""
         if self._drag_shift_preview_line is not None:
             try:
-                self._drag_shift_preview_line.remove()
+                for line in self._drag_shift_preview_line:
+                    line.remove()
             except ValueError:
                 pass
             self._drag_shift_preview_line = None
@@ -359,10 +367,17 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
             # Check if the event is on this line using native contains()
             for line in signal.lines:
-                contains, attrd = line.contains(event)
-                if contains:
-                    # Return the y coordinate in data space
-                    return signal, ax, event.ydata
+                if isinstance(line, typing.List):
+                    for n_line in line:
+                        contains, attrd = n_line.contains(event)
+                        if contains:
+                            # Return the y coordinate in data space
+                            return signal, ax, event.ydata
+                else:
+                    contains, attrd = line.contains(event)
+                    if contains:
+                        # Return the y coordinate in data space
+                        return signal, ax, event.ydata
 
         return None, None, None
 
@@ -479,7 +494,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             # Handle drag shift in Select mode with left click - use native hit-testing
             if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT:
                 signal, impl_plot, y_coord = self._find_signal_at_event(event)
-                if signal is not None:
+                if signal is not None and not signal.envelope:
                     # Check if X axis is datetime
                     try:
                         is_datetime = plot.axes[0].is_date
