@@ -1076,14 +1076,15 @@ class PyQtGraphParser(BackendParserBase):
         # Remove all items from the layout and set the current row and column to 0
         # The clear() method is wrapped from the figure (GraphicsLayoutWidget) internal GraphicsLayout
         self.figure.clear()
-        for col in self.canvas.plots:
-            for plot in col:
-                if not plot:
-                    continue
-                for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
-                    signal.lines.clear()
-                if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
-                    plot.clean_slider()
+        if self.canvas:
+            for col in self.canvas.plots:
+                for plot in col:
+                    if not plot:
+                        continue
+                    for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
+                        signal.lines.clear()
+                    if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
+                        plot.clean_slider()
 
         self.map_legend_to_ax.clear()
         self._impl_plot_ranges_hash.clear()
