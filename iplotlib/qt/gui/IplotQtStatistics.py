@@ -14,6 +14,29 @@ from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter as PGD
 logger = Sl.get_logger(__name__)
 
 
+class NumericTableWidgetItem(QTableWidgetItem):
+    """
+    Custom QTableWidgetItem that sorts by numeric value stored in UserRole
+    """
+    def __lt__(self, other):
+        self_data = self.data(Qt.ItemDataRole.UserRole)
+        other_data = other.data(Qt.ItemDataRole.UserRole)
+
+        # Handle None values
+        if self_data is None and other_data is None:
+            return False
+        if self_data is None:
+            return True
+        if other_data is None:
+            return False
+
+        # Handle tuples (for envelope data: first, last columns)
+        if isinstance(self_data, tuple) and isinstance(other_data, tuple):
+            return self_data[0] < other_data[0]
+
+        return self_data < other_data
+
+
 class IplotQtStatistics(QWidget):
 
     def __init__(self, *args, **kwargs):
@@ -34,9 +57,16 @@ class IplotQtStatistics(QWidget):
         # Row selection for the table
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
-        # Adjust column width dynamically
+        # Enable sorting by clicking on column headers
+        self.table.setSortingEnabled(True)
+
+        # Adjust column width dynamically to fit content
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+
+        # Alternating row colors
+        self.table.setAlternatingRowColors(True)
 
         # Layout
         main_v_layout = QVBoxLayout()
@@ -96,7 +126,7 @@ class IplotQtStatistics(QWidget):
 
     def _create_item(self, value):
         """
-        Creates QTableWidgetItem and set data with formatting applied
+        Creates NumericTableWidgetItem and set data with formatting applied
         """
         digits = self.decimal_digits
 
@@ -104,21 +134,21 @@ class IplotQtStatistics(QWidget):
             return f"{val:.{digits}f}" if not float(val).is_integer() else str(int(val))
 
         if isinstance(value, float):
-            item = QTableWidgetItem(fmt(value))
+            item = NumericTableWidgetItem(fmt(value))
             item.setData(Qt.ItemDataRole.UserRole, value)
         elif isinstance(value, tuple):
             val = f"({', '.join(fmt(v) for v in value)})"
-            item = QTableWidgetItem(val)
+            item = NumericTableWidgetItem(val)
             item.setData(Qt.ItemDataRole.UserRole, value)
         else:
-            item = QTableWidgetItem(fmt(value))
+            item = NumericTableWidgetItem(fmt(value))
             item.setData(Qt.ItemDataRole.UserRole, float(value))
 
         return item
 
     def _create_timestamp_item(self, timestamp, is_date, impl_plot):
         """
-        Creates QTableWidgetItem for timestamp with proper formatting
+        Creates NumericTableWidgetItem for timestamp with proper formatting
         """
         if is_date:
             # Use the appropriate formatter based on backend
@@ -129,11 +159,11 @@ class IplotQtStatistics(QWidget):
 
             # Format the timestamp to human readable
             formatted = formatter.date_fmt(int(timestamp), formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
-            item = QTableWidgetItem(formatted)
+            item = NumericTableWidgetItem(formatted)
         else:
             # Relative time (pulse) - data comes in milliseconds
             seconds = timestamp / 1000.0  # Convert from milliseconds to seconds
-            item = QTableWidgetItem(f"{seconds:.9f} s")
+            item = NumericTableWidgetItem(f"{seconds:.9f} s")
 
         item.setData(Qt.ItemDataRole.UserRole, timestamp)
         return item
@@ -344,6 +374,16 @@ class IplotQtStatistics(QWidget):
 
         # Apply formatting with the current decimal setting
         self.update_table_format()
+
+        # Adjust columns to content
+        self.adjust_columns()
+
+    def adjust_columns(self):
+        """
+        Adjust column widths to fit their contents
+        """
+        for column in range(self.table.columnCount()):
+            self.table.resizeColumnToContents(column)
 
     def update_table_format(self):
         """
