@@ -453,7 +453,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def _find_signal_at_event(self, view_box, event):
         """
-        Find signal at the event position using hit-testing.
+        Find the nearest signal to the event position using pixel-distance calculation.
         Returns (signal, y_data_coord) or (None, None).
         """
         impl_plot = view_box.parentItem()
@@ -461,54 +461,42 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             return None, None
 
         ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
-        if not ci or not hasattr(ci, 'signals') or not ci.signals:
-            return None, None
 
-        # Get click position in view coordinates
+        # Map pixel radius to data-coordinate tolerances for normalization
         scene_pos = event.scenePos()
         view_pos = view_box.mapSceneToView(scene_pos)
-        click_x = view_pos.x()
-        click_y = view_pos.y()
+        click_x, click_y = view_pos.x(), view_pos.y()
 
-        scene = view_box.scene()
-        if scene is None:
-            return None, None
+        from PySide6.QtCore import QPointF
+        p2 = view_box.mapSceneToView(QPointF(scene_pos.x(), scene_pos.y() + 1.0))
+        p3 = view_box.mapSceneToView(QPointF(scene_pos.x() + 1.0, scene_pos.y()))
+        # Data units per pixel — invert to get pixels per data unit
+        data_per_px_x = abs(p3.x() - view_pos.x())
+        data_per_px_y = abs(p2.y() - view_pos.y())
+        sx = 1.0 / data_per_px_x if data_per_px_x > 0 else 1.0
+        sy = 1.0 / data_per_px_y if data_per_px_y > 0 else 1.0
+        click_norm = np.array([click_x * sx, click_y * sy])
 
-        # Check each signal's PlotDataItem
-        for signal_ref in ci.signals:
-            signal = signal_ref()
-            if signal is None or not isinstance(signal, SignalXY):
-                continue
-            if not self._is_signal_visible(signal):
-                continue
-            if not hasattr(signal, 'lines') or not signal.lines:
-                continue
+        # Precompute x tolerance in data coords for early-exit range check
+        tol_x = data_per_px_x * self.PICK_RADIUS_PX
 
-            for line in signal.lines:
-                if not hasattr(line, 'getData'):
-                    continue
+        def get_line_pixel_data(line):
+            """Normalize a pyqtgraph line to pixel-equivalent coords for distance calculation."""
+            if not hasattr(line, 'getData'):
+                return None
+            x_data, y_data = line.getData()
+            if x_data is None or y_data is None or len(x_data) == 0:
+                return None
+            x_min, x_max = x_data.min(), x_data.max()
+            if not (x_min - tol_x <= click_x <= x_max + tol_x):
+                return None
+            pixel_coords = np.column_stack([x_data * sx, y_data * sy])
+            return pixel_coords, click_norm
 
-                x_data, y_data = line.getData()
-                if x_data is None or y_data is None or len(x_data) == 0:
-                    continue
-
-                x_min, x_max = x_data.min(), x_data.max()
-                if not (x_min <= click_x <= x_max):
-                    continue
-
-                idx = np.searchsorted(x_data, click_x)
-                idx = int(np.clip(idx, 0, len(x_data) - 1))
-                y_at_click = y_data[idx]
-
-                y_range = view_box.viewRange()[1]
-                y_span = abs(y_range[1] - y_range[0]) if y_range[1] != y_range[0] else 1.0
-                tolerance = 0.15 * y_span
-
-                dist = abs(click_y - y_at_click)
-                if dist <= tolerance:
-                    return signal, click_y
-
-
+        result = self._find_nearest_signal(ci, get_line_pixel_data)
+        if result is not None:
+            _, signal = result
+            return signal, click_y
         return None, None
 
     def _create_drag_preview(self, dy_offset, dx_offset=0.0):

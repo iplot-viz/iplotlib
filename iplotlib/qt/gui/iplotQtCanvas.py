@@ -5,8 +5,9 @@ This module has a base class defined for all Qt canvas implementations.
 from collections import defaultdict
 from abc import abstractmethod
 from contextlib import contextmanager
-from typing import List
+from typing import List, Tuple, Optional
 
+import numpy as np
 from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
 from iplotlib.core.signal import SignalXY
@@ -373,6 +374,70 @@ class IplotQtCanvas(QWidget):
 
     def sizeHint(self):
         return QSize(900, 400)
+
+    # ------------------------------------------------------------------
+    # Nearest-line signal selection
+    # ------------------------------------------------------------------
+
+    PICK_RADIUS_PX = 10  # Max pixel distance to consider a hit
+
+    @staticmethod
+    def _min_distance_to_segments(pixel_coords: np.ndarray, click_px: np.ndarray) -> float:
+        """Minimum distance from *click_px* to the polyline defined by *pixel_coords*.
+
+        Both arrays are expected in pixel-equivalent (uniform scale) space.
+        """
+        if len(pixel_coords) == 1:
+            return float(np.linalg.norm(pixel_coords[0] - click_px))
+        seg_starts = pixel_coords[:-1]
+        seg_ends = pixel_coords[1:]
+        seg_vec = seg_ends - seg_starts
+        pt_vec = click_px - seg_starts
+        seg_len_sq = np.sum(seg_vec ** 2, axis=1)
+        seg_len_sq = np.where(seg_len_sq < 1e-12, 1.0, seg_len_sq)
+        t = np.clip(np.sum(pt_vec * seg_vec, axis=1) / seg_len_sq, 0.0, 1.0)
+        projections = seg_starts + t[:, np.newaxis] * seg_vec
+        return float(np.linalg.norm(projections - click_px, axis=1).min())
+
+    def _find_nearest_signal(self, ci, get_line_pixel_data) -> Optional[Tuple]:
+        """Find the nearest visible signal in *ci* using a backend-supplied callable.
+
+        Args:
+            ci: Cache item with a ``signals`` list of weak-refs.
+            get_line_pixel_data: ``(line) -> (pixel_coords, click_px) | None``
+                Backend-specific function that, given a matplotlib Line2D or
+                pyqtgraph PlotDataItem, returns the line points and click
+                position both in pixel-equivalent (uniform scale) space,
+                or *None* to skip the line.
+
+        Returns:
+            ``(distance, signal)`` of the nearest hit within *PICK_RADIUS_PX*,
+            or *None* if nothing was close enough.
+        """
+        if not ci or not hasattr(ci, 'signals') or not ci.signals:
+            return None
+
+        best = None  # (dist, signal)
+        for signal_ref in ci.signals:
+            signal = signal_ref()
+            if signal is None or not isinstance(signal, SignalXY):
+                continue
+            if not self._is_signal_visible(signal):
+                continue
+            if not hasattr(signal, 'lines') or not signal.lines:
+                continue
+
+            for line in signal.lines:
+                result = get_line_pixel_data(line)
+                if result is None:
+                    continue
+                pixel_coords, click_px = result
+                dist = self._min_distance_to_segments(pixel_coords, click_px)
+                if dist <= self.PICK_RADIUS_PX and (best is None or dist < best[0]):
+                    best = (dist, signal)
+                break  # One line per signal is enough
+
+        return best
 
     def _start_drag_shift(self, impl_plot, signal, start_y, is_datetime=False, start_x=None):
         """Initialize drag shift state. Called by backend after successful hit-test."""

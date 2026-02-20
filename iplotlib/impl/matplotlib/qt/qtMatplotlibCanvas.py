@@ -344,7 +344,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _find_signal_at_event(self, event):
         """
-        Find signal whose line contains the mouse event using Matplotlib's native hit-testing.
+        Find the nearest signal to the mouse event using pixel-distance calculation.
         Returns (signal, impl_plot, y_data_coord) or (None, None, None).
         """
         if event.inaxes is None:
@@ -352,33 +352,28 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         ax = event.inaxes
         ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
-        if not ci or not hasattr(ci, 'signals') or not ci.signals:
-            return None, None, None
+        click_px = np.array([event.x, event.y])
 
-        # Check each signal's lines using matplotlib's contains()
-        for signal_ref in ci.signals:
-            signal = signal_ref()
-            if signal is None or not isinstance(signal, SignalXY):
-                continue
-            if not self._is_signal_visible(signal):
-                continue
-            if not hasattr(signal, 'lines') or not signal.lines:
-                continue
+        def get_line_pixel_data(line):
+            """Transform a matplotlib line to pixel coords for distance calculation."""
+            lines_to_check = line if isinstance(line, typing.List) else [line]
+            for l in lines_to_check:
+                xdata = l.get_xdata()
+                ydata = l.get_ydata()
+                if xdata is None or ydata is None or len(xdata) == 0:
+                    continue
+                try:
+                    data_coords = np.column_stack([xdata, ydata])
+                    pixel_coords = ax.transData.transform(data_coords)
+                except (ValueError, TypeError):
+                    continue
+                return pixel_coords, click_px
+            return None
 
-            # Check if the event is on this line using native contains()
-            for line in signal.lines:
-                if isinstance(line, typing.List):
-                    for n_line in line:
-                        contains, attrd = n_line.contains(event)
-                        if contains:
-                            # Return the y coordinate in data space
-                            return signal, ax, event.ydata
-                else:
-                    contains, attrd = line.contains(event)
-                    if contains:
-                        # Return the y coordinate in data space
-                        return signal, ax, event.ydata
-
+        result = self._find_nearest_signal(ci, get_line_pixel_data)
+        if result is not None:
+            _, signal = result
+            return signal, ax, event.ydata
         return None, None, None
 
     def _mpl_mouse_motion_handler(self, event: MouseEvent):
