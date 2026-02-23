@@ -181,7 +181,7 @@ class BackendParserBase(ABC):
     def get_bottom_top(self, x_line, lo, hi):
         xd, yd = self.get_impl_data(x_line)
         if xd is not None and yd is not None:
-            y_displayed = yd[((xd > lo) & (xd < hi))]
+            y_displayed = yd[((xd >= lo) & (xd <= hi))]
         else:
             y_displayed = []
 
@@ -695,7 +695,7 @@ class BackendParserBase(ABC):
 
     @staticmethod
     def _get_visible_data(xd, yd, lo, hi):
-        mask = (xd > lo) & (xd < hi)
+        mask = (xd >= lo) & (xd <= hi)
         x_displayed = xd[mask]
         y_displayed = yd[mask]
         return x_displayed, y_displayed
@@ -1441,9 +1441,6 @@ class BackendParserBase(ABC):
         logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx}")
 
         if ax_idx == 0:
-            if begin == end and begin is not None:
-                begin = end - 1
-                end += 1
             self.set_impl_x_axis_limits(impl_plot, (begin, end))
         elif ax_idx == 1:
             self.set_impl_y_axis_limits(impl_plot, (begin, end))

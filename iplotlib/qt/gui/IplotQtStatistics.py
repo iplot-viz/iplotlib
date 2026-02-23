@@ -222,10 +222,10 @@ class IplotQtStatistics(QWidget):
                     y_mean = np.array(signal.data_store[3])
 
                     # Filter values
-                    mask = ((x_data > lo) & (x_data < hi) &
-                            (y_min > y_lo) & (y_min < y_hi) &
-                            (y_mean > y_lo) & (y_mean < y_hi) &
-                            (y_max > y_lo) & (y_max < y_hi))
+                    mask = ((x_data >= lo) & (x_data <= hi) &
+                            (y_min >= y_lo) & (y_min <= y_hi) &
+                            (y_mean >= y_lo) & (y_mean <= y_hi) &
+                            (y_max >= y_lo) & (y_max <= y_hi))
 
                     y_min_displayed = y_min[mask]
                     y_max_displayed = y_max[mask]
@@ -309,7 +309,7 @@ class IplotQtStatistics(QWidget):
 
                     # Filter values
                     if (len(x_data), len(y_data)) != (0, 0):
-                        mask = ((x_data > lo) & (x_data < hi) & (y_data > y_lo) & (y_data < y_hi))
+                        mask = ((x_data >= lo) & (x_data <= hi) & (y_data >= y_lo) & (y_data <= y_hi))
                         y_displayed = y_data[mask]
                         samples = y_displayed.size
                     else:
