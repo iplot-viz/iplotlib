@@ -15,7 +15,7 @@ from PySide6.QtCore import QModelIndex, QObject, Qt
 from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import QComboBox
 
-from iplotlib.core import PropertyManager, SignalXY
+from iplotlib.core import PropertyManager, SignalXY, RangeAxis
 from iplotlib.qt.models.beanItem import BeanItem, BeanPrototype
 from iplotlib.qt.utils.conversions import ConversionHelper
 
@@ -97,6 +97,9 @@ class BeanItemModel(QStandardItemModel):
                 # Keep track of color changed
                 if isinstance(self._pyObject, SignalXY) and property_name == 'color' and value:
                     setattr(self._pyObject, 'new_color', True)
+
+                elif isinstance(self._pyObject, RangeAxis) and property_name in ['begin', 'end'] and value:
+                    setattr(self._pyObject, 'limits_changed', True)
 
                 self.dataChanged.emit(index, index)
                 return True

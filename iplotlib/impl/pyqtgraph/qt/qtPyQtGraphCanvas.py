@@ -320,7 +320,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 # Handle drag shift with left click
                 if event.button() == Qt.MouseButton.LeftButton:
                     signal, y_coord = self._find_signal_at_event(view_box, event)
-                    if signal is not None:
+                    if signal is not None and not signal.envelope:
                         try:
                             is_datetime = plot.axes[0].is_date
                         except (AttributeError, IndexError):
