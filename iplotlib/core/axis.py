@@ -83,6 +83,7 @@ class RangeAxis(Axis):
     original_end: any = None
     begin: any = None
     end: any = None
+    limits_changed: bool = False
 
     def get_limits(self, which: str = 'current') -> tuple:
         """
@@ -113,6 +114,14 @@ class RangeAxis(Axis):
         Reset begin and end.
         """
         super().reset_preferences()
+        self.limits_changed = RangeAxis.limits_changed
+
+    def merge(self, old_axis: dict):
+        super().merge(old_axis)
+        self.limits_changed = old_axis['limits_changed']
+        if self.limits_changed:
+            self.begin = old_axis['begin']
+            self.end = old_axis['end']
 
 
 @dataclass

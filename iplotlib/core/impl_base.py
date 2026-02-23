@@ -181,7 +181,7 @@ class BackendParserBase(ABC):
     def get_bottom_top(self, x_line, lo, hi):
         xd, yd = self.get_impl_data(x_line)
         if xd is not None and yd is not None:
-            y_displayed = yd[((xd > lo) & (xd < hi))]
+            y_displayed = yd[((xd >= lo) & (xd <= hi))]
         else:
             y_displayed = []
 
@@ -595,8 +595,23 @@ class BackendParserBase(ABC):
 
         impl_plot = self.process_ipl_signal_impl_plot(signal)
 
+        # impl_plot can be None if signal was removed (e.g. during undo of shift)
+        if impl_plot is None:
+            return
+
         # All good, make a data access request
         signal_data = signal.get_data()
+
+        # Apply shift offsets if present (persisted in signal metadata)
+        # This ensures offset survives any rebuild/refresh cycle
+        drag_shift_dx = getattr(signal, '_drag_shift_dx', 0.0)
+        drag_shift_dy = getattr(signal, '_drag_shift_dy', 0.0)
+        if (drag_shift_dx != 0.0 or drag_shift_dy != 0.0) and len(signal_data) >= 2:
+            signal_data = list(signal_data)  # Make mutable copy
+            if drag_shift_dx != 0.0 and signal_data[0] is not None:
+                signal_data[0] = signal_data[0] + drag_shift_dx
+            if drag_shift_dy != 0.0 and signal_data[1] is not None:
+                signal_data[1] = signal_data[1] + drag_shift_dy
 
         data = self.transform_data(impl_plot, signal_data)
 
@@ -680,7 +695,7 @@ class BackendParserBase(ABC):
 
     @staticmethod
     def _get_visible_data(xd, yd, lo, hi):
-        mask = (xd > lo) & (xd < hi)
+        mask = (xd >= lo) & (xd <= hi)
         x_displayed = xd[mask]
         y_displayed = yd[mask]
         return x_displayed, y_displayed
@@ -801,6 +816,26 @@ class BackendParserBase(ABC):
     @abstractmethod
     def get_line_label(self, line: Any):
         """"""
+
+    def set_signal_visible(self, signal: Signal, visible: bool):
+        """Set visibility of signal lines."""
+        pass
+
+    def remove_signal_lines(self, signal: Signal):
+        """Remove signal lines from the plot."""
+        pass
+
+    def remove_signal_from_legend(self, impl_plot: Any, signal: Signal):
+        """Remove signal from legend."""
+        pass
+
+    def add_signal_to_legend(self, impl_plot: Any, signal: Signal):
+        """Add signal to legend."""
+        pass
+
+    def rebuild_legend(self, impl_plot: Any, plot: Plot):
+        """Rebuild legend for the given plot. Default implementation does nothing."""
+        pass
 
     def add_marker_scaled(self, impl_plot: Any, plot: PlotXY, x_coord, y_coord):
         """
@@ -1406,9 +1441,6 @@ class BackendParserBase(ABC):
         logger.debug(f"\tLimits {begin} to to plot {end} ax_idx: {ax_idx}")
 
         if ax_idx == 0:
-            if begin == end and begin is not None:
-                begin = end - 1
-                end += 1
             self.set_impl_x_axis_limits(impl_plot, (begin, end))
         elif ax_idx == 1:
             self.set_impl_y_axis_limits(impl_plot, (begin, end))

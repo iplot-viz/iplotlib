@@ -10,9 +10,10 @@
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
-
+import typing
 from collections.abc import Collection
 
+import numpy as np
 from PySide6.QtCore import QMargins, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QMenu
@@ -28,6 +29,7 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
+from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
@@ -61,6 +63,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_renderer.mpl_connect('draw_event', self._mpl_draw_finish)
         self._mpl_renderer.mpl_connect('button_press_event', self._mpl_mouse_press_handler)
         self._mpl_renderer.mpl_connect('button_release_event', self._mpl_mouse_release_handler)
+        self._mpl_renderer.mpl_connect('motion_notify_event', self._mpl_mouse_motion_handler)
         self._mpl_renderer.mpl_connect('pick_event', self.on_pick_legend)
 
         self.setLayout(self._vlayout)
@@ -88,6 +91,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self.render()
         super().set_canvas(canvas)
+
+    def _is_signal_visible(self, signal) -> bool:
+        """Check if signal is visible (Matplotlib implementation)."""
+        if not hasattr(signal, 'lines') or not signal.lines:
+            return True  # Assume visible if no lines yet (signal being processed)
+        try:
+            lines = signal.lines
+            if isinstance(lines[0], Collection):
+                return lines[0][0].get_visible()  # visibility min data
+            else:
+                return lines[0].get_visible()
+        except (IndexError, AttributeError):
+            return True
 
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: MPLAxes
@@ -277,6 +293,98 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self.refresh()
         self.stats(self.get_canvas())
 
+    def _create_drag_preview(self, dy_offset, dx_offset=0.0):
+        """Create/update preview line during drag for Matplotlib."""
+        if self._drag_shift_signal is None or self._drag_shift_impl_plot is None:
+            return
+
+        signal = self._drag_shift_signal
+        ax = self._drag_shift_impl_plot
+
+        # Get the original line's data in display coordinates, then offset
+        if not signal.lines:
+            return
+
+        original_line = signal.lines[0]
+        if isinstance(original_line, typing.List):
+            original_line = original_line[0]  # min data
+        x_data, y_data = original_line.get_data()
+        x_data_shifted = np.array(x_data) + dx_offset if abs(dx_offset) > 1e-10 else x_data
+        y_data_shifted = np.array(y_data) + dy_offset
+
+        # Remove old preview line if exists
+        if self._drag_shift_preview_line is not None:
+            try:
+                for line in self._drag_shift_preview_line:
+                    line.remove()
+            except ValueError:
+                pass
+
+        # Create preview line with dashed style matching original color
+        self._drag_shift_preview_line = ax.plot(
+            x_data_shifted, y_data_shifted,
+            linestyle='--',
+            alpha=0.6,
+            color=original_line.get_color(),
+            linewidth=original_line.get_linewidth()
+        )
+        self._parser.figure.canvas.draw_idle()
+
+    def _remove_drag_preview(self):
+        """Remove preview line for Matplotlib."""
+        if self._drag_shift_preview_line is not None:
+            try:
+                for line in self._drag_shift_preview_line:
+                    line.remove()
+            except ValueError:
+                pass
+            self._drag_shift_preview_line = None
+            if self._parser and self._parser.figure:
+                self._parser.figure.canvas.draw_idle()
+
+    def _find_signal_at_event(self, event):
+        """
+        Find the nearest signal to the mouse event using pixel-distance calculation.
+        Returns (signal, impl_plot, y_data_coord) or (None, None, None).
+        """
+        if event.inaxes is None:
+            return None, None, None
+
+        ax = event.inaxes
+        ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
+        click_px = np.array([event.x, event.y])
+
+        def get_line_pixel_data(line):
+            """Transform a matplotlib line to pixel coords for distance calculation."""
+            lines_to_check = line if isinstance(line, typing.List) else [line]
+            for l in lines_to_check:
+                xdata = l.get_xdata()
+                ydata = l.get_ydata()
+                if xdata is None or ydata is None or len(xdata) == 0:
+                    continue
+                try:
+                    data_coords = np.column_stack([xdata, ydata])
+                    pixel_coords = ax.transData.transform(data_coords)
+                except (ValueError, TypeError):
+                    continue
+                return pixel_coords, click_px
+            return None
+
+        result = self._find_nearest_signal(ci, get_line_pixel_data)
+        if result is not None:
+            _, signal = result
+            return signal, ax, event.ydata
+        return None, None, None
+
+    def _mpl_mouse_motion_handler(self, event: MouseEvent):
+        """Handle mouse motion for drag shift preview."""
+        if not self._drag_shift_active or self._drag_shift_signal is None:
+            return
+        if event.inaxes != self._drag_shift_impl_plot:
+            return
+        if event.ydata is not None:
+            self._update_drag_shift(event.ydata, event.xdata)
+
     def _mpl_mouse_press_handler(self, event: MouseEvent):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
@@ -378,6 +486,20 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
                 autoscale_menu.popup(event.guiEvent.globalPos())
 
+            # Handle drag shift in Select mode with left click - use native hit-testing
+            if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT:
+                signal, impl_plot, y_coord = self._find_signal_at_event(event)
+                if signal is not None and not signal.envelope:
+                    # Check if X axis is datetime
+                    try:
+                        is_datetime = plot.axes[0].is_date
+                    except (AttributeError, IndexError):
+                        is_datetime = False
+                    # Get x coordinate for pulse mode dx support
+                    x_coord = event.xdata
+                    self._start_drag_shift(impl_plot, signal, y_coord, is_datetime, start_x=x_coord)
+                    return
+
             if event.button != MouseButton.LEFT:
                 return
             if not plot:
@@ -392,14 +514,28 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     x = self._parser.transform_value(event.inaxes, 0, event.xdata)
                     self._dist_calculator.set_dst(x, event.ydata, plot, ci.stack_key)
                     self._dist_calculator.set_dx_is_datetime(is_date)
-                    box = QMessageBox(self)
-                    box.setWindowTitle('Distance')
                     dx, dy, dz = self._dist_calculator.dist()
                     if any([dx, dy, dz]):
-                        box.setText(f"dx = {dx}\ndy = {dy}\ndz = {dz}")
+                        # Get visible signals from the current plot only
+                        plot_signals = self.get_visible_plot_signals(plot)
+                        dx_numeric = 0.0 if is_date else float(dx)
+                        dialog = SignalShiftDialog(
+                            self,
+                            dx=dx_numeric,
+                            dy=float(dy),
+                            dz=float(dz) if dz else 0.0,
+                            signals=plot_signals,
+                            dx_is_datetime=is_date
+                        )
+                        if is_date:
+                            dialog.set_dx_text(str(dx))
+                        dialog.shiftRequested.connect(self.signalShiftRequested.emit)
+                        dialog.exec()
                     else:
+                        box = QMessageBox(self)
+                        box.setWindowTitle('Distance')
                         box.setText("Invalid selection")
-                    box.exec_()
+                        box.exec_()
                     self._dist_calculator.reset()
                 else:
                     x = self._parser.transform_value(event.inaxes, 0, event.xdata)
@@ -410,6 +546,15 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if event.dblclick:
             pass
         else:
+            # Handle drag shift completion in Select mode
+            if self._drag_shift_active and self._mmode == Canvas.MOUSE_MODE_SELECT:
+                if event.ydata is not None:
+                    self._end_drag_shift(event.ydata, event.xdata)
+                else:
+                    self._cancel_drag_shift()
+                self.render()
+                return
+
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
                 # commit commands from staging.
                 while len(self._staging_cmds):
@@ -446,7 +591,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         for axe in self._parser.figure.axes:
             if axe.bbox.x0 < x < axe.bbox.x1 and height - axe.bbox.y0 > y > height - axe.bbox.y1:
                 event.accept()
-                print("entre las x\n\n")
                 return
         event.ignore()
 

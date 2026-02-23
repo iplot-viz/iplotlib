@@ -5,8 +5,9 @@ This module has a base class defined for all Qt canvas implementations.
 from collections import defaultdict
 from abc import abstractmethod
 from contextlib import contextmanager
-from typing import List
+from typing import List, Tuple, Optional
 
+import numpy as np
 from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
 from iplotlib.core.signal import SignalXY
@@ -28,6 +29,12 @@ class IplotQtCanvas(QWidget):
     Base class for all Qt related canvas implementations
     """
     cmdDone = Signal(IplotCommand)
+    signalShiftRequested = Signal(str, str, str, str, float, float, bool)
+    # Unified shift signals (work for both drag and DIST)
+    signalShiftApplied = Signal(str, float, float, str)  # (signal_uid, dx, dy, source)
+    signalShiftUndone = Signal(str, float, float, str)   # (signal_uid, dx, dy, source)
+    signalShiftPulseApplied = Signal(str, str, float, float, str)  # (signal_uid, pulse_id, dx, dy, source)
+    signalShiftPulseUndone = Signal(str, str, float, float)  # (signal_uid, pulse_id, previous_dx, previous_dy)
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent)
@@ -46,6 +53,15 @@ class IplotQtCanvas(QWidget):
         self._stats_table = IplotQtStatistics()
 
         self.info_shared_x_dialog = False
+
+        # Drag shift state
+        self._drag_shift_active = False
+        self._drag_shift_signal = None
+        self._drag_shift_impl_plot = None
+        self._drag_shift_start_x = None
+        self._drag_shift_start_y = None
+        self._drag_shift_is_datetime = False
+        self._drag_shift_preview_line = None
 
     @abstractmethod
     def undo(self):
@@ -116,7 +132,7 @@ class IplotQtCanvas(QWidget):
         if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_DIST:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_MARKER:
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_PAN:
@@ -205,6 +221,40 @@ class IplotQtCanvas(QWidget):
                             if isinstance(signal, SignalXY):
                                 signal_list.append(signal)
         return signal_list
+
+    def get_visible_plot_signals(self, plot) -> List[SignalXY]:
+        """
+        Get visible signals from a specific plot.
+        Only returns SignalXY instances that are not hidden via legend.
+
+        Args:
+            plot: The plot to get signals from
+
+        Returns:
+            List of visible SignalXY instances
+        """
+        visible_signals = []
+        if not plot or not hasattr(plot, 'signals'):
+            return visible_signals
+
+        for stack in plot.signals.values():
+            for signal in stack:
+                if isinstance(signal, SignalXY) and self._is_signal_visible(signal):
+                    visible_signals.append(signal)
+        return visible_signals
+
+    @abstractmethod
+    def _is_signal_visible(self, signal: SignalXY) -> bool:
+        """
+        Check if a signal is currently visible (not hidden via legend).
+        Backend-specific implementations must override this method.
+
+        Args:
+            signal: The signal to check
+
+        Returns:
+            True if visible, False if hidden
+        """
 
     def check_markers(self, canvas: Canvas):
         # Check if there are signals in the table that are no longer used
@@ -324,6 +374,180 @@ class IplotQtCanvas(QWidget):
 
     def sizeHint(self):
         return QSize(900, 400)
+
+    # ------------------------------------------------------------------
+    # Nearest-line signal selection
+    # ------------------------------------------------------------------
+
+    PICK_RADIUS_PX = 10  # Max pixel distance to consider a hit
+
+    @staticmethod
+    def _min_distance_to_segments(pixel_coords: np.ndarray, click_px: np.ndarray) -> float:
+        """Minimum distance from *click_px* to the polyline defined by *pixel_coords*.
+
+        Both arrays are expected in pixel-equivalent (uniform scale) space.
+        """
+        if len(pixel_coords) == 1:
+            return float(np.linalg.norm(pixel_coords[0] - click_px))
+        seg_starts = pixel_coords[:-1]
+        seg_ends = pixel_coords[1:]
+        seg_vec = seg_ends - seg_starts
+        pt_vec = click_px - seg_starts
+        seg_len_sq = np.sum(seg_vec ** 2, axis=1)
+        seg_len_sq = np.where(seg_len_sq < 1e-12, 1.0, seg_len_sq)
+        t = np.clip(np.sum(pt_vec * seg_vec, axis=1) / seg_len_sq, 0.0, 1.0)
+        projections = seg_starts + t[:, np.newaxis] * seg_vec
+        return float(np.linalg.norm(projections - click_px, axis=1).min())
+
+    def _find_nearest_signal(self, ci, get_line_pixel_data) -> Optional[Tuple]:
+        """Find the nearest visible signal in *ci* using a backend-supplied callable.
+
+        Args:
+            ci: Cache item with a ``signals`` list of weak-refs.
+            get_line_pixel_data: ``(line) -> (pixel_coords, click_px) | None``
+                Backend-specific function that, given a matplotlib Line2D or
+                pyqtgraph PlotDataItem, returns the line points and click
+                position both in pixel-equivalent (uniform scale) space,
+                or *None* to skip the line.
+
+        Returns:
+            ``(distance, signal)`` of the nearest hit within *PICK_RADIUS_PX*,
+            or *None* if nothing was close enough.
+        """
+        if not ci or not hasattr(ci, 'signals') or not ci.signals:
+            return None
+
+        best = None  # (dist, signal)
+        for signal_ref in ci.signals:
+            signal = signal_ref()
+            if signal is None or not isinstance(signal, SignalXY):
+                continue
+            if not self._is_signal_visible(signal):
+                continue
+            if not hasattr(signal, 'lines') or not signal.lines:
+                continue
+
+            for line in signal.lines:
+                result = get_line_pixel_data(line)
+                if result is None:
+                    continue
+                pixel_coords, click_px = result
+                dist = self._min_distance_to_segments(pixel_coords, click_px)
+                if dist <= self.PICK_RADIUS_PX and (best is None or dist < best[0]):
+                    best = (dist, signal)
+                break  # One line per signal is enough
+
+        return best
+
+    def _start_drag_shift(self, impl_plot, signal, start_y, is_datetime=False, start_x=None):
+        """Initialize drag shift state. Called by backend after successful hit-test."""
+        self._drag_shift_active = True
+        self._drag_shift_signal = signal
+        self._drag_shift_impl_plot = impl_plot
+        self._drag_shift_start_x = start_x
+        self._drag_shift_start_y = start_y
+        self._drag_shift_is_datetime = is_datetime
+
+    def _update_drag_shift(self, current_y, current_x=None):
+        """Update drag preview during drag. Called by backend on mouse move."""
+        if not self._drag_shift_active or self._drag_shift_signal is None:
+            return
+        dy_offset = current_y - self._drag_shift_start_y
+        dx_offset = 0.0
+        if not self._drag_shift_is_datetime and self._drag_shift_start_x is not None and current_x is not None:
+            dx_offset = current_x - self._drag_shift_start_x
+        self._create_drag_preview(dy_offset, dx_offset)
+
+    def _end_drag_shift(self, end_y, end_x=None):
+        """Finalize drag shift by storing offset in signal metadata and creating undo command."""
+        if not self._drag_shift_active or self._drag_shift_signal is None:
+            self._cancel_drag_shift()
+            return
+
+        dy = end_y - self._drag_shift_start_y
+
+        # Calculate X offset (only if X is not datetime)
+        dx = 0.0
+        if not self._drag_shift_is_datetime and self._drag_shift_start_x is not None and end_x is not None:
+            dx = end_x - self._drag_shift_start_x
+
+        # Remove preview line first
+        self._remove_drag_preview()
+
+        # Only apply if there was meaningful movement
+        if abs(dy) > 1e-10 or abs(dx) > 1e-10:
+            from iplotlib.core.commands.shift import ShiftCommand
+
+            signal = self._drag_shift_signal
+            signal_uid = signal.uid
+
+            # Detect pulse mode
+            pulse_id = getattr(signal, 'pulse_nb', None)
+            is_pulse_mode = pulse_id is not None and str(pulse_id).strip() != ''
+            if is_pulse_mode:
+                pulse_id = str(pulse_id)
+
+            cmd = ShiftCommand(
+                signal=signal,
+                dx=dx,
+                dy=dy,
+                parser=self._parser,
+                qt_canvas=self,
+                is_pulse_isolation=is_pulse_mode,
+                pulse_id=pulse_id if is_pulse_mode else None,
+                source='drag'
+            )
+
+            # Apply offset via metadata (works for both modes now)
+            previous_dx = getattr(signal, '_drag_shift_dx', 0.0)
+            previous_dy = getattr(signal, '_drag_shift_dy', 0.0)
+            if abs(dx) > 1e-10:
+                signal._drag_shift_dx = previous_dx + dx
+            if abs(dy) > 1e-10:
+                signal._drag_shift_dy = previous_dy + dy
+            self._parser.process_ipl_signal(signal)
+
+            # Update legend to trigger draw_idle (for matplotlib)
+            impl_plot = self._parser._signal_impl_plot_lut.get(signal_uid)
+            plot = signal.parent() if hasattr(signal, 'parent') and callable(signal.parent) else None
+            if impl_plot and plot and hasattr(self._parser, 'rebuild_legend'):
+                self._parser.rebuild_legend(impl_plot, plot)
+
+            # Register with history manager for undo/redo
+            self._parser._hm.done(cmd)
+            self.cmdDone.emit(cmd)
+
+            # Emit signal for table update
+            if is_pulse_mode:
+                self.signalShiftPulseApplied.emit(signal_uid, pulse_id, dx, dy, 'drag')
+            else:
+                self.signalShiftApplied.emit(signal_uid, dx, dy, 'drag')
+
+        self._reset_drag_shift_state()
+
+    def _cancel_drag_shift(self):
+        """Cancel drag shift without applying changes."""
+        self._remove_drag_preview()
+        self._reset_drag_shift_state()
+
+    def _reset_drag_shift_state(self):
+        """Reset all drag shift state variables."""
+        self._drag_shift_active = False
+        self._drag_shift_signal = None
+        self._drag_shift_impl_plot = None
+        self._drag_shift_start_x = None
+        self._drag_shift_start_y = None
+        self._drag_shift_is_datetime = False
+
+    @abstractmethod
+    def _create_drag_preview(self, dy_offset, dx_offset=0.0):
+        """Create/update preview line during drag. Backend-specific."""
+        pass
+
+    @abstractmethod
+    def _remove_drag_preview(self):
+        """Remove preview line. Backend-specific."""
+        pass
 
     def export_dict(self):
         self.clean_canvas()

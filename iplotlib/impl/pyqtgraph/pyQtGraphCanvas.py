@@ -52,6 +52,7 @@ STEP_MAP_PG = {
 class QtViewBox(pg.ViewBox):
     pressed = QtSignal(object, object)
     released = QtSignal(object, object)
+    dragged = QtSignal(object, object)  # For drag events during mouse move with button pressed
 
     def __init__(self, parent=None):
         super().__init__(parent=parent, enableMenu=False)
@@ -64,6 +65,15 @@ class QtViewBox(pg.ViewBox):
             return
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
+
+    def mouseMoveEvent(self, ev):
+        super().mouseMoveEvent(ev)
+        # Emit dragged signal when mouse moves (for drag preview)
+        self.dragged.emit(self, ev)
+
+    def mouseReleaseEvent(self, ev):
+        super().mouseReleaseEvent(ev)
+        self.released.emit(self, ev)
 
     def release_event(self):
         self.released.emit(self, None)
@@ -139,7 +149,13 @@ class PyQtGraphParser(BackendParserBase):
         if not legend:
             return
 
+        # Skip if line is not visible (hidden signals are not in legend)
+        if not plot_lines.isVisible():
+            return
+
         lines = [lines[0].item.name() for lines in legend.items]
+        if plot_lines.name() not in lines:
+            return
         pos = lines.index(plot_lines.name())
         legend_label = legend.items[pos][1]
         legend_text = legend.items[pos][1].text
@@ -148,6 +164,75 @@ class PyQtGraphParser(BackendParserBase):
             legend_label.setText(legend_text[:-1])
         elif not legend_text.endswith('*') and signal.isDownsampled:
             legend_label.setText(legend_text + '*')
+
+    def set_signal_visible(self, signal, visible: bool):
+        """Set visibility of signal lines."""
+        if hasattr(signal, 'lines') and signal.lines:
+            for line in signal.lines:
+                line.setVisible(visible)
+
+    def remove_signal_lines(self, signal):
+        """Remove signal lines from the plot."""
+        if hasattr(signal, 'lines') and signal.lines:
+            for line in signal.lines:
+                if hasattr(line, 'scene') and line.scene():
+                    line.scene().removeItem(line)
+
+    def remove_signal_from_legend(self, impl_plot: PlotItem, signal):
+        """Remove signal from legend."""
+        if not impl_plot.legend:
+            return
+        if hasattr(signal, 'lines') and signal.lines:
+            try:
+                impl_plot.legend.removeItem(signal.lines[0])
+            except Exception:
+                pass
+        # Also try by name
+        label = getattr(signal, 'label', '') or getattr(signal, 'name', '')
+        if label:
+            try:
+                impl_plot.legend.removeItem(label)
+            except Exception:
+                pass
+
+    def add_signal_to_legend(self, impl_plot: PlotItem, signal):
+        """Add signal to legend."""
+        if impl_plot.legend and hasattr(signal, 'lines') and signal.lines:
+            label = getattr(signal, 'label', '') or getattr(signal, 'name', '')
+            impl_plot.legend.addItem(signal.lines[0], label)
+
+    def rebuild_legend(self, impl_plot: PlotItem, plot):
+        """Rebuild legend for PyQtGraph based on visible signals."""
+        if not impl_plot.legend:
+            return
+
+        # Clear existing legend items
+        impl_plot.legend.clear()
+
+        # Get cache item to find signals
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if not ci or not hasattr(ci, 'signals'):
+            return
+
+        # Add visible signals to legend
+        for sig_ref in ci.signals:
+            sig = sig_ref() if sig_ref else None
+            if sig and hasattr(sig, 'lines') and sig.lines:
+                # Check if signal is visible and still in scene
+                line = sig.lines[0]
+                in_scene = hasattr(line, 'scene') and line.scene() is not None
+                if in_scene and hasattr(line, 'isVisible') and line.isVisible():
+                    label = getattr(sig, 'label', '') or getattr(sig, 'name', '')
+                    if label:
+                        impl_plot.legend.addItem(line, label)
+
+    def register_dynamic_signal(self, impl_plot: PlotItem, plot, signal):
+        """Register a dynamically added signal and update legend."""
+        import weakref
+        cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if cache_item and hasattr(cache_item, 'signals'):
+            cache_item.signals.append(weakref.ref(signal))
+        self.rebuild_legend(impl_plot, plot)
 
     @staticmethod
     def _update_marker_by_point_count(marker_line: PlotDataItem, signal_x_data, signal_style: dict):
@@ -991,14 +1076,15 @@ class PyQtGraphParser(BackendParserBase):
         # Remove all items from the layout and set the current row and column to 0
         # The clear() method is wrapped from the figure (GraphicsLayoutWidget) internal GraphicsLayout
         self.figure.clear()
-        for col in self.canvas.plots:
-            for plot in col:
-                if not plot:
-                    continue
-                for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
-                    signal.lines.clear()
-                if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
-                    plot.clean_slider()
+        if self.canvas:
+            for col in self.canvas.plots:
+                for plot in col:
+                    if not plot:
+                        continue
+                    for signal in [elem for sublist in plot.signals.values() for elem in sublist]:
+                        signal.lines.clear()
+                    if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
+                        plot.clean_slider()
 
         self.map_legend_to_ax.clear()
         self._impl_plot_ranges_hash.clear()

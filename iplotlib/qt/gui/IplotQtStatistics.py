@@ -14,6 +14,29 @@ from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter as PGD
 logger = Sl.get_logger(__name__)
 
 
+class NumericTableWidgetItem(QTableWidgetItem):
+    """
+    Custom QTableWidgetItem that sorts by numeric value stored in UserRole
+    """
+    def __lt__(self, other):
+        self_data = self.data(Qt.ItemDataRole.UserRole)
+        other_data = other.data(Qt.ItemDataRole.UserRole)
+
+        # Handle None values
+        if self_data is None and other_data is None:
+            return False
+        if self_data is None:
+            return True
+        if other_data is None:
+            return False
+
+        # Handle tuples (for envelope data: first, last columns)
+        if isinstance(self_data, tuple) and isinstance(other_data, tuple):
+            return self_data[0] < other_data[0]
+
+        return self_data < other_data
+
+
 class IplotQtStatistics(QWidget):
 
     def __init__(self, *args, **kwargs):
@@ -34,9 +57,16 @@ class IplotQtStatistics(QWidget):
         # Row selection for the table
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
-        # Adjust column width dynamically
+        # Enable sorting by clicking on column headers
+        self.table.setSortingEnabled(True)
+
+        # Adjust column width dynamically to fit content
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+
+        # Alternating row colors
+        self.table.setAlternatingRowColors(True)
 
         # Layout
         main_v_layout = QVBoxLayout()
@@ -96,29 +126,27 @@ class IplotQtStatistics(QWidget):
 
     def _create_item(self, value):
         """
-        Creates QTableWidgetItem and set data with formatting applied
+        Creates NumericTableWidgetItem and set data with formatting applied
         """
         digits = self.decimal_digits
 
         def fmt(val):
             return f"{val:.{digits}f}" if not float(val).is_integer() else str(int(val))
 
-        if isinstance(value, float):
-            item = QTableWidgetItem(fmt(value))
-            item.setData(Qt.ItemDataRole.UserRole, value)
-        elif isinstance(value, tuple):
+        if isinstance(value, tuple):
             val = f"({', '.join(fmt(v) for v in value)})"
-            item = QTableWidgetItem(val)
+            item = NumericTableWidgetItem(val)
             item.setData(Qt.ItemDataRole.UserRole, value)
         else:
-            item = QTableWidgetItem(fmt(value))
-            item.setData(Qt.ItemDataRole.UserRole, float(value))
+            scalar = float(value)
+            item = NumericTableWidgetItem(fmt(scalar))
+            item.setData(Qt.ItemDataRole.UserRole, scalar)
 
         return item
 
     def _create_timestamp_item(self, timestamp, is_date, impl_plot):
         """
-        Creates QTableWidgetItem for timestamp with proper formatting
+        Creates NumericTableWidgetItem for timestamp with proper formatting
         """
         if is_date:
             # Use the appropriate formatter based on backend
@@ -127,13 +155,13 @@ class IplotQtStatistics(QWidget):
             else:
                 formatter = MPLDateFormatter(ax_idx=0)
 
-            # Format the timestamp to human readable
+            # Format the timestamp
             formatted = formatter.date_fmt(int(timestamp), formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
-            item = QTableWidgetItem(formatted)
+            item = NumericTableWidgetItem(formatted)
         else:
             # Relative time (pulse) - data comes in milliseconds
             seconds = timestamp / 1000.0  # Convert from milliseconds to seconds
-            item = QTableWidgetItem(f"{seconds:.9f} s")
+            item = NumericTableWidgetItem(f"{seconds:.9f} s")
 
         item.setData(Qt.ItemDataRole.UserRole, timestamp)
         return item
@@ -194,10 +222,10 @@ class IplotQtStatistics(QWidget):
                     y_mean = np.array(signal.data_store[3])
 
                     # Filter values
-                    mask = ((x_data > lo) & (x_data < hi) &
-                            (y_min > y_lo) & (y_min < y_hi) &
-                            (y_mean > y_lo) & (y_mean < y_hi) &
-                            (y_max > y_lo) & (y_max < y_hi))
+                    mask = ((x_data >= lo) & (x_data <= hi) &
+                            (y_min >= y_lo) & (y_min <= y_hi) &
+                            (y_mean >= y_lo) & (y_mean <= y_hi) &
+                            (y_max >= y_lo) & (y_max <= y_hi))
 
                     y_min_displayed = y_min[mask]
                     y_max_displayed = y_max[mask]
@@ -281,7 +309,7 @@ class IplotQtStatistics(QWidget):
 
                     # Filter values
                     if (len(x_data), len(y_data)) != (0, 0):
-                        mask = ((x_data > lo) & (x_data < hi) & (y_data > y_lo) & (y_data < y_hi))
+                        mask = ((x_data >= lo) & (x_data <= hi) & (y_data >= y_lo) & (y_data <= y_hi))
                         y_displayed = y_data[mask]
                         samples = y_displayed.size
                     else:
@@ -345,6 +373,16 @@ class IplotQtStatistics(QWidget):
         # Apply formatting with the current decimal setting
         self.update_table_format()
 
+        # Adjust columns to content
+        self.adjust_columns()
+
+    def adjust_columns(self):
+        """
+        Adjust column widths to fit their contents
+        """
+        for column in range(self.table.columnCount()):
+            self.table.resizeColumnToContents(column)
+
     def update_table_format(self):
         """
             Updates the float value format based on the selected number of decimals
@@ -374,7 +412,7 @@ class IplotQtStatistics(QWidget):
                         item.setText(text)
 
                     # Format single float value
-                    else:
+                    elif isinstance(data, (int, float)):
                         if not float(data).is_integer():
                             item.setText(f"{data:.{self.decimal_digits}f}")
                         else:
