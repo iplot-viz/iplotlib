@@ -489,7 +489,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             # Handle drag shift in Select mode with left click - use native hit-testing
             if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT:
                 signal, impl_plot, y_coord = self._find_signal_at_event(event)
-                if signal is not None and not signal.envelope:
+                if signal is not None and signal.envelope:
+                    logger.warning("Shift is not supported for envelope signals.")
+                elif signal is not None:
                     # Check if X axis is datetime
                     try:
                         is_datetime = plot.axes[0].is_date
@@ -499,6 +501,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     x_coord = event.xdata
                     self._start_drag_shift(impl_plot, signal, y_coord, is_datetime, start_x=x_coord)
                     return
+                elif signal is None and event.inaxes is not None:
+                    # Hit-test doesn't find envelope signals (no standard lines).
+                    # Check if the plot has any envelope signals to inform the user.
+                    ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+                    if ci and hasattr(ci, 'signals') and ci.signals:
+                        for sig_ref in ci.signals:
+                            sig = sig_ref()
+                            if sig is not None and getattr(sig, 'envelope', False):
+                                logger.warning("Shift is not supported for envelope signals.")
+                                break
 
             if event.button != MouseButton.LEFT:
                 return
