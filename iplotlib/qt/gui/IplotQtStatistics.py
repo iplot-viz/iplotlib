@@ -90,7 +90,7 @@ class IplotQtStatistics(QWidget):
         self.decimals = QLabel("Number of decimals: ")
         self.adjust_decimals = QSpinBox()
         self.adjust_decimals.setRange(2, 17)
-        self.adjust_decimals.setValue(17)
+        self.adjust_decimals.setValue(2)
         self.decimal_digits = self.adjust_decimals.value()
         self.apply_decimals_button = QPushButton("Apply")
         self.apply_decimals_button.clicked.connect(self.update_table_format)
