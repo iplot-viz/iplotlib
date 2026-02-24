@@ -981,9 +981,11 @@ class PyQtGraphParser(BackendParserBase):
             tick_props['tickTextOffset'] = 1
             if font_metrics:
                 tick_length = tick_props.get('tickLength', 4)
-                axis_item.setHeight(int(font_metrics.height() + abs(tick_length) + 2))
+                h = int(font_metrics.height() + abs(tick_length) + 2)
             else:
-                axis_item.setHeight(16)
+                h = 16
+            axis_item.setHeight(h)
+            axis_item._base_height = h  # Store for use in process_ipl_axis_params_label
 
         # Font size for UTC label
         if isinstance(axis_item, NanosecondDateFormatter):
@@ -1011,6 +1013,20 @@ class PyQtGraphParser(BackendParserBase):
         if fs and fs > 0:
             label_props['font-size'] = f'{int(fs)}pt'
         axis_item.setLabel(text, **label_props)
+
+        # When a label is set on the bottom axis, increase the fixed height
+        # to accommodate both tick labels and the axis label text, preventing
+        # the label from overlapping with tick values (e.g. pulseID mode).
+        if axis_item.orientation == 'bottom' and text:
+            if fs and fs > 0:
+                label_font = QFont()
+                label_font.setPointSize(int(fs))
+                label_height = QFontMetricsF(label_font).height()
+            else:
+                label_height = 12
+            # Use _base_height (set in process_ipl_axis_params) to stay idempotent
+            base_height = getattr(axis_item, '_base_height', None) or axis_item.height() or 16
+            axis_item.setHeight(int(base_height + label_height + 2))
 
     def process_ipl_axis_formatter(self, impl_plot: PlotItem, impl_axis: NanosecondDateFormatter, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
