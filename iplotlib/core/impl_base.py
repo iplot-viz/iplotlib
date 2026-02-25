@@ -562,8 +562,12 @@ class BackendParserBase(ABC):
                     end = data[0]
                     break
 
-            data = data[~np.isnan(data)]
-            begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
+            if len(data) > 1:
+                data = data[~np.isnan(data)]
+                begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
+            else:
+                begin = -0.5
+                end = 0.5
 
         axis.set_limits(begin, end, 'original')
 
@@ -1104,6 +1108,7 @@ class BackendParserBase(ABC):
         selected region if it does not span the full available range. Used during
         Undo/Redo actions to restore previous slider limits.
         """
+
     @abstractmethod
     def update_slider_limits(self, plot, begin, end):
         """
