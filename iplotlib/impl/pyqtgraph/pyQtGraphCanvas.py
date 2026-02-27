@@ -2,7 +2,7 @@
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 import gc
 from datetime import datetime
-from typing import Any, Callable, Collection, List, Tuple
+from typing import Any, Callable, Collection, List, Tuple, Union
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
@@ -10,8 +10,7 @@ from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontMetricsF
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
-from pyqtgraph.Qt import QtCore
-from pyqtgraph.Qt import QtWidgets
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QWidget
 from pyqtgraph import TextItem
 
@@ -392,82 +391,127 @@ class PyQtGraphParser(BackendParserBase):
 
         return img
 
-    def do_impl_line_plot_contour(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContour, x_data, y_data,
-                                  z_data):
-        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[IsocurveItem]
-        contour_filled = self._pm.get_value(plot, 'contour_filled')
-        legend_format = self._pm.get_value(plot, "legend_format")
-        equivalent_units = self._pm.get_value(plot, "equivalent_units")
-        contour_levels = self._pm.get_value(signal, 'contour_levels')
-        color_map = self._pm.get_value(signal, 'color_map')
+    def _get_contour_items(self, plot_item: PlotItem, x_data, y_data, z_data, contour_levels, color_map, contour_filled):
+        # Image creation
+        img = pg.ImageItem(z_data, axisOrder='row-major')
+        # Improved quality with linear interpolation
+        img.setOpts(interpolation='bilinear')
 
-        curves = []
+        # Set rectangle view for the image. Values correspond to: x, y, w, h
+        img.setRect(QtCore.QRectF(np.min(x_data).item(), np.min(y_data).item(), np.ptp(x_data), np.ptp(y_data)))
+        img.setVisible(contour_filled)
+        plot_item.addItem(img)
 
-        if isinstance(plot_lines, IsocurveItem):
-            for tp in plot_lines.collections:
-                tp.remove()
-            # TODO: Check size z_data
-            if contour_filled:
-                img = pg.ImageItem(z_data)
-            else:
-                img = pg.ImageItem(z_data)
-                # img = pg.ImageItem()
+        # Color bar
+        colormap_obj = pg.colormap.get(color_map)
+        z_min = np.min(z_data)
+        z_max = np.max(z_data)
 
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_item.addItem(img)
-                bar = pg.ColorBarItem(values=(np.min(z_data), np.max(z_data)),
-                                      colorMap=pg.colormap.get(color_map),
-                                      label='Z value',
-                                      interactive=False)
-                bar.setImageItem(img)
-
-                for idx, v in enumerate(contour_levels):
-                    # Isocurves colors
-                    norm_values = (v - np.min(z_data)) / (np.max(z_data) - np.min(z_data))
-                    color = color_map.map(norm_values, mode='float')
-                    color_rgba = tuple(int(c * 255) for c in color)
-                    pen_color = pg.mkColor(color_rgba)
-                    pen = pg.mkPen(color=pen_color, width=2)
-
-                    iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=pen)
-                    iso_curve.setParentItem(img)
-                    plot_item.addItem(iso_curve)
-                    curves.append(iso_curve)
-
-        else:
-            if contour_filled:
-                img = pg.ImageItem(z_data)
-            else:
-                img = pg.ImageItem(z_data)
-                # img = pg.ImageItem()
-
-            # Set rectangle view for the image. Values correspond to: x, y, w, h
-            img.setRect(QtCore.QRectF(np.min(x_data).item(), np.min(y_data).item(), np.ptp(x_data), np.ptp(y_data)))
-            plot_item.addItem(img)
-
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                colormap_obj = pg.colormap.get(color_map)
-                bar = pg.ColorBarItem(values=(np.min(z_data)[0], np.max(z_data)[0]),
+        # Get existing ColorBarItem or create a new one
+        # Based on how PyQtGraph handles ColorBarItem, it's usually better to add it to the GraphicsLayout
+        # but PlotItem doesn't have a direct easy way to add it to its own layout without reaching into GraphicsLayout.
+        # For simplicity and to match the current structure, we use the parent GraphicsLayout if possible.
+        parent_layout = plot_item.parentItem()
+        if isinstance(parent_layout, pg.GraphicsLayout):
+            # Check if there is already a ColorBarItem for this plot_item
+            bar = None
+            for i in range(parent_layout.layout.count()):
+                item = parent_layout.layout.itemAt(i).graphicsItem()
+                if isinstance(item, pg.ColorBarItem) and item.imageItem() == img:
+                    bar = item
+                    break
+            if bar is None:
+                bar = pg.ColorBarItem(values=(z_min, z_max),
                                       colorMap=colormap_obj,
                                       label='Z value',
                                       interactive=False)
                 bar.setImageItem(img)
+                # Find the plot_item position in the layout and add the bar next to it
+                for r in range(parent_layout.layout.rowCount()):
+                    for c in range(parent_layout.layout.columnCount()):
+                        if parent_layout.getItem(r, c) == plot_item:
+                            parent_layout.addItem(bar, row=r, col=c + 1)
+                            break
+            else:
+                bar.setLevels((z_min, z_max))
+                bar.setColorMap(colormap_obj)
 
-                # Isocurve creation
-                # levels = np.linspace(np.min(z_data)[0], np.max(z_data)[0], contour_levels)
-                # for i, v in enumerate(levels):
-                #     # TODO: pendant add antialiasing for isocurves
-                #     iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
-                #     iso_curve.setParentItem(img)
-                #     iso_curve.setZValue(10)
-                #     plot_item.addItem(iso_curve)
-                #     curves.append(iso_curve)
+        # Isocurve creation
+        curves = [img]
+        if isinstance(contour_levels, int):
+            levels = np.linspace(z_min, z_max, contour_levels + 2)[1:-1]
+        else:
+            levels = contour_levels
+
+        # If ImageItem is row-major, we need to transpose z_data for IsocurveItem
+        # as IsocurveItem expects (x, y) indexing which corresponds to col-major (or transposed row-major)
+        z_data_iso = z_data.T
+
+        for v in levels:
+            norm_values = (v - z_min) / (z_max - z_min) if z_max != z_min else 0
+            color = colormap_obj.map(norm_values, mode='float')
+            color_rgba = tuple(int(c * 255) for c in color)
+            pen_color = pg.mkColor(color_rgba)
+            pen = pg.mkPen(color=pen_color, width=2)
+
+            iso_curve = pg.IsocurveItem(data=z_data_iso, level=v, pen=pen)
+            # Do NOT set img as parent if img might be hidden, as children inherit visibility
+            # Instead, we set the same geometry as img
+            rect = img.boundingRect()
+            iso_curve.setData(data=z_data_iso, level=v)
+            # IsocurveItem handles its own scaling/translation to fit the data indices to the desired rect
+            # We can use QTransform to map data indices to the same rect as ImageItem
+            tr = QtGui.QTransform()
+            tr.translate(rect.left(), rect.top())
+            tr.scale(rect.width() / z_data_iso.shape[0], rect.height() / z_data_iso.shape[1])
+            iso_curve.setTransform(tr)
+            iso_curve.setZValue(10)
+            plot_item.addItem(iso_curve)
+            curves.append(iso_curve)
 
         return curves
 
+    def do_impl_line_plot_contour(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContour, x_data, y_data,
+                                  z_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[pg.GraphicsObject]
+        contour_filled = self._pm.get_value(plot, 'contour_filled')
+        contour_levels = self._pm.get_value(signal, 'contour_levels')
+        color_map = self._pm.get_value(signal, 'color_map')
+
+        if plot_lines:
+            for item in plot_lines:
+                if item.scene() is not None:
+                    plot_item.removeItem(item)
+
+        if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+            plot_lines = self._get_contour_items(plot_item, x_data, y_data, z_data, contour_levels, color_map,
+                                                 contour_filled)
+
+        return plot_lines
+
     def do_impl_line_plot_contour_slider(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContourWithSlider,
                                          x_data, y_data, z_data):
-        """"""
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[pg.GraphicsObject]
+
+        idx = plot.slider.value()
+        xsub_data = x_data[idx]
+        ysub_data = y_data[idx]
+        zsub_data = z_data[idx]
+
+        contour_filled = self._pm.get_value(plot, 'contour_filled')
+        contour_levels = self._pm.get_value(signal, 'contour_levels')
+        color_map = self._pm.get_value(signal, 'color_map')
+
+        if plot_lines:
+            for item in plot_lines:
+                if item.scene() is not None:
+                    plot_item.removeItem(item)
+
+        if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
+            plot_lines = self._get_contour_items(plot_item, xsub_data, ysub_data, zsub_data, contour_levels, color_map,
+                                                 contour_filled)
+
+        return plot_lines
 
     def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
         # Update FillBetweenItem
@@ -720,6 +764,8 @@ class PyQtGraphParser(BackendParserBase):
             # Slider creation only if it doesn't exist
             if isinstance(i_plot, PlotXYWithSlider):
                 cell_gl = self.process_ipl_plot_xy_slider(i_plot, row, col, visible_stack_ids, cell_gl)
+            elif isinstance(i_plot, PlotContourWithSlider):
+                cell_gl = self.process_ipl_plot_xy_slider(i_plot, row, col, visible_stack_ids, cell_gl)
 
             plot = stack_map[row_id]
             plot.enableAutoRange(x=False, y=False)
@@ -889,7 +935,7 @@ class PyQtGraphParser(BackendParserBase):
                     and leg_rect.bottom() <= vb_rect.bottom()):
                 break
 
-    def _update_slider(self, val, i_plot: PlotXYWithSlider, slider_values, current_label, formatter):
+    def _update_slider(self, val, i_plot: Union[PlotXYWithSlider, PlotContourWithSlider], slider_values, current_label, formatter):
         for c_row in i_plot.signals.values():
             for c_signal in c_row:
                 self.process_ipl_signal(c_signal)
