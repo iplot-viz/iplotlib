@@ -184,15 +184,19 @@ class NanosecondDateFormatter(pg.AxisItem):
                     values))
             self.common_label.setText(self.offset_str)
         else:
-            if self.labelUnit in ['', 'k']:  # wait until 1e6 before scaling
+            if self.labelUnit in ['', 'k']:
                 values = list(f"{v:g}" for v in values)
                 self.common_label.setText("")
             else:
                 values = super().tickStrings(values, scale, spacing)
-                # Check str exponent to avoid set the same text multiple times
-                current_text = self.common_label.text
-                if current_text != self.offset_str:
-                    self.common_label.setText(self.offset_str)
+                if self.orientation == 'bottom':
+                    self.common_label.setText("")
+                    self._updateLabel()
+                else:
+                    # Check str exponent to avoid set the same text multiple times
+                    current_text = self.common_label.text
+                    if current_text != self.offset_str:
+                        self.common_label.setText(self.offset_str)
 
         return values
 
@@ -201,6 +205,25 @@ class NanosecondDateFormatter(pg.AxisItem):
         self.offset_str = f"1e{exponent}"
         self.autoSIPrefixScale = scale
         self.labelUnit = prefix
+
+    def labelString(self) -> str:
+        """Generate label string with exponent prefix for bottom axis."""
+        if self.labelUnits == '':
+            if not self.autoSIPrefix or self.autoSIPrefixScale == 1.0:
+                units = ''
+            else:
+                units = f'(x{1.0 / self.autoSIPrefixScale:g})'
+        else:
+            units = f'({self.labelUnitPrefix}{self.labelUnits})'
+
+        if self.orientation == 'bottom' and hasattr(self, 'offset_str') and self.offset_str and self.labelUnit not in ['', 'k']:
+            s = f'{self.offset_str}  {self.labelText}'.strip()
+        else:
+            s = f'{self.labelText} {units}'.strip()
+
+        style = ';'.join([f'{k}: {self.labelStyle[k]}' for k in self.labelStyle])
+
+        return f"<span style='{style}'>{s}</span>"
 
     def get_real_value(self, value):
         if self.offset == 100_000:

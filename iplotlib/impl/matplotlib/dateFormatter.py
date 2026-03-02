@@ -8,6 +8,44 @@ import iplotLogging.setupLogger as Sl
 logger = Sl.get_logger(__name__)
 
 
+class XAxisScalarFormatter(ScalarFormatter):
+    """Formatter that displays exponent (1eN) before axis label."""
+
+    def __init__(self, label_props: dict = None):
+        super().__init__(useOffset=True, useMathText=False)
+        self._label_props = label_props or {}
+
+    def _get_base_label(self) -> str:
+        """Extract base label from axis, removing any exponent prefix."""
+        if not self.axis:
+            return ''
+        current_label = self.axis.get_label().get_text()
+        if current_label and '1e' in current_label:
+            parts = current_label.split('  ', 1)
+            if len(parts) > 1 and parts[0].startswith('1e'):
+                return parts[1]
+        return current_label or ''
+
+    def get_offset(self):
+        """Update axis label with exponent prefix and return empty offset."""
+        base_label = self._get_base_label()
+
+        if self.orderOfMagnitude and self.orderOfMagnitude != 0:
+            exp_str = f'1e{self.orderOfMagnitude}'
+            if self.axis:
+                new_label = f'{exp_str}  {base_label}'.strip()
+                current_label = self.axis.get_label().get_text()
+                if current_label != new_label:
+                    self.axis.set_label_text(new_label, **self._label_props)
+            return ''
+        else:
+            if self.axis and base_label:
+                current_label = self.axis.get_label().get_text()
+                if current_label != base_label and '1e' in current_label:
+                    self.axis.set_label_text(base_label, **self._label_props)
+            return super().get_offset()
+
+
 class NanosecondDateFormatter(ScalarFormatter):
     """Date axis formatter that takes into account ns offset if it is defined on this formatter axis
     Additionally it formats date as common_part + postfix and includes nanosecond precision if data is given as int64"""

@@ -7,7 +7,7 @@ import gc
 import numpy as np
 import matplotlib as mpl
 from matplotlib.axes import Axes as MPLAxes
-from matplotlib.axis import Tick, YAxis
+from matplotlib.axis import Tick, YAxis, XAxis
 from matplotlib.axis import Axis as MPLAxis
 from matplotlib.patches import Patch
 from matplotlib.contour import QuadContourSet
@@ -34,7 +34,7 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
-from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
+from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, XAxisScalarFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
 logger = setupLogger.get_logger(__name__)
@@ -895,6 +895,9 @@ class MatplotlibParser(BackendParserBase):
 
         # Font size for UTC label
         mpl_axis.get_offset_text().set_fontsize(fs)
+
+        if isinstance(mpl_axis, XAxis) and not axis.is_date:
+            mpl_axis.set_major_formatter(XAxisScalarFormatter(label_props=label_props))
 
         mpl_axis.set_tick_params(**tick_props)
 
