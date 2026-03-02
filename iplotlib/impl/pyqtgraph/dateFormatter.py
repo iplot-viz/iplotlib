@@ -184,7 +184,7 @@ class NanosecondDateFormatter(pg.AxisItem):
                     values))
             self.common_label.setText(self.offset_str)
         else:
-            if self.labelUnit in ['', 'm', 'k']:  # wait until 1e6 before scaling
+            if self.labelUnit in ['', 'k']:  # wait until 1e6 before scaling
                 values = list(f"{v:g}" for v in values)
                 self.common_label.setText("")
             else:

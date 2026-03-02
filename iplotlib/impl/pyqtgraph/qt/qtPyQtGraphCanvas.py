@@ -320,7 +320,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 # Handle drag shift with left click
                 if event.button() == Qt.MouseButton.LeftButton:
                     signal, y_coord = self._find_signal_at_event(view_box, event)
-                    if signal is not None and not signal.envelope:
+                    if signal is not None and signal.envelope:
+                        logger.warning("Shift is not supported for envelope signals.")
+                    elif signal is not None:
                         try:
                             is_datetime = plot.axes[0].is_date
                         except (AttributeError, IndexError):
@@ -329,6 +331,14 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                         x_coord = system_coord.x()
                         self._start_drag_shift(impl_plot, signal, y_coord, is_datetime, start_x=x_coord)
                         event.accept()
+                    elif ci and hasattr(ci, 'signals') and ci.signals:
+                        # Hit-test doesn't find envelope signals (no standard lines).
+                        # Check if the plot has any envelope signals to inform the user.
+                        for sig_ref in ci.signals:
+                            sig = sig_ref()
+                            if sig is not None and getattr(sig, 'envelope', False):
+                                logger.warning("Shift is not supported for envelope signals.")
+                                break
 
             elif self._mmode == Canvas.MOUSE_MODE_DIST:
                 # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
