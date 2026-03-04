@@ -159,9 +159,8 @@ class IplotQtStatistics(QWidget):
             formatted = formatter.date_fmt(int(timestamp), formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
             item = NumericTableWidgetItem(formatted)
         else:
-            # Relative time (pulse) - data comes in milliseconds
-            seconds = timestamp / 1000.0  # Convert from milliseconds to seconds
-            item = NumericTableWidgetItem(f"{seconds:.9f} s")
+            # Relative time (pulse) - data is in seconds
+            item = NumericTableWidgetItem(f"{timestamp:.9f} s")
 
         item.setData(Qt.ItemDataRole.UserRole, timestamp)
         return item
