@@ -1,6 +1,7 @@
 import datetime
 
 from matplotlib.ticker import ScalarFormatter
+from matplotlib.axis import XAxis
 import pandas
 
 import iplotLogging.setupLogger as Sl
@@ -8,7 +9,7 @@ import iplotLogging.setupLogger as Sl
 logger = Sl.get_logger(__name__)
 
 
-class XAxisScalarFormatter(ScalarFormatter):
+class ExponentScalarFormatter(ScalarFormatter):
     """Formatter that displays exponent (1eN) before axis label."""
 
     def __init__(self, label_props: dict = None):
@@ -27,7 +28,10 @@ class XAxisScalarFormatter(ScalarFormatter):
         return current_label or ''
 
     def get_offset(self):
-        """Update axis label with exponent prefix and return empty offset."""
+        """Update axis label with exponent prefix (X only) and return offset string."""
+        if not isinstance(self.axis, XAxis):
+            return super().get_offset()
+
         base_label = self._get_base_label()
 
         if self.orderOfMagnitude and self.orderOfMagnitude != 0:
