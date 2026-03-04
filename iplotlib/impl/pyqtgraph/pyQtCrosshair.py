@@ -156,7 +156,7 @@ class pyQtCrosshair:
                     axis = plot.getAxis("bottom")
                     text_key = f"x{i}"
                     current_text = self._text_cache.get(text_key)
-                    ts = axis.tickStrings([x], 1.0, 1) if isinstance(axis, NanosecondDateFormatter) else None
+                    ts = axis.tickStrings([x], 1.0, getattr(axis, '_tick_spacing', 1)) if isinstance(axis, NanosecondDateFormatter) else None
                     new_text = ts[0] if ts else f"{x:.6g}"
                     if current_text != new_text:
                         self.x_arrows[i].setText(new_text)

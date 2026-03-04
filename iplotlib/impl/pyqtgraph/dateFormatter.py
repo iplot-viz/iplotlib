@@ -166,14 +166,10 @@ class NanosecondDateFormatter(pg.AxisItem):
 
             spacing = (maxVal - minVal) / max(len(values) - 1, 1)
         else:
-            if self.logMode:
-                _range = 10**np.array(self.range)
-            else:
-                _range = self.range
-            (scale, prefix) = fn.siScale(max(abs(_range[0] * self.scale), abs(_range[1] * self.scale)))
-            self.set_scale(scale, prefix)
-
             spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
+            (scale, prefix) = fn.siScale(abs(spacing * self.scale))
+            self.set_scale(scale, prefix)
+            self._tick_spacing = spacing
 
         return [(spacing, values)]  # major ticks
 
