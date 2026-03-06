@@ -883,7 +883,7 @@ class BackendParserBase(ABC):
 
                 # If the number of samples per signal is less than 100 we continue, if not the user shall keep zooming
                 if len(x_zoom) > 100:
-                    return None, len(x_zoom)
+                    return None, len(x_zoom), None
 
                 # If there are no data points in the zoomed region, skip this signal
                 if not len(x_zoom):

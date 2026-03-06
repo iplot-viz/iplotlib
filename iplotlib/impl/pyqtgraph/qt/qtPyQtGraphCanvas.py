@@ -1,4 +1,4 @@
-from PySide6.QtCore import QMargins, Qt, Signal
+from PySide6.QtCore import QMargins, Qt, Signal, QEvent
 from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox
 
 import numpy as np
@@ -269,7 +269,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._dist_calculator.reset()
             return
 
-        is_double_click = hasattr(event, 'double') and callable(getattr(event, 'double', None)) and event.double()
+        is_double_click = (
+            event.type() == QEvent.Type.GraphicsSceneMouseDoubleClick
+            or (hasattr(event, 'double') and callable(getattr(event, 'double', None)) and event.double())
+        )
 
         if is_double_click:
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER,

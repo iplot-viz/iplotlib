@@ -168,6 +168,13 @@ class NanosecondDateFormatter(pg.AxisItem):
         else:
             spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
             (scale, prefix) = fn.siScale(abs(spacing * self.scale))
+            # When values are much larger than the spacing, use the value magnitude to determine the scale so
+            # that tick labels are normalised
+            max_val = max(abs(minVal), abs(maxVal))
+            if max_val > 0:
+                (val_scale, val_prefix) = fn.siScale(max_val * self.scale)
+                if val_scale < scale:
+                    scale, prefix = val_scale, val_prefix
             self.set_scale(scale, prefix)
             self._tick_spacing = spacing
 
