@@ -109,8 +109,6 @@ class PyQtGraphParser(BackendParserBase):
         self._impl_plot_ranges_hash = dict()
         self._row_offset = 0
 
-        # Line size default value for PyQtGraph backend
-        self._pm.default['line_size'] = 2
 
         if tight_layout:
             self.enable_tight_layout()
@@ -922,19 +920,27 @@ class PyQtGraphParser(BackendParserBase):
     def _y_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
             return
-        current_plot = view_box.parentItem()  # type: PlotItem
-        super()._y_axis_update_callback(current_plot)
+        self.figure.setUpdatesEnabled(False)
+        try:
+            current_plot = view_box.parentItem()  # type: PlotItem
+            super()._y_axis_update_callback(current_plot)
 
-        for (r, c), stacks in self._layout_stacks.items():
-            if current_plot in stacks.values():
-                self.align_y_axis(c)
-                break
+            for (r, c), stacks in self._layout_stacks.items():
+                if current_plot in stacks.values():
+                    self.align_y_axis(c)
+                    break
+        finally:
+            self.figure.setUpdatesEnabled(True)
 
     def _x_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
             return
-        current_plot = view_box.parentItem()  # type: PlotItem
-        super()._x_axis_update_callback(current_plot)
+        self.figure.setUpdatesEnabled(False)
+        try:
+            current_plot = view_box.parentItem()  # type: PlotItem
+            super()._x_axis_update_callback(current_plot)
+        finally:
+            self.figure.setUpdatesEnabled(True)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':
