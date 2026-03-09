@@ -189,7 +189,7 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_contour_levels_widget():
-        return IplotPreferencesForm.create_spinbox(min=1, max=10)
+        return IplotPreferencesForm.create_spinbox(min=1, max=1000)
 
     @staticmethod
     def default_canvas_max_diff():
@@ -231,11 +231,7 @@ class IplotPreferencesForm(QWidget):
     @staticmethod
     def default_plot_contour_color_map_widget():
         return IplotPreferencesForm.create_combo_box({'viridis': 'Viridis', 'plasma': 'Plasma', 'inferno': 'Inferno',
-                                                      'magma': 'Magma', 'cividis': 'Cividis', 'Greys': 'Greys',
-                                                      'Purples': 'Purples', 'Blues': 'Blues', 'Greens': 'Greens',
-                                                      'Oranges': 'Oranges', 'Reds': 'Reds', 'coolwarm': 'Coolwarm',
-                                                      'bwr': 'Bwr', 'seismic': 'Seismic', 'PiYG': 'PiYG',
-                                                      'RdBu': 'RdBu'})
+                                                      'magma': 'Magma', 'cividis': 'Cividis', 'turbo': 'Turbo'})
 
     @staticmethod
     def default_canvas_legend_layout_widget():
