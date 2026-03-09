@@ -187,7 +187,7 @@ class NanosecondDateFormatter(pg.AxisItem):
                 ref_val = max_val if max_val > 0 else abs(spacing)
 
             oom = floor(log10(ref_val)) if ref_val > 0 else 0
-            if 0 <= oom <= 5 and self._numeric_offset == 0:
+            if -2 <= oom <= 5 and self._numeric_offset == 0:
                 scale = 1.0
             else:
                 scale = 10.0 ** (-oom)
