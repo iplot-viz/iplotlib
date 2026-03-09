@@ -656,7 +656,7 @@ class MatplotlibParser(BackendParserBase):
             stack_sz = len(plot.signals.keys())
             h_space = 0.3
 
-        if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
+        if isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider)):
             subgrid_item = self.process_ipl_plot_xy_slider(plot, grid_item, stack_sz, h_space)
         else:
             # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item

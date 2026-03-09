@@ -8,7 +8,7 @@ import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontMetricsF
+from PySide6.QtGui import QFont, QFontMetricsF, QTransform
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
 from pyqtgraph.Qt import QtCore
 from pyqtgraph.Qt import QtWidgets
@@ -107,6 +107,7 @@ class PyQtGraphParser(BackendParserBase):
         self._layout_stacks = {}  # (row, col, stack_id) -> PlotItem
         self._slider_placeholders = {}  # (row, col) -> QGraphicsProxyWidget
         self._impl_plot_ranges_hash = dict()
+        self._colorbar_lut = dict()
         self._row_offset = 0
 
 
@@ -404,71 +405,130 @@ class PyQtGraphParser(BackendParserBase):
 
         curves = []
 
-        if isinstance(plot_lines, IsocurveItem):
-            for tp in plot_lines.collections:
-                tp.remove()
-            # TODO: Check size z_data
-            if contour_filled:
-                img = pg.ImageItem(z_data)
-            else:
-                img = pg.ImageItem(z_data)
-                # img = pg.ImageItem()
-
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                plot_item.addItem(img)
-                bar = pg.ColorBarItem(values=(np.min(z_data), np.max(z_data)),
-                                      colorMap=pg.colormap.get(color_map),
-                                      label='Z value',
-                                      interactive=False)
-                bar.setImageItem(img)
-
-                for idx, v in enumerate(contour_levels):
-                    # Isocurves colors
-                    norm_values = (v - np.min(z_data)) / (np.max(z_data) - np.min(z_data))
-                    color = color_map.map(norm_values, mode='float')
-                    color_rgba = tuple(int(c * 255) for c in color)
-                    pen_color = pg.mkColor(color_rgba)
-                    pen = pg.mkPen(color=pen_color, width=2)
-
-                    iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=pen)
-                    iso_curve.setParentItem(img)
-                    plot_item.addItem(iso_curve)
-                    curves.append(iso_curve)
-
+        # TODO: Check size z_data
+        if plot_lines is not None:
+            for curve in plot_lines:
+                if isinstance(curve, IsocurveItem):
+                    curve.deleteLater()
         else:
             if contour_filled:
                 img = pg.ImageItem(z_data)
             else:
-                img = pg.ImageItem(z_data)
-                # img = pg.ImageItem()
-
-            # Set rectangle view for the image. Values correspond to: x, y, w, h
-            img.setRect(QtCore.QRectF(np.min(x_data).item(), np.min(y_data).item(), np.ptp(x_data), np.ptp(y_data)))
-            plot_item.addItem(img)
+                img = pg.ImageItem()  # border='w'
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                colormap_obj = pg.colormap.get(color_map)
-                bar = pg.ColorBarItem(values=(np.min(z_data)[0], np.max(z_data)[0]),
-                                      colorMap=colormap_obj,
-                                      label='Z value',
-                                      interactive=False)
-                bar.setImageItem(img)
+                x_min = np.min(x_data).item()
+                x_max = np.max(x_data).item()
+                y_min = np.min(y_data).item()
+                y_max = np.max(y_data).item()
+                z_min = np.min(z_data).item()
+                z_max = np.max(z_data).item()
 
-                # Isocurve creation
-                # levels = np.linspace(np.min(z_data)[0], np.max(z_data)[0], contour_levels)
-                # for i, v in enumerate(levels):
-                #     # TODO: pendant add antialiasing for isocurves
-                #     iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
-                #     iso_curve.setParentItem(img)
-                #     iso_curve.setZValue(10)
-                #     plot_item.addItem(iso_curve)
-                #     curves.append(iso_curve)
+                # 1. Configure and add the image first, before any children
+                # Set rectangle view for the image. Values correspond to: x, y, w, h
+                # Transformations needed to convert pixels into real data values
+                img.setRect(QtCore.QRectF(x_min, y_min, np.ptp(x_data), np.ptp(y_data)))
+
+                tr = QTransform()
+                tr.translate(x_min, y_min)
+                tr.scale((x_max - x_min) / np.shape(z_data)[0], (y_max - y_min) / np.shape(z_data)[1])
+                img.setTransform(tr)
+                if contour_filled:
+                    img.setImage(z_data)
+                plot_item.addItem(img)
+
+                # 2. Set ColorBarItem
+                colormap_obj = pg.colormap.get(color_map)
+                # lut = colormap_obj.getLookupTable(nPts=256, alpha=False)
+                img.setColorMap(colormap_obj)
+
+                bar = self._colorbar_lut.get(id(signal))
+                bar.setImageItem(img)
+                bar.setLevels(low=z_min, high=z_max)
+
+                # 3. Isocurves creation after img is fully set up in the scene
+                levels = np.linspace(z_min, z_max, contour_levels)
+                for i, v in enumerate(levels):
+                    # norm = np.clip((v - z_min) / (z_max - z_min), 0.0, 1.0)
+                    # r, g, b = lut[int(norm * 255)]
+                    # pen = pg.mkPen(color=(int(r), int(g), int(b)), cosmetic=True)
+
+                    iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
+                    # iso_curve.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                    iso_curve.setZValue(10)
+                    iso_curve.setParentItem(img)
+                    curves.append(iso_curve)
 
         return curves
 
     def do_impl_line_plot_contour_slider(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContourWithSlider,
                                          x_data, y_data, z_data):
-        """"""
+
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[IsocurveItem]
+
+        # Contour parameters
+        contour_filled = self._pm.get_value(plot, 'contour_filled')
+        legend_format = self._pm.get_value(plot, "legend_format")
+        equivalent_units = self._pm.get_value(plot, "equivalent_units")
+        contour_levels = self._pm.get_value(signal, 'contour_levels')
+        color_map = self._pm.get_value(signal, 'color_map')
+        curves = []
+
+        # Slider data
+        x_sub_data = x_data[plot.slider.value()]
+        y_sub_data = y_data[plot.slider.value()]
+        z_sub_data = z_data[plot.slider.value()]
+
+        if plot_lines is not None:
+            for curve in plot_lines:
+                if isinstance(curve, IsocurveItem):
+                    curve.deleteLater()
+
+        if contour_filled:
+            img = pg.ImageItem(z_data)
+        else:
+            img = pg.ImageItem()
+
+        if x_sub_data.ndim == y_sub_data.ndim == z_sub_data.ndim == 2:
+            x_min = np.min(x_sub_data).item()
+            x_max = np.max(x_sub_data).item()
+            y_min = np.min(y_sub_data).item()
+            y_max = np.max(y_sub_data).item()
+            z_min = np.min(z_sub_data).item()
+            z_max = np.max(z_sub_data).item()
+
+            # 1. Configure and add the image first, before any children
+            # Set rectangle view for the image. Values correspond to: x, y, w, h
+            # Transformations needed to convert pixels into real data values
+            img.setRect(QtCore.QRectF(x_min, y_min, np.ptp(x_sub_data), np.ptp(y_sub_data)))
+
+            # scale() - Moves origin from (0,0) to the data minimum
+            # translate() - Each pixel in X becomes (x_max - x_min)/ n_cols wide, and each pixel in Y becomes
+            # (y_max - y_min) / n_rows tall
+            tr = QTransform()
+            tr.translate(x_min, y_min)
+            tr.scale((x_max - x_min) / np.shape(z_sub_data)[0], (y_max - y_min) / np.shape(z_sub_data)[1])
+            img.setTransform(tr)
+            if contour_filled:
+                img.setImage(z_sub_data)
+            plot_item.addItem(img)
+
+            # 2. Set ColorBarItem
+            colormap_obj = pg.colormap.get(color_map)
+            img.setColorMap(colormap_obj)
+
+            bar = self._colorbar_lut.get(id(signal))
+            bar.setImageItem(img)
+            bar.setLevels(low=z_min, high=z_max)
+
+            # 3. Isocurves creation after img is fully set up in the scene
+            levels = np.linspace(z_min, z_max, contour_levels)
+            for i, level in enumerate(levels):
+                iso_curve = pg.IsocurveItem(data=z_sub_data, level=level, pen=(i, len(levels) * 1.5))
+                iso_curve.setZValue(10)
+                iso_curve.setParentItem(img)
+                curves.append(iso_curve)
+        return curves
 
     def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
         # Update FillBetweenItem
@@ -522,9 +582,30 @@ class PyQtGraphParser(BackendParserBase):
     def process_ipl_plot_contour(self):
         pass
 
-    def process_ipl_plot_xy_slider(self, i_plot: PlotXYWithSlider, row, col, visible_stack_ids, cell_gl):
+    def process_ipl_plot_contour_colorbar(self, i_plot: PlotContour | PlotContourWithSlider, visible_stack_ids,
+                                          cell_gl):
+        z_data = i_plot.signals[1][0].z_data
+        color_map = self._pm.get_value(i_plot.signals[1][0], 'color_map')
+        colormap_obj = pg.colormap.get(color_map)
+
+        previous_bar = self._colorbar_lut.get(id(i_plot.signals[1][0]))
+        if previous_bar is None:
+            bar = pg.ColorBarItem(values=(np.min(z_data).item(), np.max(z_data).item()),
+                                  colorMap=colormap_obj,
+                                  label='Z value',
+                                  interactive=False)
+            cell_gl.addItem(bar, row=visible_stack_ids[0] + 1, col=1)
+            self._colorbar_lut[id(i_plot.signals[1][0])] = bar
+
+        return cell_gl
+
+    def process_ipl_plot_xy_slider(self, i_plot: PlotXYWithSlider | PlotContourWithSlider, row, col,
+                                   visible_stack_ids, cell_gl):
         # Maximum index value for the slider based on the y-data length
-        val_max = i_plot.signals[1][0].y_data.shape[0] - 1
+        if isinstance(i_plot, PlotXYWithSlider):
+            val_max = i_plot.signals[1][0].y_data.shape[0] - 1
+        else:
+            val_max = i_plot.signals[1][0].time.shape[0] - 1
 
         # Slider creation
         slider = QSlider(QtCore.Qt.Orientation.Horizontal)
@@ -550,6 +631,10 @@ class PyQtGraphParser(BackendParserBase):
         cell_gl.addItem(proxy, row=last_row_id, col=0)
         cell_gl.layout.setRowMinimumHeight(last_row_id, 30)
         self._slider_placeholders[rc_key] = proxy
+
+        # Set colormap in case of PlotContourWithSlider
+        if isinstance(i_plot, PlotContourWithSlider):
+            cell_gl = self.process_ipl_plot_contour_colorbar(i_plot, visible_stack_ids, cell_gl)
 
         # Get data for the slider
         slider_values = i_plot.signals[1][0].time
@@ -719,8 +804,11 @@ class PyQtGraphParser(BackendParserBase):
                 stack_map[row_id] = pi
 
             # Slider creation only if it doesn't exist
-            if isinstance(i_plot, PlotXYWithSlider):
+            if isinstance(i_plot, (PlotXYWithSlider, PlotContourWithSlider)):
                 cell_gl = self.process_ipl_plot_xy_slider(i_plot, row, col, visible_stack_ids, cell_gl)
+
+            elif isinstance(i_plot, PlotContour):
+                cell_gl = self.process_ipl_plot_contour_colorbar(i_plot, visible_stack_ids, cell_gl)
 
             plot = stack_map[row_id]
             plot.enableAutoRange(x=False, y=False)
@@ -1110,6 +1198,8 @@ class PyQtGraphParser(BackendParserBase):
 
         self.map_legend_to_ax.clear()
         self._impl_plot_ranges_hash.clear()
+        self._slider_placeholders.clear()
+        self._colorbar_lut.clear()
 
         gc.collect()
 
