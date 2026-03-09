@@ -242,7 +242,9 @@ class PyQtGraphParser(BackendParserBase):
             marker_line.setSymbol(symbol or None)
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
-        return [draw_fn(x=x_data, y=y_data, **style)]
+        line = draw_fn(x=x_data, y=y_data, **style)
+        line.setClipToView(True)
+        return [line]
 
     def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
         plot_lines = []
@@ -256,6 +258,7 @@ class PyQtGraphParser(BackendParserBase):
             style_i['symbolBrush'] = line_color
 
             curve = draw_fn(x=x_data, y=y_data[:, i], **style_i)
+            curve.setClipToView(True)
             curve.opts["name"] = f"{signal.label}[{i}]"
             self._update_marker_by_point_count(curve, x_data, style)
             plot_lines.append(curve)
