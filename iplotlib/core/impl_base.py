@@ -754,6 +754,10 @@ class BackendParserBase(ABC):
             x_limits = self.get_impl_x_axis_limits(impl_plot)
             x_data, y_data = self._get_visible_data(x_data, y_data, *x_limits)
 
+        # Flatten single-column 2D y_data so it routes through the 1D path
+        if y_data.ndim == 2 and y_data.shape[1] == 1:
+            y_data = y_data.ravel()
+
         if plot_lines is not None:
             # Reflect downsampling in legend
             self.legend_downsampled_signal(signal, impl_plot, plot_lines[0])
