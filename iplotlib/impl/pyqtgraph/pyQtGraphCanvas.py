@@ -10,8 +10,7 @@ from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontMetricsF, QTransform
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
-from pyqtgraph.Qt import QtCore
-from pyqtgraph.Qt import QtWidgets
+from pyqtgraph.Qt import QtCore, QtWidgets
 from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QWidget
 from pyqtgraph import TextItem
 
@@ -47,6 +46,8 @@ STEP_MAP_PG = {
     'linear': False,
     'post': 'right'
 }
+
+pg.setConfigOptions(antialias=True)
 
 
 class QtViewBox(pg.ViewBox):
@@ -109,7 +110,6 @@ class PyQtGraphParser(BackendParserBase):
         self._impl_plot_ranges_hash = dict()
         self._colorbar_lut = dict()
         self._row_offset = 0
-
 
         if tight_layout:
             self.enable_tight_layout()
@@ -409,7 +409,9 @@ class PyQtGraphParser(BackendParserBase):
         if plot_lines is not None:
             for curve in plot_lines:
                 if isinstance(curve, IsocurveItem):
-                    curve.deleteLater()
+                    curve.setParentItem(None)
+                    plot_item.removeItem(curve)
+            plot_lines.clear()
         else:
             if contour_filled:
                 img = pg.ImageItem(z_data)
@@ -482,7 +484,9 @@ class PyQtGraphParser(BackendParserBase):
         if plot_lines is not None:
             for curve in plot_lines:
                 if isinstance(curve, IsocurveItem):
-                    curve.deleteLater()
+                    curve.setParentItem(None)
+                    plot_item.removeItem(curve)
+            plot_lines.clear()
 
         if contour_filled:
             img = pg.ImageItem(z_data)
@@ -866,8 +870,9 @@ class PyQtGraphParser(BackendParserBase):
 
             # Observe the axis limit change events
             vb = plot.getViewBox()
-            vb.sigXRangeChanged.connect(self._x_axis_update_callback)
-            vb.sigYRangeChanged.connect(self._y_axis_update_callback)
+            if not isinstance(i_plot, (PlotContour, PlotContourWithSlider)):
+                vb.sigXRangeChanged.connect(self._x_axis_update_callback)
+                vb.sigYRangeChanged.connect(self._y_axis_update_callback)
 
         self.set_bottom_axis_stacked(row, col, visible_stack_ids)
         if isinstance(i_plot.axes[0], RangeAxis):
@@ -1011,27 +1016,19 @@ class PyQtGraphParser(BackendParserBase):
     def _y_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
             return
-        self.figure.setUpdatesEnabled(False)
-        try:
-            current_plot = view_box.parentItem()  # type: PlotItem
-            super()._y_axis_update_callback(current_plot)
+        current_plot = view_box.parentItem()  # type: PlotItem
+        super()._y_axis_update_callback(current_plot)
 
-            for (r, c), stacks in self._layout_stacks.items():
-                if current_plot in stacks.values():
-                    self.align_y_axis(c)
-                    break
-        finally:
-            self.figure.setUpdatesEnabled(True)
+        for (r, c), stacks in self._layout_stacks.items():
+            if current_plot in stacks.values():
+                self.align_y_axis(c)
+                break
 
     def _x_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
             return
-        self.figure.setUpdatesEnabled(False)
-        try:
-            current_plot = view_box.parentItem()  # type: PlotItem
-            super()._x_axis_update_callback(current_plot)
-        finally:
-            self.figure.setUpdatesEnabled(True)
+        current_plot = view_box.parentItem()  # type: PlotItem
+        super()._x_axis_update_callback(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':
@@ -1233,6 +1230,10 @@ class PyQtGraphParser(BackendParserBase):
             for plot in stack.values():
                 if not plot:
                     continue
+                iplot = self._impl_plot_cache_table.get_cache_item(plot).plot()
+                if isinstance(iplot, (PlotContour, PlotContourWithSlider)):
+                    logger.warning(f"Zoom action is not supported for {type(iplot).__name__}")
+                    continue
                 vb = plot.vb
                 vb.setMouseMode(vb.RectMode)
                 self.set_mouse(plot)
@@ -1243,6 +1244,10 @@ class PyQtGraphParser(BackendParserBase):
         for stack in self._layout_stacks.values():
             for plot in stack.values():
                 if not plot:
+                    continue
+                iplot = self._impl_plot_cache_table.get_cache_item(plot).plot()
+                if isinstance(iplot, (PlotContour, PlotContourWithSlider)):
+                    logger.warning(f"Pan action is not supported for {type(iplot).__name__}")
                     continue
                 vb = plot.vb
                 vb.setMouseMode(vb.PanMode)

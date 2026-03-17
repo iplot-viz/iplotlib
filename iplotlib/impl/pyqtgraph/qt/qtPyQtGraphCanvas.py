@@ -2,7 +2,7 @@ from PySide6.QtCore import QMargins, Qt, Signal, QEvent
 from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox
 
 import numpy as np
-from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY
+from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY, PlotContourWithSlider
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
@@ -27,6 +27,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         self._parser = PyQtGraphParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
 
+        # Track connected ViewBoxes to avoid duplicate connections
+        self._connected_viewboxes = set()
+
         self._vlayout = QVBoxLayout(self)
         self._vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._vlayout.setContentsMargins(QMargins())
@@ -40,9 +43,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         # Drag & Drop
         self.setAcceptDrops(True)
-
-        # Track connected ViewBoxes to avoid duplicate connections
-        self._connected_viewboxes = set()
 
     def set_canvas(self, canvas):
         prev_canvas = self._parser.canvas
@@ -270,8 +270,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             return
 
         is_double_click = (
-            event.type() == QEvent.Type.GraphicsSceneMouseDoubleClick
-            or (hasattr(event, 'double') and callable(getattr(event, 'double', None)) and event.double())
+                event.type() == QEvent.Type.GraphicsSceneMouseDoubleClick
+                or (hasattr(event, 'double') and callable(getattr(event, 'double', None)) and event.double())
         )
 
         if is_double_click:
@@ -280,14 +280,19 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 if event.button() == Qt.MouseButton.RightButton:
                     return
 
-                # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
-                system_coord = view_box.mapSceneToView(event.scenePos())
-                x_value = system_coord.x()
-                y_value = system_coord.y()
+                if isinstance(plot, (PlotContour, PlotContourWithSlider)):
+                    logger.warning(f"Markers creation is not supported for {type(plot).__name__}")
+                    return
 
                 # Markers can only be created if the property 'marker' is not None
-                if impl_plot.listDataItems()[0].opts['symbol'] != 'None':
-                    new_marker, marker_signal, label_line = self._parser.add_marker_scaled(impl_plot, plot, x_value, y_value)
+                if impl_plot.listDataItems()[0].opts['symbol'] is not None:
+                    # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
+                    system_coord = view_box.mapSceneToView(event.scenePos())
+                    x_value = system_coord.x()
+                    y_value = system_coord.y()
+
+                    new_marker, marker_signal, label_line = self._parser.add_marker_scaled(impl_plot, plot, x_value,
+                                                                                           y_value)
                     if new_marker is not None:
                         if new_marker not in self._marker_window.get_markers():
                             self._marker_window.add_marker(marker_signal, new_marker, label_line)
@@ -311,7 +316,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         else:
             # Single click handling
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
-                if isinstance(plot, PlotContour):
+                if isinstance(plot, (PlotContour, PlotContourWithSlider)):
                     return
                 if event.button() == Qt.MouseButton.RightButton:
                     return
@@ -383,7 +388,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 else:
                     x = self._parser.transform_value(impl_plot, 0, x_value)
                     self._dist_calculator.set_src(x, y_value, plot, ci.stack_key)
-
 
     def _impl_mouse_release_handler(self, view_box, event):
         """Handle mouse release events in PyQtGraph."""
@@ -559,4 +563,3 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             except Exception:
                 pass
             self._drag_shift_preview_line = None
-
