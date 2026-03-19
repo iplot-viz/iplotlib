@@ -562,7 +562,7 @@ class BackendParserBase(ABC):
                     end = data[0]
                     break
 
-            if len(data) > 1:
+            if len(data) > 0:
                 data = data[~np.isnan(data)]
                 begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
             else:
@@ -917,7 +917,7 @@ class BackendParserBase(ABC):
                     minor_dist = distances[idx_result]
                     nearest_point = points[idx_result]
                     marker_signal = signal
-                    nearest_line_label = self.get_line_label(line)
+                    nearest_line_label = self.get_line_label(line if not isinstance(line, Collection) else line[0])
 
         return nearest_point, marker_signal, nearest_line_label
 
