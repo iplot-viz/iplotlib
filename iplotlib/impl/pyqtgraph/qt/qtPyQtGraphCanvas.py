@@ -54,6 +54,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         self._parser.deactivate_cursor()
         self._parser.process_ipl_canvas(canvas)
+        self._parser.figure.ci.layout.activate()
 
         if canvas:
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
