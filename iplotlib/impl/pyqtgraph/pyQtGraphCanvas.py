@@ -853,9 +853,17 @@ class PyQtGraphParser(BackendParserBase):
             # Legend processing for downsampled data when drawing
             fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
             ix_legend = 0
+
             if plot.legend and plot.legend.items:
+                # Set legend_lines
+                legend_lines = [sample.item
+                                for item in plot.legend.items
+                                for sample in item
+                                if isinstance(sample, pg.ItemSample)]
+
                 for signal in signals:
                     for line in self._signal_impl_shape_lut.get(id(signal)):
+                        self.map_legend_to_ax[legend_lines[ix_legend]] = line
                         label_item = plot.legend.items[ix_legend][1]
                         label_item.setAttr(attr='size', value=f'{fs}pt')
                         legend_label = line.name() if not isinstance(line, Collection) else line[0].name()
@@ -950,10 +958,21 @@ class PyQtGraphParser(BackendParserBase):
         legend = plot.legend
         legend.layout.setContentsMargins(3, 0, 0, 0)
 
+        # Set legend event
+        legend.sigSampleClicked.connect(self.check_envelope_signal)
+
         # Set aspect legend
         set_legend_position(legend, plot_leg_position)
         legend.setBrush(pg.mkBrush(255, 255, 255, 120))
         legend.setPen(pg.mkPen(color='k'))
+
+    def check_envelope_signal(self, item: PlotDataItem):
+        ax_lines = self.map_legend_to_ax[item]
+        if not isinstance(ax_lines, Collection):
+            return
+
+        for ax_line in ax_lines[1:]:
+            ax_line.setVisible(not ax_line.isVisible())
 
     def _auto_adjust_legend_layout(self, plot: PlotItem, i_plot: Plot, signals):
         legend = plot.legend
