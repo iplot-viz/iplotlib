@@ -795,10 +795,10 @@ class PyQtGraphParser(BackendParserBase):
 
             if row_id not in stack_map:
                 pi = pg.PlotItem(viewBox=QtViewBox(), axisItems=axis_items)
-                # Show top and right borders
-                pi.showAxes((True, True, True, True), showValues=(True, False, False, True))
-                # Reduce internal margins for compact layout
-                pi.layout.setContentsMargins(0, 0, 0, 0)
+                # Compact layout only for non-stacked plots
+                if len(i_plot.signals) <= 1:
+                    pi.showAxes((True, True, True, True), showValues=(True, False, False, True))
+                    pi.layout.setContentsMargins(0, 0, 0, 0)
                 # Add space for expo
                 if stack_id == 0:
                     cell_gl.addItem(axis_items["left"].common_label, row=0, col=0)
