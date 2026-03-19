@@ -398,11 +398,8 @@ class PyQtGraphParser(BackendParserBase):
                                   z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[IsocurveItem]
         contour_filled = self._pm.get_value(plot, 'contour_filled')
-        legend_format = self._pm.get_value(plot, "legend_format")
-        equivalent_units = self._pm.get_value(plot, "equivalent_units")
         contour_levels = self._pm.get_value(signal, 'contour_levels')
         color_map = self._pm.get_value(signal, 'color_map')
-
         curves = []
 
         # TODO: Check size z_data
@@ -416,15 +413,12 @@ class PyQtGraphParser(BackendParserBase):
             if contour_filled:
                 img = pg.ImageItem(z_data)
             else:
-                img = pg.ImageItem()  # border='w'
+                img = pg.ImageItem()
 
             if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                x_min = np.min(x_data).item()
-                x_max = np.max(x_data).item()
-                y_min = np.min(y_data).item()
-                y_max = np.max(y_data).item()
-                z_min = np.min(z_data).item()
-                z_max = np.max(z_data).item()
+                x_min, x_max = np.min(x_data).item(), np.max(x_data).item()
+                y_min, y_max = np.min(y_data).item(), np.max(y_data).item()
+                z_min, z_max = np.min(z_data).item(), np.max(z_data).item()
 
                 # 1. Configure and add the image first, before any children
                 # Set rectangle view for the image. Values correspond to: x, y, w, h
@@ -441,7 +435,6 @@ class PyQtGraphParser(BackendParserBase):
 
                 # 2. Set ColorBarItem
                 colormap_obj = pg.colormap.get(color_map)
-                # lut = colormap_obj.getLookupTable(nPts=256, alpha=False)
                 img.setColorMap(colormap_obj)
 
                 bar = self._colorbar_lut.get(id(signal))
@@ -450,18 +443,22 @@ class PyQtGraphParser(BackendParserBase):
 
                 # 3. Isocurves creation after img is fully set up in the scene
                 levels = np.linspace(z_min, z_max, contour_levels)
-                for i, v in enumerate(levels):
-                    # norm = np.clip((v - z_min) / (z_max - z_min), 0.0, 1.0)
-                    # r, g, b = lut[int(norm * 255)]
-                    # pen = pg.mkPen(color=(int(r), int(g), int(b)), cosmetic=True)
+                lut = None if contour_filled else colormap_obj.getLookupTable(nPts=256, alpha=False)
+                z_range = z_max - z_min
 
-                    iso_curve = pg.IsocurveItem(data=z_data, level=v, pen=(i, len(levels) * 1.5))
-                    # iso_curve.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                for i, level in enumerate(levels):
+                    if contour_filled:
+                        pen = (i, len(levels) * 1.5)
+                    else:
+                        norm = (level - z_min) / z_range if z_range != 0.0 else 0.0
+                        r, g, b = lut[int(norm * 255)]
+                        pen = pg.mkPen(color=(int(r), int(g), int(b)), cosmetic=True)
+
+                    iso_curve = pg.IsocurveItem(data=z_data, level=level, pen=pen)
                     iso_curve.setZValue(10)
                     iso_curve.setParentItem(img)
                     curves.append(iso_curve)
-
-        return curves
+            return curves
 
     def do_impl_line_plot_contour_slider(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContourWithSlider,
                                          x_data, y_data, z_data):
@@ -470,8 +467,6 @@ class PyQtGraphParser(BackendParserBase):
 
         # Contour parameters
         contour_filled = self._pm.get_value(plot, 'contour_filled')
-        legend_format = self._pm.get_value(plot, "legend_format")
-        equivalent_units = self._pm.get_value(plot, "equivalent_units")
         contour_levels = self._pm.get_value(signal, 'contour_levels')
         color_map = self._pm.get_value(signal, 'color_map')
         curves = []
@@ -494,12 +489,9 @@ class PyQtGraphParser(BackendParserBase):
             img = pg.ImageItem()
 
         if x_sub_data.ndim == y_sub_data.ndim == z_sub_data.ndim == 2:
-            x_min = np.min(x_sub_data).item()
-            x_max = np.max(x_sub_data).item()
-            y_min = np.min(y_sub_data).item()
-            y_max = np.max(y_sub_data).item()
-            z_min = np.min(z_sub_data).item()
-            z_max = np.max(z_sub_data).item()
+            x_min, x_max = np.min(x_sub_data).item(), np.max(x_sub_data).item()
+            y_min, y_max = np.min(y_sub_data).item(), np.max(y_sub_data).item()
+            z_min, z_max = np.min(z_sub_data).item(), np.max(z_sub_data).item()
 
             # 1. Configure and add the image first, before any children
             # Set rectangle view for the image. Values correspond to: x, y, w, h
@@ -527,8 +519,18 @@ class PyQtGraphParser(BackendParserBase):
 
             # 3. Isocurves creation after img is fully set up in the scene
             levels = np.linspace(z_min, z_max, contour_levels)
+            lut = None if contour_filled else colormap_obj.getLookupTable(nPts=256, alpha=False)
+            z_range = z_max - z_min
+
             for i, level in enumerate(levels):
-                iso_curve = pg.IsocurveItem(data=z_sub_data, level=level, pen=(i, len(levels) * 1.5))
+                if contour_filled:
+                    pen = (i, len(levels) * 1.5)
+                else:
+                    norm = (level - z_min) / z_range if z_range != 0.0 else 0.0
+                    r, g, b = lut[int(norm * 255)]
+                    pen = pg.mkPen(color=(int(r), int(g), int(b)), cosmetic=True)
+
+                iso_curve = pg.IsocurveItem(data=z_sub_data, level=level, pen=pen)
                 iso_curve.setZValue(10)
                 iso_curve.setParentItem(img)
                 curves.append(iso_curve)
