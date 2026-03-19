@@ -203,6 +203,7 @@ class NanosecondDateFormatter(pg.AxisItem):
             values = list(
                 map(lambda v: self.date_fmt(self.get_real_value(int(v)), self.cut_start + 1, self.cut_start + 5),
                     values))
+            self.common_label.prepareGeometryChange()
             self.common_label.setText(self.offset_str)
         else:
             adjusted = [v - self._numeric_offset for v in values] if self._numeric_offset != 0 else values
