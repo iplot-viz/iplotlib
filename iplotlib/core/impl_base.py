@@ -562,7 +562,7 @@ class BackendParserBase(ABC):
                     end = data[0]
                     break
 
-            if len(data) > 1:
+            if len(data) > 0:
                 data = data[~np.isnan(data)]
                 begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
             else:
@@ -754,6 +754,10 @@ class BackendParserBase(ABC):
             x_limits = self.get_impl_x_axis_limits(impl_plot)
             x_data, y_data = self._get_visible_data(x_data, y_data, *x_limits)
 
+        # Flatten single-column 2D y_data so it routes through the 1D path
+        if y_data.ndim == 2 and y_data.shape[1] == 1:
+            y_data = y_data.ravel()
+
         if plot_lines is not None:
             # Reflect downsampling in legend
             self.legend_downsampled_signal(signal, impl_plot, plot_lines[0])
@@ -883,7 +887,7 @@ class BackendParserBase(ABC):
 
                 # If the number of samples per signal is less than 100 we continue, if not the user shall keep zooming
                 if len(x_zoom) > 100:
-                    return None, len(x_zoom)
+                    return None, len(x_zoom), None
 
                 # If there are no data points in the zoomed region, skip this signal
                 if not len(x_zoom):
@@ -913,7 +917,7 @@ class BackendParserBase(ABC):
                     minor_dist = distances[idx_result]
                     nearest_point = points[idx_result]
                     marker_signal = signal
-                    nearest_line_label = self.get_line_label(line)
+                    nearest_line_label = self.get_line_label(line if not isinstance(line, Collection) else line[0])
 
         return nearest_point, marker_signal, nearest_line_label
 

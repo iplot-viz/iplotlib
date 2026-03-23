@@ -7,7 +7,7 @@ import gc
 import numpy as np
 import matplotlib as mpl
 from matplotlib.axes import Axes as MPLAxes
-from matplotlib.axis import Tick, YAxis
+from matplotlib.axis import Tick, YAxis, XAxis
 from matplotlib.axis import Axis as MPLAxis
 from matplotlib.patches import Patch
 from matplotlib.contour import QuadContourSet
@@ -34,7 +34,7 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
-from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
+from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
 logger = setupLogger.get_logger(__name__)
@@ -656,7 +656,7 @@ class MatplotlibParser(BackendParserBase):
             stack_sz = len(plot.signals.keys())
             h_space = 0.3
 
-        if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
+        if isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider)):
             subgrid_item = self.process_ipl_plot_xy_slider(plot, grid_item, stack_sz, h_space)
         else:
             # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
@@ -895,6 +895,9 @@ class MatplotlibParser(BackendParserBase):
 
         # Font size for UTC label
         mpl_axis.get_offset_text().set_fontsize(fs)
+
+        if not axis.is_date:
+            mpl_axis.set_major_formatter(ExponentScalarFormatter(label_props=label_props))
 
         mpl_axis.set_tick_params(**tick_props)
 

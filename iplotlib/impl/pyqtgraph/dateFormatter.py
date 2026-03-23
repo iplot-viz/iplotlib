@@ -2,7 +2,7 @@ import pyqtgraph as pg
 import pyqtgraph.functions as fn
 from datetime import datetime, timedelta
 import pandas
-from math import ceil
+from math import ceil, floor, log10
 import numpy as np
 
 import iplotLogging.setupLogger as Sl
@@ -27,6 +27,9 @@ class NanosecondDateFormatter(pg.AxisItem):
     formats = ["{:4d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:02d}", "{:03d}", "{:03d}", "{:03d}"]
 
     def __init__(self, postfix_end=True, postfix_start=False, roundh=False, is_date=True, *args, **kwargs):
+        # Init before super() because pyqtgraph calls labelString() during __init__
+        self.labelUnit = ''
+        self._numeric_offset = 0.0
         super().__init__(*args, **kwargs)
         self.postfix_end = postfix_end
         self.postfix_start = postfix_start
@@ -44,7 +47,6 @@ class NanosecondDateFormatter(pg.AxisItem):
         else:
             self.common_label = pg.LabelItem(text='', justify='left')
 
-        self.labelUnit = ''
         self.enableAutoSIPrefix(False)
 
     def __call__(self, x, pos=None):
@@ -166,14 +168,33 @@ class NanosecondDateFormatter(pg.AxisItem):
 
             spacing = (maxVal - minVal) / max(len(values) - 1, 1)
         else:
-            if self.logMode:
-                _range = 10**np.array(self.range)
-            else:
-                _range = self.range
-            (scale, prefix) = fn.siScale(max(abs(_range[0] * self.scale), abs(_range[1] * self.scale)))
-            self.set_scale(scale, prefix)
-
             spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
+            val_range = maxVal - minVal
+            max_val = max(abs(minVal), abs(maxVal))
+
+            if max_val > 0 and val_range > 0 and val_range / max_val < 1e-3:
+                oom = floor(log10(val_range))
+                self._numeric_offset = round(minVal, -oom)
+            else:
+                self._numeric_offset = 0.0
+
+            if self._numeric_offset != 0:
+                ref_val = max(abs(minVal - self._numeric_offset),
+                              abs(maxVal - self._numeric_offset))
+                if ref_val == 0:
+                    ref_val = val_range
+            else:
+                ref_val = max_val if max_val > 0 else abs(spacing)
+
+            oom = floor(log10(ref_val)) if ref_val > 0 else 0
+            if -2 <= oom <= 5 and self._numeric_offset == 0:
+                scale = 1.0
+            else:
+                scale = 10.0 ** (-oom)
+            prefix = ''
+
+            self.set_scale(scale, prefix)
+            self._tick_spacing = spacing
 
         return [(spacing, values)]  # major ticks
 
@@ -182,17 +203,25 @@ class NanosecondDateFormatter(pg.AxisItem):
             values = list(
                 map(lambda v: self.date_fmt(self.get_real_value(int(v)), self.cut_start + 1, self.cut_start + 5),
                     values))
+            self.common_label.prepareGeometryChange()
             self.common_label.setText(self.offset_str)
         else:
-            if self.labelUnit in ['', 'k']:  # wait until 1e6 before scaling
-                values = list(f"{v:g}" for v in values)
-                self.common_label.setText("")
+            adjusted = [v - self._numeric_offset for v in values] if self._numeric_offset != 0 else values
+            scale_factor = self.autoSIPrefixScale
+            if scale_factor != 1.0:
+                # Round to eliminate floating point noise (e.g., 6.93889e-18 → 0)
+                precision = int(-log10(abs(scale_factor))) + 10
+                values = [f"{round(v * scale_factor, precision):g}" for v in adjusted]
             else:
-                values = super().tickStrings(values, scale, spacing)
-                # Check str exponent to avoid set the same text multiple times
-                current_text = self.common_label.text
-                if current_text != self.offset_str:
-                    self.common_label.setText(self.offset_str)
+                values = [f"{v:g}" for v in adjusted]
+
+            if self.orientation == 'bottom':
+                self.common_label.setText("")
+                self._updateLabel()
+            else:
+                label = self.offset_str if scale_factor != 1.0 else ""
+                if self.common_label.text != label:
+                    self.common_label.setText(label)
 
         return values
 
@@ -201,6 +230,26 @@ class NanosecondDateFormatter(pg.AxisItem):
         self.offset_str = f"1e{exponent}"
         self.autoSIPrefixScale = scale
         self.labelUnit = prefix
+
+    def labelString(self) -> str:
+        """Generate label string with exponent prefix for bottom axis."""
+        if self.labelUnits == '':
+            if not self.autoSIPrefix or self.autoSIPrefixScale == 1.0:
+                units = ''
+            else:
+                units = f'(x{1.0 / self.autoSIPrefixScale:g})'
+        else:
+            units = f'({self.labelUnitPrefix}{self.labelUnits})'
+
+        has_scaling = self.autoSIPrefixScale != 1.0
+        if self.orientation == 'bottom' and hasattr(self, 'offset_str') and self.offset_str and has_scaling:
+            s = f'{self.offset_str}  {self.labelText}'.strip()
+        else:
+            s = f'{self.labelText} {units}'.strip()
+
+        style = ';'.join([f'{k}: {self.labelStyle[k]}' for k in self.labelStyle])
+
+        return f"<span style='{style}'>{s}</span>"
 
     def get_real_value(self, value):
         if self.offset == 100_000:
