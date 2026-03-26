@@ -27,10 +27,9 @@ dependencies = [
     "iplotDataAccess >= 1.3.1",
     "packaging>=20.0",
     "matplotlib >= 3.5.1",
-    "pandas >= 1.2.0",
-    "PySide6 >= 6.2.3",
-    "vtk >= 9.1.0",
-    "pyqtgraph >= 0.13.7",
+    "pandas >= 2.2.0",
+    "PySide6 >= 6.9.3",
+    "pyqtgraph >= 0.14.0",
 ]
 dynamic = ["version"]
 
