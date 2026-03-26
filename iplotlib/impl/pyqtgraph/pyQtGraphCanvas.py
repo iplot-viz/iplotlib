@@ -9,7 +9,8 @@ import pyqtgraph as pg
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontMetricsF, QTransform
-from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
+from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, PColorMeshItem
+from pyqtgraph.Qt import OpenGLConstants as GLC
 from pyqtgraph.Qt import QtCore, QtWidgets
 from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QWidget
 from pyqtgraph import TextItem
@@ -47,7 +48,18 @@ STEP_MAP_PG = {
     'post': 'right'
 }
 
-pg.setConfigOptions(antialias=True)
+pg.setConfigOptions(antialias=True, useOpenGL=True)
+
+
+class _AlphaColorMeshItem(PColorMeshItem):
+    """Enables GL alpha blending."""
+
+    def paintGL(self, widget):
+        glf = widget.getFunctions()
+        glf.glEnable(GLC.GL_BLEND)
+        glf.glBlendFunc(GLC.GL_SRC_ALPHA, GLC.GL_ONE_MINUS_SRC_ALPHA)
+        super().paintGL(widget)
+        glf.glDisable(GLC.GL_BLEND)
 
 
 class QtViewBox(pg.ViewBox):
@@ -537,22 +549,28 @@ class PyQtGraphParser(BackendParserBase):
         return curves
 
     def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
-        # Update FillBetweenItem
         area = shapes[0][2]
-        if isinstance(area, FillBetweenItem):
-            area.setCurves(shapes[0][0], shapes[0][1])
+        if isinstance(area, _AlphaColorMeshItem):
+            x_mesh = np.vstack([x_data, x_data])
+            y_mesh = np.vstack([y2_data, y1_data])
+            z_mesh = np.ones((1, len(x_data) - 1))
+            area.setData(x_mesh, y_mesh, z_mesh)
 
     def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, style, style2):
-        # Creation of FillBetweenItem
         curve_1 = [draw_fn(x=x_data, y=y1_data, **style)]  # type: List[PlotDataItem]
         curve_2 = [draw_fn(x=x_data, y=y2_data, **style2)]  # type: List[PlotDataItem]
 
-        # Brush for FillBetweenItem
         pen = curve_1[0].opts['pen']
         qcolor = pen.color()
-        brush = (qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255))
+        rgba = np.array([[qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255)]])
+        cmap = pg.ColorMap([0.0, 1.0], np.vstack([rgba, rgba]))
 
-        area = FillBetweenItem(curve1=curve_1[0], curve2=curve_2[0], brush=brush)
+        x_mesh = np.vstack([x_data, x_data])
+        y_mesh = np.vstack([y2_data, y1_data])
+        z_mesh = np.ones((1, len(x_data) - 1))
+
+        area = _AlphaColorMeshItem(x_mesh, y_mesh, z_mesh, colorMap=cmap, edgecolors=None)
+        area.setZValue(-1)
         impl_plot.addItem(area)
 
         plot_lines = [curve_1 + curve_2 + [area]]
