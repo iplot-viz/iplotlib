@@ -18,6 +18,7 @@ class NumericTableWidgetItem(QTableWidgetItem):
     """
     Custom QTableWidgetItem that sorts by numeric value stored in UserRole
     """
+
     def __lt__(self, other):
         self_data = self.data(Qt.ItemDataRole.UserRole)
         other_data = other.data(Qt.ItemDataRole.UserRole)
@@ -31,10 +32,10 @@ class NumericTableWidgetItem(QTableWidgetItem):
             return False
 
         # Handle tuples (for envelope data: first, last columns)
-        if isinstance(self_data, tuple) and isinstance(other_data, tuple):
-            return self_data[0] < other_data[0]
+        val_self_data = self_data[0] if isinstance(self_data, tuple) else self_data
+        val_other_data = other_data[0] if isinstance(other_data, tuple) else other_data
 
-        return self_data < other_data
+        return val_self_data < val_other_data
 
 
 class IplotQtStatistics(QWidget):
