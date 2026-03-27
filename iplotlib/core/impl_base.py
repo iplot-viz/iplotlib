@@ -108,6 +108,21 @@ class ImplementationPlotCacheTable:
             else:
                 return value + offset
 
+    def get_slider_time(self, impl_obj: Any):
+        """Return current slider time (ns) if impl_obj belongs to a slider plot, else None."""
+        ci = self.get_cache_item(impl_obj)
+        if ci is None:
+            return None
+        iplot = ci.plot()
+        if iplot is None or not hasattr(iplot, 'slider') or iplot.slider is None:
+            return None
+        slider_idx = int(iplot.slider.value() if callable(getattr(iplot.slider, 'value', None)) else iplot.slider.val)
+        for sig_ref in ci.signals:
+            sig = sig_ref()
+            if sig and hasattr(sig, 'time') and sig.time is not None and len(sig.time) > slider_idx:
+                return float(sig.time[slider_idx])
+        return None
+
 
 class BackendParserBase(ABC):
     """
