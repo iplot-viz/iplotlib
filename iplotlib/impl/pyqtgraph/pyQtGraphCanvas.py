@@ -1,6 +1,7 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 import gc
+import os
 from datetime import datetime
 from typing import Any, Callable, Collection, List, Tuple
 import numpy as np
@@ -48,7 +49,10 @@ STEP_MAP_PG = {
     'post': 'right'
 }
 
-pg.setConfigOptions(antialias=True, useOpenGL=True)
+IPLOT_PYQTGRAPH_OPENGL = os.environ.get('IPLOT_PYQTGRAPH_OPENGL', "").lower()
+use_open_gl = IPLOT_PYQTGRAPH_OPENGL in ("1", "true", "yes") if IPLOT_PYQTGRAPH_OPENGL else True
+
+pg.setConfigOptions(antialias=True, useOpenGL=use_open_gl)
 
 
 class _AlphaColorMeshItem(PColorMeshItem):
