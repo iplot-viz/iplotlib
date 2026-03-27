@@ -128,26 +128,35 @@ class NanosecondDateFormatter(pg.AxisItem):
         self.n_ticks = tick_number
 
     def tickValues(self, minVal, maxVal, size):
+        # Limit tick count to what fits without overlapping labels
+        n = self.n_ticks
+        if size > 0:
+            font = self.style.get('tickFont') or self.font()
+            fm = pg.Qt.QtGui.QFontMetricsF(font)
+            sample = "00:00:00.000" if self.is_date else "0.00000"
+            label_w = fm.horizontalAdvance(sample) + 10
+            n = max(2, min(n, int(size / label_w)))
+
         # Detect range change
         last_range = maxVal - minVal
 
-        # If it has changed, we need to recalculate ticks
-        if len(self.last_values) == 0 or last_range != self.last_range:
+        # Recalculate if range changed or tick count changed (e.g. window resize)
+        if len(self.last_values) == 0 or last_range != self.last_range or len(self.last_values) != n:
             # First time we generate evenly spaced values
             if self.is_date:
-                spacing = last_range / self.n_ticks
-                values = [minVal + spacing / 2 + i * spacing for i in range(self.n_ticks)]
+                spacing = last_range / n
+                values = [minVal + spacing / 2 + i * spacing for i in range(n)]
             else:
                 spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]  # Major ticks level
                 start = (ceil((minVal - offset) / spacing) * spacing) + offset
-                values = (np.arange(self.n_ticks) * spacing + start).tolist()
+                values = (np.arange(n) * spacing + start).tolist()
             self.last_range = last_range
         else:
             # Adjust previous ticks to new range
             values = [v for v in self.last_values if minVal <= v <= maxVal]
 
             # Add new ticks if needed
-            while len(values) < self.n_ticks:
+            while len(values) < n:
                 # Add to the end or to the beginning
                 if values and values[-1] + (values[1] - values[0]) <= maxVal:
                     values.append(values[-1] + (values[1] - values[0]))
@@ -156,6 +165,10 @@ class NanosecondDateFormatter(pg.AxisItem):
                 else:
                     break
             values = sorted(values)
+
+        # Thin out if too many ticks for available space
+        while len(values) > n and len(values) > 2:
+            values = values[::2]
 
         # Save current state
         self.last_values = values
