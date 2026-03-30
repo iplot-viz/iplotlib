@@ -281,7 +281,7 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.stage = Stage.DA
         self.status_info.result = Result.SUCCESS
         self.status_info.num_points = len(self.data_store[0])
-        self.status_info.inf = int(np.sum(np.isinf(self.data_store[1])))
+        self.status_info.inf = int(np.sum(np.isinf(np.asarray(self.data_store[1], dtype=float))))
 
     def set_da_fail(self, msg: str = ''):
         self.status_info.reset()
@@ -295,7 +295,7 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.reset()
         self.status_info.stage = Stage.PROC
         self.status_info.num_points = len(self.x_data)
-        self.status_info.inf = int(np.sum(np.isinf(self.y_data)))
+        self.status_info.inf = int(np.sum(np.isinf(np.asarray(self.y_data, dtype=float))))
         self.status_info.result = Result.SUCCESS
 
     def set_proc_fail(self, msg: str = ''):
