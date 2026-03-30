@@ -128,26 +128,35 @@ class NanosecondDateFormatter(pg.AxisItem):
         self.n_ticks = tick_number
 
     def tickValues(self, minVal, maxVal, size):
+        # Limit tick count to what fits without overlapping labels
+        n = self.n_ticks
+        if size > 0:
+            font = self.style.get('tickFont') or self.font()
+            fm = pg.Qt.QtGui.QFontMetricsF(font)
+            sample = "00:00:00.000" if self.is_date else "0.00000"
+            label_w = fm.horizontalAdvance(sample) + 10
+            n = max(2, min(n, int(size / label_w)))
+
         # Detect range change
         last_range = maxVal - minVal
 
-        # If it has changed, we need to recalculate ticks
-        if len(self.last_values) == 0 or last_range != self.last_range:
+        # Recalculate if range changed or tick count changed (e.g. window resize)
+        if len(self.last_values) == 0 or last_range != self.last_range or len(self.last_values) != n:
             # First time we generate evenly spaced values
             if self.is_date:
-                spacing = last_range / self.n_ticks
-                values = [minVal + spacing / 2 + i * spacing for i in range(self.n_ticks)]
+                spacing = last_range / n
+                values = [minVal + spacing / 2 + i * spacing for i in range(n)]
             else:
                 spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]  # Major ticks level
                 start = (ceil((minVal - offset) / spacing) * spacing) + offset
-                values = (np.arange(self.n_ticks) * spacing + start).tolist()
+                values = (np.arange(n) * spacing + start).tolist()
             self.last_range = last_range
         else:
             # Adjust previous ticks to new range
             values = [v for v in self.last_values if minVal <= v <= maxVal]
 
             # Add new ticks if needed
-            while len(values) < self.n_ticks:
+            while len(values) < n:
                 # Add to the end or to the beginning
                 if values and values[-1] + (values[1] - values[0]) <= maxVal:
                     values.append(values[-1] + (values[1] - values[0]))
@@ -156,6 +165,10 @@ class NanosecondDateFormatter(pg.AxisItem):
                 else:
                     break
             values = sorted(values)
+
+        # Thin out if too many ticks for available space
+        while len(values) > n and len(values) > 2:
+            values = values[::2]
 
         # Save current state
         self.last_values = values
@@ -169,32 +182,44 @@ class NanosecondDateFormatter(pg.AxisItem):
             spacing = (maxVal - minVal) / max(len(values) - 1, 1)
         else:
             spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
-            val_range = maxVal - minVal
-            max_val = max(abs(minVal), abs(maxVal))
 
-            if max_val > 0 and val_range > 0 and val_range / max_val < 1e-3:
-                oom = floor(log10(val_range))
-                self._numeric_offset = round(minVal, -oom)
+            if self.orientation == 'bottom':
+                # X axis: custom exponent logic
+                val_range = maxVal - minVal
+                max_val = max(abs(minVal), abs(maxVal))
+
+                if max_val > 0 and val_range > 0 and val_range / max_val < 1e-3:
+                    oom = floor(log10(val_range))
+                    self._numeric_offset = round(minVal, -oom)
+                else:
+                    self._numeric_offset = 0.0
+
+                if self._numeric_offset != 0:
+                    ref_val = max(abs(minVal - self._numeric_offset),
+                                  abs(maxVal - self._numeric_offset))
+                    if ref_val == 0:
+                        ref_val = val_range
+                else:
+                    ref_val = max_val if max_val > 0 else abs(spacing)
+
+                oom = floor(log10(ref_val)) if ref_val > 0 else 0
+                if -2 <= oom <= 5 and self._numeric_offset == 0:
+                    scale = 1.0
+                else:
+                    scale = 10.0 ** (-oom)
+                prefix = ''
+
+                self.set_scale(scale, prefix)
+                self._tick_spacing = spacing
             else:
+                # Y axis with fn.siScale
                 self._numeric_offset = 0.0
-
-            if self._numeric_offset != 0:
-                ref_val = max(abs(minVal - self._numeric_offset),
-                              abs(maxVal - self._numeric_offset))
-                if ref_val == 0:
-                    ref_val = val_range
-            else:
-                ref_val = max_val if max_val > 0 else abs(spacing)
-
-            oom = floor(log10(ref_val)) if ref_val > 0 else 0
-            if -2 <= oom <= 5 and self._numeric_offset == 0:
-                scale = 1.0
-            else:
-                scale = 10.0 ** (-oom)
-            prefix = ''
-
-            self.set_scale(scale, prefix)
-            self._tick_spacing = spacing
+                if self.logMode:
+                    _range = 10 ** np.array(self.range)
+                else:
+                    _range = self.range
+                (scale, prefix) = fn.siScale(max(abs(_range[0] * self.scale), abs(_range[1] * self.scale)))
+                self.set_scale(scale, prefix)
 
         return [(spacing, values)]  # major ticks
 
@@ -206,22 +231,26 @@ class NanosecondDateFormatter(pg.AxisItem):
             self.common_label.prepareGeometryChange()
             self.common_label.setText(self.offset_str)
         else:
-            adjusted = [v - self._numeric_offset for v in values] if self._numeric_offset != 0 else values
-            scale_factor = self.autoSIPrefixScale
-            if scale_factor != 1.0:
-                # Round to eliminate floating point noise (e.g., 6.93889e-18 → 0)
-                precision = int(-log10(abs(scale_factor))) + 10
-                values = [f"{round(v * scale_factor, precision):g}" for v in adjusted]
-            else:
-                values = [f"{v:g}" for v in adjusted]
-
             if self.orientation == 'bottom':
+                # X axis: custom exponent formatting
+                adjusted = [v - self._numeric_offset for v in values] if self._numeric_offset != 0 else values
+                scale_factor = self.autoSIPrefixScale
+                if scale_factor != 1.0:
+                    precision = int(-log10(abs(scale_factor))) + 10
+                    values = [f"{round(v * scale_factor, precision):g}" for v in adjusted]
+                else:
+                    values = [f"{v:g}" for v in adjusted]
                 self.common_label.setText("")
                 self._updateLabel()
             else:
-                label = self.offset_str if scale_factor != 1.0 else ""
-                if self.common_label.text != label:
-                    self.common_label.setText(label)
+                # Y axis: fn.siScale formatting
+                if self.labelUnit in ['', 'k']:
+                    values = [f"{v:g}" for v in values]
+                    self.common_label.setText("")
+                else:
+                    values = super().tickStrings(values, scale, spacing)
+                    if self.common_label.text != self.offset_str:
+                        self.common_label.setText(self.offset_str)
 
         return values
 

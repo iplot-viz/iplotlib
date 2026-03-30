@@ -50,7 +50,7 @@ class pyQtCrosshair:
         font.setPointSize(font_size)
         font.setBold(True)
 
-        for ax in self.plots:
+        for pi, ax in enumerate(self.plots):
             vb = ax.getViewBox()
             if vert_on:
                 line = InfiniteLine(angle=90, movable=False, pen=pen)
@@ -77,7 +77,7 @@ class pyQtCrosshair:
                 arrow.setParentItem(axis_l)
                 self.y_arrows.append(arrow)
             if val_label and self._cache_table:
-                self._create_value_annotations(ax, vb, font)
+                self._create_value_annotations(ax, vb, font, plot_index=pi)
 
         self.clear(None)
 
@@ -87,7 +87,8 @@ class pyQtCrosshair:
                 self._scene.sigMouseMoved.connect(self.on_move)
                 self._connected = True
 
-    def _create_value_annotations(self, plot_item: PlotItem, view_box: pg.ViewBox, font: QtGui.QFont):
+    def _create_value_annotations(self, plot_item: PlotItem, view_box: pg.ViewBox, font: QtGui.QFont,
+                                   plot_index: int = 0):
         ci = self._cache_table.get_cache_item(plot_item)
         if hasattr(ci, "signals") and ci.signals:
             from iplotlib.core import SignalContour
@@ -102,6 +103,7 @@ class pyQtCrosshair:
                         annotation.setZValue(2000)
                         annotation.line = line_item
                         annotation.viewbox = view_box
+                        annotation.plot_index = plot_index
                         view_box.addItem(annotation, ignoreBounds=True)
                         self.value_annotations.append(annotation)
 
@@ -129,7 +131,24 @@ class pyQtCrosshair:
             return
         self._last_x = x
 
-        for line in self.v_lines: line.setPos(x); line.setVisible(True)
+        # If active plot is a slider plot, use slider time for normal plots
+        slider_time = self._cache_table.get_slider_time(active_plot) if self._cache_table else None
+
+        effective_x = {}
+        for i, plot in enumerate(self.plots):
+            if slider_time is None:
+                effective_x[i] = x
+            else:
+                ci = self._cache_table.get_cache_item(plot)
+                iplot = ci.plot() if ci else None
+                if hasattr(iplot, 'slider') and iplot.slider is not None:
+                    effective_x[i] = x
+                else:
+                    effective_x[i] = self._cache_table.transform_value(plot, 0, slider_time, inverse=True)
+
+        for i, line in enumerate(self.v_lines):
+            line.setPos(effective_x[i])
+            line.setVisible(True)
         for line in self.h_lines: line.setPos(y); line.setVisible(True)
 
         for i, plot in enumerate(self.plots):
@@ -137,6 +156,7 @@ class pyQtCrosshair:
                 continue
             vb = plot.getViewBox()
             [[xmin, xmax], [ymin, ymax]] = vb.viewRange()
+            xi = effective_x[i]
 
             if self.x_label and i < len(self.x_arrows):
                 ci = self._cache_table.get_cache_item(plot)
@@ -150,7 +170,7 @@ class pyQtCrosshair:
                         is_last = False
                         break
                 arrow = self.x_arrows[i]
-                if not is_last or not (xmin < x < xmax):
+                if not is_last or not (xmin < xi < xmax):
                     arrow.setVisible(False)
                 else:
                     axis = plot.getAxis("bottom")
@@ -158,18 +178,18 @@ class pyQtCrosshair:
                     current_text = self._text_cache.get(text_key)
                     if isinstance(axis, NanosecondDateFormatter):
                         if getattr(axis, '_numeric_offset', 0) != 0:
-                            new_text = f"{x * axis.autoSIPrefixScale:g}"
+                            new_text = f"{xi * axis.autoSIPrefixScale:g}"
                         else:
-                            ts = axis.tickStrings([x], 1.0, getattr(axis, '_tick_spacing', 1))
+                            ts = axis.tickStrings([xi], 1.0, getattr(axis, '_tick_spacing', 1))
                             new_text = ts[0]
                     else:
-                        new_text = f"{x:.6g}"
+                        new_text = f"{xi:.6g}"
                     if current_text != new_text:
                         self.x_arrows[i].setText(new_text)
                         self._text_cache[text_key] = new_text
 
                     vr = vb.sceneBoundingRect()
-                    x_scene = vb.mapViewToScene(QPointF(x, ymin)).x()
+                    x_scene = vb.mapViewToScene(QPointF(xi, ymin)).x()
                     y_scene = vr.bottom()
                     self.x_arrows[i].setPos(axis.mapFromScene(QPointF(x_scene, y_scene)))
                     self.x_arrows[i].setVisible(True)
@@ -202,15 +222,16 @@ class pyQtCrosshair:
                     annotation.setVisible(False)
                     continue
 
-                idx = np.searchsorted(x_data, x, side="left")
-                if 0 < idx < len(x_data) and abs(x - x_data[idx - 1]) < abs(x - x_data[idx]):
+                ann_x = effective_x.get(getattr(annotation, 'plot_index', 0), x)
+                idx = np.searchsorted(x_data, ann_x, side="left")
+                if 0 < idx < len(x_data) and abs(ann_x - x_data[idx - 1]) < abs(ann_x - x_data[idx]):
                     idx -= 1
                 idx = min(idx, len(x_data) - 1)
 
                 vb = annotation.viewbox
                 [[xmin, xmax], [ymin, ymax]] = vb.viewRange()
                 dx = xmax - xmin
-                if abs(x - x_data[idx]) < dx * self.val_tolerance:
+                if abs(ann_x - x_data[idx]) < dx * self.val_tolerance:
                     xp = min(max(x_data[idx], xmin), xmax)
                     yp = min(max(y_data[idx], ymin), ymax)
                     ax = 0.0 if (xp - xmin) < (xmax - xp) else 1.0

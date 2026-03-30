@@ -1,6 +1,7 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 import gc
+import os
 from datetime import datetime
 from typing import Any, Callable, Collection, List, Tuple
 import numpy as np
@@ -9,7 +10,8 @@ import pyqtgraph as pg
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontMetricsF, QTransform
-from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, FillBetweenItem
+from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, PColorMeshItem
+from pyqtgraph.Qt import OpenGLConstants as GLC
 from pyqtgraph.Qt import QtCore, QtWidgets
 from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QWidget
 from pyqtgraph import TextItem
@@ -47,7 +49,21 @@ STEP_MAP_PG = {
     'post': 'right'
 }
 
-pg.setConfigOptions(antialias=True)
+IPLOT_PYQTGRAPH_OPENGL = os.environ.get('IPLOT_PYQTGRAPH_OPENGL', "").lower()
+use_open_gl = IPLOT_PYQTGRAPH_OPENGL in ("1", "true", "yes") if IPLOT_PYQTGRAPH_OPENGL else True
+
+pg.setConfigOptions(antialias=True, useOpenGL=use_open_gl)
+
+
+class _AlphaColorMeshItem(PColorMeshItem):
+    """Enables GL alpha blending."""
+
+    def paintGL(self, widget):
+        glf = widget.getFunctions()
+        glf.glEnable(GLC.GL_BLEND)
+        glf.glBlendFunc(GLC.GL_SRC_ALPHA, GLC.GL_ONE_MINUS_SRC_ALPHA)
+        super().paintGL(widget)
+        glf.glDisable(GLC.GL_BLEND)
 
 
 class QtViewBox(pg.ViewBox):
@@ -537,25 +553,37 @@ class PyQtGraphParser(BackendParserBase):
         return curves
 
     def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
-        # Update FillBetweenItem
-        area = shapes[0][2]
-        if isinstance(area, FillBetweenItem):
-            area.setCurves(shapes[0][0], shapes[0][1])
+        area = shapes[0][3]
+        if isinstance(area, _AlphaColorMeshItem):
+            x_mesh = np.vstack([x_data, x_data])
+            y_mesh = np.vstack([y2_data, y1_data])
+            z_mesh = np.ones((1, len(x_data) - 1))
+            area.setData(x_mesh, y_mesh, z_mesh)
 
-    def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, style, style2):
-        # Creation of FillBetweenItem
+    def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, y3_data, style,
+                                style2):
+
+        # Create PlotDataItem curves for min, max and average data
         curve_1 = [draw_fn(x=x_data, y=y1_data, **style)]  # type: List[PlotDataItem]
         curve_2 = [draw_fn(x=x_data, y=y2_data, **style2)]  # type: List[PlotDataItem]
+        curve_3 = [draw_fn(x=x_data, y=y3_data, **style2)]  # type: List[PlotDataItem]
 
-        # Brush for FillBetweenItem
+        # Extract base color from the min curve and create a semi-transparent uniform colormap for the envelope area
         pen = curve_1[0].opts['pen']
         qcolor = pen.color()
-        brush = (qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255))
+        rgba = np.array([[qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255)]])
+        cmap = pg.ColorMap([0.0, 1.0], np.vstack([rgba, rgba]))
 
-        area = FillBetweenItem(curve1=curve_1[0], curve2=curve_2[0], brush=brush)
+        # Build mesh grids
+        x_mesh = np.vstack([x_data, x_data])
+        y_mesh = np.vstack([y2_data, y1_data])
+        z_mesh = np.ones((1, len(x_data) - 1))
+
+        area = _AlphaColorMeshItem(x_mesh, y_mesh, z_mesh, colorMap=cmap, edgecolors=None)
+        area.setZValue(-1)
         impl_plot.addItem(area)
 
-        plot_lines = [curve_1 + curve_2 + [area]]
+        plot_lines = [curve_1 + curve_2 + curve_3 + [area]]
 
         return plot_lines
 
@@ -730,7 +758,7 @@ class PyQtGraphParser(BackendParserBase):
                 if is_date:
                     min_value = pd.Timestamp(slider_values[int(slider_min)]).value
                     min_label.setText(
-                        formatter.date_fmt(min_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                        formatter.date_fmt(min_value, formatter.YEAR, formatter.NANOSECOND,
                                            postfix_end=True))
                     max_value = pd.Timestamp(slider_values[int(slider_max)]).value
                     max_label.setText(
@@ -1338,9 +1366,17 @@ class PyQtGraphParser(BackendParserBase):
         slider_values = plot.signals[1][0].z_data
         is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
         if is_date:
-            min_annotation.setText(f'{pd.Timestamp(slider_values[start])}')
-            current_annotation.setText(f'{pd.Timestamp(slider_values[val])}')
-            max_annotation.setText(f'{pd.Timestamp(slider_values[end])}')
+            formatter = NanosecondDateFormatter(orientation='bottom')
+            start_value = slider_values[start]
+            current_value = slider_values[val]
+            max_value = slider_values[end]
+
+            min_annotation.setText(
+                formatter.date_fmt(start_value, formatter.YEAR, formatter.NANOSECOND, postfix_end=True))
+            current_annotation.setText(
+                formatter.date_fmt(current_value, formatter.cut_start + 3, formatter.NANOSECOND, postfix_end=True))
+            max_annotation.setText(
+                formatter.date_fmt(max_value, formatter.cut_start + 3, formatter.NANOSECOND, postfix_end=True))
         else:
             min_annotation.setText(f'{slider_values[start]}')
             current_annotation.setText(f'{slider_values[val]}')
@@ -1379,9 +1415,17 @@ class PyQtGraphParser(BackendParserBase):
         slider_values = plot.signals[1][0].z_data
         is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
         if is_date:
-            min_annotation.setText(f'{pd.Timestamp(slider_values[new_start])}')
-            current_annotation.setText(f'{pd.Timestamp(slider_values[val])}')
-            max_annotation.setText(f'{pd.Timestamp(slider_values[new_end])}')
+            formatter = NanosecondDateFormatter(orientation='bottom')
+            start_value = slider_values[new_start]
+            current_value = slider_values[val]
+            max_value = slider_values[new_end]
+
+            min_annotation.setText(
+                formatter.date_fmt(start_value, formatter.YEAR, formatter.NANOSECOND, postfix_end=True))
+            current_annotation.setText(
+                formatter.date_fmt(current_value, formatter.cut_start + 3, formatter.NANOSECOND, postfix_end=True))
+            max_annotation.setText(
+                formatter.date_fmt(max_value, formatter.cut_start + 3, formatter.NANOSECOND, postfix_end=True))
         else:
             min_annotation.setText(f'{slider_values[new_start]}')
             current_annotation.setText(f'{slider_values[val]}')

@@ -218,9 +218,25 @@ class IplotMultiCursor(Widget):
         if not self.canvas.widgetlock.available(self):
             return
         self.need_clear = True
+
+        # If active axis is a slider plot, use slider time for normal axes
+        slider_time = self._cache_table.get_slider_time(event.inaxes) if self._cache_table else None
+
+        effective_xdata = {}
+        for i, ax in enumerate(self.axes):
+            if slider_time is None:
+                effective_xdata[i] = event.xdata
+            else:
+                ci = self._cache_table.get_cache_item(ax)
+                iplot = ci.plot() if ci else None
+                if hasattr(iplot, 'slider') and iplot.slider is not None:
+                    effective_xdata[i] = event.xdata
+                else:
+                    effective_xdata[i] = self._cache_table.transform_value(ax, 0, slider_time, inverse=True)
+
         if self.vert_on:
-            for line in self.v_lines:
-                line.set_xdata([event.xdata])
+            for i, line in enumerate(self.v_lines):
+                line.set_xdata([effective_xdata[i]])
                 line.set_visible(True)
 
         if self.horiz_on:
@@ -229,7 +245,7 @@ class IplotMultiCursor(Widget):
                 line.set_visible(True)
 
         if self.x_label:
-            for arrow, ax in zip(self.x_arrows, self.axes):
+            for i, (arrow, ax) in enumerate(zip(self.x_arrows, self.axes)):
                 ci = self._cache_table.get_cache_item(ax)
                 ip = ci.plot()
                 is_last = True
@@ -246,10 +262,11 @@ class IplotMultiCursor(Widget):
                     arrow.set_visible(False)
                     continue
 
+                xi = effective_xdata[i]
                 x_min, x_max = ax.get_xbound()
-                if x_min < event.xdata < x_max and ax.get_xaxis().get_visible():
-                    arrow.set_position((event.xdata, arrow.get_position()[1]))
-                    arrow.set_text(ax.format_xdata(event.xdata))
+                if x_min < xi < x_max and ax.get_xaxis().get_visible():
+                    arrow.set_position((xi, arrow.get_position()[1]))
+                    arrow.set_text(ax.format_xdata(xi))
                     arrow.set_visible(True)
                 else:
                     arrow.set_visible(False)
@@ -271,8 +288,8 @@ class IplotMultiCursor(Widget):
                     line = annotation.line
                     if line is not None and line[0].get_visible() and len(line[0].get_xdata()) > 0:
                         ax = annotation.axes
-
-                        xvalue = event.xdata
+                        ax_idx = self.axes.index(ax) if ax in self.axes else 0
+                        xvalue = effective_xdata.get(ax_idx, event.xdata)
                         values = get_values_from_line(line, xvalue)
                         logger.debug(F"Found {values} for xvalue: {xvalue}")
                         dx = abs(xvalue - values[0])

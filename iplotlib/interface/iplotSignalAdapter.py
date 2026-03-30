@@ -175,7 +175,10 @@ class IplotSignalAdapter(ProcessingSignal):
             # 2. Use iplotProcessing to evaluate x_data, y_data, z_data
             self._do_data_processing()
 
-        return [self.x_data, self.y_data, self.z_data]
+        if hasattr(self, 'envelope') and self.envelope and len(self.data_store[0]) > 0:
+            return [self.x_data, self.y_data, self.z_data, self.data_store[3]]
+        else:
+            return [self.x_data, self.y_data, self.z_data]
 
     def set_data(self, data=None):
         """Set `x_data`, `y_data` and `z_data`.
@@ -512,7 +515,8 @@ class IplotSignalAdapter(ProcessingSignal):
                             self.data_store[0] = dependencies[0].time
                         self.data_store[1] = p.result if isinstance(p.result, BufferObject) else BufferObject(p.result)
                     else:
-                        self.set_proc_fail(f"Result of expression={self.name} is not an instance of {type(self).__name__}")
+                        self.set_proc_fail(
+                            f"Result of expression={self.name} is not an instance of {type(self).__name__}")
                         return
             except Exception as e:
                 self.set_proc_fail(msg=str(e))

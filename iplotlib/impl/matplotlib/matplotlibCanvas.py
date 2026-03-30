@@ -387,27 +387,31 @@ class MatplotlibParser(BackendParserBase):
         return plot_lines
 
     def update_area_envelope_1D(self, shapes, impl_plot: MPLAxes, x_data, y1_data, y2_data, style):
-        shapes[0][2].remove()
-        shapes[0][2] = impl_plot.fill_between(x_data, y1_data, y2_data,
+        shapes[0][3].remove()
+        shapes[0][3] = impl_plot.fill_between(x_data, y1_data, y2_data,
                                               alpha=0.3,
                                               color=shapes[0][0].get_color(),
                                               step=STEP_MAP[style['drawstyle']])
-        shapes[0][2].set_visible(shapes[0][0].get_visible())
+        shapes[0][3].set_visible(shapes[0][0].get_visible())
         self.figure.canvas.draw_idle()
 
-    def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, style, style2):
+    def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, y3_data, style,
+                                style2):
         line_1 = draw_fn(x_data, y1_data, **style)  # type: List[Line2D]
         signal.color = line_1[0].get_color()
         style2 = dict(style)
         style2.update(color=signal.color, label='')
         line_2 = draw_fn(x_data, y2_data, **style2)  # type: List[Line2D]
 
+        # Average curve
+        line_3 = draw_fn(x_data, y3_data, **style2)  # type: List[Line2D]
+
         area = impl_plot.fill_between(x_data, y1_data, y2_data,
                                       alpha=0.3,
                                       color=style2['color'],
                                       step=STEP_MAP[style['drawstyle']])
 
-        lines = [line_1 + line_2 + [area]]
+        lines = [line_1 + line_2 + line_3 + [area]]
         for new, old in zip(lines, signal.lines):
             new.set_visible(old.get_visible())
 
@@ -1000,9 +1004,17 @@ class MatplotlibParser(BackendParserBase):
         slider_values = plot.signals[1][0].z_data
         is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
         if is_date:
-            min_annotation.set_text(f'{pandas.Timestamp(slider_values[start])}')
-            current_annotation.set_text(f'{pandas.Timestamp(slider_values[val])}')
-            max_annotation.set_text(f'{pandas.Timestamp(slider_values[end])}')
+            formatter = NanosecondDateFormatter(ax_idx=0)
+            start_value = slider_values[start]
+            current_value = slider_values[val]
+            max_value = slider_values[end]
+
+            min_annotation.set_text(
+                formatter.date_fmt(start_value, formatter.YEAR, formatter.NANOSECOND, postfix_end=True))
+            current_annotation.set_text(
+                formatter.date_fmt(current_value, formatter.cut_start + 3, formatter.NANOSECOND, postfix_end=True))
+            max_annotation.set_text(
+                formatter.date_fmt(max_value, formatter.cut_start + 3, formatter.NANOSECOND, postfix_end=True))
         else:
             min_annotation.set_text(f'{slider_values[start]}')
             current_annotation.set_text(f'{slider_values[val]}')
@@ -1053,9 +1065,17 @@ class MatplotlibParser(BackendParserBase):
         slider_values = plot.signals[1][0].z_data
         is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
         if is_date:
-            min_annotation.set_text(f'{pandas.Timestamp(slider_values[new_start])}')
-            current_annotation.set_text(f'{pandas.Timestamp(slider_values[val])}')
-            max_annotation.set_text(f'{pandas.Timestamp(slider_values[new_end])}')
+            formatter = NanosecondDateFormatter(ax_idx=0)
+            start_value = slider_values[new_start]
+            current_value = slider_values[val]
+            max_value = slider_values[new_end]
+
+            min_annotation.set_text(
+                formatter.date_fmt(start_value, formatter.YEAR, formatter.NANOSECOND, postfix_end=True))
+            current_annotation.set_text(
+                formatter.date_fmt(current_value, formatter.cut_start + 3, formatter.NANOSECOND, postfix_end=True))
+            max_annotation.set_text(
+                formatter.date_fmt(max_value, formatter.cut_start + 3, formatter.NANOSECOND, postfix_end=True))
         else:
             min_annotation.set_text(f'{slider_values[new_start]}')
             current_annotation.set_text(f'{slider_values[val]}')
@@ -1107,7 +1127,8 @@ class MatplotlibParser(BackendParserBase):
                 for columns in self.canvas.plots:
                     for plot_temp in columns:
                         if plot_temp and not isinstance(self._focus_plot,
-                                                        PlotXYWithSlider) and plot_temp != self._focus_plot and not isinstance(plot_temp, (PlotXYWithSlider, PlotContourWithSlider)):
+                                                        PlotXYWithSlider) and plot_temp != self._focus_plot and not isinstance(
+                            plot_temp, (PlotXYWithSlider, PlotContourWithSlider)):
                             logger.debug(
                                 f"Setting range on plot {id(plot_temp)} focused= {id(self._focus_plot)} begin={begin}")
 

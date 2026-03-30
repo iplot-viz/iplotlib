@@ -108,6 +108,21 @@ class ImplementationPlotCacheTable:
             else:
                 return value + offset
 
+    def get_slider_time(self, impl_obj: Any):
+        """Return current slider time (ns) if impl_obj belongs to a slider plot, else None."""
+        ci = self.get_cache_item(impl_obj)
+        if ci is None:
+            return None
+        iplot = ci.plot()
+        if iplot is None or not hasattr(iplot, 'slider') or iplot.slider is None:
+            return None
+        slider_idx = int(iplot.slider.value() if callable(getattr(iplot.slider, 'value', None)) else iplot.slider.val)
+        for sig_ref in ci.signals:
+            sig = sig_ref()
+            if sig and hasattr(sig, 'time') and sig.time is not None and len(sig.time) > slider_idx:
+                return float(sig.time[slider_idx])
+        return None
+
 
 class BackendParserBase(ABC):
     """
@@ -620,11 +635,14 @@ class BackendParserBase(ABC):
         data = self.transform_data(impl_plot, signal_data)
 
         if hasattr(signal, 'envelope') and signal.envelope:
-            if len(data) != 3:
+            if len(data) != 4:
                 logger.error(f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data"
-                             f" arrays (==3). {signal}")
+                             f" arrays (==4). {signal}")
                 return
-            self.do_impl_envelope_plot(signal, impl_plot, data[0], data[1], data[2])
+            if not isinstance(signal, SignalXY):
+                logger.error(f"Skipping envelope plot: only supported for SignalXY, but received {type(signal).__name__}")
+                return
+            self.do_impl_envelope_plot(signal, impl_plot, data[0], data[1], data[2], data[3])
         else:
             if len(data) < 2:
                 logger.error(f"Requested to draw line for sig({id(signal)}), but it does not have sufficient data "
@@ -1012,8 +1030,7 @@ class BackendParserBase(ABC):
                                          x_data, y_data, z_data):
         """"""
 
-    def do_impl_envelope_plot(self, signal: Signal, impl_plot: Any, x_data, y1_data, y2_data):
-        # TODO: check if Signal is a SignalXY. If not raise WARNING
+    def do_impl_envelope_plot(self, signal: SignalXY, impl_plot: Any, x_data, y1_data, y2_data, y3_data):
         shapes = self._signal_impl_shape_lut.get(id(signal))  # type: List[List[Any]]
 
         draw_fn = impl_plot.plot
@@ -1025,15 +1042,16 @@ class BackendParserBase(ABC):
             # Reflect downsampling in legend
             self.legend_downsampled_signal(signal, impl_plot, shapes[0][0])
 
-            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
+            if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1 and y3_data.ndim == 1:
                 self.set_line_data(shapes[0][0], x_data, y1_data)
                 self.set_line_data(shapes[0][1], x_data, y2_data)
+                self.set_line_data(shapes[0][2], x_data, y3_data)
                 self.update_area_envelope_1D(shapes, impl_plot, x_data, y1_data, y2_data, style)
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
         else:
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
-                shapes = self.create_area_envelope_1D(draw_fn, impl_plot, signal, x_data, y1_data, y2_data, style,
-                                                      style2)
+                shapes = self.create_area_envelope_1D(draw_fn, impl_plot, signal, x_data, y1_data, y2_data, y3_data,
+                                                      style, style2)
                 signal.lines = shapes
                 self._signal_impl_shape_lut.update({id(signal): shapes})
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
@@ -1043,7 +1061,8 @@ class BackendParserBase(ABC):
         pass
 
     @abstractmethod
-    def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, style, style2):
+    def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, y3_data, style,
+                                style2):
         pass
 
     def do_impl_line_plot(self, signal: Signal, impl_plot: Any, data: List[BufferObject]):
