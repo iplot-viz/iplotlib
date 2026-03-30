@@ -50,7 +50,7 @@ STEP_MAP_PG = {
 }
 
 IPLOT_PYQTGRAPH_OPENGL = os.environ.get('IPLOT_PYQTGRAPH_OPENGL', "").lower()
-use_open_gl = IPLOT_PYQTGRAPH_OPENGL in ("1", "true", "yes") if IPLOT_PYQTGRAPH_OPENGL else True
+use_open_gl = IPLOT_PYQTGRAPH_OPENGL in ("1", "true", "yes") if IPLOT_PYQTGRAPH_OPENGL else False
 
 pg.setConfigOptions(antialias=True, useOpenGL=use_open_gl)
 
