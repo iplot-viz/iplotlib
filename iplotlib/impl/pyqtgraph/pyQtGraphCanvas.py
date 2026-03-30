@@ -56,7 +56,19 @@ pg.setConfigOptions(antialias=True, useOpenGL=use_open_gl)
 
 
 class _AlphaColorMeshItem(PColorMeshItem):
-    """Enables GL alpha blending."""
+    """PColorMeshItem subclass with OpenGL alpha blending support.
+
+    When OpenGL is active (useOpenGL=True), pyqtgraph's PColorMeshItem
+    renders via paintGL() which does NOT enable blending by default —
+    semi-transparent colors appear fully opaque.
+
+    This subclass wraps paintGL() to enable GL_BLEND with standard
+    alpha compositing (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) before rendering,
+    and disables it after to avoid side effects on other items.
+
+    Used by the envelope visualization (create_area_envelope_1D) to
+    render the filled min/max area with 30% opacity behind the curves.
+    """
 
     def paintGL(self, widget):
         glf = widget.getFunctions()
