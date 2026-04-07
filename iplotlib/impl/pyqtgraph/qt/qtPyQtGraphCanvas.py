@@ -216,6 +216,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             while len(self._commitd_cmds):
                 self.push_view_lim_cmd()
 
+    def _save_svg(self, filename: str):
+        from pyqtgraph.exporters import SVGExporter
+        exporter = SVGExporter(self._parser.figure.scene())
+        exporter.export(filename)
+
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
 
