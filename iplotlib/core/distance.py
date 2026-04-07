@@ -63,7 +63,7 @@ class DistanceCalculator:
         if self.is_valid():
             # See https://jira.iter.org/browse/IDV-260
             if self._dx_is_datetime:
-                dx = pd.Timestamp(self.p2[0], unit='ns') - pd.Timestamp(self.p1[0], unit='ns')
+                dx = abs(pd.Timestamp(self.p2[0], unit='ns') - pd.Timestamp(self.p1[0], unit='ns'))
                 dx_str = f"{dx.components.days}D" if dx.components.days else ""
                 dx_str += f"T{dx.components.hours}H{dx.components.minutes}M{dx.components.seconds}S"
                 if dx.components.nanoseconds:
@@ -74,12 +74,12 @@ class DistanceCalculator:
                     if dx.components.milliseconds:
                         dx_str += f"+{dx.components.milliseconds}m"
                     if dx.components.microseconds:
-                        dx_str += f"+{dx.components.microseconds}m"
+                        dx_str += f"+{dx.components.microseconds}u"
                 dx = dx_str
             else:
-                dx = self.p2[0] - self.p1[0]
-            dy = self.p2[1] - self.p1[1]
-            dz = self.p2[2] - self.p1[2]
+                dx = abs(self.p2[0] - self.p1[0])
+            dy = abs(self.p2[1] - self.p1[1])
+            dz = abs(self.p2[2] - self.p1[2])
             return dx, dy, dz
         else:
             return None, None, None
