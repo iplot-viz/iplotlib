@@ -1,8 +1,11 @@
+import csv
+import io
+
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, \
-    QAbstractItemView, QPushButton, QMenu, QSpinBox, QLabel, QFrame
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import QApplication, QFileDialog, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, \
+    QTableWidgetItem, QHeaderView, QAbstractItemView, QPushButton, QMenu, QSpinBox, QLabel, QFrame
 
 import iplotLogging.setupLogger as Sl
 from pyqtgraph import PlotItem
@@ -55,8 +58,13 @@ class IplotQtStatistics(QWidget):
         # Disable cell modification
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
-        # Row selection for the table
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        # Cell selection with multi-select support
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+
+        # Context menu
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_context_menu)
 
         # Enable sorting by clicking on column headers
         self.table.setSortingEnabled(True)
@@ -96,11 +104,16 @@ class IplotQtStatistics(QWidget):
         self.apply_decimals_button = QPushButton("Apply")
         self.apply_decimals_button.clicked.connect(self.update_table_format)
 
+        # Export CSV button
+        self.export_csv_button = QPushButton("Export CSV")
+        self.export_csv_button.clicked.connect(self._export_csv)
+
         # Add button and table to layout
         top_layout_with_button.addWidget(self.column_menu_button)
         top_layout_with_button.addWidget(self.decimals)
         top_layout_with_button.addWidget(self.adjust_decimals)
         top_layout_with_button.addWidget(self.apply_decimals_button)
+        top_layout_with_button.addWidget(self.export_csv_button)
         top_layout_with_button.addStretch()
 
         # Add controllers to vertical layout
@@ -417,3 +430,66 @@ class IplotQtStatistics(QWidget):
                             item.setText(f"{data:.{self.decimal_digits}f}")
                         else:
                             item.setText(str(int(data)))
+
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.StandardKey.Copy):
+            self._copy_selection()
+        else:
+            super().keyPressEvent(event)
+
+    def _copy_selection(self):
+        """Copy selected cells to clipboard as tab-separated text."""
+        selection = self.table.selectedIndexes()
+        if not selection:
+            return
+
+        rows = sorted(set(idx.row() for idx in selection))
+        cols = sorted(set(idx.column() for idx in selection))
+
+        lines = []
+        # Include headers if multiple columns selected
+        if len(cols) > 1:
+            headers = [self.column_names[c] for c in cols]
+            lines.append('\t'.join(headers))
+
+        for row in rows:
+            cells = []
+            for col in cols:
+                item = self.table.item(row, col)
+                cells.append(item.text() if item else '')
+            lines.append('\t'.join(cells))
+
+        QApplication.clipboard().setText('\n'.join(lines))
+
+    def _export_csv(self):
+        """Export visible columns of the table to a CSV file."""
+        filename, _ = QFileDialog.getSaveFileName(self, "Export Statistics as CSV", "", "CSV Files (*.csv)")
+        if not filename:
+            return
+        if not filename.lower().endswith('.csv'):
+            filename += '.csv'
+
+        visible_cols = [c for c in range(self.table.columnCount()) if not self.table.isColumnHidden(c)]
+
+        with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f, delimiter=';')
+            writer.writerow([self.column_names[c] for c in visible_cols])
+            for row in range(self.table.rowCount()):
+                row_data = []
+                for col in visible_cols:
+                    item = self.table.item(row, col)
+                    row_data.append(item.text() if item else '')
+                writer.writerow(row_data)
+
+    def _show_context_menu(self, pos):
+        """Right-click context menu with Copy and Export CSV."""
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy")
+        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        export_action = menu.addAction("Export CSV")
+
+        action = menu.exec(self.table.viewport().mapToGlobal(pos))
+        if action == copy_action:
+            self._copy_selection()
+        elif action == export_action:
+            self._export_csv()
