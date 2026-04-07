@@ -7,7 +7,7 @@ A main window with a collection of iplotlib canvases and a helpful toolbar.
 from functools import partial
 import typing
 
-from PySide6.QtCore import QMargins, Qt, Signal
+from PySide6.QtCore import QItemSelectionModel, QMargins, Qt, Signal
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from iplotlib.core.command import IplotCommand
@@ -132,6 +132,7 @@ class IplotQtMainWindow(QMainWindow):
         Connect the `on_cmd_done` signal of the canvas widget to our `on_cmd_done` signal.
         """
         w.cmdDone.connect(partial(self.on_cmd_done, w))
+        w.openPlotPreferences.connect(self._open_plot_preferences)
 
     def on_cmd_done(self, w: IplotQtCanvas, cmd: IplotCommand):
         """
@@ -141,6 +142,38 @@ class IplotQtMainWindow(QMainWindow):
         """
         self.check_history(w)
         self.toolBar.undoAction.setText(f"Undo {cmd.name}")
+
+    def _open_plot_preferences(self, plot):
+        """Open preferences window and navigate to the given plot in the tree.
+        Collapses all other items and expands only the selected plot."""
+        tree = self.prefWindow.treeView
+        model = tree.model()
+        if not model:
+            return
+        # Walk the tree to find the item whose UserRole data matches the plot
+        for canvas_row in range(model.rowCount()):
+            canvas_idx = model.index(canvas_row, 0)
+            for col_row in range(model.rowCount(canvas_idx)):
+                col_idx = model.index(col_row, 0, canvas_idx)
+                for plot_row in range(model.rowCount(col_idx)):
+                    plot_idx = model.index(plot_row, 0, col_idx)
+                    if plot_idx.data(Qt.ItemDataRole.UserRole) is plot:
+                        self.prefWindow.show()
+                        self.prefWindow.raise_()
+                        self.prefWindow.activateWindow()
+                        self.prefWindow._refresh_signal_icons()
+                        # Collapse all, then expand only the path to the selected plot
+                        tree.collapseAll()
+                        tree.expand(canvas_idx)
+                        tree.expand(col_idx)
+                        tree.expand(plot_idx)
+                        # Select and scroll to the plot
+                        tree.selectionModel().clearSelection()
+                        tree.selectionModel().select(
+                            plot_idx, QItemSelectionModel.SelectionFlag.Select)
+                        tree.scrollTo(plot_idx)
+                        self.prefWindow.set_canvas_from_preferences()
+                        return
 
     def update_canvas_preferences(self):
         w = self.canvasStack.currentWidget()

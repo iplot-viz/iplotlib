@@ -484,6 +484,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     autoscale_menu.addAction("Focus on plot", lambda: self._full_screen_mode_on(event.inaxes))
                 else:
                     autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+                autoscale_menu.addSeparator()
+                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+                if ci:
+                    autoscale_menu.addAction("Preferences",
+                                             lambda: self.openPlotPreferences.emit(ci.plot()))
                 autoscale_menu.popup(event.guiEvent.globalPos())
 
             # Handle drag shift in Select mode with left click - use native hit-testing

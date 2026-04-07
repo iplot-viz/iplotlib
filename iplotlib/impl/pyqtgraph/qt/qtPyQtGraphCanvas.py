@@ -429,6 +429,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                                                   lambda: self._full_screen_mode_on(impl_plot))
                 else:
                     self.autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+                self.autoscale_menu.addSeparator()
+                ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+                if ci:
+                    self.autoscale_menu.addAction("Preferences",
+                                                  lambda: self.openPlotPreferences.emit(ci.plot()))
                 self.autoscale_menu.popup(event.screenPos().toPoint())
 
     def mouse_clicked(self, event):
