@@ -138,6 +138,7 @@ class PyQtGraphParser(BackendParserBase):
         self._impl_plot_ranges_hash = dict()
         self._colorbar_lut = dict()
         self._row_offset = 0
+        self._grid_spacing_labels = {}  # PlotItem -> TextItem
 
         if tight_layout:
             self.enable_tight_layout()
@@ -930,6 +931,10 @@ class PyQtGraphParser(BackendParserBase):
 
         self.align_y_axis(col)
 
+        # Update grid spacing labels after all data and axes are configured
+        for plot in stack_map.values():
+            self.update_grid_spacing_label(plot)
+
     def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
         if not visible_stacks:
             return
@@ -1084,12 +1089,14 @@ class PyQtGraphParser(BackendParserBase):
             if current_plot in stacks.values():
                 self.align_y_axis(c)
                 break
+        self.update_grid_spacing_label(current_plot)
 
     def _x_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
             return
         current_plot = view_box.parentItem()  # type: PlotItem
         super()._x_axis_update_callback(current_plot)
+        self.update_grid_spacing_label(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':
@@ -1267,6 +1274,85 @@ class PyQtGraphParser(BackendParserBase):
         Enable or disable the grid for the given plot.
         """
         plot.showGrid(x=grid, y=grid)
+
+    @staticmethod
+    def _format_spacing(s, is_date=False):
+        """Format tick spacing as a human-readable string (oscilloscope style)."""
+        s = abs(s)
+        if s == 0:
+            return ""
+        if is_date:
+            if s >= 86400e9:
+                return f"{s / 86400e9:.3g}D/div"
+            elif s >= 3600e9:
+                return f"{s / 3600e9:.3g}h/div"
+            elif s >= 60e9:
+                return f"{s / 60e9:.3g}min/div"
+            elif s >= 1e9:
+                return f"{s / 1e9:.3g}s/div"
+            elif s >= 1e6:
+                return f"{s / 1e6:.3g}ms/div"
+            elif s >= 1e3:
+                return f"{s / 1e3:.3g}μs/div"
+            else:
+                return f"{s:.3g}ns/div"
+        else:
+            if s >= 1e9:
+                return f"{s / 1e9:.3g}G/div"
+            elif s >= 1e6:
+                return f"{s / 1e6:.3g}M/div"
+            elif s >= 1e3:
+                return f"{s / 1e3:.3g}k/div"
+            elif s >= 1:
+                return f"{s:.3g}/div"
+            elif s >= 1e-3:
+                return f"{s * 1e3:.3g}m/div"
+            elif s >= 1e-6:
+                return f"{s * 1e6:.3g}μ/div"
+            else:
+                return f"{s * 1e9:.3g}n/div"
+
+    def update_grid_spacing_label(self, plot: PlotItem):
+        """Update or remove the grid spacing label for a plot."""
+        ci = self._impl_plot_cache_table.get_cache_item(plot)
+        if not ci:
+            return
+        i_plot = ci.plot()
+        show = self._pm.get_value(i_plot, 'grid') and self._pm.get_value(i_plot, 'grid_spacing_label')
+
+        if not show:
+            if plot in self._grid_spacing_labels:
+                plot.removeItem(self._grid_spacing_labels.pop(plot))
+            return
+
+        vb = plot.getViewBox()
+        vr = vb.viewRange()
+        x_axis = plot.getAxis('bottom')
+
+        # Calculate spacing from view range and tick count
+        n_ticks = getattr(x_axis, 'n_ticks', 5)
+        x_spacing = (vr[0][1] - vr[0][0]) / max(n_ticks, 1)
+        y_spacing = (vr[1][1] - vr[1][0]) / max(n_ticks, 1)
+
+        is_date = getattr(x_axis, 'is_date', False)
+        x_label = self._format_spacing(x_spacing, is_date)
+        y_label = self._format_spacing(y_spacing, False)
+
+        text = f"X: {x_label}  Y: {y_label}" if x_label and y_label else x_label or y_label
+        if not text:
+            return
+
+        if plot not in self._grid_spacing_labels:
+            label = TextItem(text, color=(150, 150, 150), anchor=(1, 1))
+            label.setZValue(100)
+            plot.addItem(label, ignoreBounds=True)
+            self._grid_spacing_labels[plot] = label
+        else:
+            label = self._grid_spacing_labels[plot]
+            label.setText(text)
+
+        # Position at bottom-right of the view
+        label.setPos(vr[0][1], vr[1][0])
 
     @staticmethod
     def set_mouse(plot: PlotItem):

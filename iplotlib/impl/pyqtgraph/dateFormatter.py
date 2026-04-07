@@ -42,6 +42,7 @@ class NanosecondDateFormatter(pg.AxisItem):
         self.last_range = 0
         self.offset = 0
         self.is_date = is_date
+        self._spacing = 0.0
         if kwargs['orientation'] == 'bottom':
             self.common_label = pg.LabelItem(text='', justify='right')
         else:
@@ -54,6 +55,44 @@ class NanosecondDateFormatter(pg.AxisItem):
             return self.date_fmt(int(x), self.cut_start + 1, self.cut_start + 4)
         else:
             return f"{x:g}"
+
+    def get_spacing_label(self):
+        """Return a human-readable label for the current tick spacing (oscilloscope style)."""
+        s = abs(self._spacing)
+        if s == 0:
+            return ""
+        if self.is_date:
+            # Spacing is in nanoseconds
+            if s >= 86400e9:
+                return f"{s / 86400e9:.3g}D/div"
+            elif s >= 3600e9:
+                return f"{s / 3600e9:.3g}h/div"
+            elif s >= 60e9:
+                return f"{s / 60e9:.3g}min/div"
+            elif s >= 1e9:
+                return f"{s / 1e9:.3g}s/div"
+            elif s >= 1e6:
+                return f"{s / 1e6:.3g}ms/div"
+            elif s >= 1e3:
+                return f"{s / 1e3:.3g}μs/div"
+            else:
+                return f"{s:.3g}ns/div"
+        else:
+            # Numeric axis
+            if s >= 1e9:
+                return f"{s / 1e9:.3g}G/div"
+            elif s >= 1e6:
+                return f"{s / 1e6:.3g}M/div"
+            elif s >= 1e3:
+                return f"{s / 1e3:.3g}k/div"
+            elif s >= 1:
+                return f"{s:.3g}/div"
+            elif s >= 1e-3:
+                return f"{s * 1e3:.3g}m/div"
+            elif s >= 1e-6:
+                return f"{s * 1e6:.3g}μ/div"
+            else:
+                return f"{s * 1e9:.3g}n/div"
 
     def set_offset(self, offset):
         self.offset = offset
@@ -170,8 +209,12 @@ class NanosecondDateFormatter(pg.AxisItem):
         while len(values) > n and len(values) > 2:
             values = values[::2]
 
-        # Save current state
+        # Save current state and spacing
         self.last_values = values
+        if len(values) >= 2:
+            self._spacing = values[1] - values[0]
+        elif last_range > 0:
+            self._spacing = last_range / max(n, 1)
 
         if self.is_date:
             self.cut_start = self.lcp(self.get_real_value(int(values[0])), self.get_real_value(int(values[-1])))

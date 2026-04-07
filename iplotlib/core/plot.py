@@ -64,6 +64,7 @@ class Plot(ABC):
     legend_layout: str = None
     background_color: str = None
     grid: bool = None
+    grid_spacing_label: bool = None
     log_scale: bool = None
     _type: str = None
     parent = None
@@ -94,6 +95,7 @@ class Plot(ABC):
         self.legend_layout = Plot.legend_layout
         self.background_color = Plot.background_color
         self.grid = Plot.grid
+        self.grid_spacing_label = Plot.grid_spacing_label
         self.log_scale = Plot.log_scale
         self.font_size = Plot.font_size
         self.font_color = Plot.font_color
@@ -117,6 +119,7 @@ class Plot(ABC):
         self.font_color = old_plot['font_color']
         self.background_color = old_plot['background_color']
         self.grid = old_plot['grid']
+        self.grid_spacing_label = old_plot.get('grid_spacing_label')
         self.log_scale = old_plot['log_scale']
 
         for idxAxis, axis in enumerate(self.axes):

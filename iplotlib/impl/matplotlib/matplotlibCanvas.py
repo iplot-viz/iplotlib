@@ -66,6 +66,7 @@ class MatplotlibParser(BackendParserBase):
         register_matplotlib_converters()
         self.figure = Figure()
         self._impl_plot_ranges_hash = dict()
+        self._grid_spacing_annotations = {}  # MPLAxes -> Text artist
 
         if tight_layout:
             self.enable_tight_layout()
@@ -113,6 +114,86 @@ class MatplotlibParser(BackendParserBase):
         if hasattr(signal, 'lines') and signal.lines:
             for line in signal.lines:
                 line.remove()
+
+    @staticmethod
+    def _format_spacing(s, is_date=False):
+        """Format tick spacing as a human-readable string (oscilloscope style)."""
+        s = abs(s)
+        if s == 0:
+            return ""
+        if is_date:
+            if s >= 86400e9:
+                return f"{s / 86400e9:.3g}D/div"
+            elif s >= 3600e9:
+                return f"{s / 3600e9:.3g}h/div"
+            elif s >= 60e9:
+                return f"{s / 60e9:.3g}min/div"
+            elif s >= 1e9:
+                return f"{s / 1e9:.3g}s/div"
+            elif s >= 1e6:
+                return f"{s / 1e6:.3g}ms/div"
+            elif s >= 1e3:
+                return f"{s / 1e3:.3g}μs/div"
+            else:
+                return f"{s:.3g}ns/div"
+        else:
+            if s >= 1e9:
+                return f"{s / 1e9:.3g}G/div"
+            elif s >= 1e6:
+                return f"{s / 1e6:.3g}M/div"
+            elif s >= 1e3:
+                return f"{s / 1e3:.3g}k/div"
+            elif s >= 1:
+                return f"{s:.3g}/div"
+            elif s >= 1e-3:
+                return f"{s * 1e3:.3g}m/div"
+            elif s >= 1e-6:
+                return f"{s * 1e6:.3g}μ/div"
+            else:
+                return f"{s * 1e9:.3g}n/div"
+
+    def _update_grid_spacing_label(self, mpl_axes: MPLAxes, plot: Plot):
+        """Add or update grid spacing annotation on a matplotlib axes."""
+        show = self._pm.get_value(plot, 'grid') and self._pm.get_value(plot, 'grid_spacing_label')
+
+        if not show:
+            if mpl_axes in self._grid_spacing_annotations:
+                self._grid_spacing_annotations.pop(mpl_axes).remove()
+            return
+
+        def _calc_and_update(mpl_ax=mpl_axes, pl=plot):
+            x_ticks = mpl_ax.xaxis.get_ticklocs()
+            y_ticks = mpl_ax.yaxis.get_ticklocs()
+            x_label = ""
+            if len(x_ticks) >= 2:
+                x_spacing = abs(x_ticks[1] - x_ticks[0])
+                is_date = pl.axes[0].is_date if hasattr(pl.axes[0], 'is_date') else False
+                x_label = self._format_spacing(x_spacing, is_date)
+            y_label = ""
+            if len(y_ticks) >= 2:
+                y_spacing = abs(y_ticks[1] - y_ticks[0])
+                y_label = self._format_spacing(y_spacing)
+            text = f"X: {x_label}  Y: {y_label}" if x_label and y_label else x_label or y_label
+            if mpl_ax in self._grid_spacing_annotations and text:
+                self._grid_spacing_annotations[mpl_ax].set_text(text)
+
+        _calc_and_update()
+
+        if mpl_axes not in self._grid_spacing_annotations:
+            x_ticks = mpl_axes.xaxis.get_ticklocs()
+            y_ticks = mpl_axes.yaxis.get_ticklocs()
+            x_label = self._format_spacing(abs(x_ticks[1] - x_ticks[0]), getattr(plot.axes[0], 'is_date', False)) if len(x_ticks) >= 2 else ""
+            y_label = self._format_spacing(abs(y_ticks[1] - y_ticks[0])) if len(y_ticks) >= 2 else ""
+            text = f"X: {x_label}  Y: {y_label}" if x_label and y_label else x_label or y_label
+            if text:
+                ann = mpl_axes.annotate(text, xy=(1, 0), xycoords='axes fraction',
+                                        ha='right', va='bottom', fontsize=8,
+                                        color='gray', alpha=0.8,
+                                        xytext=(-5, 5), textcoords='offset points')
+                self._grid_spacing_annotations[mpl_axes] = ann
+                # Connect to axis limit changes for dynamic updates
+                mpl_axes.callbacks.connect('xlim_changed', lambda ax: _calc_and_update())
+                mpl_axes.callbacks.connect('ylim_changed', lambda ax: _calc_and_update())
 
     def rebuild_legend(self, mpl_axes: MPLAxes, plot: Plot):
         """
@@ -724,6 +805,8 @@ class MatplotlibParser(BackendParserBase):
                         mpl_axes.grid(show_grid, which='major')
                 else:
                     mpl_axes.grid(show_grid, which='both')
+
+                self._update_grid_spacing_label(mpl_axes, plot)
 
                 # Update properties of the plot axes
                 x_axis = None

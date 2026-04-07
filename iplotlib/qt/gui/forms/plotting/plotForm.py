@@ -32,6 +32,8 @@ class PlotXYForm(IplotPreferencesForm):
              "widget": self.create_checkbox()},
             {"label": "Grid", "property": "grid",
              "widget": self.create_checkbox()},
+            {"label": "Grid spacing label", "property": "grid_spacing_label",
+             "widget": self.create_checkbox()},
             {"label": "Legend", "property": "legend",
              "widget": self.create_checkbox()},
             {"label": "Legend position", "property": "legend_position",
