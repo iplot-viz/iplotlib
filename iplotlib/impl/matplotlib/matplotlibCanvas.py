@@ -193,7 +193,7 @@ class MatplotlibParser(BackendParserBase):
         if mpl_axes not in self._grid_spacing_annotations:
             ann = mpl_axes.annotate(" ", xy=(1, 0), xycoords='axes fraction',
                                     ha='right', va='bottom', fontsize=8,
-                                    color='gray', alpha=0.8,
+                                    color='black', alpha=0.8,
                                     xytext=(-5, 5), textcoords='offset points')
             self._grid_spacing_annotations[mpl_axes] = ann
             # Connect to axis limit changes and draw event for dynamic updates

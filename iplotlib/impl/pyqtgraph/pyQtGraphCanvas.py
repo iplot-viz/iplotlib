@@ -1364,7 +1364,7 @@ class PyQtGraphParser(BackendParserBase):
             return
 
         if plot not in self._grid_spacing_labels:
-            label = TextItem(text, color=(150, 150, 150), anchor=(1, 1))
+            label = TextItem(text, color=(0, 0, 0), anchor=(1, 1))
             label.setZValue(100)
             label.setFlag(label.GraphicsItemFlag.ItemIsMovable, True)
             label._user_moved = False
