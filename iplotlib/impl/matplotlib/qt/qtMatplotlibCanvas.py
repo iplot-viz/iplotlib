@@ -264,6 +264,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._debug_log_event(event, f"Draw call {self._draw_call_counter}")
 
     def on_pick_legend(self, event):
+        # Right-click on legend → open signal preferences
+        if hasattr(event, 'mouseevent') and event.mouseevent.button == MouseButton.RIGHT:
+            signal = self._parser._legend_signal_lut.get(event.artist)
+            if signal:
+                menu = QMenu(self)
+                menu.addAction("Signal Preferences",
+                               lambda s=signal: self.openPlotPreferences.emit(s))
+                menu.popup(event.mouseevent.guiEvent.globalPos())
+            return
+
         # On the pick event, find the original line corresponding to the legend
         # proxy line, and toggle its visibility.
         legend_line = event.artist

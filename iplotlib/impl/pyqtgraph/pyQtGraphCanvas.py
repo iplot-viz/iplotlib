@@ -126,7 +126,8 @@ class PyQtGraphParser(BackendParserBase):
                          impl_flush_method=impl_flush_method)
 
         self.map_legend_to_ax = {}
-        self._legend_signal_lut = {}  # ItemSample -> Signal
+        self._legend_signal_lut = {}  # id(ItemSample/LabelItem) -> Signal
+        self._on_legend_right_click = None  # callback(Signal) set by Qt canvas
         self.legend_size = 8
         self._cursors = []
         self._cursor_active = False
@@ -911,6 +912,17 @@ class PyQtGraphParser(BackendParserBase):
                         self._legend_signal_lut[id(legend_samples[ix_legend])] = signal
                         label_item = plot.legend.items[ix_legend][1]
                         self._legend_signal_lut[id(label_item)] = signal
+                        # Patch ItemSample to handle right-click for signal preferences
+                        sample = legend_samples[ix_legend]
+                        orig_handler = sample.mouseClickEvent
+                        def _patched_click(ev, orig=orig_handler, sig=signal, parser=self):
+                            if ev.button() == QtCore.Qt.MouseButton.RightButton:
+                                if parser._on_legend_right_click:
+                                    parser._on_legend_right_click(sig, ev.screenPos())
+                                ev.accept()
+                                return
+                            orig(ev)
+                        sample.mouseClickEvent = _patched_click
                         label_item.setAttr(attr='size', value=f'{fs}pt')
                         legend_label = line.name() if not isinstance(line, Collection) else line[0].name()
                         if signal.isDownsampled:

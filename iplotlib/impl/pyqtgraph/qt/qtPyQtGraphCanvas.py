@@ -26,6 +26,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._draw_call_counter = 0
 
         self._parser = PyQtGraphParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
+        self._parser._on_legend_right_click = self._on_legend_right_click
 
         # Track connected ViewBoxes to avoid duplicate connections
         self._connected_viewboxes = set()
@@ -478,6 +479,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         y_value = system_coord.y()
         if y_value is not None:
             self._update_drag_shift(y_value, x_value)
+
+    def _on_legend_right_click(self, signal, screen_pos):
+        """Handle right-click on a legend item to open signal preferences."""
+        menu = QMenu(self)
+        menu.addAction("Signal Preferences", lambda s=signal: self.openPlotPreferences.emit(s))
+        menu.popup(screen_pos.toPoint())
 
     def _find_signal_at_event(self, view_box, event):
         """
