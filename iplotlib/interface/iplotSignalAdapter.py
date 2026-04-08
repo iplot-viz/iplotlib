@@ -112,6 +112,7 @@ class IplotSignalAdapter(ProcessingSignal):
     ts_end: str = ''
     ts_relative: bool = False
     envelope: bool = False
+    calibrated: bool = True
     isDownsampled: bool = False
     x_expr: str = '${self}.time'
     y_expr: str = '${self}.data'
@@ -675,16 +676,19 @@ class AccessHelper:
 
     @staticmethod
     def construct_da_params(signal: IplotSignalAdapter):
-        return dict(data_s_name=signal.data_source,
-                    varname=signal.name,
-                    tsS=AccessHelper.uda_ts(signal, signal.ts_start),
-                    tsE=AccessHelper.uda_ts(signal, signal.ts_end),
-                    tsFormat='relative' if signal.ts_relative else 'absolute',
-                    pulse=signal.pulse_nb,
-                    envelope=signal.envelope,
-                    extremities=signal.extremities,
-                    nbp=AccessHelper.num_samples if AccessHelper.num_samples_override else -1
-                    )
+        params = dict(data_s_name=signal.data_source,
+                      varname=signal.name,
+                      tsS=AccessHelper.uda_ts(signal, signal.ts_start),
+                      tsE=AccessHelper.uda_ts(signal, signal.ts_end),
+                      tsFormat='relative' if signal.ts_relative else 'absolute',
+                      pulse=signal.pulse_nb,
+                      envelope=signal.envelope,
+                      extremities=signal.extremities,
+                      nbp=AccessHelper.num_samples if AccessHelper.num_samples_override else -1
+                      )
+        if signal.calibrated:
+            params['retType'] = 'doubleCalibrated'
+        return params
 
     @staticmethod
     def uda_ts(signal: IplotSignalAdapter, value):
