@@ -11,6 +11,7 @@ from PySide6.QtCore import QItemSelectionModel, QMargins, Qt, Signal
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from iplotlib.core.command import IplotCommand
+from iplotlib.core.signal import Signal as IplotSignal
 
 from iplotlib.qt.gui.iplotCanvasToolbar import IplotQtCanvasToolbar
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
@@ -143,37 +144,44 @@ class IplotQtMainWindow(QMainWindow):
         self.check_history(w)
         self.toolBar.undoAction.setText(f"Undo {cmd.name}")
 
-    def _open_plot_preferences(self, plot):
-        """Open preferences window and navigate to the given plot in the tree.
-        Collapses all other items and expands only the selected plot."""
+    def _open_plot_preferences(self, target):
+        """Open preferences window and navigate to the given Plot or Signal in the tree.
+        Collapses all other items and expands only the relevant path."""
         tree = self.prefWindow.treeView
         model = tree.model()
         if not model:
             return
-        # Walk the tree to find the item whose UserRole data matches the plot
+        is_signal = isinstance(target, IplotSignal)
         for canvas_row in range(model.rowCount()):
             canvas_idx = model.index(canvas_row, 0)
             for col_row in range(model.rowCount(canvas_idx)):
                 col_idx = model.index(col_row, 0, canvas_idx)
                 for plot_row in range(model.rowCount(col_idx)):
                     plot_idx = model.index(plot_row, 0, col_idx)
-                    if plot_idx.data(Qt.ItemDataRole.UserRole) is plot:
-                        self.prefWindow.show()
-                        self.prefWindow.raise_()
-                        self.prefWindow.activateWindow()
-                        self.prefWindow._refresh_signal_icons()
-                        # Collapse all, then expand only the path to the selected plot
-                        tree.collapseAll()
-                        tree.expand(canvas_idx)
-                        tree.expand(col_idx)
-                        tree.expand(plot_idx)
-                        # Select and scroll to the plot
-                        tree.selectionModel().clearSelection()
-                        tree.selectionModel().select(
-                            plot_idx, QItemSelectionModel.SelectionFlag.Select)
-                        tree.scrollTo(plot_idx)
-                        self.prefWindow.set_canvas_from_preferences()
+                    if not is_signal and plot_idx.data(Qt.ItemDataRole.UserRole) is target:
+                        self._show_pref_at(tree, canvas_idx, col_idx, plot_idx, plot_idx)
                         return
+                    if is_signal:
+                        for child_row in range(model.rowCount(plot_idx)):
+                            child_idx = model.index(child_row, 0, plot_idx)
+                            if child_idx.data(Qt.ItemDataRole.UserRole) is target:
+                                self._show_pref_at(tree, canvas_idx, col_idx, plot_idx, child_idx)
+                                return
+
+    def _show_pref_at(self, tree, canvas_idx, col_idx, plot_idx, target_idx):
+        """Show preferences window with tree collapsed except the path to target_idx."""
+        self.prefWindow.show()
+        self.prefWindow.raise_()
+        self.prefWindow.activateWindow()
+        self.prefWindow._refresh_signal_icons()
+        tree.collapseAll()
+        tree.expand(canvas_idx)
+        tree.expand(col_idx)
+        tree.expand(plot_idx)
+        tree.selectionModel().clearSelection()
+        tree.selectionModel().select(target_idx, QItemSelectionModel.SelectionFlag.Select)
+        tree.scrollTo(target_idx)
+        self.prefWindow.set_canvas_from_preferences()
 
     def update_canvas_preferences(self):
         w = self.canvasStack.currentWidget()

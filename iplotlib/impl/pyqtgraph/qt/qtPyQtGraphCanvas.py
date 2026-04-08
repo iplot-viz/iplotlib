@@ -434,6 +434,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 if ci:
                     self.autoscale_menu.addAction("Preferences",
                                                   lambda: self.openPlotPreferences.emit(ci.plot()))
+                # Detect nearest signal and add Signal Preferences option
+                nearest_signal, _ = self._find_signal_at_event(view_box, event)
+                if nearest_signal:
+                    self.autoscale_menu.addAction("Signal Preferences",
+                                                  lambda s=nearest_signal: self.openPlotPreferences.emit(s))
                 self.autoscale_menu.popup(event.screenPos().toPoint())
 
     def mouse_clicked(self, event):

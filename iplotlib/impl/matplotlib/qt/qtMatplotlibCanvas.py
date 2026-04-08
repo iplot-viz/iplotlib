@@ -489,6 +489,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 if ci:
                     autoscale_menu.addAction("Preferences",
                                              lambda: self.openPlotPreferences.emit(ci.plot()))
+                # Detect nearest signal and add Signal Preferences option
+                nearest_signal, _, _ = self._find_signal_at_event(event)
+                if nearest_signal:
+                    autoscale_menu.addAction("Signal Preferences",
+                                             lambda s=nearest_signal: self.openPlotPreferences.emit(s))
                 autoscale_menu.popup(event.guiEvent.globalPos())
 
             # Handle drag shift in Select mode with left click - use native hit-testing

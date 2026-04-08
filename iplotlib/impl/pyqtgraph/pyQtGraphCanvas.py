@@ -126,6 +126,7 @@ class PyQtGraphParser(BackendParserBase):
                          impl_flush_method=impl_flush_method)
 
         self.map_legend_to_ax = {}
+        self._legend_signal_lut = {}  # ItemSample -> Signal
         self.legend_size = 8
         self._cursors = []
         self._cursor_active = False
@@ -897,16 +898,19 @@ class PyQtGraphParser(BackendParserBase):
             ix_legend = 0
 
             if plot.legend and plot.legend.items:
-                # Set legend_lines
-                legend_lines = [sample.item
-                                for item in plot.legend.items
-                                for sample in item
-                                if isinstance(sample, pg.ItemSample)]
+                # Set legend_lines and build legend → signal mapping
+                legend_samples = [sample
+                                  for item in plot.legend.items
+                                  for sample in item
+                                  if isinstance(sample, pg.ItemSample)]
+                legend_lines = [sample.item for sample in legend_samples]
 
                 for signal in signals:
                     for line in self._signal_impl_shape_lut.get(id(signal)):
                         self.map_legend_to_ax[legend_lines[ix_legend]] = line
+                        self._legend_signal_lut[id(legend_samples[ix_legend])] = signal
                         label_item = plot.legend.items[ix_legend][1]
+                        self._legend_signal_lut[id(label_item)] = signal
                         label_item.setAttr(attr='size', value=f'{fs}pt')
                         legend_label = line.name() if not isinstance(line, Collection) else line[0].name()
                         if signal.isDownsampled:
