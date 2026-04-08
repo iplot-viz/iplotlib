@@ -268,7 +268,7 @@ class Canvas(ABC):
         self.legend_position = old_canvas['legend_position']
         self.legend_layout = old_canvas['legend_layout']
         self.grid = old_canvas['grid']
-        self.grid_spacing_label = old_canvas.get('grid_spacing_label')
+        self.grid_spacing_label = old_canvas.get('grid_spacing_label', False) or False
         self.autoscale = old_canvas['autoscale']
         self.contour_filled = old_canvas['contour_filled']
         self.legend_format = old_canvas['legend_format']

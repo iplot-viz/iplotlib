@@ -119,7 +119,7 @@ class Plot(ABC):
         self.font_color = old_plot['font_color']
         self.background_color = old_plot['background_color']
         self.grid = old_plot['grid']
-        self.grid_spacing_label = old_plot.get('grid_spacing_label')
+        self.grid_spacing_label = old_plot.get('grid_spacing_label', False) or False
         self.log_scale = old_plot['log_scale']
 
         for idxAxis, axis in enumerate(self.axes):

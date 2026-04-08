@@ -56,17 +56,18 @@ class MatplotlibParser(BackendParserBase):
                  impl_flush_method: Callable = None) -> None:
         """Initialize underlying matplotlib classes.
         """
-        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
-                         impl_flush_method=impl_flush_method)
-
+        # Initialize before super().__init__() because it calls clear() via process_ipl_canvas
         self.map_legend_to_ax = {}
         self.legend_size = 8
         self._cursors = []
+        self._grid_spacing_annotations = {}  # MPLAxes -> Text artist
+        self._impl_plot_ranges_hash = dict()
+
+        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
+                         impl_flush_method=impl_flush_method)
 
         register_matplotlib_converters()
         self.figure = Figure()
-        self._impl_plot_ranges_hash = dict()
-        self._grid_spacing_annotations = {}  # MPLAxes -> Text artist
 
         if tight_layout:
             self.enable_tight_layout()
@@ -122,20 +123,16 @@ class MatplotlibParser(BackendParserBase):
         if s == 0:
             return ""
         if is_date:
-            if s >= 86400e9:
-                return f"{s / 86400e9:.3g}D/div"
-            elif s >= 3600e9:
-                return f"{s / 3600e9:.3g}h/div"
-            elif s >= 60e9:
-                return f"{s / 60e9:.3g}min/div"
-            elif s >= 1e9:
-                return f"{s / 1e9:.3g}s/div"
-            elif s >= 1e6:
-                return f"{s / 1e6:.3g}ms/div"
-            elif s >= 1e3:
-                return f"{s / 1e3:.3g}μs/div"
-            else:
-                return f"{s:.3g}ns/div"
+            # Snap to nearest integer unit if within 20% tolerance
+            units = [(86400e9, "D"), (3600e9, "h"), (60e9, "min"), (1e9, "s"), (1e6, "ms"), (1e3, "μs"), (1, "ns")]
+            for unit_ns, unit_name in units:
+                if s >= unit_ns * 0.8:
+                    val = s / unit_ns
+                    rounded = round(val)
+                    if rounded > 0 and abs(val - rounded) / rounded < 0.2:
+                        val = rounded
+                    return f"{val:.3g}{unit_name}/div"
+            return f"{s:.3g}ns/div"
         else:
             if s >= 1e9:
                 return f"{s / 1e9:.3g}G/div"
@@ -161,39 +158,49 @@ class MatplotlibParser(BackendParserBase):
                 self._grid_spacing_annotations.pop(mpl_axes).remove()
             return
 
-        def _calc_and_update(mpl_ax=mpl_axes, pl=plot):
-            x_ticks = mpl_ax.xaxis.get_ticklocs()
-            y_ticks = mpl_ax.yaxis.get_ticklocs()
+        def _calc_spacing(mpl_ax, pl):
+            is_date = pl.axes[0].is_date if hasattr(pl.axes[0], 'is_date') else False
+
             x_label = ""
-            if len(x_ticks) >= 2:
-                x_spacing = abs(x_ticks[1] - x_ticks[0])
-                is_date = pl.axes[0].is_date if hasattr(pl.axes[0], 'is_date') else False
+            x_ticks = sorted(mpl_ax.xaxis.get_ticklocs())
+            x_lo, x_hi = mpl_ax.get_xlim()
+            visible_x = [t for t in x_ticks if x_lo <= t <= x_hi]
+            if len(visible_x) >= 2:
+                x_spacing = abs(visible_x[1] - visible_x[0])
+                if is_date:
+                    formatter = mpl_ax.xaxis.get_major_formatter()
+                    offset_ns = getattr(formatter, 'offset_ns', 0)
+                    if offset_ns == 100_000:
+                        x_spacing = x_spacing * offset_ns
                 x_label = self._format_spacing(x_spacing, is_date)
+
             y_label = ""
-            if len(y_ticks) >= 2:
-                y_spacing = abs(y_ticks[1] - y_ticks[0])
+            y_ticks = sorted(mpl_ax.yaxis.get_ticklocs())
+            y_lo, y_hi = mpl_ax.get_ylim()
+            visible_y = [t for t in y_ticks if y_lo <= t <= y_hi]
+            if len(visible_y) >= 2:
+                y_spacing = abs(visible_y[1] - visible_y[0])
                 y_label = self._format_spacing(y_spacing)
+
+            return x_label, y_label
+
+        def _calc_and_update(mpl_ax=mpl_axes, pl=plot):
+            x_label, y_label = _calc_spacing(mpl_ax, pl)
             text = f"X: {x_label}  Y: {y_label}" if x_label and y_label else x_label or y_label
             if mpl_ax in self._grid_spacing_annotations and text:
                 self._grid_spacing_annotations[mpl_ax].set_text(text)
 
-        _calc_and_update()
-
         if mpl_axes not in self._grid_spacing_annotations:
-            x_ticks = mpl_axes.xaxis.get_ticklocs()
-            y_ticks = mpl_axes.yaxis.get_ticklocs()
-            x_label = self._format_spacing(abs(x_ticks[1] - x_ticks[0]), getattr(plot.axes[0], 'is_date', False)) if len(x_ticks) >= 2 else ""
-            y_label = self._format_spacing(abs(y_ticks[1] - y_ticks[0])) if len(y_ticks) >= 2 else ""
-            text = f"X: {x_label}  Y: {y_label}" if x_label and y_label else x_label or y_label
-            if text:
-                ann = mpl_axes.annotate(text, xy=(1, 0), xycoords='axes fraction',
-                                        ha='right', va='bottom', fontsize=8,
-                                        color='gray', alpha=0.8,
-                                        xytext=(-5, 5), textcoords='offset points')
-                self._grid_spacing_annotations[mpl_axes] = ann
-                # Connect to axis limit changes for dynamic updates
-                mpl_axes.callbacks.connect('xlim_changed', lambda ax: _calc_and_update())
-                mpl_axes.callbacks.connect('ylim_changed', lambda ax: _calc_and_update())
+            ann = mpl_axes.annotate(" ", xy=(1, 0), xycoords='axes fraction',
+                                    ha='right', va='bottom', fontsize=8,
+                                    color='gray', alpha=0.8,
+                                    xytext=(-5, 5), textcoords='offset points')
+            self._grid_spacing_annotations[mpl_axes] = ann
+            # Connect to axis limit changes and draw event for dynamic updates
+            mpl_axes.callbacks.connect('xlim_changed', lambda ax: _calc_and_update())
+            mpl_axes.callbacks.connect('ylim_changed', lambda ax: _calc_and_update())
+            if hasattr(self, 'figure') and self.figure.canvas:
+                self.figure.canvas.mpl_connect('draw_event', lambda ev: _calc_and_update())
 
     def rebuild_legend(self, mpl_axes: MPLAxes, plot: Plot):
         """
@@ -519,6 +526,7 @@ class MatplotlibParser(BackendParserBase):
                         signal.lines.clear()
 
         self.map_legend_to_ax.clear()
+        self._grid_spacing_annotations.clear()
         self._impl_plot_ranges_hash.clear()
 
         gc.collect()

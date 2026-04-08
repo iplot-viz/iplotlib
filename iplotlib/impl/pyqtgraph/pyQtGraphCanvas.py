@@ -122,23 +122,24 @@ class PyQtGraphParser(BackendParserBase):
                  focus_plot=None,
                  focus_plot_stack_key=None,
                  impl_flush_method: Callable = None) -> None:
-        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
-                         impl_flush_method=impl_flush_method)
-
+        # Initialize before super().__init__() because it calls clear() via process_ipl_canvas
         self.map_legend_to_ax = {}
         self.legend_size = 8
         self._cursors = []
         self._cursor_active = False
-
-        self.figure = pg.GraphicsLayoutWidget()
-        self.figure.setBackground('w')
-        self._cell_gl = {}  # (row, col) -> GraphicsLayout sublayout
-        self._layout_stacks = {}  # (row, col, stack_id) -> PlotItem
-        self._slider_placeholders = {}  # (row, col) -> QGraphicsProxyWidget
+        self._grid_spacing_labels = {}  # PlotItem -> TextItem
+        self._cell_gl = {}
+        self._layout_stacks = {}
+        self._slider_placeholders = {}
         self._impl_plot_ranges_hash = dict()
         self._colorbar_lut = dict()
         self._row_offset = 0
-        self._grid_spacing_labels = {}  # PlotItem -> TextItem
+
+        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
+                         impl_flush_method=impl_flush_method)
+
+        self.figure = pg.GraphicsLayoutWidget()
+        self.figure.setBackground('w')
 
         if tight_layout:
             self.enable_tight_layout()
@@ -1262,6 +1263,7 @@ class PyQtGraphParser(BackendParserBase):
                         plot.clean_slider()
 
         self.map_legend_to_ax.clear()
+        self._grid_spacing_labels.clear()
         self._impl_plot_ranges_hash.clear()
         self._slider_placeholders.clear()
         self._colorbar_lut.clear()
@@ -1282,20 +1284,16 @@ class PyQtGraphParser(BackendParserBase):
         if s == 0:
             return ""
         if is_date:
-            if s >= 86400e9:
-                return f"{s / 86400e9:.3g}D/div"
-            elif s >= 3600e9:
-                return f"{s / 3600e9:.3g}h/div"
-            elif s >= 60e9:
-                return f"{s / 60e9:.3g}min/div"
-            elif s >= 1e9:
-                return f"{s / 1e9:.3g}s/div"
-            elif s >= 1e6:
-                return f"{s / 1e6:.3g}ms/div"
-            elif s >= 1e3:
-                return f"{s / 1e3:.3g}μs/div"
-            else:
-                return f"{s:.3g}ns/div"
+            # Snap to nearest integer unit if within 20% tolerance
+            units = [(86400e9, "D"), (3600e9, "h"), (60e9, "min"), (1e9, "s"), (1e6, "ms"), (1e3, "μs"), (1, "ns")]
+            for unit_ns, unit_name in units:
+                if s >= unit_ns * 0.8:
+                    val = s / unit_ns
+                    rounded = round(val)
+                    if rounded > 0 and abs(val - rounded) / rounded < 0.2:
+                        val = rounded
+                    return f"{val:.3g}{unit_name}/div"
+            return f"{s:.3g}ns/div"
         else:
             if s >= 1e9:
                 return f"{s / 1e9:.3g}G/div"
@@ -1328,15 +1326,38 @@ class PyQtGraphParser(BackendParserBase):
         vb = plot.getViewBox()
         vr = vb.viewRange()
         x_axis = plot.getAxis('bottom')
-
-        # Calculate spacing from view range and tick count
-        n_ticks = getattr(x_axis, 'n_ticks', 5)
-        x_spacing = (vr[0][1] - vr[0][0]) / max(n_ticks, 1)
-        y_spacing = (vr[1][1] - vr[1][0]) / max(n_ticks, 1)
-
+        y_axis = plot.getAxis('left')
         is_date = getattr(x_axis, 'is_date', False)
-        x_label = self._format_spacing(x_spacing, is_date)
-        y_label = self._format_spacing(y_spacing, False)
+
+        def _get_tick_spacing(axis, vr_min, vr_max):
+            """Get the actual tick spacing from an axis."""
+            try:
+                geom = axis.geometry()
+                size = geom.width() if axis.orientation in ('bottom', 'top') else geom.height()
+                if size <= 0:
+                    size = 800  # fallback for initial draw
+                tick_levels = axis.tickValues(vr_min, vr_max, size)
+                if tick_levels:
+                    spacing, ticks = tick_levels[0]
+                    if spacing > 0:
+                        return spacing
+                    if len(ticks) >= 2:
+                        return abs(ticks[1] - ticks[0])
+            except Exception:
+                pass
+            return 0
+
+        x_spacing = _get_tick_spacing(x_axis, vr[0][0], vr[0][1])
+        y_spacing = _get_tick_spacing(y_axis, vr[1][0], vr[1][1])
+
+        # Correct for axis offset scaling (datetime axes may use offset == 100_000 as multiplier)
+        if is_date:
+            offset = getattr(x_axis, 'offset', 0)
+            if offset == 100_000:
+                x_spacing = x_spacing * offset
+
+        x_label = self._format_spacing(x_spacing, is_date) if x_spacing > 0 else ""
+        y_label = self._format_spacing(y_spacing, False) if y_spacing > 0 else ""
 
         text = f"X: {x_label}  Y: {y_label}" if x_label and y_label else x_label or y_label
         if not text:
@@ -1345,14 +1366,24 @@ class PyQtGraphParser(BackendParserBase):
         if plot not in self._grid_spacing_labels:
             label = TextItem(text, color=(150, 150, 150), anchor=(1, 1))
             label.setZValue(100)
+            label.setFlag(label.GraphicsItemFlag.ItemIsMovable, True)
+            label._user_moved = False
+            # Track if user moved it
+            orig_release = label.mouseReleaseEvent
+            def _on_release(ev, lbl=label, orig=orig_release):
+                lbl._user_moved = True
+                if orig:
+                    orig(ev)
+            label.mouseReleaseEvent = _on_release
             plot.addItem(label, ignoreBounds=True)
             self._grid_spacing_labels[plot] = label
         else:
             label = self._grid_spacing_labels[plot]
             label.setText(text)
 
-        # Position at bottom-right of the view
-        label.setPos(vr[0][1], vr[1][0])
+        # Position at bottom-right of the view (only if user hasn't moved it)
+        if not getattr(label, '_user_moved', False):
+            label.setPos(vr[0][1], vr[1][0])
 
     @staticmethod
     def set_mouse(plot: PlotItem):

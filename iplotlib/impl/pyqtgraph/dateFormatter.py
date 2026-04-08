@@ -222,7 +222,7 @@ class NanosecondDateFormatter(pg.AxisItem):
             self.offset_str = 'UTC:' + self.date_fmt(self.get_real_value(values[0]), self.YEAR, self.cut_start,
                                                      postfix_end=self.postfix_end, postfix_start=self.postfix_start)
 
-            spacing = (maxVal - minVal) / max(len(values) - 1, 1)
+            spacing = abs(values[1] - values[0]) if len(values) >= 2 else (maxVal - minVal)
         else:
             spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
 
