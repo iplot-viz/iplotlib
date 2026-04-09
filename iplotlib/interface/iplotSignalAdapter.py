@@ -216,6 +216,10 @@ class IplotSignalAdapter(ProcessingSignal):
                 logger.warning(
                     f"Caught x-target shape mismatch! Fixing it. len(source) = {len(source)} -> {len(target)}")
                 return BufferObject(np.linspace(source[0], source[-1], len(target)), unit=source.unit)
+            elif len(source) != len(target) and len(target) < len(source):
+                logger.warning(
+                    f"Caught y-source shape mismatch! Truncating. len(source) = {len(source)} -> {len(target)}")
+                return BufferObject(source[:len(target)], unit=source.unit)
             else:
                 return source
         else:
