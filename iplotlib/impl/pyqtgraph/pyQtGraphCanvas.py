@@ -1363,6 +1363,8 @@ class PyQtGraphParser(BackendParserBase):
         if not text:
             return
 
+        fs = self._pm.get_value(i_plot, 'font_size') or 8
+
         if plot not in self._grid_spacing_labels:
             label = TextItem(text, color=(0, 0, 0), anchor=(1, 1))
             label.setZValue(100)
@@ -1380,6 +1382,9 @@ class PyQtGraphParser(BackendParserBase):
         else:
             label = self._grid_spacing_labels[plot]
             label.setText(text)
+        font = QFont()
+        font.setPointSize(int(fs))
+        label.setFont(font)
 
         # Position at bottom-right of the view (only if user hasn't moved it)
         if not getattr(label, '_user_moved', False):

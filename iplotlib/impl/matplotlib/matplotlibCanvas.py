@@ -189,10 +189,14 @@ class MatplotlibParser(BackendParserBase):
             text = f"X: {x_label}  Y: {y_label}" if x_label and y_label else x_label or y_label
             if mpl_ax in self._grid_spacing_annotations and text:
                 self._grid_spacing_annotations[mpl_ax].set_text(text)
+                self._grid_spacing_annotations[mpl_ax].set_fontsize(
+                    self._pm.get_value(pl, 'font_size') or 8)
+
+        fs = self._pm.get_value(plot, 'font_size') or 8
 
         if mpl_axes not in self._grid_spacing_annotations:
             ann = mpl_axes.annotate(" ", xy=(1, 0), xycoords='axes fraction',
-                                    ha='right', va='bottom', fontsize=8,
+                                    ha='right', va='bottom', fontsize=fs,
                                     color='black', alpha=0.8,
                                     xytext=(-5, 5), textcoords='offset points')
             self._grid_spacing_annotations[mpl_axes] = ann
