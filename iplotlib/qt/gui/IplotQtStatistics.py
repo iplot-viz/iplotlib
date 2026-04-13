@@ -3,7 +3,7 @@ import csv
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QApplication, QFileDialog, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, \
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, \
     QTableWidgetItem, QHeaderView, QAbstractItemView, QPushButton, QMenu, QSpinBox, QLabel, QFrame
 
 import iplotLogging.setupLogger as Sl
@@ -470,15 +470,20 @@ class IplotQtStatistics(QWidget):
 
         visible_cols = [c for c in range(self.table.columnCount()) if not self.table.isColumnHidden(c)]
 
-        with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f, delimiter=';')
-            writer.writerow([self.column_names[c] for c in visible_cols])
-            for row in range(self.table.rowCount()):
-                row_data = []
-                for col in visible_cols:
-                    item = self.table.item(row, col)
-                    row_data.append(item.text() if item else '')
-                writer.writerow(row_data)
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f, delimiter=';')
+                writer.writerow([self.column_names[c] for c in visible_cols])
+                for row in range(self.table.rowCount()):
+                    row_data = []
+                    for col in visible_cols:
+                        item = self.table.item(row, col)
+                        row_data.append(item.text() if item else '')
+                    writer.writerow(row_data)
+            logger.info(f"Exported statistics to {filename}")
+        except Exception as e:
+            logger.error(f"Failed to export CSV: {e}")
+            QMessageBox.critical(self, "Export Error", f"Cannot export to file: {filename}\n{e}")
 
     def _show_context_menu(self, pos):
         """Right-click context menu with Copy and Export CSV."""
