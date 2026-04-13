@@ -452,3 +452,28 @@ class PlotContourWithSlider(PlotContour):
 
     def clean_slider(self):
         self.slider = None
+
+
+@dataclass
+class PlotImageWithSlider(PlotImage):
+    """
+    A concrete Plot class specialized for 2D image plotting with slider.
+    """
+    slider: typing.Optional = None
+    slider_last_val: int = None
+    slider_last_min: int = None
+    slider_last_max: int = None
+    sync_slider: bool = None
+
+    def __post_init__(self):
+        super().__post_init__()
+
+    def reset_preferences(self):
+        super().reset_preferences()
+
+    def merge(self, old_plot: dict):
+        super().merge(old_plot)
+        self.slider_last_val = 0
+
+    def clean_slider(self):
+        self.slider = None

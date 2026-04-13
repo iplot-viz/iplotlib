@@ -27,6 +27,7 @@ from iplotlib.core import (Axis,
                            PlotXYWithSlider,
                            PlotContourWithSlider,
                            PlotImage,
+                           PlotImageWithSlider,
                            Signal,
                            SignalXY,
                            SignalContour)
@@ -436,6 +437,9 @@ class PyQtGraphParser(BackendParserBase):
 
         return img
 
+    def update_image(self, impl_plot, plot, plot_lines, data):
+        plot_lines.setImage(np.asarray(data, dtype=float))
+
     def do_impl_line_plot_contour(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContour, x_data, y_data,
                                   z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[IsocurveItem]
@@ -659,10 +663,12 @@ class PyQtGraphParser(BackendParserBase):
 
         return cell_gl
 
-    def process_ipl_plot_xy_slider(self, i_plot: PlotXYWithSlider | PlotContourWithSlider, row, col,
+    def process_ipl_plot_xy_slider(self, i_plot: PlotXYWithSlider | PlotContourWithSlider | PlotImageWithSlider, row, col,
                                    visible_stack_ids, cell_gl):
         # Maximum index value for the slider based on the y-data length
         if isinstance(i_plot, PlotXYWithSlider):
+            val_max = i_plot.signals[1][0].y_data.shape[0] - 1
+        elif isinstance(i_plot, PlotImageWithSlider):
             val_max = i_plot.signals[1][0].y_data.shape[0] - 1
         else:
             val_max = i_plot.signals[1][0].time.shape[0] - 1
@@ -864,7 +870,7 @@ class PyQtGraphParser(BackendParserBase):
                 stack_map[row_id] = pi
 
             # Slider creation only if it doesn't exist
-            if isinstance(i_plot, (PlotXYWithSlider, PlotContourWithSlider)):
+            if isinstance(i_plot, (PlotXYWithSlider, PlotContourWithSlider, PlotImageWithSlider)):
                 cell_gl = self.process_ipl_plot_xy_slider(i_plot, row, col, visible_stack_ids, cell_gl)
 
             elif isinstance(i_plot, PlotContour):

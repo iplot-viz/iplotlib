@@ -27,7 +27,7 @@ from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits, IplSliderLimits
-from iplotlib.core.plot import Plot, PlotXY, PlotXYWithSlider, PlotContour, PlotImage, PlotContourWithSlider
+from iplotlib.core.plot import Plot, PlotXY, PlotXYWithSlider, PlotContour, PlotImage, PlotContourWithSlider, PlotImageWithSlider
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 import iplotLogging.setupLogger as Sl
 
@@ -958,6 +958,28 @@ class BackendParserBase(ABC):
     def create_image(self, impl_plot: Any, plot: PlotImage, cache_item, data):
         pass
 
+    @abstractmethod
+    def update_image(self, impl_plot: Any, plot: PlotImage, plot_lines, data):
+        pass
+
+    def do_impl_line_plot_image_slider(self, signal: SignalXY, impl_plot: Any, plot: PlotImageWithSlider, cache_item,
+                                       x_data, y_data, z_data):
+        plot_lines = self._signal_impl_shape_lut.get(id(signal))
+        img = None
+
+        data = self.get_ysub_data(plot, y_data)
+
+        if plot_lines is None:
+            if data.ndim == 2:
+                img = self.create_image(impl_plot, plot, cache_item, data)
+        else:
+            self.update_image(impl_plot, plot, plot_lines, data)
+            img = plot_lines
+
+        signal.lines = img
+
+        return img
+
     def do_impl_line_plot_xy_slider(self, signal: SignalXY, impl_plot: Any, plot: PlotXYWithSlider, cache_item,
                                     x_data, y_data, z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[Any]
@@ -1078,6 +1100,8 @@ class BackendParserBase(ABC):
             if isinstance(plot, PlotXYWithSlider):
                 plot_lines = self.do_impl_line_plot_xy_slider(signal, impl_plot, plot, cache_item, data[0], data[1],
                                                               data[2])
+            elif isinstance(plot, PlotImageWithSlider):
+                plot_lines = self.do_impl_line_plot_image_slider(signal, impl_plot, plot, cache_item, data[0], data[1], data[2])
             elif isinstance(plot, PlotImage):
                 plot_lines = self.do_impl_line_plot_image(signal, impl_plot, plot, cache_item, data[0])
             else:

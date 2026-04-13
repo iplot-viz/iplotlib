@@ -31,6 +31,7 @@ from iplotlib.core import (Axis,
                            PlotXYWithSlider,
                            PlotContourWithSlider,
                            PlotImage,
+                           PlotImageWithSlider,
                            Signal,
                            SignalXY,
                            SignalContour)
@@ -277,6 +278,10 @@ class MatplotlibParser(BackendParserBase):
 
         return img
 
+    def update_image(self, impl_plot, plot, plot_lines, data):
+        plot_lines.set_data(data)
+        plot_lines.set_clim(vmin=data.min(), vmax=data.max())
+
     def do_impl_line_plot_contour(self, signal: SignalContour, mpl_axes: MPLAxes, plot: PlotContour, x_data, y_data,
                                   z_data):
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: QuadContourSet
@@ -465,7 +470,7 @@ class MatplotlibParser(BackendParserBase):
     def process_ipl_plot_contour(self):
         pass
 
-    def process_ipl_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider | PlotContourWithSlider,
+    def process_ipl_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider | PlotContourWithSlider | PlotImageWithSlider,
                                    grid_item: SubplotSpec, stack_sz: int, h_space: float):
         # Configure slider height and calculate the space for plot
         slider_height = 0.06
@@ -541,6 +546,65 @@ class MatplotlibParser(BackendParserBase):
             # Register the callback function to update the plot when the slider value changes
             plot_with_slider.slider.on_changed(
                 lambda val: self._update_slider_contour(val, plot_with_slider, slider_values, current_label))
+
+        # Case for PlotImageWithSlider
+        elif isinstance(plot_with_slider, PlotImageWithSlider):
+            # Get data for the slider
+            slider_values = plot_with_slider.signals[1][0].time
+            min_value = slider_values[0]
+            max_value = slider_values[-1]
+
+            formatter = NanosecondDateFormatter(ax_idx=0)
+            is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
+            if is_date:
+                min_value = pandas.Timestamp(min_value).value
+                max_value = pandas.Timestamp(max_value).value
+
+                start_format = formatter.date_fmt(min_value, formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
+                current_format = formatter.date_fmt(min_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                                    postfix_end=True)
+                end_format = formatter.date_fmt(max_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                                postfix_end=True)
+            else:
+                start_format = min_value
+                current_format = min_value
+                end_format = max_value
+
+            # Font size for slider labels
+            fs = self._pm.get_value(plot_with_slider, 'font_size')
+
+            # Annotate labels along the slider axis
+            slider_ax.annotate(start_format, xy=(0, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=fs)
+            current_label = slider_ax.annotate(current_format, xy=(0.425, -0.3), xycoords='axes fraction', ha='left',
+                                               va='center', fontsize=fs)
+            slider_ax.annotate(end_format, xy=(0.85, -0.3), xycoords='axes fraction', ha='left', va='center',
+                               fontsize=fs)
+
+            # Check if there was a previous plot_with_slider with a value
+            if plot_with_slider.slider_last_val is not None:
+                value = plot_with_slider.slider_last_val
+                if is_date:
+                    current_value = pandas.Timestamp(slider_values[int(value)]).value
+                    current_label.set_text(
+                        formatter.date_fmt(current_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                           postfix_end=True))
+                else:
+                    current_value = slider_values[int(value)]
+                    current_label.set_text(str(current_value))
+            else:
+                value = 0
+
+            # Maximum index value for the slider based on the y-data length
+            val_max = plot_with_slider.signals[1][0].y_data.shape[0] - 1
+
+            # Slider creation
+            plot_with_slider.slider = Slider(slider_ax, '', 0, val_max, valinit=value, valstep=1)
+            plot_with_slider.slider.valtext.set_visible(False)  # Hide slider value text
+
+            # Register the callback function to update the plot when the slider value changes
+            plot_with_slider.slider.on_changed(
+                lambda val: self._update_slider_image(val, plot_with_slider, slider_values, current_label, formatter))
 
         # Case for PlotXYWithSlider
         else:
@@ -660,7 +724,7 @@ class MatplotlibParser(BackendParserBase):
             stack_sz = len(plot.signals.keys())
             h_space = 0.3
 
-        if isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider)):
+        if isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider, PlotImageWithSlider)):
             subgrid_item = self.process_ipl_plot_xy_slider(plot, grid_item, stack_sz, h_space)
         else:
             # Create a vertical layout with `stack_sz` rows and 1 column inside grid_item
@@ -851,6 +915,36 @@ class MatplotlibParser(BackendParserBase):
 
         current_value = slider_values[int(val)]
         current_label.set_text(str(current_value))
+
+        plot.slider_last_val = val
+
+        if self._pm.get_value(plot, 'sync_slider'):
+            return
+
+        if self._pm.get_value(self.canvas, 'shared_x_axis'):
+            plot_with_slider_shared = self.get_shared_plot_xy_slider(plot)
+            for plot_with_slider in plot_with_slider_shared:
+                if not self.canvas.focus_plot:
+                    plot_with_slider.sync_slider = True
+                    plot_with_slider.slider.set_val(val)
+                    plot_with_slider.sync_slider = False
+                else:
+                    plot_with_slider.slider_last_val = val
+
+    def _update_slider_image(self, val, plot, slider_values, current_label, formatter):
+        for c_row in plot.signals.values():
+            for c_signal in c_row:
+                self.process_ipl_signal(c_signal)
+
+        is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
+        if is_date:
+            current_value = pandas.Timestamp(slider_values[int(val)]).value
+            current_label.set_text(
+                formatter.date_fmt(current_value, formatter.cut_start + 3, formatter.NANOSECOND,
+                                   postfix_end=True))
+        else:
+            current_value = slider_values[int(val)]
+            current_label.set_text(str(current_value))
 
         plot.slider_last_val = val
 
