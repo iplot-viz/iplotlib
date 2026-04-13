@@ -1,3 +1,5 @@
+import os
+
 from PySide6.QtCore import QMargins, Qt, Signal, QEvent
 from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox
 
@@ -215,6 +217,23 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             # Push committed command
             while len(self._commitd_cmds):
                 self.push_view_lim_cmd()
+
+    def save_canvas_image(self, filename: str):
+        """Use pyqtgraph exporters instead of QWidget.grab() for accurate rendering."""
+        ext = os.path.splitext(filename)[1].lower()
+        if ext == '.svg':
+            self._save_svg(filename)
+        else:
+            from pyqtgraph.exporters import ImageExporter
+            exporter = ImageExporter(self._parser.figure.scene())
+            exporter.parameters()['width'] = self.width()
+            exporter.export(filename)
+        logger.info(f"Screenshot saved: {os.path.abspath(filename)}")
+
+    def _save_svg(self, filename: str):
+        from pyqtgraph.exporters import SVGExporter
+        exporter = SVGExporter(self._parser.figure.scene())
+        exporter.export(filename)
 
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)

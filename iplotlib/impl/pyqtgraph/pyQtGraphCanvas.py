@@ -166,7 +166,21 @@ class PyQtGraphParser(BackendParserBase):
         return cell_gl
 
     def export_image(self, filename: str, **kwargs):
-        super().export_image(filename, **kwargs)
+        canvas = kwargs.get('canvas')
+        if canvas:
+            self.process_ipl_canvas(canvas)
+
+        ext = os.path.splitext(filename)[1].lower() if '.' in filename else '.png'
+        if ext == '.svg':
+            from pyqtgraph.exporters import SVGExporter
+            exporter = SVGExporter(self.figure.scene())
+            exporter.export(filename)
+        else:
+            from pyqtgraph.exporters import ImageExporter
+            exporter = ImageExporter(self.figure.scene())
+            width = kwargs.get('width', 1920)
+            exporter.parameters()['width'] = width
+            exporter.export(filename)
 
     def legend_downsampled_signal(self, signal, impl_plot: PlotItem, plot_lines: PlotDataItem):
         """
