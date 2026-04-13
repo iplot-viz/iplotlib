@@ -1,5 +1,4 @@
 import csv
-import io
 
 import numpy as np
 from PySide6.QtCore import Qt
