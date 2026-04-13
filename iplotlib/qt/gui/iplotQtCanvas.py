@@ -152,7 +152,10 @@ class IplotQtCanvas(QWidget):
             self._save_svg(filename)
         else:
             pixmap = self.grab()
-            pixmap.save(filename)
+            if not pixmap.save(filename):
+                logger.error(f"Failed to save image: {filename}")
+                return
+        logger.info(f"Screenshot saved: {os.path.abspath(filename)}")
 
     def _save_svg(self, filename: str):
         """SVG export — subclasses override for vector output."""
