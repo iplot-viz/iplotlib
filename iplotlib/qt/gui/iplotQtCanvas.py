@@ -30,6 +30,7 @@ class IplotQtCanvas(QWidget):
     Base class for all Qt related canvas implementations
     """
     cmdDone = Signal(IplotCommand)
+    openPlotPreferences = Signal(object)
     signalShiftRequested = Signal(str, str, str, str, float, float, bool)
     # Unified shift signals (work for both drag and DIST)
     signalShiftApplied = Signal(str, float, float, str)  # (signal_uid, dx, dy, source)

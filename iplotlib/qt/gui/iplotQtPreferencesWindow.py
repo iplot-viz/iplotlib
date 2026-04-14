@@ -18,6 +18,8 @@ from PySide6.QtGui import QShowEvent, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QSplitter, QStackedWidget, QTreeView, QWidget,
                                QScrollArea)
 
+from PySide6.QtGui import QColor, QIcon, QPixmap
+
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
@@ -95,6 +97,7 @@ class IplotQtPreferencesWindow(QMainWindow):
 
     def post_applied(self):
         self._applyTime = time.time_ns()
+        self._refresh_signal_icons()
 
     def set_canvas_from_preferences(self):
         # Get the current canvas in order to preserve the preferences if these are reset
@@ -141,12 +144,32 @@ class IplotQtPreferencesWindow(QMainWindow):
             self.formsStack.currentWidget().set_source_index(self.treeView.model().index(0, 0))
         self.treeView.expandAll()
 
+    def _refresh_signal_icons(self):
+        """Update signal color icons in the tree to reflect current signal colors."""
+        model = self.treeView.model()
+        if not model:
+            return
+        for canvas_row in range(model.rowCount()):
+            canvas_item = model.item(canvas_row, 0)
+            for col_row in range(canvas_item.rowCount()):
+                col_item = canvas_item.child(col_row)
+                for plot_row in range(col_item.rowCount()):
+                    plot_item = col_item.child(plot_row)
+                    for child_row in range(plot_item.rowCount()):
+                        child_item = plot_item.child(child_row)
+                        data = child_item.data(Qt.ItemDataRole.UserRole)
+                        if isinstance(data, Signal) and hasattr(data, 'color') and data.color:
+                            pixmap = QPixmap(12, 12)
+                            pixmap.fill(QColor(data.color))
+                            child_item.setIcon(QIcon(pixmap))
+
     def showEvent(self, event: QShowEvent):
         # Clear selection in the Selection Model
         self.treeView.selectionModel().clearSelection()
         # Select model using the specified command
         self.treeView.selectionModel().select(self.treeView.model().index(0, 0), QItemSelectionModel.Select)
         self.treeView.expandAll()
+        self._refresh_signal_icons()
         self.set_canvas_from_preferences()
         return super().showEvent(event)
 

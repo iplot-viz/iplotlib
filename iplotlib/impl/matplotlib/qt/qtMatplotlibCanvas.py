@@ -267,6 +267,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._debug_log_event(event, f"Draw call {self._draw_call_counter}")
 
     def on_pick_legend(self, event):
+        # Right-click on legend → open signal preferences
+        if hasattr(event, 'mouseevent') and event.mouseevent.button == MouseButton.RIGHT:
+            signal = self._parser._legend_signal_lut.get(event.artist)
+            if signal:
+                menu = QMenu(self)
+                menu.addAction("Signal Preferences",
+                               lambda s=signal: self.openPlotPreferences.emit(s))
+                menu.popup(event.mouseevent.guiEvent.globalPos())
+            return
+
         # On the pick event, find the original line corresponding to the legend
         # proxy line, and toggle its visibility.
         legend_line = event.artist
@@ -487,6 +497,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     autoscale_menu.addAction("Focus on plot", lambda: self._full_screen_mode_on(event.inaxes))
                 else:
                     autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+                autoscale_menu.addSeparator()
+                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+                if ci:
+                    autoscale_menu.addAction("Preferences",
+                                             lambda: self.openPlotPreferences.emit(ci.plot()))
+                # Detect nearest signal and add Signal Preferences option
+                nearest_signal, _, _ = self._find_signal_at_event(event)
+                if nearest_signal:
+                    autoscale_menu.addAction("Signal Preferences",
+                                             lambda s=nearest_signal: self.openPlotPreferences.emit(s))
                 autoscale_menu.popup(event.guiEvent.globalPos())
 
             # Handle drag shift in Select mode with left click - use native hit-testing

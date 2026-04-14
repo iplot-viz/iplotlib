@@ -6,8 +6,8 @@ Stubs for signal.
 
 import typing
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QStandardItem
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QColor, QIcon, QPixmap, QStandardItem
 
 
 class SignalItem(QStandardItem):
@@ -17,3 +17,8 @@ class SignalItem(QStandardItem):
 
     def setData(self, value: typing.Any, role: int = Qt.ItemDataRole.UserRole):
         super().setData(value, role=role)
+        # Show signal color as icon for easy identification
+        if role == Qt.ItemDataRole.UserRole and hasattr(value, 'color') and value.color:
+            pixmap = QPixmap(QSize(12, 12))
+            pixmap.fill(QColor(value.color))
+            self.setIcon(QIcon(pixmap))
