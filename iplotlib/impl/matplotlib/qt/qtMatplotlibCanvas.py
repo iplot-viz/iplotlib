@@ -217,6 +217,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # Redraw canvas to reflect changes
         self._parser.figure.canvas.draw()
 
+    def _save_svg(self, filename: str):
+        self._parser.figure.savefig(filename, format='svg', bbox_inches='tight')
+
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
 
