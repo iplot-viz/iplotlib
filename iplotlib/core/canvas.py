@@ -11,7 +11,7 @@ from typing import List, Union, Dict
 
 from iplotLogging import setupLogger
 from iplotlib.core.persistence import JSONExporter
-from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider, PlotContourWithSlider
+from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider, PlotContourWithSlider, PlotImage
 from iplotlib.core.signal import Signal
 import pandas as pd
 import weakref
@@ -239,12 +239,8 @@ class Canvas(ABC):
 
         for _, col in enumerate(self.plots):
             for _, plot in enumerate(col):
-                if isinstance(plot, PlotXY):
+                if isinstance(plot, (PlotXY, PlotContour, PlotImage)):
                     plot.reset_preferences()
-                elif isinstance(plot, PlotContour):
-                    plot.reset_preferences()
-                else:
-                    continue
 
     def merge(self, old_canvas: dict):
         """

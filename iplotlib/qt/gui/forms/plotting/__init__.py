@@ -5,7 +5,8 @@ from .axisForm import AxisForm
 from .canvasForm import CanvasForm
 from .plotForm import PlotXYForm
 from .plotForm import PlotContourForm
+from .plotForm import PlotImageForm
 from .signalForm import SignalXYForm
 from .signalForm import SignalContourForm
 
-__all__ = ['AxisForm', 'CanvasForm', 'PlotXYForm', 'PlotContourForm', 'SignalXYForm', 'SignalContourForm']
+__all__ = ['AxisForm', 'CanvasForm', 'PlotXYForm', 'PlotContourForm', 'PlotImageForm', 'SignalXYForm', 'SignalContourForm']

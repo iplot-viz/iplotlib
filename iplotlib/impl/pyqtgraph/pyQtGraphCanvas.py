@@ -429,11 +429,8 @@ class PyQtGraphParser(BackendParserBase):
 
         img.setImage(data)
 
-        vb = impl_plot.getViewBox()
-        # vb.setAspectLocked(True)
-
-        # if origin == 'upper':
-        #     impl_plot.invertY(True)
+        if origin == 'upper':
+            impl_plot.invertY(True)
 
         return img
 

@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, Q
 import iplotLogging.setupLogger as Sl
 from pyqtgraph import PlotItem
 
-from iplotlib.core import PlotXYWithSlider, PlotContourWithSlider
+from iplotlib.core import PlotXYWithSlider, PlotContourWithSlider, PlotImage, PlotImageWithSlider
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter as MPLDateFormatter
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter as PGDateFormatter
 
@@ -189,6 +189,9 @@ class IplotQtStatistics(QWidget):
         idx = 0
 
         for signal, impl_plot in info_stats:
+            plot = signal.parent()
+            if isinstance(plot, (PlotImage, PlotImageWithSlider)):
+                continue
             lines = signal.lines
             stack = signal.get_stack()
             has_envelope = signal.data_store[2].size > 0 and signal.data_store[3].size > 0

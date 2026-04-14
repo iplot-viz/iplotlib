@@ -13,7 +13,7 @@ import typing
 from PySide6.QtCore import QModelIndex, Qt, Slot
 from PySide6.QtWidgets import QWidget
 
-from iplotlib.core.plot import PlotXY, PlotContour
+from iplotlib.core.plot import PlotXY, PlotContour, PlotImage
 from iplotlib.qt.gui.forms.iplotPreferencesForm import IplotPreferencesForm
 from iplotlib.qt.models.beanItemModel import BeanItemModel
 from iplotlib.qt.utils.color_picker import ColorPicker
@@ -92,6 +92,38 @@ class PlotContourForm(IplotPreferencesForm):
         py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
 
         if isinstance(py_object, PlotContour):
+            py_object.reset_preferences()
+        else:
+            return
+
+        self.widgetMapper.revert()
+        super().reset_prefs()
+
+
+class PlotImageForm(IplotPreferencesForm):
+    """
+    Map the properties of a PlotImage object to the widgets in a GUI form.
+    """
+
+    def __init__(self, parent: typing.Optional[QWidget] = None, f: Qt.WindowFlags = Qt.Widget):
+        prototype = [
+            {"label": "Title", "property": "plot_title", "widget": self.create_lineedit()},
+            {"label": "Grid", "property": "grid", "widget": self.create_checkbox()},
+            {"label": "Font size", "property": "font_size", "widget": self.default_fontsize_widget()},
+            {"label": "Font color", "property": "font_color", "widget": ColorPicker("font_color")},
+            {"label": "Background color", "property": "background_color", "widget": ColorPicker("background_color")},
+            {"label": "Interpolation", "property": "interpolation",
+             "widget": self.create_combo_box(["none", "nearest", "bilinear", "bicubic"])},
+            {"label": "Origin", "property": "origin",
+             "widget": self.create_combo_box(["upper", "lower"])}
+        ]
+        super().__init__(fields=prototype, label="A plot", parent=parent, f=f)
+
+    @Slot()
+    def reset_prefs(self):
+        py_object = self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
+
+        if isinstance(py_object, PlotImage):
             py_object.reset_preferences()
         else:
             return

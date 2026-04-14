@@ -354,7 +354,24 @@ class PlotImage(Plot):
         super().merge(old_plot)
 
     def get_signals_as_df(self, row, col):
-        """"""
+        x = pd.DataFrame()
+        for p, plot in enumerate(self.signals.values()):
+            for s, pl_signal in enumerate(plot):
+                col_name = f"plot{row + 1}.{col + 1}"
+                if len(self.signals) > 1:
+                    col_name += f".{p + 1}"
+                if pl_signal.alias:
+                    col_name += f"_{pl_signal.alias}"
+                else:
+                    col_name += f"_{pl_signal.name}"
+
+                img_data = pl_signal.x_data
+                if hasattr(img_data, 'ndim') and img_data.ndim == 2:
+                    dataframe = pd.DataFrame(img_data,
+                                             columns=[f"{col_name}.data.{i}" for i in range(img_data.shape[1])])
+                    x = pd.concat([x, dataframe], axis=1)
+
+        return x
 
 
 class SliderMixin:

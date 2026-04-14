@@ -288,7 +288,7 @@ class BackendParserBase(ABC):
                     if self._focus_plot == plot:
                         logger.debug(f"Focusing on plot: {plot}")
                         self.process_ipl_plot(plot, 0, 0)
-                    elif isinstance(plot, PlotXYWithSlider):
+                    elif isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider, PlotImageWithSlider)):
                         plot.slider = None
                 else:
                     self.process_ipl_plot(plot, i, j)
@@ -1185,16 +1185,16 @@ class BackendParserBase(ABC):
         """
         self._hm.drop()
 
-    def get_shared_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider | PlotContourWithSlider):
+    def get_shared_plot_xy_slider(self, plot_with_slider: PlotXYWithSlider | PlotContourWithSlider | PlotImageWithSlider):
         """
-        Returns a list of PlotXYWithSlider instances that share the same time range with the given PlotXYWithSlider
+        Returns a list of slider plots that share the same time range with the given slider plot
         """
         shared = []
         base_begin, base_end = plot_with_slider.axes[0].get_limits('original')
         for col in self.canvas.plots:
             for plot in col:
-                if not (isinstance(plot, PlotXYWithSlider) or isinstance(plot,
-                                                                         PlotContourWithSlider)) or plot == plot_with_slider:
+                if not isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider, PlotImageWithSlider)) \
+                        or plot == plot_with_slider:
                     continue
 
                 # Check if it is date and the max difference is 1 second
@@ -1202,7 +1202,7 @@ class BackendParserBase(ABC):
                 if isinstance(plot, PlotXYWithSlider):
                     slider_values = plot.signals[1][0].z_data
                     is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
-                elif isinstance(plot, PlotContourWithSlider):
+                elif isinstance(plot, (PlotContourWithSlider, PlotImageWithSlider)):
                     slider_values = plot.signals[1][0].time
                     is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
                 else:
