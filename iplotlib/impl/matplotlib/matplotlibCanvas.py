@@ -56,17 +56,19 @@ class MatplotlibParser(BackendParserBase):
                  impl_flush_method: Callable = None) -> None:
         """Initialize underlying matplotlib classes.
         """
-        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
-                         impl_flush_method=impl_flush_method)
-
+        # Initialize before super().__init__() because it calls clear() via process_ipl_canvas
         self.map_legend_to_ax = {}
         self._legend_signal_lut = {}  # legend_line -> Signal
         self.legend_size = 8
         self._cursors = []
+        self._grid_spacing_annotations = {}  # MPLAxes -> Text artist
+        self._impl_plot_ranges_hash = dict()
+
+        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
+                         impl_flush_method=impl_flush_method)
 
         register_matplotlib_converters()
         self.figure = Figure()
-        self._impl_plot_ranges_hash = dict()
 
         if tight_layout:
             self.enable_tight_layout()
@@ -114,6 +116,96 @@ class MatplotlibParser(BackendParserBase):
         if hasattr(signal, 'lines') and signal.lines:
             for line in signal.lines:
                 line.remove()
+
+    @staticmethod
+    def _format_spacing(s, is_date=False):
+        """Format tick spacing as a human-readable string (oscilloscope style)."""
+        s = abs(s)
+        if s == 0:
+            return ""
+        if is_date:
+            # Snap to nearest integer unit if within 20% tolerance
+            units = [(86400e9, "D"), (3600e9, "h"), (60e9, "min"), (1e9, "s"), (1e6, "ms"), (1e3, "μs"), (1, "ns")]
+            for unit_ns, unit_name in units:
+                if s >= unit_ns * 0.8:
+                    val = s / unit_ns
+                    rounded = round(val)
+                    if rounded > 0 and abs(val - rounded) / rounded < 0.2:
+                        val = rounded
+                    return f"{val:.3g}{unit_name}/div"
+            return f"{s:.3g}ns/div"
+        else:
+            if s >= 1e9:
+                return f"{s / 1e9:.3g}G/div"
+            elif s >= 1e6:
+                return f"{s / 1e6:.3g}M/div"
+            elif s >= 1e3:
+                return f"{s / 1e3:.3g}k/div"
+            elif s >= 1:
+                return f"{s:.3g}/div"
+            elif s >= 1e-3:
+                return f"{s * 1e3:.3g}m/div"
+            elif s >= 1e-6:
+                return f"{s * 1e6:.3g}μ/div"
+            else:
+                return f"{s * 1e9:.3g}n/div"
+
+    def _update_grid_spacing_label(self, mpl_axes: MPLAxes, plot: Plot):
+        """Add or update grid spacing annotation on a matplotlib axes."""
+        show = self._pm.get_value(plot, 'grid') and self._pm.get_value(plot, 'grid_spacing_label')
+
+        if not show:
+            if mpl_axes in self._grid_spacing_annotations:
+                self._grid_spacing_annotations.pop(mpl_axes).remove()
+            return
+
+        def _calc_spacing(mpl_ax, pl):
+            is_date = pl.axes[0].is_date if hasattr(pl.axes[0], 'is_date') else False
+
+            x_label = ""
+            x_ticks = sorted(mpl_ax.xaxis.get_ticklocs())
+            x_lo, x_hi = mpl_ax.get_xlim()
+            visible_x = [t for t in x_ticks if x_lo <= t <= x_hi]
+            if len(visible_x) >= 2:
+                x_spacing = abs(visible_x[1] - visible_x[0])
+                if is_date:
+                    formatter = mpl_ax.xaxis.get_major_formatter()
+                    offset_ns = getattr(formatter, 'offset_ns', 0)
+                    if offset_ns == 100_000:
+                        x_spacing = x_spacing * offset_ns
+                x_label = self._format_spacing(x_spacing, is_date)
+
+            y_label = ""
+            y_ticks = sorted(mpl_ax.yaxis.get_ticklocs())
+            y_lo, y_hi = mpl_ax.get_ylim()
+            visible_y = [t for t in y_ticks if y_lo <= t <= y_hi]
+            if len(visible_y) >= 2:
+                y_spacing = abs(visible_y[1] - visible_y[0])
+                y_label = self._format_spacing(y_spacing)
+
+            return x_label, y_label
+
+        def _calc_and_update(mpl_ax=mpl_axes, pl=plot):
+            x_label, y_label = _calc_spacing(mpl_ax, pl)
+            text = f"X: {x_label}  Y: {y_label}" if x_label and y_label else x_label or y_label
+            if mpl_ax in self._grid_spacing_annotations and text:
+                self._grid_spacing_annotations[mpl_ax].set_text(text)
+                self._grid_spacing_annotations[mpl_ax].set_fontsize(
+                    self._pm.get_value(pl, 'font_size') or 8)
+
+        fs = self._pm.get_value(plot, 'font_size') or 8
+
+        if mpl_axes not in self._grid_spacing_annotations:
+            ann = mpl_axes.annotate(" ", xy=(1, 0), xycoords='axes fraction',
+                                    ha='right', va='bottom', fontsize=fs,
+                                    color='black', alpha=0.8,
+                                    xytext=(-5, 5), textcoords='offset points')
+            self._grid_spacing_annotations[mpl_axes] = ann
+            # Connect to axis limit changes and draw event for dynamic updates
+            mpl_axes.callbacks.connect('xlim_changed', lambda ax: _calc_and_update())
+            mpl_axes.callbacks.connect('ylim_changed', lambda ax: _calc_and_update())
+            if hasattr(self, 'figure') and self.figure.canvas:
+                self.figure.canvas.mpl_connect('draw_event', lambda ev: _calc_and_update())
 
     def rebuild_legend(self, mpl_axes: MPLAxes, plot: Plot):
         """
@@ -439,6 +531,7 @@ class MatplotlibParser(BackendParserBase):
                         signal.lines.clear()
 
         self.map_legend_to_ax.clear()
+        self._grid_spacing_annotations.clear()
         self._impl_plot_ranges_hash.clear()
 
         gc.collect()
@@ -725,6 +818,8 @@ class MatplotlibParser(BackendParserBase):
                         mpl_axes.grid(show_grid, which='major')
                 else:
                     mpl_axes.grid(show_grid, which='both')
+
+                self._update_grid_spacing_label(mpl_axes, plot)
 
                 # Update properties of the plot axes
                 x_axis = None
