@@ -199,14 +199,19 @@ class IplotSignalAdapter(ProcessingSignal):
         self.set_da_success()
 
     @staticmethod
-    def acquire_shape(source: BufferObject, target: BufferObject) -> BufferObject:
-        """Modify `source` such that shape(`source`) == shape(`target`)
+    def truncate_to_target(source: BufferObject, target: BufferObject) -> BufferObject:
+        """Align `source` to the shape of `target`.
 
-        :param source: This object will acquire its shape from `target` if it is not the same.
+        This function truncates `source` when it is longer than `target`. As a special case,
+        a single-element `source` is expanded to match `target`'s length by replicating the
+        value (no data is invented). It does not extend `source` with assumed values in any
+        other case.
+
+        :param source: The object to align.
         :type source: BufferObject
-        :param target: This object will dictate the shape of `source`
+        :param target: The object whose shape should be matched.
         :type target: BufferObject
-        :return: The new modified `source` object.
+        :return: The aligned `source` object.
         :rtype: BufferObject
         """
         if np.isscalar(source):
@@ -223,7 +228,7 @@ class IplotSignalAdapter(ProcessingSignal):
             logger.warning(
                 f"X and Y expressions produced arrays of different lengths "
                 f"(source has {len(source)} point, target has {len(target)}). "
-                f"Expanding the single-point source to match the target size. "
+                f"Replicating the single-point source to match the target size. "
                 f"To avoid this warning, make sure both expressions return arrays of the same length.")
             return BufferObject(np.linspace(source[0], source[-1], len(target)), unit=source.unit)
 
@@ -237,11 +242,11 @@ class IplotSignalAdapter(ProcessingSignal):
             return BufferObject(source[:len(target)], unit=source.unit)
 
         # target is longer than source (and source has more than 1 element):
-        # cannot extend source safely without making assumptions about the data.
+        # do not extend source with assumed values; leave it and let the mismatch surface.
         logger.warning(
             f"X and Y expressions produced arrays of different lengths "
-            f"(source has {len(source)} points, target has {len(target)}) "
-            f"and source cannot be safely extended. Leaving source as-is; downstream operations may fail. "
+            f"(source has {len(source)} points, target has {len(target)}). "
+            f"Source cannot be extended without assuming data; leaving it as-is. "
             f"Make sure both expressions return arrays of the same length.")
         return source
 
@@ -457,10 +462,10 @@ class IplotSignalAdapter(ProcessingSignal):
                             break
                         logger.debug(f"[UDA len_data={len(data)} name={name} i={i} len_data_i={len(data[i])}]")
         # 2. Fix x-y shape mismatch.
-        self.y_data = self.acquire_shape(self.y_data, self.x_data)
+        self.y_data = self.truncate_to_target(self.y_data, self.x_data)
 
         # 3. Fix x-z shape mismatch.
-        self.z_data = self.acquire_shape(self.z_data, self.x_data)
+        self.z_data = self.truncate_to_target(self.z_data, self.x_data)
 
         self._report_xyz_data()
 
