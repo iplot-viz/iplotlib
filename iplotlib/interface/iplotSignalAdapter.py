@@ -211,19 +211,39 @@ class IplotSignalAdapter(ProcessingSignal):
         """
         if np.isscalar(source):
             return BufferObject([source] * len(target))
-        elif target.ndim == source.ndim:
-            if len(source) != len(target) and len(source) == 1:
-                logger.warning(
-                    f"Caught x-target shape mismatch! Fixing it. len(source) = {len(source)} -> {len(target)}")
-                return BufferObject(np.linspace(source[0], source[-1], len(target)), unit=source.unit)
-            elif len(source) != len(target) and len(target) < len(source):
-                logger.warning(
-                    f"Caught y-source shape mismatch! Truncating. len(source) = {len(source)} -> {len(target)}")
-                return BufferObject(source[:len(target)], unit=source.unit)
-            else:
-                return source
-        else:
+
+        if target.ndim != source.ndim:
             return source  # CHECK: Modify ndims
+
+        if len(source) == len(target):
+            return source
+
+        # Lengths differ: try to align source to target's shape
+        if len(source) == 1:
+            logger.warning(
+                f"X and Y expressions produced arrays of different lengths "
+                f"(source has {len(source)} point, target has {len(target)}). "
+                f"Expanding the single-point source to match the target size. "
+                f"To avoid this warning, make sure both expressions return arrays of the same length.")
+            return BufferObject(np.linspace(source[0], source[-1], len(target)), unit=source.unit)
+
+        if len(target) < len(source):
+            logger.warning(
+                f"X and Y expressions produced arrays of different lengths "
+                f"(source has {len(source)} points, target has {len(target)}). "
+                f"Truncating source to match target. "
+                f"To avoid this warning, make sure both expressions return arrays of the same length "
+                f"(e.g. use ${{signal}}.data[0:1] to match a single-point X).")
+            return BufferObject(source[:len(target)], unit=source.unit)
+
+        # target is longer than source (and source has more than 1 element):
+        # cannot extend source safely without making assumptions about the data.
+        logger.warning(
+            f"X and Y expressions produced arrays of different lengths "
+            f"(source has {len(source)} points, target has {len(target)}) "
+            f"and source cannot be safely extended. Leaving source as-is; downstream operations may fail. "
+            f"Make sure both expressions return arrays of the same length.")
+        return source
 
     def compute(self, **kwargs) -> dict:
         data_arrays = dict()
