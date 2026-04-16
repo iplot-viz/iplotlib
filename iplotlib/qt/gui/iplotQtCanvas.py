@@ -2,6 +2,7 @@
 This module has a base class defined for all Qt canvas implementations.
 """
 
+import os
 from collections import defaultdict
 from abc import abstractmethod
 from contextlib import contextmanager
@@ -29,6 +30,7 @@ class IplotQtCanvas(QWidget):
     Base class for all Qt related canvas implementations
     """
     cmdDone = Signal(IplotCommand)
+    openPlotPreferences = Signal(object)
     signalShiftRequested = Signal(str, str, str, str, float, float, bool)
     # Unified shift signals (work for both drag and DIST)
     signalShiftApplied = Signal(str, float, float, str)  # (signal_uid, dx, dy, source)
@@ -143,6 +145,30 @@ class IplotQtCanvas(QWidget):
             self.setCursor(Qt.CursorShape.CrossCursor)
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def save_canvas_image(self, filename: str):
+        """Save the canvas to an image file (PNG, JPEG, or SVG)."""
+        ext = os.path.splitext(filename)[1].lower()
+        if ext == '.svg':
+            self._save_svg(filename)
+        else:
+            pixmap = self.grab()
+            if not pixmap.save(filename):
+                logger.error(f"Failed to save image: {filename}")
+                return
+        logger.info(f"Screenshot saved: {os.path.abspath(filename)}")
+
+    def _save_svg(self, filename: str):
+        """SVG export — subclasses override for vector output."""
+        from PySide6.QtSvg import QSvgGenerator
+        from PySide6.QtGui import QPainter
+        generator = QSvgGenerator()
+        generator.setFileName(filename)
+        generator.setSize(self.size())
+        generator.setViewBox(self.rect())
+        painter = QPainter(generator)
+        self.render(painter)
+        painter.end()
 
     @abstractmethod
     def set_canvas(self, canvas: Canvas):

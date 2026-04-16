@@ -133,6 +133,7 @@ class Canvas(ABC):
     legend_position: str = None
     legend_layout: str = None
     grid: bool = None
+    grid_spacing_label: bool = None
     autoscale: bool = None
     contour_filled: bool = None
     legend_format: str = None
@@ -216,6 +217,7 @@ class Canvas(ABC):
         self.legend_position = Canvas.legend_position
         self.legend_layout = Canvas.legend_layout
         self.grid = Canvas.grid
+        self.grid_spacing_label = Canvas.grid_spacing_label
         self.autoscale = Canvas.autoscale
         self.contour_filled = Canvas.contour_filled
         self.legend_format = Canvas.legend_format
@@ -266,6 +268,7 @@ class Canvas(ABC):
         self.legend_position = old_canvas['legend_position']
         self.legend_layout = old_canvas['legend_layout']
         self.grid = old_canvas['grid']
+        self.grid_spacing_label = old_canvas.get('grid_spacing_label', None)
         self.autoscale = old_canvas['autoscale']
         self.contour_filled = old_canvas['contour_filled']
         self.legend_format = old_canvas['legend_format']

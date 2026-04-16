@@ -7,10 +7,15 @@ A main window with a collection of iplotlib canvases and a helpful toolbar.
 from functools import partial
 import typing
 
-from PySide6.QtCore import QMargins, Qt, Signal
+from PySide6.QtCore import QItemSelectionModel, QMargins, Qt, Signal
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
+
+from PySide6.QtCore import QMargins, Qt, Signal
+from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QWidget
+
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from iplotlib.core.command import IplotCommand
+from iplotlib.core.signal import Signal as IplotSignal
 
 from iplotlib.qt.gui.iplotCanvasToolbar import IplotQtCanvasToolbar
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
@@ -67,6 +72,7 @@ class IplotQtMainWindow(QMainWindow):
             [self.canvasStack.widget(i).set_mouse_mode(tool_name) for i in range(self.canvasStack.count())])
         self.canvasStack.canvasAdded.connect(self.on_canvas_add)
         self.canvasStack.currentChanged.connect(lambda idx: self.check_history(self.canvasStack.widget(idx)))
+        self.toolBar.saveImageAction.triggered.connect(self.save_canvas_image)
         self.toolBar.redrawAction.triggered.connect(self.re_draw)
         self.toolBar.detachAction.triggered.connect(self.detach)
         self.toolBar.configureAction.triggered.connect(
@@ -103,6 +109,23 @@ class IplotQtMainWindow(QMainWindow):
             return
         w.show_stats()
 
+    def save_canvas_image(self):
+        w = self.canvasStack.currentWidget()
+        if not w:
+            return
+        file_filter = "PNG Image (*.png);;SVG Image (*.svg);;JPEG Image (*.jpg *.jpeg)"
+        filename, selected_filter = QFileDialog.getSaveFileName(
+            self, "Save Canvas as Image", "", file_filter)
+        if filename:
+            if not any(filename.lower().endswith(ext) for ext in ('.png', '.svg', '.jpg', '.jpeg')):
+                if 'SVG' in selected_filter:
+                    filename += '.svg'
+                elif 'JPEG' in selected_filter:
+                    filename += '.jpg'
+                else:
+                    filename += '.png'
+            w.save_canvas_image(filename)
+
     def drop_history(self):
         w = self.canvasStack.currentWidget()
         if not w:
@@ -132,6 +155,7 @@ class IplotQtMainWindow(QMainWindow):
         Connect the `on_cmd_done` signal of the canvas widget to our `on_cmd_done` signal.
         """
         w.cmdDone.connect(partial(self.on_cmd_done, w))
+        w.openPlotPreferences.connect(self._open_plot_preferences)
 
     def on_cmd_done(self, w: IplotQtCanvas, cmd: IplotCommand):
         """
@@ -141,6 +165,45 @@ class IplotQtMainWindow(QMainWindow):
         """
         self.check_history(w)
         self.toolBar.undoAction.setText(f"Undo {cmd.name}")
+
+    def _open_plot_preferences(self, target):
+        """Open preferences window and navigate to the given Plot or Signal in the tree.
+        Collapses all other items and expands only the relevant path."""
+        tree = self.prefWindow.treeView
+        model = tree.model()
+        if not model:
+            return
+        is_signal = isinstance(target, IplotSignal)
+        for canvas_row in range(model.rowCount()):
+            canvas_idx = model.index(canvas_row, 0)
+            for col_row in range(model.rowCount(canvas_idx)):
+                col_idx = model.index(col_row, 0, canvas_idx)
+                for plot_row in range(model.rowCount(col_idx)):
+                    plot_idx = model.index(plot_row, 0, col_idx)
+                    if not is_signal and plot_idx.data(Qt.ItemDataRole.UserRole) is target:
+                        self._show_pref_at(tree, canvas_idx, col_idx, plot_idx, plot_idx)
+                        return
+                    if is_signal:
+                        for child_row in range(model.rowCount(plot_idx)):
+                            child_idx = model.index(child_row, 0, plot_idx)
+                            if child_idx.data(Qt.ItemDataRole.UserRole) is target:
+                                self._show_pref_at(tree, canvas_idx, col_idx, plot_idx, child_idx)
+                                return
+
+    def _show_pref_at(self, tree, canvas_idx, col_idx, plot_idx, target_idx):
+        """Show preferences window with tree collapsed except the path to target_idx."""
+        self.prefWindow.show()
+        self.prefWindow.raise_()
+        self.prefWindow.activateWindow()
+        self.prefWindow._refresh_signal_icons()
+        tree.collapseAll()
+        tree.expand(canvas_idx)
+        tree.expand(col_idx)
+        tree.expand(plot_idx)
+        tree.selectionModel().clearSelection()
+        tree.selectionModel().select(target_idx, QItemSelectionModel.SelectionFlag.Select)
+        tree.scrollTo(target_idx)
+        self.prefWindow.set_canvas_from_preferences()
 
     def update_canvas_preferences(self):
         w = self.canvasStack.currentWidget()

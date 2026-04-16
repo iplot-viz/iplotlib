@@ -122,22 +122,26 @@ class PyQtGraphParser(BackendParserBase):
                  focus_plot=None,
                  focus_plot_stack_key=None,
                  impl_flush_method: Callable = None) -> None:
-        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
-                         impl_flush_method=impl_flush_method)
-
+        # Initialize before super().__init__() because it calls clear() via process_ipl_canvas
         self.map_legend_to_ax = {}
+        self._legend_signal_lut = {}  # id(ItemSample/LabelItem) -> Signal
+        self._on_legend_right_click = None  # callback(Signal) set by Qt canvas
         self.legend_size = 8
         self._cursors = []
         self._cursor_active = False
-
-        self.figure = pg.GraphicsLayoutWidget()
-        self.figure.setBackground('w')
-        self._cell_gl = {}  # (row, col) -> GraphicsLayout sublayout
-        self._layout_stacks = {}  # (row, col, stack_id) -> PlotItem
-        self._slider_placeholders = {}  # (row, col) -> QGraphicsProxyWidget
+        self._grid_spacing_labels = {}  # PlotItem -> TextItem
+        self._cell_gl = {}
+        self._layout_stacks = {}
+        self._slider_placeholders = {}
         self._impl_plot_ranges_hash = dict()
         self._colorbar_lut = dict()
         self._row_offset = 0
+
+        super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
+                         impl_flush_method=impl_flush_method)
+
+        self.figure = pg.GraphicsLayoutWidget()
+        self.figure.setBackground('w')
 
         if tight_layout:
             self.enable_tight_layout()
@@ -166,7 +170,21 @@ class PyQtGraphParser(BackendParserBase):
         return cell_gl
 
     def export_image(self, filename: str, **kwargs):
-        super().export_image(filename, **kwargs)
+        canvas = kwargs.get('canvas')
+        if canvas:
+            self.process_ipl_canvas(canvas)
+
+        ext = os.path.splitext(filename)[1].lower() if '.' in filename else '.png'
+        if ext == '.svg':
+            from pyqtgraph.exporters import SVGExporter
+            exporter = SVGExporter(self.figure.scene())
+            exporter.export(filename)
+        else:
+            from pyqtgraph.exporters import ImageExporter
+            exporter = ImageExporter(self.figure.scene())
+            width = kwargs.get('width', 1920)
+            exporter.parameters()['width'] = width
+            exporter.export(filename)
 
     def legend_downsampled_signal(self, signal, impl_plot: PlotItem, plot_lines: PlotDataItem):
         """
@@ -897,16 +915,30 @@ class PyQtGraphParser(BackendParserBase):
             ix_legend = 0
 
             if plot.legend and plot.legend.items:
-                # Set legend_lines
-                legend_lines = [sample.item
-                                for item in plot.legend.items
-                                for sample in item
-                                if isinstance(sample, pg.ItemSample)]
+                # Set legend_lines and build legend → signal mapping
+                legend_samples = [sample
+                                  for item in plot.legend.items
+                                  for sample in item
+                                  if isinstance(sample, pg.ItemSample)]
+                legend_lines = [sample.item for sample in legend_samples]
 
                 for signal in signals:
                     for line in self._signal_impl_shape_lut.get(id(signal)):
                         self.map_legend_to_ax[legend_lines[ix_legend]] = line
+                        self._legend_signal_lut[id(legend_samples[ix_legend])] = signal
                         label_item = plot.legend.items[ix_legend][1]
+                        self._legend_signal_lut[id(label_item)] = signal
+                        # Patch ItemSample to handle right-click for signal preferences
+                        sample = legend_samples[ix_legend]
+                        orig_handler = sample.mouseClickEvent
+                        def _patched_click(ev, orig=orig_handler, sig=signal, parser=self):
+                            if ev.button() == QtCore.Qt.MouseButton.RightButton:
+                                if parser._on_legend_right_click:
+                                    parser._on_legend_right_click(sig, ev.screenPos())
+                                ev.accept()
+                                return
+                            orig(ev)
+                        sample.mouseClickEvent = _patched_click
                         label_item.setAttr(attr='size', value=f'{fs}pt')
                         legend_label = line.name() if not isinstance(line, Collection) else line[0].name()
                         if signal.isDownsampled:
@@ -929,6 +961,10 @@ class PyQtGraphParser(BackendParserBase):
             cell_gl.addItem(axis_items["bottom"].common_label, row=len(i_plot.signals) + 1, col=0)
 
         self.align_y_axis(col)
+
+        # Update grid spacing labels after all data and axes are configured
+        for plot in stack_map.values():
+            self.update_grid_spacing_label(plot)
 
     def set_bottom_axis_stacked(self, row: int, col: int, visible_stacks: List[int]):
         if not visible_stacks:
@@ -1084,12 +1120,14 @@ class PyQtGraphParser(BackendParserBase):
             if current_plot in stacks.values():
                 self.align_y_axis(c)
                 break
+        self.update_grid_spacing_label(current_plot)
 
     def _x_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
             return
         current_plot = view_box.parentItem()  # type: PlotItem
         super()._x_axis_update_callback(current_plot)
+        self.update_grid_spacing_label(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':
@@ -1255,6 +1293,7 @@ class PyQtGraphParser(BackendParserBase):
                         plot.clean_slider()
 
         self.map_legend_to_ax.clear()
+        self._grid_spacing_labels.clear()
         self._impl_plot_ranges_hash.clear()
         self._slider_placeholders.clear()
         self._colorbar_lut.clear()
@@ -1267,6 +1306,119 @@ class PyQtGraphParser(BackendParserBase):
         Enable or disable the grid for the given plot.
         """
         plot.showGrid(x=grid, y=grid)
+
+    @staticmethod
+    def _format_spacing(s, is_date=False):
+        """Format tick spacing as a human-readable string (oscilloscope style)."""
+        s = abs(s)
+        if s == 0:
+            return ""
+        if is_date:
+            # Snap to nearest integer unit if within 20% tolerance
+            units = [(86400e9, "D"), (3600e9, "h"), (60e9, "min"), (1e9, "s"), (1e6, "ms"), (1e3, "μs"), (1, "ns")]
+            for unit_ns, unit_name in units:
+                if s >= unit_ns * 0.8:
+                    val = s / unit_ns
+                    rounded = round(val)
+                    if rounded > 0 and abs(val - rounded) / rounded < 0.2:
+                        val = rounded
+                    return f"{val:.3g}{unit_name}/div"
+            return f"{s:.3g}ns/div"
+        else:
+            if s >= 1e9:
+                return f"{s / 1e9:.3g}G/div"
+            elif s >= 1e6:
+                return f"{s / 1e6:.3g}M/div"
+            elif s >= 1e3:
+                return f"{s / 1e3:.3g}k/div"
+            elif s >= 1:
+                return f"{s:.3g}/div"
+            elif s >= 1e-3:
+                return f"{s * 1e3:.3g}m/div"
+            elif s >= 1e-6:
+                return f"{s * 1e6:.3g}μ/div"
+            else:
+                return f"{s * 1e9:.3g}n/div"
+
+    def update_grid_spacing_label(self, plot: PlotItem):
+        """Update or remove the grid spacing label for a plot."""
+        ci = self._impl_plot_cache_table.get_cache_item(plot)
+        if not ci:
+            return
+        i_plot = ci.plot()
+        show = self._pm.get_value(i_plot, 'grid') and self._pm.get_value(i_plot, 'grid_spacing_label')
+
+        if not show:
+            if plot in self._grid_spacing_labels:
+                plot.removeItem(self._grid_spacing_labels.pop(plot))
+            return
+
+        vb = plot.getViewBox()
+        vr = vb.viewRange()
+        x_axis = plot.getAxis('bottom')
+        y_axis = plot.getAxis('left')
+        is_date = getattr(x_axis, 'is_date', False)
+
+        def _get_tick_spacing(axis, vr_min, vr_max):
+            """Get the actual tick spacing from an axis."""
+            try:
+                geom = axis.geometry()
+                size = geom.width() if axis.orientation in ('bottom', 'top') else geom.height()
+                if size <= 0:
+                    size = 800  # fallback for initial draw
+                tick_levels = axis.tickValues(vr_min, vr_max, size)
+                if tick_levels:
+                    spacing, ticks = tick_levels[0]
+                    if spacing > 0:
+                        return spacing
+                    if len(ticks) >= 2:
+                        return abs(ticks[1] - ticks[0])
+            except Exception:
+                pass
+            return 0
+
+        x_spacing = _get_tick_spacing(x_axis, vr[0][0], vr[0][1])
+        y_spacing = _get_tick_spacing(y_axis, vr[1][0], vr[1][1])
+
+        # Correct for axis offset scaling (datetime axes may use offset == 100_000 as multiplier)
+        if is_date:
+            offset = getattr(x_axis, 'offset', 0)
+            if offset == 100_000:
+                x_spacing = x_spacing * offset
+
+        x_label = self._format_spacing(x_spacing, is_date) if x_spacing > 0 else ""
+        y_label = self._format_spacing(y_spacing, False) if y_spacing > 0 else ""
+
+        text = f"X: {x_label}  Y: {y_label}" if x_label and y_label else x_label or y_label
+        if not text:
+            return
+
+        fs = self._pm.get_value(i_plot, 'font_size') or 8
+
+        if plot not in self._grid_spacing_labels:
+            label = TextItem(text, color=(0, 0, 0), anchor=(1, 1))
+            label.setZValue(100)
+            label.setFlag(label.GraphicsItemFlag.ItemIsMovable, True)
+            label._user_moved = False
+            # Track if user moved it
+            orig_release = label.mouseReleaseEvent
+            def _on_release(ev, lbl=label, orig=orig_release):
+                lbl._user_moved = True
+                if orig:
+                    orig(ev)
+            label.mouseReleaseEvent = _on_release
+            plot.addItem(label, ignoreBounds=True)
+            self._grid_spacing_labels[plot] = label
+        else:
+            label = self._grid_spacing_labels[plot]
+            label.setText(text)
+        font = QFont()
+        font.setPointSize(int(fs))
+        label.setFont(font)
+
+        # Position at bottom-right of the view (only if user hasn't moved it)
+        if not getattr(label, '_user_moved', False):
+            label.setPos(vr[0][1], vr[1][0])
 
     @staticmethod
     def set_mouse(plot: PlotItem):
