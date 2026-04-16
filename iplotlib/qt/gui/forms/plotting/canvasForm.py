@@ -54,6 +54,8 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.create_checkbox()},
             {"label": "Grid", "property": "grid",
              "widget": self.create_checkbox()},
+            {"label": "Grid spacing label", "property": "grid_spacing_label",
+             "widget": self.create_checkbox()},
             {"label": "Show all ticks", "property": "ticks_position",
              "widget": self.create_checkbox()},
             {"label": "Number of ticks and labels", "property": "tick_number",

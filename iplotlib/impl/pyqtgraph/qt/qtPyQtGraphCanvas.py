@@ -1,3 +1,5 @@
+import os
+
 from PySide6.QtCore import QMargins, Qt, Signal, QEvent
 from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox
 
@@ -26,6 +28,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._draw_call_counter = 0
 
         self._parser = PyQtGraphParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
+        self._parser._on_legend_right_click = self._on_legend_right_click
 
         # Track connected ViewBoxes to avoid duplicate connections
         self._connected_viewboxes = set()
@@ -215,6 +218,23 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             # Push committed command
             while len(self._commitd_cmds):
                 self.push_view_lim_cmd()
+
+    def save_canvas_image(self, filename: str):
+        """Use pyqtgraph exporters instead of QWidget.grab() for accurate rendering."""
+        ext = os.path.splitext(filename)[1].lower()
+        if ext == '.svg':
+            self._save_svg(filename)
+        else:
+            from pyqtgraph.exporters import ImageExporter
+            exporter = ImageExporter(self._parser.figure.scene())
+            exporter.parameters()['width'] = self.width()
+            exporter.export(filename)
+        logger.info(f"Screenshot saved: {os.path.abspath(filename)}")
+
+    def _save_svg(self, filename: str):
+        from pyqtgraph.exporters import SVGExporter
+        exporter = SVGExporter(self._parser.figure.scene())
+        exporter.export(filename)
 
     def set_mouse_mode(self, mode: str):
         super().set_mouse_mode(mode)
@@ -429,6 +449,16 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                                                   lambda: self._full_screen_mode_on(impl_plot))
                 else:
                     self.autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+                self.autoscale_menu.addSeparator()
+                ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+                if ci:
+                    self.autoscale_menu.addAction("Preferences",
+                                                  lambda: self.openPlotPreferences.emit(ci.plot()))
+                # Detect nearest signal and add Signal Preferences option
+                nearest_signal, _ = self._find_signal_at_event(view_box, event)
+                if nearest_signal:
+                    self.autoscale_menu.addAction("Signal Preferences",
+                                                  lambda s=nearest_signal: self.openPlotPreferences.emit(s))
                 self.autoscale_menu.popup(event.screenPos().toPoint())
 
     def mouse_clicked(self, event):
@@ -468,6 +498,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         y_value = system_coord.y()
         if y_value is not None:
             self._update_drag_shift(y_value, x_value)
+
+    def _on_legend_right_click(self, signal, screen_pos):
+        """Handle right-click on a legend item to open signal preferences."""
+        menu = QMenu(self)
+        menu.addAction("Signal Preferences", lambda s=signal: self.openPlotPreferences.emit(s))
+        menu.popup(screen_pos.toPoint())
 
     def _find_signal_at_event(self, view_box, event):
         """

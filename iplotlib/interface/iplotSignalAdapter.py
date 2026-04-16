@@ -795,6 +795,12 @@ class AccessHelper:
             result = AccessHelper._request_data(**in_params)
             out_params.update(result)
             signal.isDownsampled = result['isds']
+            # Update pulse_nb and legend label with the resolved value (for 0/-1 special pulses)
+            if result.get('resolved_pulse') and str(signal.pulse_nb) != result['resolved_pulse']:
+                old_pulse = str(signal.pulse_nb)
+                signal.pulse_nb = result['resolved_pulse']
+                if old_pulse and signal.label and old_pulse in signal.label:
+                    signal.label = signal.label.replace(old_pulse, signal.pulse_nb)
         except Exception as e:
             # Indicate failure with message.
             if signal.pulse_nb:
@@ -878,6 +884,8 @@ class AccessHelper:
                 result['d2_unit'] = d_env.yunit if d_env else ''
                 result['d3_unit'] = d_env.yunit if d_env else ''
                 result['isds'] = ds
+                if d_env and d_env.resolved_pulse:
+                    result['resolved_pulse'] = d_env.resolved_pulse
                 logger.debug(f"[UDA ] nbsMIN={len(d_env.ydata_min)} nbsMAX={len(d_env.ydata_max)}")
 
             else:
@@ -917,6 +925,8 @@ class AccessHelper:
                 result['d2_unit'] = ''
                 result['d3_unit'] = ''
                 result['isds'] = ds
+                if raw.resolved_pulse:
+                    result['resolved_pulse'] = raw.resolved_pulse
         else:
             raise DataAccessError(f"tsS={ts_s}, tsE={ts_e}, pulse_nb={pulse}")
 
