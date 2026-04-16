@@ -43,6 +43,9 @@ from iplotLogging import setupLogger
 
 logger = setupLogger.get_logger(__name__)
 
+# Dedup key (source, target, len_src, len_tgt, case): same mismatch across signals warns once.
+_TRUNCATE_WARN_KEYS: typing.Set[tuple] = set()
+
 IplotSignalAdapterT = typing.TypeVar('IplotSignalAdapterT', bound='IplotSignalAdapter')
 
 
@@ -199,7 +202,8 @@ class IplotSignalAdapter(ProcessingSignal):
         self.set_da_success()
 
     @staticmethod
-    def truncate_to_target(source: BufferObject, target: BufferObject) -> BufferObject:
+    def truncate_to_target(source: BufferObject, target: BufferObject,
+                           source_label: str = 'source', target_label: str = 'target') -> BufferObject:
         """Align `source` to the shape of `target`.
 
         This function truncates `source` when it is longer than `target`. As a special case,
@@ -211,6 +215,8 @@ class IplotSignalAdapter(ProcessingSignal):
         :type source: BufferObject
         :param target: The object whose shape should be matched.
         :type target: BufferObject
+        :param source_label: Name of the expression producing `source` (e.g. 'y' or 'z').
+        :param target_label: Name of the expression producing `target` (e.g. 'x').
         :return: The aligned `source` object.
         :rtype: BufferObject
         """
@@ -223,30 +229,38 @@ class IplotSignalAdapter(ProcessingSignal):
         if len(source) == len(target):
             return source
 
-        # Lengths differ: try to align source to target's shape
+        def _log_mismatch(case: str, msg: str) -> None:
+            key = (source_label, target_label, len(source), len(target), case)
+            if key in _TRUNCATE_WARN_KEYS:
+                logger.debug(msg)
+            else:
+                _TRUNCATE_WARN_KEYS.add(key)
+                logger.warning(msg)
+
         if len(source) == 1:
-            logger.warning(
-                f"X and Y expressions produced arrays of different lengths "
-                f"(source has {len(source)} point, target has {len(target)}). "
-                f"Replicating the single-point source to match the target size. "
+            _log_mismatch(
+                'replicate',
+                f"{source_label} and {target_label} expressions produced arrays of different lengths "
+                f"({source_label} has {len(source)} point, {target_label} has {len(target)}). "
+                f"Replicating the single-point {source_label} to match the {target_label} size. "
                 f"To avoid this warning, make sure both expressions return arrays of the same length.")
-            return BufferObject(np.linspace(source[0], source[-1], len(target)), unit=source.unit)
+            return BufferObject(np.full(len(target), source[0], dtype=source.dtype), unit=source.unit)
 
         if len(target) < len(source):
-            logger.warning(
-                f"X and Y expressions produced arrays of different lengths "
-                f"(source has {len(source)} points, target has {len(target)}). "
-                f"Truncating source to match target. "
+            _log_mismatch(
+                'truncate',
+                f"{source_label} and {target_label} expressions produced arrays of different lengths "
+                f"({source_label} has {len(source)} points, {target_label} has {len(target)}). "
+                f"Truncating {source_label} to match {target_label}. "
                 f"To avoid this warning, make sure both expressions return arrays of the same length "
-                f"(e.g. use ${{signal}}.data[0:1] to match a single-point X).")
+                f"(e.g. use [0:1] slicing to align with a single-point expression).")
             return BufferObject(source[:len(target)], unit=source.unit)
 
-        # target is longer than source (and source has more than 1 element):
-        # do not extend source with assumed values; leave it and let the mismatch surface.
-        logger.warning(
-            f"X and Y expressions produced arrays of different lengths "
-            f"(source has {len(source)} points, target has {len(target)}). "
-            f"Source cannot be extended without assuming data; leaving it as-is. "
+        _log_mismatch(
+            'no-extend',
+            f"{source_label} and {target_label} expressions produced arrays of different lengths "
+            f"({source_label} has {len(source)} points, {target_label} has {len(target)}). "
+            f"{source_label} cannot be extended without assuming data; leaving it as-is. "
             f"Make sure both expressions return arrays of the same length.")
         return source
 
@@ -462,10 +476,12 @@ class IplotSignalAdapter(ProcessingSignal):
                             break
                         logger.debug(f"[UDA len_data={len(data)} name={name} i={i} len_data_i={len(data[i])}]")
         # 2. Fix x-y shape mismatch.
-        self.y_data = self.truncate_to_target(self.y_data, self.x_data)
+        self.y_data = self.truncate_to_target(self.y_data, self.x_data,
+                                              source_label='y', target_label='x')
 
         # 3. Fix x-z shape mismatch.
-        self.z_data = self.truncate_to_target(self.z_data, self.x_data)
+        self.z_data = self.truncate_to_target(self.z_data, self.x_data,
+                                              source_label='z', target_label='x')
 
         self._report_xyz_data()
 

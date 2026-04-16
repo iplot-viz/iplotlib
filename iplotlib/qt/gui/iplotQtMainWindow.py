@@ -207,8 +207,20 @@ class IplotQtMainWindow(QMainWindow):
 
     def update_canvas_preferences(self):
         w = self.canvasStack.currentWidget()
-        with w.view_retainer():
+        canvas = w.get_canvas()
+        prev = self.prefWindow.current_canvas or {}
+        # shared_x_axis toggle changes range semantics — invalidate X limits and skip
+        # retention so the refresh recomputes ranges under the new setting.
+        toggled = canvas is not None and prev.get('shared_x_axis') != getattr(canvas, 'shared_x_axis', None)
+        if toggled:
+            for col in canvas.plots:
+                for plot in col:
+                    if plot is not None and plot.axes:
+                        plot.axes[0].set_limits(None, None, 'current')
             w.refresh()
+        else:
+            with w.view_retainer():
+                w.refresh()
         self.prefWindow.set_canvas_from_preferences()
         self.prefWindow.post_applied()
 

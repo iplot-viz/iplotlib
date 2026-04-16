@@ -551,11 +551,8 @@ class BackendParserBase(ABC):
 
         begin, end = +np.inf, -np.inf
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        # For the X axis with shared_x_axis, aggregate signals from every plot sharing
-        # the axis so the range covers all subplots (single-point signals in separate
-        # plots would otherwise each compute a degenerate range independently).
-        # Otherwise aggregate from the stacks of the current plot so stacked single-point
-        # signals within the same plot are still consolidated.
+        # X axis with shared_x_axis: aggregate across all non-slider plots so single-point
+        # signals in sibling subplots land on one consolidated range.
         if ax_idx == 0 and self._pm.get_value(self.canvas, 'shared_x_axis'):
             signals = []
             for col in self.canvas.plots:
