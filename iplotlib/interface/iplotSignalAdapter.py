@@ -112,7 +112,7 @@ class IplotSignalAdapter(ProcessingSignal):
     ts_end: str = ''
     ts_relative: bool = False
     envelope: bool = False
-    calibrated: bool = True
+    calibrated: bool = False
     isDownsampled: bool = False
     x_expr: str = '${self}.time'
     y_expr: str = '${self}.data'
