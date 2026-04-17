@@ -112,6 +112,7 @@ class IplotSignalAdapter(ProcessingSignal):
     ts_end: str = ''
     ts_relative: bool = False
     envelope: bool = False
+    calibrated: bool = False
     isDownsampled: bool = False
     x_expr: str = '${self}.time'
     y_expr: str = '${self}.data'
@@ -167,7 +168,7 @@ class IplotSignalAdapter(ProcessingSignal):
             self.status_info.result = Result.READY
 
     def calculate_data_hash(self):
-        return hash_code(self, ["ts_start", "ts_end", "pulse_nb"])
+        return hash_code(self, ["ts_start", "ts_end", "pulse_nb", "calibrated"])
 
     def get_data(self):
         # 1. Populate time, data_primary, data_secondary (if needed)
@@ -675,16 +676,22 @@ class AccessHelper:
 
     @staticmethod
     def construct_da_params(signal: IplotSignalAdapter):
-        return dict(data_s_name=signal.data_source,
-                    varname=signal.name,
-                    tsS=AccessHelper.uda_ts(signal, signal.ts_start),
-                    tsE=AccessHelper.uda_ts(signal, signal.ts_end),
-                    tsFormat='relative' if signal.ts_relative else 'absolute',
-                    pulse=signal.pulse_nb,
-                    envelope=signal.envelope,
-                    extremities=signal.extremities,
-                    nbp=AccessHelper.num_samples if AccessHelper.num_samples_override else -1
-                    )
+        params = dict(data_s_name=signal.data_source,
+                      varname=signal.name,
+                      tsS=AccessHelper.uda_ts(signal, signal.ts_start),
+                      tsE=AccessHelper.uda_ts(signal, signal.ts_end),
+                      tsFormat='relative' if signal.ts_relative else 'absolute',
+                      pulse=signal.pulse_nb,
+                      envelope=signal.envelope,
+                      extremities=signal.extremities,
+                      nbp=AccessHelper.num_samples if AccessHelper.num_samples_override else -1
+                      )
+        # retType is UDA-specific; IMASPy has no notion of calibrated data
+        if signal.calibrated:
+            ds = AccessHelper.da.get_data_source(signal.data_source) if AccessHelper.da else None
+            if ds is None or ds.source_type == 'CODAC_UDA':
+                params['retType'] = 'doubleCalibrated'
+        return params
 
     @staticmethod
     def uda_ts(signal: IplotSignalAdapter, value):
