@@ -502,7 +502,10 @@ class BackendParserBase(ABC):
 
         # Set axis limits
         if ax_idx != 1 or not self.canvas.streaming:  # In case of Streaming, just set X limits at the start
-            if axis.begin is None and axis.end is None:
+            # Recalculate when limits are missing OR degenerate (begin == end), which
+            # can happen with single-point workspaces where the stored range doesn't
+            # span the data of all signals sharing the axis.
+            if (axis.begin is None and axis.end is None) or (axis.begin == axis.end):
                 self.update_original_axis_limits(axis, impl_plot, ax_idx)
                 padding_begin, padding_end = True, True
 
@@ -547,7 +550,21 @@ class BackendParserBase(ABC):
         logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.original_begin} and {axis.original_end}")
 
         begin, end = +np.inf, -np.inf
-        signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        # X axis with shared_x_axis: aggregate across all non-slider plots so single-point
+        # signals in sibling subplots land on one consolidated range.
+        if ax_idx == 0 and self._pm.get_value(self.canvas, 'shared_x_axis'):
+            signals = []
+            for col in self.canvas.plots:
+                for p in col:
+                    if p is None or isinstance(p, PlotXYWithSlider) or not p.signals:
+                        continue
+                    for stack in p.signals.values():
+                        signals.extend(weakref.ref(s) for s in stack)
+        elif ax_idx == 0 and ci and ci.plot() is not None and ci.plot().signals:
+            signals = [weakref.ref(s) for stack in ci.plot().signals.values() for s in stack]
+        else:
+            signals = ci.signals if ci else []
 
         for signal_ref in signals:
             signal = signal_ref()
