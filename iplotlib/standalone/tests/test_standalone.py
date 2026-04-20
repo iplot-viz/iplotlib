@@ -5,6 +5,7 @@ matplotlib and pyqtgraph backends and checks the output is produced.
 """
 
 import os
+import sys
 import unittest
 
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
@@ -13,6 +14,8 @@ from iplotlib.standalone.examples import customData
 
 ROOT = os.path.dirname(__file__)
 BASELINE_DIR = os.path.join(ROOT, 'baseline')
+PYQT_CANONICAL_PLATFORM = 'linux'
+BASELINE_TOLERANCE = 5.0
 
 
 class StandaloneRenderTest(unittest.TestCase):
@@ -36,12 +39,14 @@ class StandaloneRenderTest(unittest.TestCase):
         self.assertGreater(pixmap.height(), 0)
 
         baseline = os.path.join(BASELINE_DIR, f"customData_{backend}.png")
-        compare_pixmap_to_baseline(pixmap, baseline)
+        compare_pixmap_to_baseline(pixmap, baseline, tol=BASELINE_TOLERANCE)
         return baseline
 
     def test_matplotlib_renders_customData(self):
         self._render_and_save('matplotlib')
 
+    @unittest.skipIf(not sys.platform.startswith(PYQT_CANONICAL_PLATFORM),
+                     "pyqt visual baselines are canonical on Linux only")
     def test_pyqtgraph_renders_customData(self):
         self._render_and_save('pyqt')
 

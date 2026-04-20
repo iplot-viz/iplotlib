@@ -72,8 +72,23 @@ backends and failures report per backend.
 ## Baselines
 
 Baseline PNGs live under `iplotlib/standalone/tests/baseline/`. Each render
-test is a visual regression: the produced image is diffed against the
-committed baseline with an RMS tolerance of 5.0.
+test is a visual regression diffed against the committed baseline with an
+RMS tolerance of 5.0.
+
+**Canonical platform for pyqtgraph**: Linux. Matplotlib rasterises with
+FreeType and bundled fonts so its baselines are bit-exact across
+platforms. PyQtGraph renders through Qt's native pipeline, whose font
+hinting and anti-aliasing differ between operating systems even in
+offscreen mode, producing unusable cross-platform drift. The suite
+therefore treats Linux as the source of truth for pyqt baselines: the
+visual tests for `pyqt` skip on any other platform (via
+`sys.platform.startswith('linux')` checks), and the baselines committed
+to the repo must be generated on Linux (CI or a Linux workstation).
+
+Developers on macOS or Windows can still run the full suite locally —
+matplotlib visual tests, unit tests, regression tests and interaction
+tests all run — only the pyqt pixmap diffs are skipped with a clear
+reason message.
 
 Adding a new rendering test:
 

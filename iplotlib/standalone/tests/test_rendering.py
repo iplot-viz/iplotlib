@@ -6,6 +6,7 @@ image-diff regression checks.
 """
 
 import os
+import sys
 import unittest
 
 import numpy as np
@@ -20,6 +21,14 @@ ROOT = os.path.dirname(__file__)
 BASELINE_DIR = os.path.join(ROOT, 'baseline')
 
 BACKENDS = ('matplotlib', 'pyqt')
+# Matplotlib rasterises with FreeType + bundled fonts so its output is
+# bit-exact across platforms. PyQtGraph renders through Qt's native
+# pipeline, whose font hinting and anti-aliasing differ between operating
+# systems even in offscreen mode, so its baselines are only reliable on
+# the canonical Linux platform used by CI and the Linux-based dev team.
+# On other platforms the pyqt visual tests skip to avoid flakiness.
+PYQT_CANONICAL_PLATFORM = 'linux'
+BASELINE_TOLERANCE = 5.0
 
 
 class RenderingTest(unittest.TestCase):
@@ -31,6 +40,9 @@ class RenderingTest(unittest.TestCase):
         os.makedirs(BASELINE_DIR, exist_ok=True)
 
     def _render(self, backend: str, core_canvas: Canvas, out_name: str):
+        if backend == 'pyqt' and not sys.platform.startswith(PYQT_CANONICAL_PLATFORM):
+            self.skipTest("pyqt visual baselines are canonical on Linux only")
+
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=core_canvas)
         qt_canvas.set_canvas(core_canvas)
         qt_canvas.resize(800, 600)
@@ -42,7 +54,7 @@ class RenderingTest(unittest.TestCase):
         self.assertGreater(pixmap.height(), 0)
 
         baseline = os.path.join(BASELINE_DIR, f"{out_name}_{backend}.png")
-        compare_pixmap_to_baseline(pixmap, baseline)
+        compare_pixmap_to_baseline(pixmap, baseline, tol=BASELINE_TOLERANCE)
 
     # --------------------------
     #           TESTS
