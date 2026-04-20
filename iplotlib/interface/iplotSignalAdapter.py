@@ -230,6 +230,10 @@ class IplotSignalAdapter(ProcessingSignal):
         if len(source) == len(target):
             return source
 
+        # Source empty means the axis isn't used by this signal; not a mismatch.
+        if len(source) == 0:
+            return source
+
         def _log_mismatch(case: str, msg: str) -> None:
             key = (source_label, target_label, len(source), len(target), case)
             if key in _TRUNCATE_WARN_KEYS:
