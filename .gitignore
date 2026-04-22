@@ -55,6 +55,8 @@ cython_debug/
 *.xml
 *.html
 *.coverage
+.coverage
+htmlcov/
 
 # Archives
 *.tar.gz
