@@ -28,7 +28,14 @@ BACKENDS = ('matplotlib', 'pyqt')
 # the canonical Linux platform used by CI and the Linux-based dev team.
 # On other platforms the pyqt visual tests skip to avoid flakiness.
 PYQT_CANONICAL_PLATFORM = 'linux'
+# Matplotlib Agg is byte-stable across Linux distros so a strict tolerance
+# is appropriate. Pyqtgraph renders through Qt's native painter which pulls
+# system freetype/fontconfig — the same scene rendered on CODAC (RHEL) and
+# on ubuntu-latest (CI) drifts by a few RMS points, especially when text
+# is involved. A higher pyqt tolerance absorbs that drift while still
+# catching real regressions (missing plots, wrong data, wrong legends).
 BASELINE_TOLERANCE = 5.0
+PYQT_BASELINE_TOLERANCE = 20.0
 
 
 class RenderingTest(unittest.TestCase):
@@ -54,7 +61,8 @@ class RenderingTest(unittest.TestCase):
         self.assertGreater(pixmap.height(), 0)
 
         baseline = os.path.join(BASELINE_DIR, f"{out_name}_{backend}.png")
-        compare_pixmap_to_baseline(pixmap, baseline, tol=BASELINE_TOLERANCE)
+        tol = PYQT_BASELINE_TOLERANCE if backend == 'pyqt' else BASELINE_TOLERANCE
+        compare_pixmap_to_baseline(pixmap, baseline, tol=tol)
 
     # --------------------------
     #           TESTS

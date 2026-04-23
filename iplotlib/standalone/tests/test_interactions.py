@@ -29,7 +29,11 @@ ROOT = os.path.dirname(__file__)
 BASELINE_DIR = os.path.join(ROOT, 'baseline')
 BACKENDS = ('matplotlib', 'pyqt')
 PYQT_CANONICAL_PLATFORM = 'linux'
+# Matplotlib Agg is byte-stable across Linux distros; pyqtgraph goes
+# through Qt's native painter and drifts by a few RMS points between
+# CODAC (RHEL) and ubuntu-latest (CI). Use a laxer tolerance for pyqt.
 BASELINE_TOLERANCE = 5.0
+PYQT_BASELINE_TOLERANCE = 20.0
 
 
 def _make_canvas() -> Canvas:
@@ -76,8 +80,9 @@ class InteractionsTest(unittest.TestCase):
         self.assertFalse(pixmap.isNull())
         if self._skip_pyqt_visual_on_non_linux(backend):
             return
+        tol = PYQT_BASELINE_TOLERANCE if backend == 'pyqt' else BASELINE_TOLERANCE
         compare_pixmap_to_baseline(pixmap, os.path.join(BASELINE_DIR, f"{name}.png"),
-                                   tol=BASELINE_TOLERANCE)
+                                   tol=tol)
 
     def _build(self, backend: str):
         canvas = _make_canvas()

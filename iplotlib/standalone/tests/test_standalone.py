@@ -16,6 +16,7 @@ ROOT = os.path.dirname(__file__)
 BASELINE_DIR = os.path.join(ROOT, 'baseline')
 PYQT_CANONICAL_PLATFORM = 'linux'
 BASELINE_TOLERANCE = 5.0
+PYQT_BASELINE_TOLERANCE = 20.0
 
 
 class StandaloneRenderTest(unittest.TestCase):
@@ -39,7 +40,8 @@ class StandaloneRenderTest(unittest.TestCase):
         self.assertGreater(pixmap.height(), 0)
 
         baseline = os.path.join(BASELINE_DIR, f"customData_{backend}.png")
-        compare_pixmap_to_baseline(pixmap, baseline, tol=BASELINE_TOLERANCE)
+        tol = PYQT_BASELINE_TOLERANCE if backend == 'pyqt' else BASELINE_TOLERANCE
+        compare_pixmap_to_baseline(pixmap, baseline, tol=tol)
         return baseline
 
     def test_matplotlib_renders_customData(self):
