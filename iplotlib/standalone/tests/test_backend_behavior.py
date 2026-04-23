@@ -174,6 +174,54 @@ class CrosshairEnabledRenderTest(unittest.TestCase):
                 self.assertFalse(pm.isNull())
 
 
+class SharedXAxisTest(unittest.TestCase):
+    """When ``shared_x_axis=True`` on a multi-plot canvas, zooming one plot
+    must propagate the X range to every other plot. This path is glue
+    between the parser and the history-command pipeline and has historically
+    regressed silently (plots going out of sync on undo)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def _build_two_stacked_plots(self, backend: str):
+        canvas = Canvas(2, 1, title="shared_x", shared_x_axis=True)
+        x = np.linspace(0, 10, 200)
+        for i in range(2):
+            plot = PlotXY()
+            sig = SignalXY(label=f"s{i}")
+            sig.set_data([x, np.sin(x + i)])
+            plot.add_signal(sig)
+            canvas.add_plot(plot, 0)
+        qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+        qt_canvas.set_canvas(canvas)
+        qt_canvas.resize(600, 400)
+        self.app.processEvents()
+        return canvas, qt_canvas
+
+    def test_shared_x_axis_flag_is_read_by_parser(self):
+        """Canvas flag must propagate through set_canvas to the parser's view."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build_two_stacked_plots(backend)
+                self.assertTrue(qt_canvas.get_canvas().shared_x_axis)
+
+    def test_all_plot_limits_share_the_same_x_range_on_initial_build(self):
+        """When ``shared_x_axis=True`` the parser reports identical X ranges
+        for every plot on the first draw — no post-interaction required."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build_two_stacked_plots(backend)
+                limits = qt_canvas._parser.get_all_plot_limits()
+                self.assertEqual(len(limits), 2)
+                x0 = (limits[0].axes_ranges[0].begin,
+                      limits[0].axes_ranges[0].end)
+                x1 = (limits[1].axes_ranges[0].begin,
+                      limits[1].axes_ranges[0].end)
+                self.assertAlmostEqual(x0[0], x1[0], places=3)
+                self.assertAlmostEqual(x0[1], x1[1], places=3)
+
+
 class CrosshairMouseMotionTest(unittest.TestCase):
     """Drive the crosshair drawing path by invoking the mouse-motion handlers.
 
