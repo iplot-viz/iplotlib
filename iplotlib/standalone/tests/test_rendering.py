@@ -184,6 +184,56 @@ class RenderingTest(unittest.TestCase):
                 core_canvas.add_plot(plot, 0)
                 self._render(backend, core_canvas, "canvas_legend")
 
+    def _render_simple_canvas(self, backend: str, out_name: str, **canvas_kwargs):
+        core_canvas = Canvas(1, 1, title=out_name, **canvas_kwargs)
+        x = np.linspace(0.5, 10.0, 200)
+        plot = PlotXY()
+        signal = SignalXY(label="s")
+        signal.set_data([x, np.sin(x) + 2.0])  # positive so log_scale is valid
+        plot.add_signal(signal)
+        core_canvas.add_plot(plot, 0)
+        self._render(backend, core_canvas, out_name)
+
+    def test_13_preference_grid_off(self):
+        """Canvas with grid=False must render without grid lines."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                self._render_simple_canvas(backend, "pref_grid_off", grid=False)
+
+    def test_14_preference_log_scale(self):
+        """Canvas with log_scale=True must render Y axis on a log scale."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                self._render_simple_canvas(backend, "pref_log_scale", log_scale=True)
+
+    def test_15_preference_font_size_large(self):
+        """Canvas with a larger font_size must render bigger tick/title text."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                self._render_simple_canvas(backend, "pref_font_size_large", font_size=14)
+
+    def test_16_preference_background_color(self):
+        """Canvas with a custom background_color must render with that fill."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                self._render_simple_canvas(backend, "pref_background_color",
+                                           background_color="#eef3ff")
+
+    def test_17_preference_shared_x_axis(self):
+        """Two stacked plots with shared_x_axis=True share their X range."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                core_canvas = Canvas(2, 1, title="pref_shared_x_axis",
+                                     shared_x_axis=True)
+                x = np.linspace(0, 10, 200)
+                for i in range(2):
+                    plot = PlotXY()
+                    signal = SignalXY(label=f"s{i}")
+                    signal.set_data([x, np.sin(x + i)])
+                    plot.add_signal(signal)
+                    core_canvas.add_plot(plot, 0)
+                self._render(backend, core_canvas, "pref_shared_x_axis")
+
     def test_12_canvas_with_crosshair_enabled_builds(self):
         """Canvas with crosshair enabled renders without errors.
 

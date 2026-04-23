@@ -2,12 +2,15 @@
 
 Full mouse-event simulation (``QTest.mousePress``/``mouseMove``/``mouseRelease``)
 is fragile on the offscreen platform because hit-testing depends on widget
-geometry that is never actually laid out on screen.  Instead, these tests
+geometry that is never actually laid out on screen. Instead, these tests
 invoke the public backend APIs that the interactive modes ultimately call
-(``ViewBox.setRange`` for pyqtgraph, ``Axes.set_xlim`` for matplotlib) and
-assert that the axis range is updated.  We also capture pixmaps before and
-after the interaction to catch visual regressions of the backend's rendering
-after a zoom/pan, not just the numerical range change.
+(``ViewBox.setXRange`` for pyqtgraph, ``Axes.set_xlim`` for matplotlib) and
+assert that the axis range is updated. We also capture pixmaps before and
+after the interaction to catch visual regressions of the backend's
+rendering after a zoom/pan, not just the numerical range change.
+
+Both pan and zoom are exercised on both backends so the visual coverage
+is symmetric.
 """
 
 import os
@@ -24,6 +27,7 @@ from iplotlib.qt.testing import compare_pixmap_to_baseline, ensure_qapp
 
 ROOT = os.path.dirname(__file__)
 BASELINE_DIR = os.path.join(ROOT, 'baseline')
+BACKENDS = ('matplotlib', 'pyqt')
 PYQT_CANONICAL_PLATFORM = 'linux'
 BASELINE_TOLERANCE = 5.0
 
@@ -39,68 +43,86 @@ def _make_canvas() -> Canvas:
     return core
 
 
+def _first_impl_plot(qt_canvas, core_plot):
+    impl_plots = qt_canvas._parser._plot_impl_plot_lut.get(id(core_plot), [])
+    assert impl_plots, "parser must register an implementation plot for the core plot"
+    return impl_plots[0]
+
+
+def _set_x_range(backend: str, impl, low: float, high: float) -> None:
+    """Call the backend-specific API that pan/zoom ultimately invoke."""
+    if backend == 'pyqt':
+        impl.getViewBox().setXRange(low, high, padding=0)
+    else:
+        impl.set_xlim(low, high)
+
+
+def _get_x_range(backend: str, impl):
+    if backend == 'pyqt':
+        return tuple(impl.getViewBox().viewRange()[0])
+    return impl.get_xlim()
+
+
 class InteractionsTest(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
         self.app = ensure_qapp()
 
-    def _first_impl_plot(self, qt_canvas, core_plot):
-        impl_plots = qt_canvas._parser._plot_impl_plot_lut.get(id(core_plot), [])
-        self.assertGreater(len(impl_plots), 0,
-                           "parser must register an implementation plot for the core plot")
-        return impl_plots[0]
+    def _skip_pyqt_visual_on_non_linux(self, backend: str) -> bool:
+        return backend == 'pyqt' and not sys.platform.startswith(PYQT_CANONICAL_PLATFORM)
 
-    def _grab_baseline(self, qt_canvas, name: str, backend: str) -> None:
+    def _grab_and_diff(self, qt_canvas, name: str, backend: str) -> None:
         pixmap = qt_canvas.grab()
         self.assertFalse(pixmap.isNull())
-        if backend == 'pyqt' and not sys.platform.startswith(PYQT_CANONICAL_PLATFORM):
-            # Skip the pixmap diff on non-canonical platforms; numerical
-            # assertions above already validated the interaction.
+        if self._skip_pyqt_visual_on_non_linux(backend):
             return
         compare_pixmap_to_baseline(pixmap, os.path.join(BASELINE_DIR, f"{name}.png"),
                                    tol=BASELINE_TOLERANCE)
 
-    def test_pyqtgraph_zoom_updates_viewbox_range(self):
+    def _build(self, backend: str):
         canvas = _make_canvas()
-        qt_canvas = IplotQtCanvasFactory.new('pyqt', canvas=canvas)
+        qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
         qt_canvas.set_canvas(canvas)
         qt_canvas.resize(800, 600)
         self.app.processEvents()
-        self._grab_baseline(qt_canvas, "interaction_pyqt_before_zoom", 'pyqt')
+        return canvas, qt_canvas
 
-        plot_item = self._first_impl_plot(qt_canvas, canvas.plots[0][0])
-        vb = plot_item.getViewBox()
-        before = list(vb.viewRange()[0])
+    def test_pan_updates_x_range(self):
+        """Pan shifts both limits by the same amount; output must re-render."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build(backend)
+                self._grab_and_diff(qt_canvas, f"interaction_{backend}_before_pan", backend)
 
-        # Same call PlotItem makes internally when the user rubber-band zooms.
-        vb.setXRange(before[0] + 2.0, before[1] - 2.0, padding=0)
-        self.app.processEvents()
+                impl = _first_impl_plot(qt_canvas, canvas.plots[0][0])
+                lo_before, hi_before = _get_x_range(backend, impl)
+                shift = (hi_before - lo_before) * 0.25
+                _set_x_range(backend, impl, lo_before + shift, hi_before + shift)
+                self.app.processEvents()
 
-        after = list(vb.viewRange()[0])
-        self.assertAlmostEqual(after[0], before[0] + 2.0, places=3)
-        self.assertAlmostEqual(after[1], before[1] - 2.0, places=3)
+                lo_after, hi_after = _get_x_range(backend, impl)
+                self.assertAlmostEqual(lo_after, lo_before + shift, places=3)
+                self.assertAlmostEqual(hi_after, hi_before + shift, places=3)
 
-        self._grab_baseline(qt_canvas, "interaction_pyqt_after_zoom", 'pyqt')
+                self._grab_and_diff(qt_canvas, f"interaction_{backend}_after_pan", backend)
 
-    def test_matplotlib_pan_updates_axes_xlim(self):
-        canvas = _make_canvas()
-        qt_canvas = IplotQtCanvasFactory.new('matplotlib', canvas=canvas)
-        qt_canvas.set_canvas(canvas)
-        qt_canvas.resize(800, 600)
-        self.app.processEvents()
-        self._grab_baseline(qt_canvas, "interaction_matplotlib_before_pan", 'matplotlib')
+    def test_zoom_updates_x_range(self):
+        """Zoom shrinks the range symmetrically; output must re-render."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build(backend)
+                self._grab_and_diff(qt_canvas, f"interaction_{backend}_before_zoom", backend)
 
-        ax = self._first_impl_plot(qt_canvas, canvas.plots[0][0])
-        lo_before, hi_before = ax.get_xlim()
-        shift = (hi_before - lo_before) * 0.25
-        ax.set_xlim(lo_before + shift, hi_before + shift)
-        self.app.processEvents()
+                impl = _first_impl_plot(qt_canvas, canvas.plots[0][0])
+                lo_before, hi_before = _get_x_range(backend, impl)
+                _set_x_range(backend, impl, lo_before + 2.0, hi_before - 2.0)
+                self.app.processEvents()
 
-        lo_after, hi_after = ax.get_xlim()
-        self.assertAlmostEqual(lo_after, lo_before + shift, places=3)
-        self.assertAlmostEqual(hi_after, hi_before + shift, places=3)
+                lo_after, hi_after = _get_x_range(backend, impl)
+                self.assertAlmostEqual(lo_after, lo_before + 2.0, places=3)
+                self.assertAlmostEqual(hi_after, hi_before - 2.0, places=3)
 
-        self._grab_baseline(qt_canvas, "interaction_matplotlib_after_pan", 'matplotlib')
+                self._grab_and_diff(qt_canvas, f"interaction_{backend}_after_zoom", backend)
 
 
 if __name__ == '__main__':
