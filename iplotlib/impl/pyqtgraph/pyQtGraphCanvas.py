@@ -1696,6 +1696,8 @@ class PyQtGraphParser(BackendParserBase):
         horiz_on = bool(getattr(self.canvas, 'crosshair_horizontal', False))
         vert_on = bool(getattr(self.canvas, 'crosshair_vertical', True))
 
+        font_size = self._pm.get_value(self.canvas, 'font_size') or 8
+
         if getattr(self.canvas, 'crosshair_per_plot', False):
             for p in plots:
                 cursor = pyQtCrosshair(
@@ -1708,6 +1710,7 @@ class PyQtGraphParser(BackendParserBase):
                     horiz_on=horiz_on,
                     vert_on=vert_on,
                     val_tolerance=0.05,
+                    font_size=font_size,
                     cache_table=self._impl_plot_cache_table,
                 )
                 self._cursors.append(cursor)
@@ -1722,6 +1725,7 @@ class PyQtGraphParser(BackendParserBase):
                 horiz_on=horiz_on,
                 vert_on=vert_on,
                 val_tolerance=0.05,
+                font_size=font_size,
                 cache_table=self._impl_plot_cache_table,
             )
             self._cursors.append(cursor)
