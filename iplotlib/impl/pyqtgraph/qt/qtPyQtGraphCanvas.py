@@ -41,9 +41,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
 
-        # QMenu
-        self.autoscale_menu = None
-
         # Drag & Drop
         self.setAcceptDrops(True)
 
@@ -331,9 +328,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                             f"Cannot add marker {new_marker}: found {marker_signal} samples, but the maximum allowed is 100")
                 else:
                     logger.warning("Markers must be enabled in the plot to create signal markers")
-
-            elif self._mmode == Canvas.MOUSE_MODE_SELECT:
-                self.autoscale_menu = None
         else:
             # Single click handling
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
@@ -345,7 +339,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 return
 
             elif self._mmode == Canvas.MOUSE_MODE_SELECT:
-                self.autoscale_menu = None
                 # Handle drag shift with left click
                 if event.button() == Qt.MouseButton.LeftButton:
                     signal, y_coord = self._find_signal_at_event(view_box, event)
@@ -435,31 +428,29 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             # Update statistics
             self.stats(self.get_canvas())
 
-        elif self._mmode in [Canvas.MOUSE_MODE_SELECT]:
-            if event is None or event.button() == Qt.MouseButton.LeftButton or event.double():
-                return
-
-            # Create menu with autoscale options
-            if self.autoscale_menu is None:
-                self.autoscale_menu = QMenu(self)
-                self.autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(impl_plot))
-                self.autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
-                if self._parser.canvas.focus_plot is None:
-                    self.autoscale_menu.addAction("Focus on plot",
-                                                  lambda: self._full_screen_mode_on(impl_plot))
-                else:
-                    self.autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
-                self.autoscale_menu.addSeparator()
-                ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
-                if ci:
-                    self.autoscale_menu.addAction("Preferences",
-                                                  lambda: self.openPlotPreferences.emit(ci.plot()))
-                # Detect nearest signal and add Signal Preferences option
-                nearest_signal, _ = self._find_signal_at_event(view_box, event)
-                if nearest_signal:
-                    self.autoscale_menu.addAction("Signal Preferences",
-                                                  lambda s=nearest_signal: self.openPlotPreferences.emit(s))
-                self.autoscale_menu.popup(event.screenPos().toPoint())
+        is_double = callable(getattr(event, 'double', None)) and event.double()
+        if event is not None and event.button() == Qt.MouseButton.RightButton and not is_double:
+            autoscale_menu = QMenu(self)
+            autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(impl_plot))
+            autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+            if self._parser.canvas.focus_plot is None:
+                autoscale_menu.addAction("Focus on plot",
+                                         lambda: self._full_screen_mode_on(impl_plot))
+            else:
+                autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+            autoscale_menu.addSeparator()
+            ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+            if ci:
+                autoscale_menu.addAction("Preferences",
+                                         lambda: self.openPlotPreferences.emit(ci.plot()))
+            nearest_signal, _ = self._find_signal_at_event(view_box, event)
+            if nearest_signal:
+                autoscale_menu.addAction("Signal Preferences",
+                                         lambda s=nearest_signal: self.openPlotPreferences.emit(s))
+            screen_pos = event.screenPos()
+            if hasattr(screen_pos, 'toPoint'):
+                screen_pos = screen_pos.toPoint()
+            autoscale_menu.popup(screen_pos)
 
     def mouse_clicked(self, event):
         if not event.currentItem:

@@ -91,6 +91,7 @@ class QtViewBox(pg.ViewBox):
         # Right click PAN has no effect
         if ev.button() == Qt.MouseButton.RightButton and self.getState()['mouseEnabled'] == [True, True]:
             ev.accept()
+            self.released.emit(self, ev)
             return
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
