@@ -482,9 +482,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 return
             plot = ci.plot()
             if event.button == MouseButton.RIGHT:
-                for attr in ('_zoom_info', '_pan_info'):
-                    if getattr(self._mpl_toolbar, attr, None) is not None:
-                        setattr(self._mpl_toolbar, attr, None)
+                if getattr(self._mpl_toolbar, '_zoom_info', None) is not None:
+                    self._mpl_toolbar.release_zoom(event)
+                if getattr(self._mpl_toolbar, '_pan_info', None) is not None:
+                    self._mpl_toolbar.release_pan(event)
                 self._show_autoscale_menu(event)
                 return
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
