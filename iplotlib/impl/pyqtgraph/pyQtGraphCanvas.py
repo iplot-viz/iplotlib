@@ -86,11 +86,15 @@ class QtViewBox(pg.ViewBox):
     def __init__(self, parent=None):
         super().__init__(parent=parent, enableMenu=False)
         self.sigRangeChangedManually.connect(self.release_event)
+        self._right_click_pan_handled = False
 
     def mousePressEvent(self, ev):
+        self._right_click_pan_handled = False
         # Right click PAN has no effect
         if ev.button() == Qt.MouseButton.RightButton and self.getState()['mouseEnabled'] == [True, True]:
             ev.accept()
+            self.released.emit(self, ev)
+            self._right_click_pan_handled = True
             return
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
@@ -102,14 +106,16 @@ class QtViewBox(pg.ViewBox):
 
     def mouseReleaseEvent(self, ev):
         super().mouseReleaseEvent(ev)
-        self.released.emit(self, ev)
+        if not self._right_click_pan_handled:
+            self.released.emit(self, ev)
 
     def release_event(self):
         self.released.emit(self, None)
 
     def mouseClickEvent(self, ev):
         super().mouseClickEvent(ev)
-        self.released.emit(self, ev)
+        if not self._right_click_pan_handled:
+            self.released.emit(self, ev)
 
     def wheelEvent(self, ev, axis=None):
         ev.ignore()
