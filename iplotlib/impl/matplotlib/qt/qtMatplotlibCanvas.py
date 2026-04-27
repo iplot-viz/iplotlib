@@ -277,22 +277,21 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 menu.popup(event.mouseevent.guiEvent.globalPos())
             return
 
-        # On the pick event, find the original line corresponding to the legend
-        # proxy line, and toggle its visibility.
         legend_line = event.artist
+        ax_lines = self._parser.map_legend_to_ax.get(legend_line)
+        if ax_lines is None:
+            return
+        self._toggle_legend_line(legend_line, ax_lines)
 
-        ax_lines = self._parser.map_legend_to_ax[legend_line]
-        visible = True
+    def _toggle_legend_line(self, legend_line, ax_lines):
         if isinstance(ax_lines, Collection):
+            visible = True
             for ax_line in ax_lines:  # Envelope case
                 visible = not ax_line.get_visible()
                 ax_line.set_visible(visible)
         else:
             visible = not ax_lines.get_visible()
             ax_lines.set_visible(visible)
-
-        # signal.lines = ax_lines
-        # Change the alpha on the line in the legend, so we can see what lines have been toggled
         legend_line.set_alpha(1.0 if visible else 0.2)
         self._parser.figure.canvas.draw()
 
@@ -402,8 +401,23 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
 
+        on_legend = (event.inaxes and event.inaxes.get_legend()
+                     and event.inaxes.get_legend().contains(event)[0])
+
+        if (on_legend and event.button == MouseButton.LEFT
+                and self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]):
+            for legend_line, ax_lines in self._parser.map_legend_to_ax.items():
+                contains, _ = legend_line.contains(event)
+                if contains:
+                    if getattr(self._mpl_toolbar, '_zoom_info', None) is not None:
+                        self._mpl_toolbar.release_zoom(event)
+                    if getattr(self._mpl_toolbar, '_pan_info', None) is not None:
+                        self._mpl_toolbar.release_pan(event)
+                    self._toggle_legend_line(legend_line, ax_lines)
+                    return
+
         # If the mouse is over the legend it ignores it
-        if event.inaxes and event.inaxes.get_legend() and event.inaxes.get_legend().contains(event)[0]:
+        if on_legend:
             return
 
         if event.dblclick:
