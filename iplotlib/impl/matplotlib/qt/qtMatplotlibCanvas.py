@@ -269,12 +269,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def on_pick_legend(self, event):
         # Right-click on legend → open signal preferences
         if hasattr(event, 'mouseevent') and event.mouseevent.button == MouseButton.RIGHT:
-            signal = self._parser._legend_signal_lut.get(event.artist)
-            if signal:
-                menu = QMenu(self)
-                menu.addAction("Signal Preferences",
-                               lambda s=signal: self.openPlotPreferences.emit(s))
-                menu.popup(event.mouseevent.guiEvent.globalPos())
+            self._show_signal_prefs_menu(event.artist, event.mouseevent)
             return
 
         legend_line = event.artist
@@ -282,6 +277,15 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if ax_lines is None:
             return
         self._toggle_legend_line(legend_line, ax_lines)
+
+    def _show_signal_prefs_menu(self, legend_line, event):
+        signal = self._parser._legend_signal_lut.get(legend_line)
+        if signal is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("Signal Preferences",
+                       lambda s=signal: self.openPlotPreferences.emit(s))
+        menu.popup(event.guiEvent.globalPos())
 
     def _toggle_legend_line(self, legend_line, ax_lines):
         if isinstance(ax_lines, Collection):
@@ -404,7 +408,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         on_legend = (event.inaxes and event.inaxes.get_legend()
                      and event.inaxes.get_legend().contains(event)[0])
 
-        if (on_legend and event.button == MouseButton.LEFT
+        if (on_legend and event.button in (MouseButton.LEFT, MouseButton.RIGHT)
                 and self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]):
             for legend_line, ax_lines in self._parser.map_legend_to_ax.items():
                 contains, _ = legend_line.contains(event)
@@ -413,7 +417,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                         self._mpl_toolbar.release_zoom(event)
                     if getattr(self._mpl_toolbar, '_pan_info', None) is not None:
                         self._mpl_toolbar.release_pan(event)
-                    self._toggle_legend_line(legend_line, ax_lines)
+                    if event.button == MouseButton.LEFT:
+                        self._toggle_legend_line(legend_line, ax_lines)
+                    else:
+                        self._show_signal_prefs_menu(legend_line, event)
                     return
 
         # If the mouse is over the legend it ignores it
