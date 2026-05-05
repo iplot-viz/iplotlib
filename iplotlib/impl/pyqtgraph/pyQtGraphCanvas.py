@@ -334,9 +334,18 @@ class PyQtGraphParser(BackendParserBase):
         all_y_data = []
         for signal_ref in cache_item.signals:
             signal = signal_ref()
-            if signal.lines[0].isVisible() and len(signal.x_data) > 0:
-                mask = (signal.x_data >= min_time) & (signal.x_data <= now)
-                all_y_data.extend(signal.y_data[mask])
+            if not signal.lines[0].isVisible():
+                continue
+            # Snapshot x/y once: the receiver thread can update them between reads.
+            x_data = signal.x_data
+            y_data = signal.y_data
+            n = min(len(x_data), len(y_data))
+            if n == 0:
+                continue
+            x_data = x_data[:n]
+            y_data = y_data[:n]
+            mask = (x_data >= min_time) & (x_data <= now)
+            all_y_data.extend(y_data[mask])
 
         if all_y_data:
             y_max = np.nanmax(all_y_data).item()
