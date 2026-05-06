@@ -77,6 +77,7 @@ class NanosecondDateFormatter(ScalarFormatter):
         self._offset_lut = offset_lut
         self._ax_idx = ax_idx
         self._round = roundh
+        self._spacing = 0
 
     @property
     def offset_ns(self):
@@ -90,6 +91,13 @@ class NanosecondDateFormatter(ScalarFormatter):
         if locs is None or len(locs) == 0:
             return
 
+        # Tick spacing in ns, used to adapt label segments to the visible range.
+        if len(locs) >= 2:
+            delta = abs(int(locs[1]) - int(locs[0]))
+            self._spacing = delta * 100_000 if self.offset_ns == 100_000 else delta
+        else:
+            self._spacing = 0
+
         if self.offset_ns == 100_000:
             self.cut_start = self.lcp(self.offset_ns * int(locs[0]), self.offset_ns * int(locs[-1]))
             self.offset_str = 'UTC:' + self.date_fmt(self.offset_ns * locs[0], self.YEAR, self.cut_start,
@@ -101,17 +109,31 @@ class NanosecondDateFormatter(ScalarFormatter):
 
         super().set_locs(locs)
 
+    def _segments_for_spacing(self) -> int:
+        """Number of date segments to display after cut_start, adapted to tick spacing.
+
+        Avoids showing arbitrary trailing digits (e.g. seconds when ticks are hours/days apart).
+        Falls back to ``label_segments`` (4 by default) for spacings below one hour.
+        """
+        if self._spacing >= 86400e9:  # >= 1 day
+            return 1
+        if self._spacing >= 3600e9:  # >= 1 hour
+            return 2
+        return self.label_segments
+
     def __call__(self, x, pos=None):
+        end_seg = self.cut_start + self._segments_for_spacing()
         if self.offset_ns == 100_000:
-            return self.date_fmt(int(self.offset_ns) * int(x), self.cut_start + 1, self.cut_start + self.label_segments)
+            return self.date_fmt(int(self.offset_ns) * int(x), self.cut_start + 1, end_seg)
         else:
-            return self.date_fmt(int(self.offset_ns) + int(x), self.cut_start + 1, self.cut_start + self.label_segments)
+            return self.date_fmt(int(self.offset_ns) + int(x), self.cut_start + 1, end_seg)
 
     def format_data_short(self, value):
+        end_seg = self.cut_start + self._segments_for_spacing()
         if self.offset_ns == 100_000:
-            return self.date_fmt(int(self.offset_ns) * int(value), self.cut_start + 1, self.cut_start + self.label_segments)
+            return self.date_fmt(int(self.offset_ns) * int(value), self.cut_start + 1, end_seg)
         else:
-            return self.date_fmt(int(self.offset_ns) + int(value), self.cut_start + 1, self.cut_start + self.label_segments)
+            return self.date_fmt(int(self.offset_ns) + int(value), self.cut_start + 1, end_seg)
 
     def format_data(self, value):
         return super().format_data(value)

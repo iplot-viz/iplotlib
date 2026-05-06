@@ -52,9 +52,22 @@ class NanosecondDateFormatter(pg.AxisItem):
 
     def __call__(self, x, pos=None):
         if self.is_date:
-            return self.date_fmt(int(x), self.cut_start + 1, self.cut_start + 4)
+            return self.date_fmt(int(x), self.cut_start + 1, self.cut_start + self._segments_for_spacing())
         else:
             return f"{x:g}"
+
+    def _segments_for_spacing(self) -> int:
+        """Number of date segments to display after cut_start, adapted to tick spacing.
+
+        Avoids showing arbitrary trailing digits (e.g. seconds when ticks are hours/days apart).
+        Returns 4 (the original behaviour) for spacings below one hour.
+        """
+        s = abs(self._spacing)
+        if s >= 86400e9:  # >= 1 day
+            return 1
+        if s >= 3600e9:  # >= 1 hour
+            return 2
+        return 4
 
     def get_spacing_label(self):
         """Return a human-readable label for the current tick spacing (oscilloscope style)."""
