@@ -43,8 +43,10 @@ STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre"
             "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
 
 
-# mpl.rcParams['path.simplify'] = True
-# mpl.rcParams['path.simplify_threshold'] = 1.0
+# Chunked rendering caps path complexity in the Agg renderer; only set when the
+# user has not already configured it.
+if mpl.rcParams.get('agg.path.chunksize', 0) == 0:
+    mpl.rcParams['agg.path.chunksize'] = 10000
 
 
 class MatplotlibParser(BackendParserBase):
@@ -320,7 +322,10 @@ class MatplotlibParser(BackendParserBase):
         line.set_data(x_data, y_data)
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
-        return draw_fn(x_data, y_data, **style)
+        lines = draw_fn(x_data, y_data, **style)
+        for line in lines:
+            self._tune_line_for_large_data(line)
+        return lines
 
     def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
         plot_lines = []
@@ -330,15 +335,25 @@ class MatplotlibParser(BackendParserBase):
             line = draw_fn(x_data, y_data[:, i], **style_i)  # List[Line2D]
             line[0].set_label(f"{signal.label}[{i}]")
             self._update_marker_by_point_count(line[0], x_data, style)
+            self._tune_line_for_large_data(line[0])
             plot_lines.append(line[0])
 
         return plot_lines
+
+    @staticmethod
+    def _tune_line_for_large_data(line: Line2D):
+        """Drop vertices that fall under one pixel of the visible line."""
+        line.set_simplify(True)
+        line.set_simplify_threshold(1.0)
 
     def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
         return y_data[plot.slider.val]
 
     def create_slider_plot_lines_1D(self, draw_fn, x_data, ysub_data, style) -> List[Line2D]:
-        return draw_fn(x_data, ysub_data, **style)
+        lines = draw_fn(x_data, ysub_data, **style)
+        for line in lines:
+            self._tune_line_for_large_data(line)
+        return lines
 
     def create_slider_plot_lines_2D(self, draw_fn, x_data, ysub_data, style):
         pass
