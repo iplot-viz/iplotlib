@@ -30,6 +30,7 @@ class CanvasStreamer:
         self._window_ns = 0
         self._ds_to_signals = {}
         self._callback = None
+        self._first_live_pending = set()
 
     def _signal_lock(self, signal):
         lock = self._inject_locks.get(signal.uid)
@@ -40,6 +41,7 @@ class CanvasStreamer:
 
     def start(self, canvas, callback, window_ns: int = None):
         self.stop_flag = False
+        self._first_live_pending.clear()
         all_signals = []
         for col in canvas.plots:
             for plot in col:
@@ -114,23 +116,37 @@ class CanvasStreamer:
             logger.warning(f'signal name {varname} was not found')
             return
         for signal in signals_by_name:
-            if hasattr(signal, 'inject_external'):
-                result = dict(alias_map={
-                    'time': {'idx': 0, 'independent': True},
-                    'data': {'idx': 1}
-                },
-                    d0=dobj.xdata,
-                    d1=dobj.ydata,
-                    d2=[],
-                    d3=[],
-                    d0_unit=dobj.xunit,
-                    d1_unit=dobj.yunit,
-                    d2_unit='',
-                    d3_unit='')
-                with self._signal_lock(signal):
-                    signal.inject_external(append=True, **result)
-                logger.debug(f"Updated {varname} with {len(dobj.xdata)} new samples")
-                callback(signal)
+            if not hasattr(signal, 'inject_external'):
+                continue
+            x_data = dobj.xdata
+            y_data = dobj.ydata
+            if signal.uid in self._first_live_pending:
+                cur_x = signal.x_data
+                cur_y = signal.y_data
+                if cur_x is not None and len(cur_x) > 0 and len(x_data) > 0:
+                    cur_x_arr = np.asarray(cur_x)
+                    cur_y_arr = np.asarray(cur_y)
+                    flat_x = np.asarray(x_data[:1], dtype=cur_x_arr.dtype)
+                    flat_y = np.asarray([cur_y_arr[-1]], dtype=cur_y_arr.dtype)
+                    x_data = np.concatenate([flat_x, np.asarray(x_data)])
+                    y_data = np.concatenate([flat_y, np.asarray(y_data)])
+                self._first_live_pending.discard(signal.uid)
+            result = dict(alias_map={
+                'time': {'idx': 0, 'independent': True},
+                'data': {'idx': 1}
+            },
+                d0=x_data,
+                d1=y_data,
+                d2=[],
+                d3=[],
+                d0_unit=dobj.xunit,
+                d1_unit=dobj.yunit,
+                d2_unit='',
+                d3_unit='')
+            with self._signal_lock(signal):
+                signal.inject_external(append=True, **result)
+            logger.debug(f"Updated {varname} with {len(dobj.xdata)} new samples")
+            callback(signal)
 
     def _archive_backfill(self, ds_to_signals: dict, window_ns: int, callback):
         """Seed each signal's visible window with archive data, anchoring the
@@ -144,7 +160,7 @@ class CanvasStreamer:
                 self._backfill_signal(ds, signal, window_ns, callback)
 
     def _backfill_signal(self, ds: str, signal, window_ns: int, callback):
-        archive_end_ns = self._wait_for_first_live(signal)
+        archive_end_ns, found_live = self._wait_for_first_live(signal)
         archive_start_ns = archive_end_ns - window_ns
 
         try:
@@ -185,17 +201,22 @@ class CanvasStreamer:
                 d3_unit='')
             signal.inject_external(append=False, **payload)
 
+        if not found_live:
+            self._first_live_pending.add(signal.uid)
+
         logger.info(f"Archive backfill for {signal.name}: {len(ax)} points prepended")
         callback(signal)
 
-    def _wait_for_first_live(self, signal) -> int:
+    def _wait_for_first_live(self, signal):
+        """Returns (end_ns, found_live) so the caller can distinguish path 1 from
+        path 2 (no live sample within the timeout)."""
         deadline = time.monotonic() + _FIRST_LIVE_WAIT_S
         while time.monotonic() < deadline and not self.stop_flag:
             x = signal.x_data
             if x is not None and len(x) > 0:
-                return int(x[0])
+                return int(x[0]), True
             time.sleep(0.05)
-        return int(time.time() * 1e9)
+        return int(time.time() * 1e9), False
 
     def _hourly_topup(self):
         """Refresh the most recent ``_TOPUP_PERIOD_S`` from archive each period
@@ -344,3 +365,4 @@ class CanvasStreamer:
         self.stop_flag = True
         self.collectors.clear()
         self.streamers.clear()
+        self._first_live_pending.clear()
