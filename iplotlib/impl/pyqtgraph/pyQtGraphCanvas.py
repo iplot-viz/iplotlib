@@ -356,6 +356,9 @@ class PyQtGraphParser(BackendParserBase):
         end = self.transform_value(impl_plot, 0, now, inverse=True)
         vb.setXRange(begin, end, padding=0)
 
+    def _apply_xrange(self, impl_plot: PlotItem, begin, end):
+        impl_plot.getViewBox().setXRange(begin, end, padding=0)
+
     def set_line_data(self, line: PlotDataItem, x_data, y_data):
         """
         Set the data for a PlotDataItem based on the attributes of SignalXY.

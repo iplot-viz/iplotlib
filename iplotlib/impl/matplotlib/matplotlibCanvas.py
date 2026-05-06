@@ -310,6 +310,9 @@ class MatplotlibParser(BackendParserBase):
         end = self.transform_value(impl_plot, 0, now, inverse=True)
         impl_plot.set_xlim(begin, end)
 
+    def _apply_xrange(self, impl_plot: MPLAxes, begin, end):
+        impl_plot.set_xlim(begin, end)
+
     def set_line_data(self, line: Line2D, x_data, y_data):
         """
         Set the data for a Line2D

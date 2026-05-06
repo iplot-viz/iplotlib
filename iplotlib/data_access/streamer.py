@@ -1,10 +1,18 @@
 import time
 from functools import partial
-from threading import Thread
+from threading import Thread, Lock
+
+import numpy as np
 
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
+
+# Max wait for the first live sample before anchoring the archive end at "now".
+_FIRST_LIVE_WAIT_S = 2.0
+
+# Sliding-window refresh cadence. Skipped for windows shorter than this period.
+_TOPUP_PERIOD_S = 3600
 
 
 # CWS-SCSU-0000:CU510{1,2,3,4}-TT-XI, CTRL-SYSM-CUB-4505-61:CU000{1,2,3}-HTH-TT,BUIL-B36-VA-RT-RT1:CL0001-TT02-STATE
@@ -18,8 +26,19 @@ class CanvasStreamer:
         self.signals = {}
         self.collectors = []
         self.streamers = []
+        self._inject_locks = {}
+        self._window_ns = 0
+        self._ds_to_signals = {}
+        self._callback = None
 
-    def start(self, canvas, callback):
+    def _signal_lock(self, signal):
+        lock = self._inject_locks.get(signal.uid)
+        if lock is None:
+            lock = Lock()
+            self._inject_locks[signal.uid] = lock
+        return lock
+
+    def start(self, canvas, callback, window_ns: int = None):
         self.stop_flag = False
         all_signals = []
         for col in canvas.plots:
@@ -46,6 +65,22 @@ class CanvasStreamer:
         for ds in signals_by_ds.keys():
             logger.info(F"Starting streamer for data source: {ds}")
             self.start_stream(ds, signals_by_ds[ds], partial(self.handler, callback))
+
+        self._window_ns = int(window_ns) if window_ns else 0
+        self._ds_to_signals = {ds: [s for s in all_signals if s.data_source == ds]
+                               for ds in signals_by_ds.keys()}
+        self._callback = callback
+
+        if self._window_ns > 0:
+            Thread(name="archive-backfill",
+                   target=self._archive_backfill,
+                   args=(self._ds_to_signals, self._window_ns, callback),
+                   daemon=True).start()
+
+            if self._window_ns > _TOPUP_PERIOD_S * int(1e9):
+                Thread(name="archive-topup",
+                       target=self._hourly_topup,
+                       daemon=True).start()
 
     def start_stream(self, ds, varnames, callback):
         collect_thread = Thread(name="collector", target=self.stream_thread, args=(ds, varnames, callback), daemon=True)
@@ -92,9 +127,218 @@ class CanvasStreamer:
                     d1_unit=dobj.yunit,
                     d2_unit='',
                     d3_unit='')
-                signal.inject_external(append=True, **result)
+                with self._signal_lock(signal):
+                    signal.inject_external(append=True, **result)
                 logger.debug(f"Updated {varname} with {len(dobj.xdata)} new samples")
                 callback(signal)
+
+    def _archive_backfill(self, ds_to_signals: dict, window_ns: int, callback):
+        """Seed each signal's visible window with archive data, anchoring the
+        end at the first live sample (or now, if none arrives in time)."""
+        for ds, signals in ds_to_signals.items():
+            if self.stop_flag:
+                return
+            for signal in signals:
+                if self.stop_flag:
+                    return
+                self._backfill_signal(ds, signal, window_ns, callback)
+
+    def _backfill_signal(self, ds: str, signal, window_ns: int, callback):
+        archive_end_ns = self._wait_for_first_live(signal)
+        archive_start_ns = archive_end_ns - window_ns
+
+        try:
+            data = self.da.get_archive_window(
+                ds,
+                varname=signal.name,
+                tsS=str(archive_start_ns),
+                tsE=str(archive_end_ns),
+            )
+        except Exception as exc:
+            logger.warning(f"Archive backfill failed for {signal.name}: {exc}")
+            return
+
+        if data is None or getattr(data, 'errcode', -1) != 0:
+            logger.debug(f"No archive data for {signal.name}")
+            return
+
+        ax, ay, xunit, yunit = self._unpack_archive(data)
+        if ax is None or len(ax) == 0:
+            return
+
+        with self._signal_lock(signal):
+            current_x = signal.x_data
+            current_y = signal.y_data
+            merged_x = np.concatenate([np.asarray(ax), np.asarray(current_x)])
+            merged_y = np.concatenate([np.asarray(ay), np.asarray(current_y)])
+            payload = dict(alias_map={
+                'time': {'idx': 0, 'independent': True},
+                'data': {'idx': 1}
+            },
+                d0=merged_x,
+                d1=merged_y,
+                d2=[],
+                d3=[],
+                d0_unit=xunit,
+                d1_unit=yunit,
+                d2_unit='',
+                d3_unit='')
+            signal.inject_external(append=False, **payload)
+
+        logger.info(f"Archive backfill for {signal.name}: {len(ax)} points prepended")
+        callback(signal)
+
+    def _wait_for_first_live(self, signal) -> int:
+        deadline = time.monotonic() + _FIRST_LIVE_WAIT_S
+        while time.monotonic() < deadline and not self.stop_flag:
+            x = signal.x_data
+            if x is not None and len(x) > 0:
+                return int(x[0])
+            time.sleep(0.05)
+        return int(time.time() * 1e9)
+
+    def _hourly_topup(self):
+        """Refresh the most recent ``_TOPUP_PERIOD_S`` from archive each period
+        and drop samples older than ``self._window_ns``."""
+        period_ns = _TOPUP_PERIOD_S * int(1e9)
+        while not self.stop_flag:
+            target = time.monotonic() + _TOPUP_PERIOD_S
+            while time.monotonic() < target and not self.stop_flag:
+                time.sleep(1)
+            if self.stop_flag:
+                return
+            for ds, signals in self._ds_to_signals.items():
+                for signal in signals:
+                    if self.stop_flag:
+                        return
+                    self._topup_signal(ds, signal, period_ns)
+
+    def _topup_signal(self, ds: str, signal, period_ns: int):
+        now_ns = int(time.time() * 1e9)
+        last_period_start_ns = now_ns - period_ns
+        cutoff_ns = now_ns - self._window_ns
+
+        try:
+            data = self.da.get_archive_window(
+                ds,
+                varname=signal.name,
+                tsS=str(last_period_start_ns),
+                tsE=str(now_ns),
+            )
+        except Exception as exc:
+            logger.warning(f"Archive top-up failed for {signal.name}: {exc}")
+            return
+
+        if data is None or getattr(data, 'errcode', -1) != 0:
+            logger.debug(f"No archive data for {signal.name} top-up")
+            return
+
+        ax, ay, xunit, yunit = self._unpack_archive(data)
+        if ax is None or len(ax) == 0:
+            return
+
+        with self._signal_lock(signal):
+            cur_x = np.asarray(signal.x_data)
+            cur_y = np.asarray(signal.y_data)
+
+            keep_mask = (cur_x >= cutoff_ns) & (cur_x < last_period_start_ns)
+            kept_x = cur_x[keep_mask]
+            kept_y = cur_y[keep_mask]
+
+            merged_x = np.concatenate([kept_x, np.asarray(ax)])
+            merged_y = np.concatenate([kept_y, np.asarray(ay)])
+
+            payload = dict(alias_map={
+                'time': {'idx': 0, 'independent': True},
+                'data': {'idx': 1}
+            },
+                d0=merged_x,
+                d1=merged_y,
+                d2=[],
+                d3=[],
+                d0_unit=xunit,
+                d1_unit=yunit,
+                d2_unit='',
+                d3_unit='')
+            signal.inject_external(append=False, **payload)
+
+        logger.info(f"Top-up for {signal.name}: {len(ax)} archive points, "
+                    f"{len(kept_x)} prior live points retained")
+        if self._callback:
+            self._callback(signal)
+
+    def change_window(self, new_window_ns: int):
+        """Update the visible window mid-stream. If wider than the current one,
+        fetch the newly-revealed range from the archive."""
+        if new_window_ns <= 0:
+            return
+        old_window_ns = self._window_ns
+        self._window_ns = int(new_window_ns)
+        if new_window_ns > old_window_ns and self._ds_to_signals:
+            Thread(name="archive-gap-fill",
+                   target=self._gap_fill,
+                   args=(old_window_ns, new_window_ns),
+                   daemon=True).start()
+
+    def _gap_fill(self, old_window_ns: int, new_window_ns: int):
+        now_ns = int(time.time() * 1e9)
+        new_start_ns = now_ns - new_window_ns
+        old_start_ns = now_ns - old_window_ns
+        for ds, signals in self._ds_to_signals.items():
+            if self.stop_flag:
+                return
+            for signal in signals:
+                if self.stop_flag:
+                    return
+                self._gap_fill_signal(ds, signal, new_start_ns, old_start_ns)
+
+    def _gap_fill_signal(self, ds: str, signal, start_ns: int, end_ns: int):
+        try:
+            data = self.da.get_archive_window(
+                ds,
+                varname=signal.name,
+                tsS=str(start_ns),
+                tsE=str(end_ns),
+            )
+        except Exception as exc:
+            logger.warning(f"Archive gap-fill failed for {signal.name}: {exc}")
+            return
+
+        if data is None or getattr(data, 'errcode', -1) != 0:
+            return
+
+        ax, ay, xunit, yunit = self._unpack_archive(data)
+        if ax is None or len(ax) == 0:
+            return
+
+        with self._signal_lock(signal):
+            cur_x = np.asarray(signal.x_data)
+            cur_y = np.asarray(signal.y_data)
+            merged_x = np.concatenate([np.asarray(ax), cur_x])
+            merged_y = np.concatenate([np.asarray(ay), cur_y])
+            payload = dict(alias_map={
+                'time': {'idx': 0, 'independent': True},
+                'data': {'idx': 1}
+            },
+                d0=merged_x,
+                d1=merged_y,
+                d2=[],
+                d3=[],
+                d0_unit=xunit,
+                d1_unit=yunit,
+                d2_unit='',
+                d3_unit='')
+            signal.inject_external(append=False, **payload)
+
+        logger.info(f"Gap-fill for {signal.name}: {len(ax)} archive points prepended")
+        if self._callback:
+            self._callback(signal)
+
+    @staticmethod
+    def _unpack_archive(data):
+        if hasattr(data, 'ydata_avg') and data.ydata_avg is not None:
+            return data.xdata, data.ydata_avg, data.xunit, data.yunit
+        return data.xdata, data.ydata, data.xunit, data.yunit
 
     def stop(self):
         self.stop_flag = True
