@@ -196,10 +196,10 @@ class NanosecondDateFormatter(pg.AxisItem):
 
             # Add new ticks if needed
             while len(values) < n:
-                # Add to the end or to the beginning
-                if values and values[-1] + (values[1] - values[0]) <= maxVal:
+                # Add to the end or to the beginning. Need >= 2 values to extrapolate spacing.
+                if len(values) >= 2 and values[-1] + (values[1] - values[0]) <= maxVal:
                     values.append(values[-1] + (values[1] - values[0]))
-                elif values and values[0] - (values[1] - values[0]) >= minVal:
+                elif len(values) >= 2 and values[0] - (values[1] - values[0]) >= minVal:
                     values.insert(0, values[0] - (values[1] - values[0]))
                 else:
                     break
