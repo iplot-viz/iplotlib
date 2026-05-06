@@ -315,10 +315,9 @@ class MatplotlibParser(BackendParserBase):
 
     def set_line_data(self, line: Line2D, x_data, y_data):
         """
-        Set the data for a Line2D
+        Set the data for a Line2D atomically (single cache invalidation).
         """
-        line.set_xdata(x=x_data)
-        line.set_ydata(y=y_data)
+        line.set_data(x_data, y_data)
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
         return draw_fn(x_data, y_data, **style)

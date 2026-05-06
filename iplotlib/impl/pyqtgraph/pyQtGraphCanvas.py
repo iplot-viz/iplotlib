@@ -354,10 +354,10 @@ class PyQtGraphParser(BackendParserBase):
 
         begin = self.transform_value(impl_plot, 0, min_time, inverse=True)
         end = self.transform_value(impl_plot, 0, now, inverse=True)
-        vb.setXRange(begin, end, padding=0)
+        vb.setXRange(begin, end, padding=0.02)
 
     def _apply_xrange(self, impl_plot: PlotItem, begin, end):
-        impl_plot.getViewBox().setXRange(begin, end, padding=0)
+        impl_plot.getViewBox().setXRange(begin, end, padding=0.02)
 
     def set_line_data(self, line: PlotDataItem, x_data, y_data):
         """
@@ -1127,10 +1127,9 @@ class PyQtGraphParser(BackendParserBase):
                     plot_with_slider.slider_last_val = val
 
     def _y_axis_update_callback(self, view_box: ViewBox):
-        if self.canvas.streaming:
-            return
         current_plot = view_box.parentItem()  # type: PlotItem
-        super()._y_axis_update_callback(current_plot)
+        if not self.canvas.streaming:
+            super()._y_axis_update_callback(current_plot)
 
         for (r, c), stacks in self._layout_stacks.items():
             if current_plot in stacks.values():
