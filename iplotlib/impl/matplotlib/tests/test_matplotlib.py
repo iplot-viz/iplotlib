@@ -25,6 +25,10 @@ class MatplotlibTesting(QAppOffscreenTestAdapter):
     def setUp(self) -> None:
         super().setUp()
 
+        # Snapshot global state we are about to mutate, so tearDown can restore it.
+        self._prev_sources_config = os.environ.get('IPLOT_SOURCES_CONFIG')
+        self._prev_access_helper_da = AccessHelper.da
+
         self.da = DataAccess()
         self.ds = "csv"
 
@@ -32,22 +36,26 @@ class MatplotlibTesting(QAppOffscreenTestAdapter):
         data_dir_escaped = data_dir.replace('\\', '/')
         dscfg = dscfg_csv % data_dir_escaped
 
-        # Create temp file - on Windows we need to close it before reading
-        self.temp_config_path = tempfile.mktemp(suffix='.cfg')
-        with open(self.temp_config_path, 'w') as f:
+        fd, self.temp_config_path = tempfile.mkstemp(suffix='.cfg')
+        with os.fdopen(fd, 'w') as f:
             f.write(dscfg)
 
-        os.environ.update({'IPLOT_SOURCES_CONFIG': os.path.abspath(self.temp_config_path)})
+        os.environ['IPLOT_SOURCES_CONFIG'] = os.path.abspath(self.temp_config_path)
         if self.da.load_config(self.temp_config_path):
             AccessHelper.da = self.da
 
     def tearDown(self) -> None:
-        # Clean up temp file
         if hasattr(self, 'temp_config_path'):
             try:
                 os.unlink(self.temp_config_path)
             except OSError:
                 pass
+        # Restore env var and AccessHelper to prevent leaking into other tests.
+        if self._prev_sources_config is None:
+            os.environ.pop('IPLOT_SOURCES_CONFIG', None)
+        else:
+            os.environ['IPLOT_SOURCES_CONFIG'] = self._prev_sources_config
+        AccessHelper.da = self._prev_access_helper_da
         super().tearDown()
 
     # --------------------------
@@ -85,6 +93,8 @@ class MatplotlibTesting(QAppOffscreenTestAdapter):
             pulse = test_case["pulse"]
             expected_x_shape = test_case["expected_x_shape"]
             expected_y_shape = test_case["expected_y_shape"]
+            expected_x_values = test_case["expected_x_values"]
+            expected_y_values = test_case["expected_y_values"]
 
             dobj = self.da.get_data(self.ds, varname=varname, pulse=pulse)
 
@@ -92,6 +102,8 @@ class MatplotlibTesting(QAppOffscreenTestAdapter):
             self.assertEqual(np.shape(dobj.ydata), expected_y_shape)
             self.assertIsInstance(dobj.xdata, (np.ndarray, list))
             self.assertIsInstance(dobj.ydata, (np.ndarray, list))
+            np.testing.assert_array_equal(dobj.xdata, expected_x_values)
+            np.testing.assert_array_equal(dobj.ydata, expected_y_values)
 
     def test_CSVAccessByPulseWithTime(self) -> None:
         test_cases = [

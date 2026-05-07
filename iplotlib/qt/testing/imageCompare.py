@@ -21,9 +21,10 @@ def compare_pixmap_to_baseline(pixmap, baseline_path: str, tol: float = 5.0) -> 
     matplotlib's ``compare_images`` (default 5.0, generous enough to absorb
     anti-aliasing differences between platforms).
     """
+    os.makedirs(os.path.dirname(baseline_path), exist_ok=True)
     actual_path = baseline_path.replace('.png', '_actual.png')
-    pixmap.save(actual_path, 'PNG')
-    assert os.path.exists(actual_path), f"pixmap.save produced no file: {actual_path}"
+    if not pixmap.save(actual_path, 'PNG'):
+        raise RuntimeError(f"pixmap.save failed for {actual_path}")
 
     if not os.path.exists(baseline_path):
         shutil.copyfile(actual_path, baseline_path)

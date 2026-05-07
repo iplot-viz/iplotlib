@@ -26,7 +26,7 @@ class StandaloneRenderTest(unittest.TestCase):
         super().setUp()
         self.app = ensure_qapp()
 
-    def _render_and_save(self, backend: str) -> bytes:
+    def _render_and_save(self, backend: str) -> None:
         canvas = customData.get_canvas()
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
         qt_canvas.set_canvas(canvas)
@@ -42,7 +42,6 @@ class StandaloneRenderTest(unittest.TestCase):
         baseline = os.path.join(BASELINE_DIR, f"customData_{backend}.png")
         tol = PYQT_BASELINE_TOLERANCE if backend == 'pyqt' else BASELINE_TOLERANCE
         compare_pixmap_to_baseline(pixmap, baseline, tol=tol)
-        return baseline
 
     def test_matplotlib_renders_customData(self):
         self._render_and_save('matplotlib')
