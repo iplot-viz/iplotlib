@@ -1269,6 +1269,7 @@ class MatplotlibParser(BackendParserBase):
                                  lw=self.canvas.crosshair_line_width,
                                  horiz_on=False or self.canvas.crosshair_horizontal,
                                  vert_on=self.canvas.crosshair_vertical,
+                                 font_size=int(self._pm.get_value(self.canvas, 'font_size') or 8),
                                  use_blit=True,
                                  cache_table=self._impl_plot_cache_table))
 

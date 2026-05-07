@@ -269,30 +269,33 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def on_pick_legend(self, event):
         # Right-click on legend → open signal preferences
         if hasattr(event, 'mouseevent') and event.mouseevent.button == MouseButton.RIGHT:
-            signal = self._parser._legend_signal_lut.get(event.artist)
-            if signal:
-                menu = QMenu(self)
-                menu.addAction("Signal Preferences",
-                               lambda s=signal: self.openPlotPreferences.emit(s))
-                menu.popup(event.mouseevent.guiEvent.globalPos())
+            self._show_signal_prefs_menu(event.artist, event.mouseevent)
             return
 
-        # On the pick event, find the original line corresponding to the legend
-        # proxy line, and toggle its visibility.
         legend_line = event.artist
+        ax_lines = self._parser.map_legend_to_ax.get(legend_line)
+        if ax_lines is None:
+            return
+        self._toggle_legend_line(legend_line, ax_lines)
 
-        ax_lines = self._parser.map_legend_to_ax[legend_line]
-        visible = True
+    def _show_signal_prefs_menu(self, legend_line, event):
+        signal = self._parser._legend_signal_lut.get(legend_line)
+        if signal is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("Signal Preferences",
+                       lambda s=signal: self.openPlotPreferences.emit(s))
+        menu.popup(event.guiEvent.globalPos())
+
+    def _toggle_legend_line(self, legend_line, ax_lines):
         if isinstance(ax_lines, Collection):
+            visible = True
             for ax_line in ax_lines:  # Envelope case
                 visible = not ax_line.get_visible()
                 ax_line.set_visible(visible)
         else:
             visible = not ax_lines.get_visible()
             ax_lines.set_visible(visible)
-
-        # signal.lines = ax_lines
-        # Change the alpha on the line in the legend, so we can see what lines have been toggled
         legend_line.set_alpha(1.0 if visible else 0.2)
         self._parser.figure.canvas.draw()
 
@@ -402,8 +405,26 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
 
+        on_legend = (event.inaxes and event.inaxes.get_legend()
+                     and event.inaxes.get_legend().contains(event)[0])
+
+        if (on_legend and event.button in (MouseButton.LEFT, MouseButton.RIGHT)
+                and self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]):
+            for legend_line, ax_lines in self._parser.map_legend_to_ax.items():
+                contains, _ = legend_line.contains(event)
+                if contains:
+                    if getattr(self._mpl_toolbar, '_zoom_info', None) is not None:
+                        self._mpl_toolbar.release_zoom(event)
+                    if getattr(self._mpl_toolbar, '_pan_info', None) is not None:
+                        self._mpl_toolbar.release_pan(event)
+                    if event.button == MouseButton.LEFT:
+                        self._toggle_legend_line(legend_line, ax_lines)
+                    else:
+                        self._show_signal_prefs_menu(legend_line, event)
+                    return
+
         # If the mouse is over the legend it ignores it
-        if event.inaxes and event.inaxes.get_legend() and event.inaxes.get_legend().contains(event)[0]:
+        if on_legend:
             return
 
         if event.dblclick:
@@ -481,6 +502,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             if not hasattr(ci, 'plot'):
                 return
             plot = ci.plot()
+            if event.button == MouseButton.RIGHT:
+                if getattr(self._mpl_toolbar, '_zoom_info', None) is not None:
+                    self._mpl_toolbar.release_zoom(event)
+                if getattr(self._mpl_toolbar, '_pan_info', None) is not None:
+                    self._mpl_toolbar.release_pan(event)
+                self._show_autoscale_menu(event)
+                return
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
                 # Stage a command to obtain original view limits
                 # Disable Zoom and Pan for PlotContour and for PlotContourWithSlider
@@ -488,26 +516,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     return
                 self.stage_view_lim_cmd(event.inaxes)
                 return
-            if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.RIGHT:
-                # Create menu with autoscale options
-                autoscale_menu = QMenu(self)
-                autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
-                autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
-                if self._parser.canvas.focus_plot is None:
-                    autoscale_menu.addAction("Focus on plot", lambda: self._full_screen_mode_on(event.inaxes))
-                else:
-                    autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
-                autoscale_menu.addSeparator()
-                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
-                if ci:
-                    autoscale_menu.addAction("Preferences",
-                                             lambda: self.openPlotPreferences.emit(ci.plot()))
-                # Detect nearest signal and add Signal Preferences option
-                nearest_signal, _, _ = self._find_signal_at_event(event)
-                if nearest_signal:
-                    autoscale_menu.addAction("Signal Preferences",
-                                             lambda s=nearest_signal: self.openPlotPreferences.emit(s))
-                autoscale_menu.popup(event.guiEvent.globalPos())
 
             # Handle drag shift in Select mode with left click - use native hit-testing
             if self._mmode == Canvas.MOUSE_MODE_SELECT and event.button == MouseButton.LEFT:
@@ -599,6 +607,27 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self.push_view_lim_cmd()
                 # Update statistics
                 self.stats(self.get_canvas())
+
+    def _show_autoscale_menu(self, event: MouseEvent):
+        if event.inaxes is None:
+            return
+        ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+        autoscale_menu = QMenu(self)
+        autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
+        autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+        if self._parser.canvas.focus_plot is None:
+            autoscale_menu.addAction("Focus on plot", lambda: self._full_screen_mode_on(event.inaxes))
+        else:
+            autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+        autoscale_menu.addSeparator()
+        if ci:
+            autoscale_menu.addAction("Preferences",
+                                     lambda: self.openPlotPreferences.emit(ci.plot()))
+        nearest_signal, _, _ = self._find_signal_at_event(event)
+        if nearest_signal:
+            autoscale_menu.addAction("Signal Preferences",
+                                     lambda s=nearest_signal: self.openPlotPreferences.emit(s))
+        autoscale_menu.popup(event.guiEvent.globalPos())
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.text() == 'n':
