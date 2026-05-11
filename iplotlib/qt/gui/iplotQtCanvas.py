@@ -336,6 +336,13 @@ class IplotQtCanvas(QWidget):
 
     @contextmanager
     def view_retainer(self):
+        # During streaming, axis limits are rewritten every frame by
+        # do_impl_streaming, so snapshotting and restoring them here is both
+        # meaningless and unsafe (snapshot may be (None, None), undo() then
+        # crashes in create_offset). Skip the retainer in that case.
+        if self._parser.canvas is not None and self._parser.canvas.streaming:
+            yield None
+            return
         try:
             current_lims = self._parser.get_all_plot_limits()
             cmd = IplotAxesRangeCmd('_TmpPrefUpd_', current_lims, parser=self._parser)

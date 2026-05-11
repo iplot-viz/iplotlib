@@ -107,6 +107,9 @@ class IplotQtMainWindow(QMainWindow):
         w = self.canvasStack.currentWidget()
         if not w:
             return
+        # Recompute stats on demand. Needed during streaming, where stats
+        # are not refreshed automatically per-frame.
+        w.stats(w.get_canvas())
         w.show_stats()
 
     def save_canvas_image(self):
