@@ -53,6 +53,7 @@ class CanvasStreamer:
 
         signals = {}
         for s in all_signals:
+            s._streaming_has_live = False
             signals[s.name] = signals.get(s.name, []) + [s]
         self.signals = signals
 
@@ -64,14 +65,14 @@ class CanvasStreamer:
             else:
                 signals_by_ds[s.data_source] = [s.name]
 
-        for ds in signals_by_ds.keys():
-            logger.info(F"Starting streamer for data source: {ds}")
-            self.start_stream(ds, signals_by_ds[ds], partial(self.handler, callback))
-
         self._window_ns = int(window_ns) if window_ns else 0
         self._ds_to_signals = {ds: [s for s in all_signals if s.data_source == ds]
                                for ds in signals_by_ds.keys()}
         self._callback = callback
+
+        for ds in signals_by_ds.keys():
+            logger.info(F"Starting streamer for data source: {ds}")
+            self.start_stream(ds, signals_by_ds[ds], partial(self.handler, callback))
 
         if self._window_ns > 0:
             Thread(name="archive-backfill",
@@ -145,6 +146,10 @@ class CanvasStreamer:
                 d3_unit='')
             with self._signal_lock(signal):
                 signal.inject_external(append=True, **result)
+            if len(x_data) > 0 and self._window_ns > 0:
+                now_ns = int(time.time() * 1e9)
+                if int(x_data[-1]) >= now_ns - self._window_ns:
+                    signal._streaming_has_live = True
             logger.debug(f"Updated {varname} with {len(dobj.xdata)} new samples")
             callback(signal)
 

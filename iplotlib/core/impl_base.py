@@ -746,12 +746,8 @@ class BackendParserBase(ABC):
 
     def update_plot_line_streaming(self, signal: SignalXY, impl_plot: Any, plot_lines, x_data, y_data, style):
         """
-        Updates the plot data during streaming, distinguishing between the cases when new data arrives and when no
-        new data is received.
-
-        The method stores the last X and Y points from the arrays and compares them with the most recent values. If
-        the latest X value remains unchanged, it means no new data has arrived. In this case, a constant value is drawn
-        to represent the last received Y point.
+        Update the streaming line. Extends the trace horizontally to ``now`` during gaps only after a live
+        sample has been received; otherwise the existing points are drawn as-is.
         """
         last_x = self._streaming_impl_plot_lut[signal.uid][0]
         last_y = self._streaming_impl_plot_lut[signal.uid][1]
@@ -762,11 +758,14 @@ class BackendParserBase(ABC):
             self._update_marker_by_point_count(plot_lines[0], x_data, style)
 
         elif len(x_data) > 0 and last_x == x_data[-1]:  # No new data
-            now = int(datetime.now().timestamp() * 1e9)
-            new_x = self.transform_value(impl_plot, 0, now, inverse=True)
-            const_x = np.append(x_data, new_x)
-            const_y = np.append(y_data, last_y)
-            self.set_line_data(plot_lines[0], const_x, const_y)
+            if getattr(signal, '_streaming_has_live', False):
+                now = int(datetime.now().timestamp() * 1e9)
+                new_x = self.transform_value(impl_plot, 0, now, inverse=True)
+                const_x = np.append(x_data, new_x)
+                const_y = np.append(y_data, last_y)
+                self.set_line_data(plot_lines[0], const_x, const_y)
+            else:
+                self.set_line_data(plot_lines[0], x_data, y_data)
 
         return plot_lines
 
