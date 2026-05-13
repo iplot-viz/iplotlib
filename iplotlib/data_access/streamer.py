@@ -40,6 +40,11 @@ class CanvasStreamer:
             self._inject_locks[signal.uid] = lock
         return lock
 
+    def _archive_kwargs(self):
+        # Pass nbp to UDA so the archive layer respects the cap at fetch time.
+        # Below the cap UDA returns raw; above it falls back to its envelope mode.
+        return {'nbp': self._max_points} if self._max_points > 0 else {}
+
     def _apply_cap(self, signal):
         # Drop-oldest trim to honour the per-signal sample cap. Caller must hold _signal_lock.
         if self._max_points <= 0:
@@ -202,6 +207,7 @@ class CanvasStreamer:
                 varname=signal.name,
                 tsS=str(archive_start_ns),
                 tsE=str(archive_end_ns),
+                **self._archive_kwargs(),
             )
         except Exception as exc:
             logger.warning(f"Archive backfill failed for {signal.name}: {exc}")
@@ -279,6 +285,7 @@ class CanvasStreamer:
                 varname=signal.name,
                 tsS=str(last_period_start_ns),
                 tsE=str(now_ns),
+                **self._archive_kwargs(),
             )
         except Exception as exc:
             logger.warning(f"Archive top-up failed for {signal.name}: {exc}")
@@ -355,6 +362,7 @@ class CanvasStreamer:
                 varname=signal.name,
                 tsS=str(start_ns),
                 tsE=str(end_ns),
+                **self._archive_kwargs(),
             )
         except Exception as exc:
             logger.warning(f"Archive gap-fill failed for {signal.name}: {exc}")
