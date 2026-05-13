@@ -28,6 +28,7 @@ class CanvasStreamer:
         self.streamers = []
         self._inject_locks = {}
         self._window_ns = 0
+        self._max_points = 0
         self._ds_to_signals = {}
         self._callback = None
         self._first_live_pending = set()
@@ -39,7 +40,32 @@ class CanvasStreamer:
             self._inject_locks[signal.uid] = lock
         return lock
 
-    def start(self, canvas, callback, window_ns: int = None):
+    def _apply_cap(self, signal):
+        # Drop-oldest trim to honour the per-signal sample cap. Caller must hold _signal_lock.
+        if self._max_points <= 0:
+            return
+        x_data = signal.x_data
+        if x_data is None or len(x_data) <= self._max_points:
+            return
+        y_data = signal.y_data
+        n = self._max_points
+        trimmed_x = np.asarray(x_data)[-n:]
+        trimmed_y = np.asarray(y_data)[-n:]
+        payload = dict(alias_map={
+            'time': {'idx': 0, 'independent': True},
+            'data': {'idx': 1}
+        },
+            d0=trimmed_x,
+            d1=trimmed_y,
+            d2=[],
+            d3=[],
+            d0_unit=getattr(x_data, 'unit', ''),
+            d1_unit=getattr(y_data, 'unit', ''),
+            d2_unit='',
+            d3_unit='')
+        signal.inject_external(append=False, **payload)
+
+    def start(self, canvas, callback, window_ns: int = None, max_points: int = 0):
         self.stop_flag = False
         self._first_live_pending.clear()
         all_signals = []
@@ -66,6 +92,7 @@ class CanvasStreamer:
                 signals_by_ds[s.data_source] = [s.name]
 
         self._window_ns = int(window_ns) if window_ns else 0
+        self._max_points = int(max_points) if max_points else 0
         self._ds_to_signals = {ds: [s for s in all_signals if s.data_source == ds]
                                for ds in signals_by_ds.keys()}
         self._callback = callback
@@ -146,6 +173,7 @@ class CanvasStreamer:
                 d3_unit='')
             with self._signal_lock(signal):
                 signal.inject_external(append=True, **result)
+                self._apply_cap(signal)
             if len(x_data) > 0 and self._window_ns > 0:
                 now_ns = int(time.time() * 1e9)
                 if int(x_data[-1]) >= now_ns - self._window_ns:
@@ -205,6 +233,7 @@ class CanvasStreamer:
                 d2_unit='',
                 d3_unit='')
             signal.inject_external(append=False, **payload)
+            self._apply_cap(signal)
 
         if not found_live:
             self._first_live_pending.add(signal.uid)
@@ -287,6 +316,7 @@ class CanvasStreamer:
                 d2_unit='',
                 d3_unit='')
             signal.inject_external(append=False, **payload)
+            self._apply_cap(signal)
 
         logger.info(f"Top-up for {signal.name}: {len(ax)} archive points, "
                     f"{len(kept_x)} prior live points retained")
@@ -355,6 +385,7 @@ class CanvasStreamer:
                 d2_unit='',
                 d3_unit='')
             signal.inject_external(append=False, **payload)
+            self._apply_cap(signal)
 
         logger.info(f"Gap-fill for {signal.name}: {len(ax)} archive points prepended")
         if self._callback:
