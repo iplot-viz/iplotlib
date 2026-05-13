@@ -240,6 +240,7 @@ class CanvasStreamer:
                 d3_unit='')
             signal.inject_external(append=False, **payload)
             self._apply_cap(signal)
+            signal._streaming_has_live = True
 
         if not found_live:
             self._first_live_pending.add(signal.uid)
@@ -324,6 +325,7 @@ class CanvasStreamer:
                 d3_unit='')
             signal.inject_external(append=False, **payload)
             self._apply_cap(signal)
+            signal._streaming_has_live = True
 
         logger.info(f"Top-up for {signal.name}: {len(ax)} archive points, "
                     f"{len(kept_x)} prior live points retained")
@@ -394,6 +396,7 @@ class CanvasStreamer:
                 d3_unit='')
             signal.inject_external(append=False, **payload)
             self._apply_cap(signal)
+            signal._streaming_has_live = True
 
         logger.info(f"Gap-fill for {signal.name}: {len(ax)} archive points prepended")
         if self._callback:
