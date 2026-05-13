@@ -40,10 +40,47 @@ class CanvasStreamer:
             self._inject_locks[signal.uid] = lock
         return lock
 
-    def _archive_kwargs(self):
-        # Pass nbp to UDA so the archive layer respects the cap at fetch time.
-        # Below the cap UDA returns raw; above it falls back to its envelope mode.
-        return {'nbp': self._max_points} if self._max_points > 0 else {}
+    def _fetch_archive_window(self, ds, signal, start_ns, end_ns):
+        try:
+            data = self.da.get_archive_window(
+                ds,
+                varname=signal.name,
+                tsS=str(start_ns),
+                tsE=str(end_ns),
+                **self._archive_kwargs(signal),
+            )
+        except Exception as exc:
+            logger.warning(f"Archive fetch failed for {signal.name}: {exc}")
+            return None, None, None, None
+
+        if data is None or getattr(data, 'errcode', -1) != 0:
+            return None, None, None, None
+        return self._unpack_archive(data)
+
+    def _fetch_last_archive_value(self, ds, signal, end_ns):
+        try:
+            data = self.da.get_archive_window(
+                ds,
+                varname=signal.name,
+                tsS="0",
+                tsE=str(end_ns),
+                nbp=1,
+                decType="last",
+            )
+        except Exception as exc:
+            logger.warning(f"Last-value fetch failed for {signal.name}: {exc}")
+            return None, None, None, None
+        if data is None or getattr(data, 'errcode', -1) != 0:
+            return None, None, None, None
+        return self._unpack_archive(data)
+
+    def _archive_kwargs(self, signal=None):
+        kwargs = {'extremities': True}
+        if self._max_points > 0:
+            kwargs['nbp'] = self._max_points
+        if signal is not None and getattr(signal, 'envelope', False):
+            kwargs['envelope'] = True
+        return kwargs
 
     def _apply_cap(self, signal):
         # Drop-oldest trim to honour the per-signal sample cap. Caller must hold _signal_lock.
@@ -201,23 +238,9 @@ class CanvasStreamer:
         archive_end_ns, found_live = self._wait_for_first_live(signal)
         archive_start_ns = archive_end_ns - window_ns
 
-        try:
-            data = self.da.get_archive_window(
-                ds,
-                varname=signal.name,
-                tsS=str(archive_start_ns),
-                tsE=str(archive_end_ns),
-                **self._archive_kwargs(),
-            )
-        except Exception as exc:
-            logger.warning(f"Archive backfill failed for {signal.name}: {exc}")
-            return
-
-        if data is None or getattr(data, 'errcode', -1) != 0:
-            logger.debug(f"No archive data for {signal.name}")
-            return
-
-        ax, ay, xunit, yunit = self._unpack_archive(data)
+        ax, ay, xunit, yunit = self._fetch_archive_window(ds, signal, archive_start_ns, archive_end_ns)
+        if ax is None or len(ax) == 0:
+            ax, ay, xunit, yunit = self._fetch_last_archive_value(ds, signal, archive_end_ns)
         if ax is None or len(ax) == 0:
             return
 
@@ -286,7 +309,7 @@ class CanvasStreamer:
                 varname=signal.name,
                 tsS=str(last_period_start_ns),
                 tsE=str(now_ns),
-                **self._archive_kwargs(),
+                **self._archive_kwargs(signal),
             )
         except Exception as exc:
             logger.warning(f"Archive top-up failed for {signal.name}: {exc}")
@@ -364,7 +387,7 @@ class CanvasStreamer:
                 varname=signal.name,
                 tsS=str(start_ns),
                 tsE=str(end_ns),
-                **self._archive_kwargs(),
+                **self._archive_kwargs(signal),
             )
         except Exception as exc:
             logger.warning(f"Archive gap-fill failed for {signal.name}: {exc}")
