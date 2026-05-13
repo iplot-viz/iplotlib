@@ -218,6 +218,17 @@ class NanosecondDateFormatter(pg.AxisItem):
                     break
             values = sorted(values)
 
+            # Cache may leave too few ticks to extrapolate; regenerate from scratch.
+            if len(values) < 2:
+                if self.is_date:
+                    spacing = last_range / n
+                    values = [minVal + spacing / 2 + i * spacing for i in range(n)]
+                else:
+                    spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
+                    start = (ceil((minVal - offset) / spacing) * spacing) + offset
+                    values = (np.arange(n) * spacing + start).tolist()
+                self.last_range = last_range
+
         # Thin out if too many ticks for available space
         while len(values) > n and len(values) > 2:
             values = values[::2]
