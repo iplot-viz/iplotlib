@@ -54,6 +54,11 @@ use_open_gl = IPLOT_PYQTGRAPH_OPENGL in ("1", "true", "yes") if IPLOT_PYQTGRAPH_
 
 pg.setConfigOptions(antialias=True, useOpenGL=use_open_gl)
 
+# Above this point count, streamed lines are rendered via per-bucket min/max
+# decimation so the visible line preserves extremes at viewport resolution.
+_STREAM_DECIMATE_THRESHOLD = 4000
+_STREAM_DECIMATE_TARGET_PAIRS = 2000
+
 
 class _AlphaColorMeshItem(PColorMeshItem):
     """PColorMeshItem subclass with OpenGL alpha blending support.
@@ -363,7 +368,39 @@ class PyQtGraphParser(BackendParserBase):
         """
         Set the data for a PlotDataItem based on the attributes of SignalXY.
         """
+        if self.canvas.streaming and len(x_data) > _STREAM_DECIMATE_THRESHOLD:
+            x_data, y_data = self._minmax_decimate(
+                x_data, y_data, _STREAM_DECIMATE_TARGET_PAIRS)
         line.setData(x=x_data, y=y_data)
+
+    @staticmethod
+    def _minmax_decimate(x, y, target_pairs):
+        """Reduce to 2 points per bucket (per-bucket argmin/argmax of y) preserving extremes."""
+        n = len(x)
+        if n <= 2 * target_pairs:
+            return x, y
+        bucket_size = n // target_pairs
+        truncated = bucket_size * target_pairs
+        x_arr = np.asarray(x[:truncated]).reshape(target_pairs, bucket_size)
+        y_arr = np.asarray(y[:truncated]).reshape(target_pairs, bucket_size)
+        rows = np.arange(target_pairs)
+        argmin = np.argmin(y_arr, axis=1)
+        argmax = np.argmax(y_arr, axis=1)
+        x_min = x_arr[rows, argmin]
+        y_min = y_arr[rows, argmin]
+        x_max = x_arr[rows, argmax]
+        y_max = y_arr[rows, argmax]
+        min_first = x_min <= x_max
+        out_x = np.empty(2 * target_pairs, dtype=x_arr.dtype)
+        out_y = np.empty(2 * target_pairs, dtype=y_arr.dtype)
+        out_x[0::2] = np.where(min_first, x_min, x_max)
+        out_y[0::2] = np.where(min_first, y_min, y_max)
+        out_x[1::2] = np.where(min_first, x_max, x_min)
+        out_y[1::2] = np.where(min_first, y_max, y_min)
+        if n > truncated:
+            out_x = np.concatenate([out_x, np.asarray(x[truncated:])])
+            out_y = np.concatenate([out_y, np.asarray(y[truncated:])])
+        return out_x, out_y
 
     @staticmethod
     def set_line_style(style: dict, line: PlotDataItem):
