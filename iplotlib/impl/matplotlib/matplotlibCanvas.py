@@ -318,19 +318,47 @@ class MatplotlibParser(BackendParserBase):
                 if is_envelope:
                     y_chunks.append(np.array([y_hi[-1]]))
 
+        # Sticky Y: re-fit only on out-of-range data or sustained underuse (regime change).
         if y_chunks:
             y_concat = np.concatenate(y_chunks)
             y_max = np.nanmax(y_concat).item()
             y_min = np.nanmin(y_concat).item()
-            if y_max == y_min:
-                diff = y_max * 0.05
+            cur_lo, cur_hi = impl_plot.get_ylim()
+            uninit = cur_hi <= cur_lo
+            data_range = y_max - y_min
+            view_range = cur_hi - cur_lo
+            if uninit or y_min < cur_lo or y_max > cur_hi:
+                # Wider initial margin (50%) absorbs early-batch underestimation.
+                margin = 0.5 if uninit else 0.2
+                if data_range == 0:
+                    pad = abs(y_max) * margin if y_max != 0 else 0.1
+                else:
+                    pad = data_range * margin
+                new_lo = (y_min if uninit else min(y_min, cur_lo)) - pad
+                new_hi = (y_max if uninit else max(y_max, cur_hi)) + pad
+                impl_plot.set_ylim(new_lo, new_hi)
+                impl_plot._sticky_y_underuse = 0
+            elif view_range > 0 and data_range / view_range < 0.3:
+                streak = getattr(impl_plot, '_sticky_y_underuse', 0) + 1
+                if streak >= 5:
+                    pad = data_range * 0.2 if data_range > 0 else (abs(y_max) * 0.05 if y_max != 0 else 0.1)
+                    impl_plot.set_ylim(y_min - pad, y_max + pad)
+                    impl_plot._sticky_y_underuse = 0
+                else:
+                    impl_plot._sticky_y_underuse = streak
             else:
-                diff = (y_max - y_min) * 0.1
-            impl_plot.set_ylim(y_min - diff, y_max + diff)
+                impl_plot._sticky_y_underuse = 0
 
+        # X: skip set_xlim when the shift is sub-pixel.
         begin = self.transform_value(impl_plot, 0, min_time, inverse=True)
         end = self.transform_value(impl_plot, 0, now, inverse=True)
-        impl_plot.set_xlim(begin, end)
+        cur_begin, cur_end = impl_plot.get_xlim()
+        if cur_end <= cur_begin:
+            impl_plot.set_xlim(begin, end)
+        else:
+            px_per_data = impl_plot.bbox.width / (cur_end - cur_begin)
+            if abs(end - cur_end) * px_per_data >= 1.0:
+                impl_plot.set_xlim(begin, end)
 
     def _apply_xrange(self, impl_plot: MPLAxes, begin, end):
         impl_plot.set_xlim(begin, end)
