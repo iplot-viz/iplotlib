@@ -1614,7 +1614,7 @@ class BackendParserBase(ABC):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
 
         for ax_idx, d in enumerate(data):
-            logger.debug(f"\t transform data ax_idx={ax_idx} d = {d} ")
+            logger.debug("\t transform data ax_idx=%s d = %s ", ax_idx, d)
             offset = ci.offsets[ax_idx]
             if offset == 0 or offset is None:
                 ret.append(d)
