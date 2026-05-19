@@ -340,8 +340,7 @@ class PyQtGraphParser(BackendParserBase):
         for signal_ref in cache_item.signals:
             signal = signal_ref()
             is_envelope = getattr(signal, 'envelope', False)
-            # Envelope shapes are stored as [[curve_min, curve_max, curve_avg, area]];
-            # reach one level deeper to test visibility on a real artist.
+            # Envelope signal.lines is nested [[curve_min, curve_max, curve_avg, area]].
             first_artist = signal.lines[0][0] if is_envelope else signal.lines[0]
             if not first_artist.isVisible():
                 continue
@@ -358,9 +357,7 @@ class PyQtGraphParser(BackendParserBase):
             all_y_data.extend(y_lo[mask])
             if is_envelope:
                 all_y_data.extend(y_hi[:n][mask])
-            # Include the last sample's y when no points fall inside the visible
-            # window but a live extension is being projected to ``now``;
-            # otherwise the extended constant line falls outside the y-range.
+            # Keep the projected constant line on screen when nothing falls inside the window.
             if not mask.any() and getattr(signal, '_streaming_has_live', False):
                 all_y_data.append(y_lo[-1])
                 if is_envelope:
@@ -651,9 +648,7 @@ class PyQtGraphParser(BackendParserBase):
 
     def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
         area = shapes[0][3]
-        # PColorMeshItem needs at least one quad (z shape (1, len(x)-1)). With
-        # a single point z_mesh is empty and self.levels stays None → crash in
-        # _drawPicture. Hide or defer the mesh until enough samples arrive.
+        # PColorMeshItem requires at least one quad; hide until 2+ samples.
         if len(x_data) < 2:
             if isinstance(area, _AlphaColorMeshItem):
                 area.setVisible(False)
@@ -676,8 +671,7 @@ class PyQtGraphParser(BackendParserBase):
         curve_2 = [draw_fn(x=x_data, y=y2_data, **style2)]  # type: List[PlotDataItem]
         curve_3 = [draw_fn(x=x_data, y=y3_data, **style2)]  # type: List[PlotDataItem]
 
-        # Defer the area mesh until at least 2 samples are available;
-        # PColorMeshItem cannot render an empty z grid.
+        # PColorMeshItem requires at least one quad; defer until 2+ samples.
         area = (self._build_envelope_area(impl_plot, curve_1[0], x_data, y1_data, y2_data)
                 if len(x_data) >= 2 else None)
 
@@ -688,8 +682,7 @@ class PyQtGraphParser(BackendParserBase):
     @staticmethod
     def _build_envelope_area(impl_plot: PlotItem, line_min: PlotDataItem,
                              x_data, y1_data, y2_data) -> "_AlphaColorMeshItem":
-        # Extract base color from the min curve and create a semi-transparent
-        # uniform colormap for the envelope area
+        # Semi-transparent uniform colormap derived from the min-curve pen.
         pen = line_min.opts['pen']
         qcolor = pen.color()
         rgba = np.array([[qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255)]])

@@ -42,14 +42,8 @@ class CanvasStreamer:
 
     @staticmethod
     def _make_payload(signal, x, y, *, y_min=None, y_max=None, xunit='', yunit=''):
-        """Build an inject_external payload mirroring one-shot conventions.
-
-        Envelope signals use the iplotSignalAdapter envelope layout
-        (alias_map dmin/dmax/davg with d1=min, d2=max, d3=avg). Sources that
-        cannot provide min/max (live samples, decType=last fallback) flatten
-        the band by reusing ``y`` as both bounds, so the data_store shape
-        stays consistent across archive backfill and live updates.
-        """
+        """Build an inject_external payload. Envelope signals expand to
+        dmin/dmax/davg; sources without min/max reuse ``y`` for both bounds."""
         is_envelope = signal is not None and getattr(signal, 'envelope', False)
         if is_envelope:
             ymin = y if y_min is None else y_min
@@ -71,8 +65,8 @@ class CanvasStreamer:
 
     @staticmethod
     def _current_arrays(signal):
-        """Read data_store as ``(x, y, ymin, ymax)``. For envelope signals
-        ``y`` is davg (data_store[3]); for raw signals ymin/ymax are None."""
+        """Read data_store as ``(x, y, ymin, ymax)``. ``y`` is davg for
+        envelope signals; ymin/ymax are None for raw signals."""
         ds = signal.data_store
         x = np.asarray(ds[0]) if len(ds) > 0 else np.array([])
         if getattr(signal, 'envelope', False) and len(ds) >= 4:
@@ -81,9 +75,8 @@ class CanvasStreamer:
         return x, y, None, None
 
     def _fetch_archive_window(self, ds, signal, start_ns, end_ns):
-        # Envelope signals must call get_envelope directly: get_archive_window
-        # only falls back to envelope when UDA reports the window exceeds its
-        # raw cap, so passing envelope=True as a kwarg has no effect.
+        # get_archive_window only falls back to envelope on UDA overflow;
+        # envelope signals must call get_envelope directly.
         is_envelope = getattr(signal, 'envelope', False)
         fetch = self.da.get_envelope if is_envelope else self.da.get_archive_window
         try:
@@ -123,8 +116,7 @@ class CanvasStreamer:
         kwargs = {}
         if self._max_points > 0:
             kwargs['nbp'] = self._max_points
-        # extremities=True combined with envelope triggers a UDA UInt64<Str
-        # comparison error; envelope buckets already include boundary samples.
+        # Envelope buckets already cover boundaries; extremities=True crashes UDA.
         if not (signal is not None and getattr(signal, 'envelope', False)):
             kwargs['extremities'] = True
         return kwargs
@@ -441,9 +433,8 @@ class CanvasStreamer:
 
     @staticmethod
     def _unpack_archive(data):
-        """Returns ``(xdata, y_or_davg, ymin, ymax, xunit, yunit)``. The min/max
-        slots are None when the source returned a raw DataObj rather than a
-        DataEnvelope (e.g. decType=last fallback)."""
+        """Returns ``(xdata, y_or_davg, ymin, ymax, xunit, yunit)``. ymin/ymax
+        are None for raw DataObj responses."""
         if hasattr(data, 'ydata_avg') and data.ydata_avg is not None:
             ymin = getattr(data, 'ydata_min', None)
             ymax = getattr(data, 'ydata_max', None)

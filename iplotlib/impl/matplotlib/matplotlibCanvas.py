@@ -291,8 +291,7 @@ class MatplotlibParser(BackendParserBase):
         for signal_ref in cache_item.signals:
             signal = signal_ref()
             is_envelope = getattr(signal, 'envelope', False)
-            # Envelope shapes are stored as [[line_min, line_max, line_avg, area]];
-            # reach one level deeper to test visibility on a real artist.
+            # Envelope signal.lines is nested [[line_min, line_max, line_avg, area]].
             first_artist = signal.lines[0][0] if is_envelope else signal.lines[0]
             if not first_artist.get_visible():
                 continue
@@ -309,9 +308,7 @@ class MatplotlibParser(BackendParserBase):
             all_y_data.extend(y_lo[mask])
             if is_envelope:
                 all_y_data.extend(y_hi[:n][mask])
-            # Include the last sample's y when no points fall inside the visible
-            # window but a live extension is being projected to ``now``;
-            # otherwise the extended constant line falls outside the y-range.
+            # Keep the projected constant line on screen when nothing falls inside the window.
             if not mask.any() and getattr(signal, '_streaming_has_live', False):
                 all_y_data.append(y_lo[-1])
                 if is_envelope:
