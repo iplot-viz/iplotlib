@@ -290,18 +290,32 @@ class MatplotlibParser(BackendParserBase):
         all_y_data = []
         for signal_ref in cache_item.signals:
             signal = signal_ref()
-            if not signal.lines[0].get_visible():
+            is_envelope = getattr(signal, 'envelope', False)
+            # Envelope shapes are stored as [[line_min, line_max, line_avg, area]];
+            # reach one level deeper to test visibility on a real artist.
+            first_artist = signal.lines[0][0] if is_envelope else signal.lines[0]
+            if not first_artist.get_visible():
                 continue
             # Snapshot x/y once: the receiver thread can update them between reads.
             x_data = signal.x_data
-            y_data = signal.y_data
-            n = min(len(x_data), len(y_data))
+            y_lo = signal.y_data
+            y_hi = signal.z_data if is_envelope else y_lo
+            n = min(len(x_data), len(y_lo), len(y_hi))
             if n == 0:
                 continue
             x_data = x_data[:n]
-            y_data = y_data[:n]
+            y_lo = y_lo[:n]
             mask = (x_data >= min_time) & (x_data <= now)
-            all_y_data.extend(y_data[mask])
+            all_y_data.extend(y_lo[mask])
+            if is_envelope:
+                all_y_data.extend(y_hi[:n][mask])
+            # Include the last sample's y when no points fall inside the visible
+            # window but a live extension is being projected to ``now``;
+            # otherwise the extended constant line falls outside the y-range.
+            if not mask.any() and getattr(signal, '_streaming_has_live', False):
+                all_y_data.append(y_lo[-1])
+                if is_envelope:
+                    all_y_data.append(y_hi[-1])
 
         if all_y_data:
             y_max = np.nanmax(all_y_data).item()

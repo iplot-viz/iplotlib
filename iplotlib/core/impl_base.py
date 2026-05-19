@@ -751,6 +751,7 @@ class BackendParserBase(ABC):
         """
         last_x = self._streaming_impl_plot_lut[signal.uid][0]
         last_y = self._streaming_impl_plot_lut[signal.uid][1]
+        has_live = getattr(signal, '_streaming_has_live', False)
 
         if len(x_data) > 0 and last_x != x_data[-1]:  # New data
             self._streaming_impl_plot_lut[signal.uid] = [x_data[-1], y_data[-1]]
@@ -758,7 +759,7 @@ class BackendParserBase(ABC):
             self._update_marker_by_point_count(plot_lines[0], x_data, style)
 
         elif len(x_data) > 0 and last_x == x_data[-1]:  # No new data
-            if getattr(signal, '_streaming_has_live', False):
+            if has_live:
                 now = int(datetime.now().timestamp() * 1e9)
                 new_x = self.transform_value(impl_plot, 0, now, inverse=True)
                 const_x = np.append(x_data, new_x)
@@ -768,6 +769,38 @@ class BackendParserBase(ABC):
                 self.set_line_data(plot_lines[0], x_data, y_data)
 
         return plot_lines
+
+    def update_plot_envelope_streaming(self, signal: SignalXY, impl_plot: Any, shapes,
+                                       x_data, y1_data, y2_data, y3_data, style):
+        """
+        Envelope counterpart of update_plot_line_streaming. Extends the three
+        envelope curves and the area horizontally to ``now`` during gaps after
+        the first live sample, mirroring the raw-line behaviour. Last-value
+        tracking reuses ``_streaming_impl_plot_lut`` (storing davg as the
+        representative y so the LUT shape stays consistent).
+        """
+        last_x = self._streaming_impl_plot_lut[signal.uid][0]
+        has_live = getattr(signal, '_streaming_has_live', False)
+        new_data = last_x != x_data[-1]
+
+        if new_data:
+            self._streaming_impl_plot_lut[signal.uid] = [x_data[-1], y3_data[-1]]
+            xs, y1s, y2s, y3s = x_data, y1_data, y2_data, y3_data
+        elif has_live:
+            now = int(datetime.now().timestamp() * 1e9)
+            new_x = self.transform_value(impl_plot, 0, now, inverse=True)
+            xs = np.append(x_data, new_x)
+            y1s = np.append(y1_data, y1_data[-1])
+            y2s = np.append(y2_data, y2_data[-1])
+            y3s = np.append(y3_data, y3_data[-1])
+        else:
+            xs, y1s, y2s, y3s = x_data, y1_data, y2_data, y3_data
+
+        self.set_line_data(shapes[0][0], xs, y1s)
+        self.set_line_data(shapes[0][1], xs, y2s)
+        self.set_line_data(shapes[0][2], xs, y3s)
+        self.update_area_envelope_1D(shapes, impl_plot, xs, y1s, y2s, style)
+        return shapes
 
     def do_impl_line_plot_xy(self, signal: SignalXY, impl_plot: Any, plot: PlotXY, cache_item, x_data, y_data):
 
@@ -1077,17 +1110,37 @@ class BackendParserBase(ABC):
             self.legend_downsampled_signal(signal, impl_plot, shapes[0][0])
 
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1 and y3_data.ndim == 1:
-                self.set_line_data(shapes[0][0], x_data, y1_data)
-                self.set_line_data(shapes[0][1], x_data, y2_data)
-                self.set_line_data(shapes[0][2], x_data, y3_data)
-                self.update_area_envelope_1D(shapes, impl_plot, x_data, y1_data, y2_data, style)
+                if self.canvas.streaming and len(x_data) > 0:
+                    self.update_plot_envelope_streaming(signal, impl_plot, shapes,
+                                                        x_data, y1_data, y2_data, y3_data, style)
+                else:
+                    self.set_line_data(shapes[0][0], x_data, y1_data)
+                    self.set_line_data(shapes[0][1], x_data, y2_data)
+                    self.set_line_data(shapes[0][2], x_data, y3_data)
+                    self.update_area_envelope_1D(shapes, impl_plot, x_data, y1_data, y2_data, style)
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
+
+            # Mirror line plot streaming: keep the x window scrolling and the
+            # y range fit to data. Without this the envelope RangeAxis stays
+            # at default None values, hiding data and crashing undo/redo.
+            if self.canvas.streaming:
+                cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
+                plot = cache_item.plot() if cache_item is not None else None
+                if cache_item is not None and plot is not None:
+                    self.do_impl_streaming(impl_plot, plot, cache_item)
         else:
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
                 shapes = self.create_area_envelope_1D(draw_fn, impl_plot, signal, x_data, y1_data, y2_data, y3_data,
                                                       style, style2)
                 signal.lines = shapes
                 self._signal_impl_shape_lut.update({id(signal): shapes})
+                # First-draw streaming hook so the freshly created envelope is
+                # bracketed by the live window even before the next update.
+                if self.canvas.streaming:
+                    cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
+                    plot = cache_item.plot() if cache_item is not None else None
+                    if cache_item is not None and plot is not None:
+                        self.do_impl_streaming(impl_plot, plot, cache_item)
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
 
     @abstractmethod
@@ -1495,6 +1548,11 @@ class BackendParserBase(ABC):
         Offset-aware version of implementation's `set_impl_x_axis_limits`, `set_impl_y_axis_limits`
         The `oaw` in the function name stands for OffsetAWare.
         """
+        # RangeAxis can hold (None, None) before any data update has occurred
+        # (e.g. envelope plot prior to streaming hook firing). Restoring such a
+        # range via undo/redo would crash in create_offset's end-begin; skip.
+        if limits[0] is None or limits[1] is None:
+            return
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         ci.offsets[ax_idx] = self.create_offset(limits)
 

@@ -40,9 +40,54 @@ class CanvasStreamer:
             self._inject_locks[signal.uid] = lock
         return lock
 
+    @staticmethod
+    def _make_payload(signal, x, y, *, y_min=None, y_max=None, xunit='', yunit=''):
+        """Build an inject_external payload mirroring one-shot conventions.
+
+        Envelope signals use the iplotSignalAdapter envelope layout
+        (alias_map dmin/dmax/davg with d1=min, d2=max, d3=avg). Sources that
+        cannot provide min/max (live samples, decType=last fallback) flatten
+        the band by reusing ``y`` as both bounds, so the data_store shape
+        stays consistent across archive backfill and live updates.
+        """
+        is_envelope = signal is not None and getattr(signal, 'envelope', False)
+        if is_envelope:
+            ymin = y if y_min is None else y_min
+            ymax = y if y_max is None else y_max
+            return dict(
+                alias_map={'time': {'idx': 0, 'independent': True},
+                           'dmin': {'idx': 1},
+                           'dmax': {'idx': 2},
+                           'davg': {'idx': 3}},
+                d0=x, d1=ymin, d2=ymax, d3=y,
+                d0_unit=xunit, d1_unit=yunit, d2_unit=yunit, d3_unit=yunit,
+            )
+        return dict(
+            alias_map={'time': {'idx': 0, 'independent': True},
+                       'data': {'idx': 1}},
+            d0=x, d1=y, d2=[], d3=[],
+            d0_unit=xunit, d1_unit=yunit, d2_unit='', d3_unit='',
+        )
+
+    @staticmethod
+    def _current_arrays(signal):
+        """Read data_store as ``(x, y, ymin, ymax)``. For envelope signals
+        ``y`` is davg (data_store[3]); for raw signals ymin/ymax are None."""
+        ds = signal.data_store
+        x = np.asarray(ds[0]) if len(ds) > 0 else np.array([])
+        if getattr(signal, 'envelope', False) and len(ds) >= 4:
+            return x, np.asarray(ds[3]), np.asarray(ds[1]), np.asarray(ds[2])
+        y = np.asarray(ds[1]) if len(ds) > 1 else np.array([])
+        return x, y, None, None
+
     def _fetch_archive_window(self, ds, signal, start_ns, end_ns):
+        # Envelope signals must call get_envelope directly: get_archive_window
+        # only falls back to envelope when UDA reports the window exceeds its
+        # raw cap, so passing envelope=True as a kwarg has no effect.
+        is_envelope = getattr(signal, 'envelope', False)
+        fetch = self.da.get_envelope if is_envelope else self.da.get_archive_window
         try:
-            data = self.da.get_archive_window(
+            data = fetch(
                 ds,
                 varname=signal.name,
                 tsS=str(start_ns),
@@ -51,10 +96,10 @@ class CanvasStreamer:
             )
         except Exception as exc:
             logger.warning(f"Archive fetch failed for {signal.name}: {exc}")
-            return None, None, None, None
+            return None, None, None, None, None, None
 
         if data is None or getattr(data, 'errcode', -1) != 0:
-            return None, None, None, None
+            return None, None, None, None, None, None
         return self._unpack_archive(data)
 
     def _fetch_last_archive_value(self, ds, signal, end_ns):
@@ -69,42 +114,36 @@ class CanvasStreamer:
             )
         except Exception as exc:
             logger.warning(f"Last-value fetch failed for {signal.name}: {exc}")
-            return None, None, None, None
+            return None, None, None, None, None, None
         if data is None or getattr(data, 'errcode', -1) != 0:
-            return None, None, None, None
+            return None, None, None, None, None, None
         return self._unpack_archive(data)
 
     def _archive_kwargs(self, signal=None):
-        kwargs = {'extremities': True}
+        kwargs = {}
         if self._max_points > 0:
             kwargs['nbp'] = self._max_points
-        if signal is not None and getattr(signal, 'envelope', False):
-            kwargs['envelope'] = True
+        # extremities=True combined with envelope triggers a UDA UInt64<Str
+        # comparison error; envelope buckets already include boundary samples.
+        if not (signal is not None and getattr(signal, 'envelope', False)):
+            kwargs['extremities'] = True
         return kwargs
 
     def _apply_cap(self, signal):
         # Drop-oldest trim to honour the per-signal sample cap. Caller must hold _signal_lock.
         if self._max_points <= 0:
             return
-        x_data = signal.x_data
-        if x_data is None or len(x_data) <= self._max_points:
+        x, y, y_min, y_max = self._current_arrays(signal)
+        if len(x) <= self._max_points:
             return
-        y_data = signal.y_data
         n = self._max_points
-        trimmed_x = np.asarray(x_data)[-n:]
-        trimmed_y = np.asarray(y_data)[-n:]
-        payload = dict(alias_map={
-            'time': {'idx': 0, 'independent': True},
-            'data': {'idx': 1}
-        },
-            d0=trimmed_x,
-            d1=trimmed_y,
-            d2=[],
-            d3=[],
-            d0_unit=getattr(x_data, 'unit', ''),
-            d1_unit=getattr(y_data, 'unit', ''),
-            d2_unit='',
-            d3_unit='')
+        payload = self._make_payload(
+            signal, x[-n:], y[-n:],
+            y_min=y_min[-n:] if y_min is not None else None,
+            y_max=y_max[-n:] if y_max is not None else None,
+            xunit=getattr(signal.data_store[0], 'unit', ''),
+            yunit=getattr(signal.data_store[1], 'unit', ''),
+        )
         signal.inject_external(append=False, **payload)
 
     def start(self, canvas, callback, window_ns: int = None, max_points: int = 0):
@@ -201,18 +240,10 @@ class CanvasStreamer:
                     x_data = np.concatenate([flat_x, np.asarray(x_data)])
                     y_data = np.concatenate([flat_y, np.asarray(y_data)])
                 self._first_live_pending.discard(signal.uid)
-            result = dict(alias_map={
-                'time': {'idx': 0, 'independent': True},
-                'data': {'idx': 1}
-            },
-                d0=x_data,
-                d1=y_data,
-                d2=[],
-                d3=[],
-                d0_unit=dobj.xunit,
-                d1_unit=dobj.yunit,
-                d2_unit='',
-                d3_unit='')
+            result = self._make_payload(
+                signal, x_data, y_data,
+                xunit=dobj.xunit, yunit=dobj.yunit,
+            )
             with self._signal_lock(signal):
                 signal.inject_external(append=True, **result)
                 self._apply_cap(signal)
@@ -238,29 +269,34 @@ class CanvasStreamer:
         archive_end_ns, found_live = self._wait_for_first_live(signal)
         archive_start_ns = archive_end_ns - window_ns
 
-        ax, ay, xunit, yunit = self._fetch_archive_window(ds, signal, archive_start_ns, archive_end_ns)
+        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window(
+            ds, signal, archive_start_ns, archive_end_ns)
         if ax is None or len(ax) == 0:
-            ax, ay, xunit, yunit = self._fetch_last_archive_value(ds, signal, archive_end_ns)
+            ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_last_archive_value(
+                ds, signal, archive_end_ns)
         if ax is None or len(ax) == 0:
             return
 
         with self._signal_lock(signal):
-            current_x = signal.x_data
-            current_y = signal.y_data
-            merged_x = np.concatenate([np.asarray(ax), np.asarray(current_x)])
-            merged_y = np.concatenate([np.asarray(ay), np.asarray(current_y)])
-            payload = dict(alias_map={
-                'time': {'idx': 0, 'independent': True},
-                'data': {'idx': 1}
-            },
-                d0=merged_x,
-                d1=merged_y,
-                d2=[],
-                d3=[],
-                d0_unit=xunit,
-                d1_unit=yunit,
-                d2_unit='',
-                d3_unit='')
+            cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(signal)
+            new_x = np.asarray(ax)
+            new_y = np.asarray(ay)
+            merged_x = np.concatenate([new_x, cur_x])
+            merged_y = np.concatenate([new_y, cur_y])
+            merged_ymin = None
+            merged_ymax = None
+            if getattr(signal, 'envelope', False):
+                new_ymin = np.asarray(ay_min) if ay_min is not None else new_y
+                new_ymax = np.asarray(ay_max) if ay_max is not None else new_y
+                merged_ymin = np.concatenate(
+                    [new_ymin, cur_ymin if cur_ymin is not None else cur_y])
+                merged_ymax = np.concatenate(
+                    [new_ymax, cur_ymax if cur_ymax is not None else cur_y])
+            payload = self._make_payload(
+                signal, merged_x, merged_y,
+                y_min=merged_ymin, y_max=merged_ymax,
+                xunit=xunit, yunit=yunit,
+            )
             signal.inject_external(append=False, **payload)
             self._apply_cap(signal)
             signal._streaming_has_live = True
@@ -303,49 +339,38 @@ class CanvasStreamer:
         last_period_start_ns = now_ns - period_ns
         cutoff_ns = now_ns - self._window_ns
 
-        try:
-            data = self.da.get_archive_window(
-                ds,
-                varname=signal.name,
-                tsS=str(last_period_start_ns),
-                tsE=str(now_ns),
-                **self._archive_kwargs(signal),
-            )
-        except Exception as exc:
-            logger.warning(f"Archive top-up failed for {signal.name}: {exc}")
-            return
-
-        if data is None or getattr(data, 'errcode', -1) != 0:
-            logger.debug(f"No archive data for {signal.name} top-up")
-            return
-
-        ax, ay, xunit, yunit = self._unpack_archive(data)
+        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window(
+            ds, signal, last_period_start_ns, now_ns)
         if ax is None or len(ax) == 0:
             return
 
         with self._signal_lock(signal):
-            cur_x = np.asarray(signal.x_data)
-            cur_y = np.asarray(signal.y_data)
-
+            cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(signal)
             keep_mask = (cur_x >= cutoff_ns) & (cur_x < last_period_start_ns)
             kept_x = cur_x[keep_mask]
             kept_y = cur_y[keep_mask]
 
-            merged_x = np.concatenate([kept_x, np.asarray(ax)])
-            merged_y = np.concatenate([kept_y, np.asarray(ay)])
+            new_x = np.asarray(ax)
+            new_y = np.asarray(ay)
+            merged_x = np.concatenate([kept_x, new_x])
+            merged_y = np.concatenate([kept_y, new_y])
+            merged_ymin = None
+            merged_ymax = None
+            if getattr(signal, 'envelope', False):
+                kept_ymin = (cur_ymin[keep_mask]
+                             if cur_ymin is not None else kept_y)
+                kept_ymax = (cur_ymax[keep_mask]
+                             if cur_ymax is not None else kept_y)
+                new_ymin = np.asarray(ay_min) if ay_min is not None else new_y
+                new_ymax = np.asarray(ay_max) if ay_max is not None else new_y
+                merged_ymin = np.concatenate([kept_ymin, new_ymin])
+                merged_ymax = np.concatenate([kept_ymax, new_ymax])
 
-            payload = dict(alias_map={
-                'time': {'idx': 0, 'independent': True},
-                'data': {'idx': 1}
-            },
-                d0=merged_x,
-                d1=merged_y,
-                d2=[],
-                d3=[],
-                d0_unit=xunit,
-                d1_unit=yunit,
-                d2_unit='',
-                d3_unit='')
+            payload = self._make_payload(
+                signal, merged_x, merged_y,
+                y_min=merged_ymin, y_max=merged_ymax,
+                xunit=xunit, yunit=yunit,
+            )
             signal.inject_external(append=False, **payload)
             self._apply_cap(signal)
             signal._streaming_has_live = True
@@ -381,42 +406,31 @@ class CanvasStreamer:
                 self._gap_fill_signal(ds, signal, new_start_ns, old_start_ns)
 
     def _gap_fill_signal(self, ds: str, signal, start_ns: int, end_ns: int):
-        try:
-            data = self.da.get_archive_window(
-                ds,
-                varname=signal.name,
-                tsS=str(start_ns),
-                tsE=str(end_ns),
-                **self._archive_kwargs(signal),
-            )
-        except Exception as exc:
-            logger.warning(f"Archive gap-fill failed for {signal.name}: {exc}")
-            return
-
-        if data is None or getattr(data, 'errcode', -1) != 0:
-            return
-
-        ax, ay, xunit, yunit = self._unpack_archive(data)
+        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window(
+            ds, signal, start_ns, end_ns)
         if ax is None or len(ax) == 0:
             return
 
         with self._signal_lock(signal):
-            cur_x = np.asarray(signal.x_data)
-            cur_y = np.asarray(signal.y_data)
-            merged_x = np.concatenate([np.asarray(ax), cur_x])
-            merged_y = np.concatenate([np.asarray(ay), cur_y])
-            payload = dict(alias_map={
-                'time': {'idx': 0, 'independent': True},
-                'data': {'idx': 1}
-            },
-                d0=merged_x,
-                d1=merged_y,
-                d2=[],
-                d3=[],
-                d0_unit=xunit,
-                d1_unit=yunit,
-                d2_unit='',
-                d3_unit='')
+            cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(signal)
+            new_x = np.asarray(ax)
+            new_y = np.asarray(ay)
+            merged_x = np.concatenate([new_x, cur_x])
+            merged_y = np.concatenate([new_y, cur_y])
+            merged_ymin = None
+            merged_ymax = None
+            if getattr(signal, 'envelope', False):
+                new_ymin = np.asarray(ay_min) if ay_min is not None else new_y
+                new_ymax = np.asarray(ay_max) if ay_max is not None else new_y
+                merged_ymin = np.concatenate(
+                    [new_ymin, cur_ymin if cur_ymin is not None else cur_y])
+                merged_ymax = np.concatenate(
+                    [new_ymax, cur_ymax if cur_ymax is not None else cur_y])
+            payload = self._make_payload(
+                signal, merged_x, merged_y,
+                y_min=merged_ymin, y_max=merged_ymax,
+                xunit=xunit, yunit=yunit,
+            )
             signal.inject_external(append=False, **payload)
             self._apply_cap(signal)
             signal._streaming_has_live = True
@@ -427,9 +441,14 @@ class CanvasStreamer:
 
     @staticmethod
     def _unpack_archive(data):
+        """Returns ``(xdata, y_or_davg, ymin, ymax, xunit, yunit)``. The min/max
+        slots are None when the source returned a raw DataObj rather than a
+        DataEnvelope (e.g. decType=last fallback)."""
         if hasattr(data, 'ydata_avg') and data.ydata_avg is not None:
-            return data.xdata, data.ydata_avg, data.xunit, data.yunit
-        return data.xdata, data.ydata, data.xunit, data.yunit
+            ymin = getattr(data, 'ydata_min', None)
+            ymax = getattr(data, 'ydata_max', None)
+            return data.xdata, data.ydata_avg, ymin, ymax, data.xunit, data.yunit
+        return data.xdata, data.ydata, None, None, data.xunit, data.yunit
 
     def stop(self):
         self.stop_flag = True

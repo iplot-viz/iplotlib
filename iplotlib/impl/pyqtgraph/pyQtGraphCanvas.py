@@ -339,18 +339,32 @@ class PyQtGraphParser(BackendParserBase):
         all_y_data = []
         for signal_ref in cache_item.signals:
             signal = signal_ref()
-            if not signal.lines[0].isVisible():
+            is_envelope = getattr(signal, 'envelope', False)
+            # Envelope shapes are stored as [[curve_min, curve_max, curve_avg, area]];
+            # reach one level deeper to test visibility on a real artist.
+            first_artist = signal.lines[0][0] if is_envelope else signal.lines[0]
+            if not first_artist.isVisible():
                 continue
             # Snapshot x/y once: the receiver thread can update them between reads.
             x_data = signal.x_data
-            y_data = signal.y_data
-            n = min(len(x_data), len(y_data))
+            y_lo = signal.y_data
+            y_hi = signal.z_data if is_envelope else y_lo
+            n = min(len(x_data), len(y_lo), len(y_hi))
             if n == 0:
                 continue
             x_data = x_data[:n]
-            y_data = y_data[:n]
+            y_lo = y_lo[:n]
             mask = (x_data >= min_time) & (x_data <= now)
-            all_y_data.extend(y_data[mask])
+            all_y_data.extend(y_lo[mask])
+            if is_envelope:
+                all_y_data.extend(y_hi[:n][mask])
+            # Include the last sample's y when no points fall inside the visible
+            # window but a live extension is being projected to ``now``;
+            # otherwise the extended constant line falls outside the y-range.
+            if not mask.any() and getattr(signal, '_streaming_has_live', False):
+                all_y_data.append(y_lo[-1])
+                if is_envelope:
+                    all_y_data.append(y_hi[-1])
 
         if all_y_data:
             y_max = np.nanmax(all_y_data).item()
@@ -637,11 +651,22 @@ class PyQtGraphParser(BackendParserBase):
 
     def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
         area = shapes[0][3]
-        if isinstance(area, _AlphaColorMeshItem):
+        # PColorMeshItem needs at least one quad (z shape (1, len(x)-1)). With
+        # a single point z_mesh is empty and self.levels stays None → crash in
+        # _drawPicture. Hide or defer the mesh until enough samples arrive.
+        if len(x_data) < 2:
+            if isinstance(area, _AlphaColorMeshItem):
+                area.setVisible(False)
+            return
+        if area is None:
+            shapes[0][3] = self._build_envelope_area(impl_plot, shapes[0][0],
+                                                    x_data, y1_data, y2_data)
+        elif isinstance(area, _AlphaColorMeshItem):
             x_mesh = np.vstack([x_data, x_data])
             y_mesh = np.vstack([y2_data, y1_data])
             z_mesh = np.ones((1, len(x_data) - 1))
             area.setData(x_mesh, y_mesh, z_mesh)
+            area.setVisible(True)
 
     def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, y3_data, style,
                                 style2):
@@ -651,8 +676,21 @@ class PyQtGraphParser(BackendParserBase):
         curve_2 = [draw_fn(x=x_data, y=y2_data, **style2)]  # type: List[PlotDataItem]
         curve_3 = [draw_fn(x=x_data, y=y3_data, **style2)]  # type: List[PlotDataItem]
 
-        # Extract base color from the min curve and create a semi-transparent uniform colormap for the envelope area
-        pen = curve_1[0].opts['pen']
+        # Defer the area mesh until at least 2 samples are available;
+        # PColorMeshItem cannot render an empty z grid.
+        area = (self._build_envelope_area(impl_plot, curve_1[0], x_data, y1_data, y2_data)
+                if len(x_data) >= 2 else None)
+
+        plot_lines = [curve_1 + curve_2 + curve_3 + [area]]
+
+        return plot_lines
+
+    @staticmethod
+    def _build_envelope_area(impl_plot: PlotItem, line_min: PlotDataItem,
+                             x_data, y1_data, y2_data) -> "_AlphaColorMeshItem":
+        # Extract base color from the min curve and create a semi-transparent
+        # uniform colormap for the envelope area
+        pen = line_min.opts['pen']
         qcolor = pen.color()
         rgba = np.array([[qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255)]])
         cmap = pg.ColorMap([0.0, 1.0], np.vstack([rgba, rgba]))
@@ -665,10 +703,7 @@ class PyQtGraphParser(BackendParserBase):
         area = _AlphaColorMeshItem(x_mesh, y_mesh, z_mesh, colorMap=cmap, edgecolors=None)
         area.setZValue(-1)
         impl_plot.addItem(area)
-
-        plot_lines = [curve_1 + curve_2 + curve_3 + [area]]
-
-        return plot_lines
+        return area
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
         suptitle = pg.LabelItem(justify='center')
