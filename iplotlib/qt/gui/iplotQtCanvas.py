@@ -112,6 +112,7 @@ class IplotQtCanvas(QWidget):
     def flush_draw_queue(self):
         if self._parser:
             self._parser.process_work_queue()
+            self._parser.flush_pending_signals()
 
     @abstractmethod
     def refresh(self):

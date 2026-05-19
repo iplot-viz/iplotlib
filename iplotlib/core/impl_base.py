@@ -155,6 +155,9 @@ class BackendParserBase(ABC):
             lambda: defaultdict(dict))  # type: Dict[Any, int] # key is id(impl_plot)
         self._update = False
         self._streaming_impl_plot_lut = defaultdict(lambda: [None, None])
+        self._pending_signal_refs = {}  # type: Dict[Any, weakref.ref]
+        self._pending_signal_lock = threading.Lock()
+        self._signal_flush_scheduled = False
 
     def run_in_one_thread(func):
         """
@@ -188,6 +191,34 @@ class BackendParserBase(ABC):
             work_item()
         except Empty:
             logger.debug("Nothing to do.")
+
+    def request_signal_redraw(self, signal):
+        """Schedule a redraw on the draw thread, coalescing bursts so multiple
+        updates per tick collapse into one batched flush. Thread-safe."""
+        if signal is None:
+            return
+        with self._pending_signal_lock:
+            self._pending_signal_refs[signal.uid] = weakref.ref(signal)
+            should_schedule = not self._signal_flush_scheduled
+            self._signal_flush_scheduled = True
+        if should_schedule and self._impl_flush_method is not None:
+            self._impl_flush_method()
+
+    @run_in_one_thread
+    def flush_pending_signals(self):
+        """Drain pending signal updates and redraw each once. Draw thread only."""
+        with self._pending_signal_lock:
+            pending = list(self._pending_signal_refs.values())
+            self._pending_signal_refs.clear()
+            self._signal_flush_scheduled = False
+        for ref in pending:
+            sig = ref()
+            if sig is None:
+                continue
+            try:
+                self.process_ipl_signal(sig)
+            except Exception:
+                logger.exception(f"Error redrawing signal {getattr(sig, 'name', '?')}")
 
     @abstractmethod
     def get_impl_data(self, curve):
@@ -772,13 +803,8 @@ class BackendParserBase(ABC):
 
     def update_plot_envelope_streaming(self, signal: SignalXY, impl_plot: Any, shapes,
                                        x_data, y1_data, y2_data, y3_data, style):
-        """
-        Envelope counterpart of update_plot_line_streaming. Extends the three
-        envelope curves and the area horizontally to ``now`` during gaps after
-        the first live sample, mirroring the raw-line behaviour. Last-value
-        tracking reuses ``_streaming_impl_plot_lut`` (storing davg as the
-        representative y so the LUT shape stays consistent).
-        """
+        """Envelope counterpart of ``update_plot_line_streaming``: extends the
+        three curves and the area horizontally to ``now`` during gaps."""
         last_x = self._streaming_impl_plot_lut[signal.uid][0]
         has_live = getattr(signal, '_streaming_has_live', False)
         new_data = last_x != x_data[-1]
@@ -1120,9 +1146,8 @@ class BackendParserBase(ABC):
                     self.update_area_envelope_1D(shapes, impl_plot, x_data, y1_data, y2_data, style)
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
 
-            # Mirror line plot streaming: keep the x window scrolling and the
-            # y range fit to data. Without this the envelope RangeAxis stays
-            # at default None values, hiding data and crashing undo/redo.
+            # Mirror line plot: without this the envelope RangeAxis stays at
+            # None and undo/redo crashes.
             if self.canvas.streaming:
                 cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
                 plot = cache_item.plot() if cache_item is not None else None
@@ -1134,8 +1159,6 @@ class BackendParserBase(ABC):
                                                       style, style2)
                 signal.lines = shapes
                 self._signal_impl_shape_lut.update({id(signal): shapes})
-                # First-draw streaming hook so the freshly created envelope is
-                # bracketed by the live window even before the next update.
                 if self.canvas.streaming:
                     cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
                     plot = cache_item.plot() if cache_item is not None else None
@@ -1548,9 +1571,7 @@ class BackendParserBase(ABC):
         Offset-aware version of implementation's `set_impl_x_axis_limits`, `set_impl_y_axis_limits`
         The `oaw` in the function name stands for OffsetAWare.
         """
-        # RangeAxis can hold (None, None) before any data update has occurred
-        # (e.g. envelope plot prior to streaming hook firing). Restoring such a
-        # range via undo/redo would crash in create_offset's end-begin; skip.
+        # Skip uninitialised RangeAxis: create_offset would crash on None - None.
         if limits[0] is None or limits[1] is None:
             return
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
