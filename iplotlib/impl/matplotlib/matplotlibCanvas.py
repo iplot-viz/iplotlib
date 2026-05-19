@@ -287,7 +287,7 @@ class MatplotlibParser(BackendParserBase):
         now = int(datetime.now().timestamp() * 1e9)
         min_time = now - int(ax_window)
 
-        all_y_data = []
+        y_chunks = []
         for signal_ref in cache_item.signals:
             signal = signal_ref()
             is_envelope = getattr(signal, 'envelope', False)
@@ -305,18 +305,23 @@ class MatplotlibParser(BackendParserBase):
             x_data = x_data[:n]
             y_lo = y_lo[:n]
             mask = (x_data >= min_time) & (x_data <= now)
-            all_y_data.extend(y_lo[mask])
+            inside = y_lo[mask]
+            if inside.size:
+                y_chunks.append(inside)
             if is_envelope:
-                all_y_data.extend(y_hi[:n][mask])
+                inside_hi = y_hi[:n][mask]
+                if inside_hi.size:
+                    y_chunks.append(inside_hi)
             # Keep the projected constant line on screen when nothing falls inside the window.
             if not mask.any() and getattr(signal, '_streaming_has_live', False):
-                all_y_data.append(y_lo[-1])
+                y_chunks.append(np.array([y_lo[-1]]))
                 if is_envelope:
-                    all_y_data.append(y_hi[-1])
+                    y_chunks.append(np.array([y_hi[-1]]))
 
-        if all_y_data:
-            y_max = np.nanmax(all_y_data).item()
-            y_min = np.nanmin(all_y_data).item()
+        if y_chunks:
+            y_concat = np.concatenate(y_chunks)
+            y_max = np.nanmax(y_concat).item()
+            y_min = np.nanmin(y_concat).item()
             if y_max == y_min:
                 diff = y_max * 0.05
             else:
