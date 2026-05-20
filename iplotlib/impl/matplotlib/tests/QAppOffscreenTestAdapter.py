@@ -1,5 +1,4 @@
 # Description: Sets up an application ready for testing in offscreen mode (headless CI).
-# Author: Based on mint/tests/QAppOffscreenTestAdapter.py
 
 from iplotlib.qt.testing import QAppTestAdapter, ensure_qapp
 
