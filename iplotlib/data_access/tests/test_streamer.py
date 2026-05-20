@@ -1,11 +1,6 @@
-"""Streamer regression tests covering branch 78 behaviour.
-
-Locks in the wiring for the per-signal sample cap, the archive-window
-kwargs (envelope vs raw, nbp gating), the last-value fallback used when
-the visible window has no samples, and the _streaming_has_live flag set
-during backfill. Tests use lightweight fakes (no Qt, no UDA, no
-threading) so they run on both Linux and Windows CI.
-"""
+"""Tests for the per-signal sample cap, archive-window kwargs
+(envelope vs raw, nbp gating), the empty-window last-value fallback,
+and the _streaming_has_live flag set during backfill."""
 
 import unittest
 from unittest.mock import MagicMock
@@ -183,15 +178,14 @@ class BackfillSignalTests(unittest.TestCase):
     def test_empty_window_triggers_last_value_fallback(self):
         fake_da = MagicMock()
         fake_da.get_archive_window.side_effect = [
-            _FakeArchiveResponse(x=[], y=[]),              # window: empty
-            _FakeArchiveResponse(x=[5], y=[99]),           # fallback: one point
+            _FakeArchiveResponse(x=[], y=[]),
+            _FakeArchiveResponse(x=[5], y=[99]),
         ]
         streamer = CanvasStreamer(da=fake_da)
         streamer._max_points = 0
         streamer._backfill_signal('ds', self.signal, window_ns=100,
                                   callback=self.callback)
         self.assertEqual(fake_da.get_archive_window.call_count, 2)
-        # Second call must carry the last-value kwargs.
         second_kwargs = fake_da.get_archive_window.call_args_list[1].kwargs
         self.assertEqual(second_kwargs.get('nbp'), 1)
         self.assertEqual(second_kwargs.get('decType'), 'last')
