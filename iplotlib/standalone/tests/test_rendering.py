@@ -21,19 +21,16 @@ ROOT = os.path.dirname(__file__)
 BASELINE_DIR = os.path.join(ROOT, 'baseline')
 
 BACKENDS = ('matplotlib', 'pyqt')
-# Matplotlib rasterises with FreeType + bundled fonts so its output is
-# bit-exact across platforms. PyQtGraph renders through Qt's native
-# pipeline, whose font hinting and anti-aliasing differ between operating
-# systems even in offscreen mode, so its baselines are only reliable on
-# the canonical Linux platform used by CI and the Linux-based dev team.
-# On other platforms the pyqt visual tests skip to avoid flakiness.
+# Both backends' visual baselines are validated on Linux only. PyQtGraph
+# renders through Qt's native pipeline, which differs heavily across OSes.
+# Matplotlib rasterises with FreeType + bundled fonts and is byte-stable
+# across Linux distros, but Windows still drifts by ~5-6 RMS — enough to
+# exceed the strict tolerance below. Visual tests skip on non-Linux for
+# both backends; the logic tests still run everywhere.
 PYQT_CANONICAL_PLATFORM = 'linux'
-# Matplotlib Agg is byte-stable across Linux distros so a strict tolerance
-# is appropriate. Pyqtgraph renders through Qt's native painter which pulls
-# system freetype/fontconfig — the same scene rendered on CODAC (RHEL) and
-# on ubuntu-latest (CI) drifts by a few RMS points, especially when text
-# is involved. A higher pyqt tolerance absorbs that drift while still
-# catching real regressions (missing plots, wrong data, wrong legends).
+MPL_CANONICAL_PLATFORM = 'linux'
+# Pyqtgraph allows higher drift (Qt native painter pulls system freetype);
+# matplotlib stays strict because Linux Agg output is byte-stable.
 BASELINE_TOLERANCE = 5.0
 PYQT_BASELINE_TOLERANCE = 20.0
 
@@ -49,6 +46,8 @@ class RenderingTest(unittest.TestCase):
     def _render(self, backend: str, core_canvas: Canvas, out_name: str):
         if backend == 'pyqt' and not sys.platform.startswith(PYQT_CANONICAL_PLATFORM):
             self.skipTest("pyqt visual baselines are canonical on Linux only")
+        if backend == 'matplotlib' and not sys.platform.startswith(MPL_CANONICAL_PLATFORM):
+            self.skipTest("matplotlib visual baselines are canonical on Linux only")
 
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=core_canvas)
         qt_canvas.set_canvas(core_canvas)
