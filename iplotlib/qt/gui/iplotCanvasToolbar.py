@@ -78,6 +78,15 @@ class IplotQtCanvasToolbar(QToolBar):
         self.saveImageAction = QAction(create_icon('screenshot'), '&Save Canvas as Image', self)
         self.addAction(self.saveImageAction)
 
+        # Pulse creation. Hidden by default — the host application decides
+        # whether to show it based on data-source capabilities (see
+        # MTMainWindow feature-gating against UdaAccess.is_write_capable()).
+        self.createPulseAction = QAction('&Create Pulse', self)
+        self.createPulseAction.setStatusTip(
+            'Create a UDA pulse from the currently visible time range')
+        self.createPulseAction.setVisible(False)
+        self.addAction(self.createPulseAction)
+
         # Draw..
         self.redrawAction = QAction(create_icon('rotate180'), '&Redraw', self)
         # self.addAction(self.redrawAction)
