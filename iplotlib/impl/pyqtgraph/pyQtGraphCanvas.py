@@ -465,7 +465,8 @@ class PyQtGraphParser(BackendParserBase):
             else:
                 img = pg.ImageItem()
 
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+            if (x_data.ndim == y_data.ndim == z_data.ndim == 2
+                    and x_data.size and y_data.size and z_data.size):
                 x_min, x_max = np.min(x_data).item(), np.max(x_data).item()
                 y_min, y_max = np.min(y_data).item(), np.max(y_data).item()
                 z_min, z_max = np.min(z_data).item(), np.max(z_data).item()
@@ -538,7 +539,8 @@ class PyQtGraphParser(BackendParserBase):
         else:
             img = pg.ImageItem()
 
-        if x_sub_data.ndim == y_sub_data.ndim == z_sub_data.ndim == 2:
+        if (x_sub_data.ndim == y_sub_data.ndim == z_sub_data.ndim == 2
+                and x_sub_data.size and y_sub_data.size and z_sub_data.size):
             x_min, x_max = np.min(x_sub_data).item(), np.max(x_sub_data).item()
             y_min, y_max = np.min(y_sub_data).item(), np.max(y_sub_data).item()
             z_min, z_max = np.min(z_sub_data).item(), np.max(z_sub_data).item()
@@ -653,6 +655,10 @@ class PyQtGraphParser(BackendParserBase):
     def process_ipl_plot_contour_colorbar(self, i_plot: PlotContour | PlotContourWithSlider, visible_stack_ids,
                                           cell_gl):
         z_data = i_plot.signals[1][0].z_data
+        # Cannot derive colorbar levels without data; defer creation until z_data is populated.
+        if z_data is None or np.asarray(z_data).size == 0:
+            return cell_gl
+
         color_map = self._pm.get_value(i_plot.signals[1][0], 'color_map')
         colormap_obj = pg.colormap.get(color_map)
 
