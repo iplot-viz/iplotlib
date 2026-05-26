@@ -221,6 +221,57 @@ class SharedXAxisTest(unittest.TestCase):
                 self.assertAlmostEqual(x0[0], x1[0], places=3)
                 self.assertAlmostEqual(x0[1], x1[1], places=3)
 
+    def _build_two_plots_with_drifting_originals(self, backend: str):
+        canvas = Canvas(2, 1, title="shared_x_drift", shared_x_axis=True)
+        ts_start = 1_754_463_600_000_000_000
+        ts_end = 1_754_503_200_000_000_000
+        # Plot 1 fills the window; plot 2 ends 3s short, mimicking partial UDA coverage.
+        for i, axis_offset_end_ns in enumerate([0, -3_000_000_000]):
+            plot = PlotXY()
+            sig = SignalXY(label=f"s{i}")
+            sig.ts_start = ts_start
+            sig.ts_end = ts_end
+            time = np.linspace(ts_start, ts_end + axis_offset_end_ns, 50).astype(np.int64)
+            sig.set_data([time, np.sin(time * 1e-18 + i)])
+            plot.add_signal(sig)
+            canvas.add_plot(plot, 0)
+        qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+        qt_canvas.set_canvas(canvas)
+        qt_canvas.resize(600, 400)
+        self.app.processEvents()
+        return canvas, qt_canvas
+
+    def test_shared_axes_groups_plots_with_same_signal_ts_despite_axis_drift(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build_two_plots_with_drifting_originals(backend)
+                parser = qt_canvas._parser
+                plots = parser.get_canvas_plots()
+                self.assertEqual(len(plots), 2)
+                shared = parser._get_all_shared_axes(plots[0])
+                self.assertEqual(len(shared), 2)
+
+    def test_shared_axes_excludes_plots_with_different_signal_ts(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = Canvas(2, 1, title="shared_x_distinct", shared_x_axis=True)
+                for ts_start in (1_000_000_000_000_000_000, 2_000_000_000_000_000_000):
+                    plot = PlotXY()
+                    sig = SignalXY(label=f"s_{ts_start}")
+                    sig.ts_start = ts_start
+                    sig.ts_end = ts_start + 1_000_000_000
+                    time = np.linspace(sig.ts_start, sig.ts_end, 10).astype(np.int64)
+                    sig.set_data([time, np.ones_like(time, dtype=float)])
+                    plot.add_signal(sig)
+                    canvas.add_plot(plot, 0)
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(600, 400)
+                self.app.processEvents()
+                plots = qt_canvas._parser.get_canvas_plots()
+                shared = qt_canvas._parser._get_all_shared_axes(plots[0])
+                self.assertEqual(len(shared), 1)
+
 
 class CrosshairMouseMotionTest(unittest.TestCase):
     """Drive the crosshair drawing path by invoking the mouse-motion handlers.
