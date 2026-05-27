@@ -87,6 +87,13 @@ class IplotQtCanvasToolbar(QToolBar):
         self.createPulseAction.setVisible(False)
         self.addAction(self.createPulseAction)
 
+        # Pulse update. Hidden by default; same gating as createPulseAction.
+        self.updatePulseAction = QAction('&Update Pulse', self)
+        self.updatePulseAction.setStatusTip(
+            'Search for an existing UDA pulse and update its time range, status or description')
+        self.updatePulseAction.setVisible(False)
+        self.addAction(self.updatePulseAction)
+
         # Capture the canvas zoom into the data range selector (issue #107).
         # Always available — no data-source gating needed.
         self.setTimeWindowAction = QAction('&Set as Time Window', self)
