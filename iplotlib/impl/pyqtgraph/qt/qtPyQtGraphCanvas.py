@@ -79,17 +79,18 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         canvas = self._parser.canvas
         if not canvas:
             return
-        for col in canvas.plots:
-            for plot in col:
+        for col_idx, col in enumerate(canvas.plots):
+            for row_idx, plot in enumerate(col):
                 if not plot or not getattr(plot, 'rulers', None):
                     continue
                 impl_plot = self._get_impl_plot_for_plot(plot)
                 if impl_plot is None:
                     continue
+                plot_id = (row_idx + 1, col_idx + 1)
                 is_date = bool(getattr(plot.axes[0], 'is_date', False))
                 for ruler in plot.rulers:
                     self._parser.add_ruler(impl_plot, ruler.name, ruler.xy[0], ruler.xy[1], ruler.color)
-                    self._ruler_window.add_row(ruler.name, (plot.col, plot.row), ruler.xy,
+                    self._ruler_window.add_row(ruler.name, plot_id, ruler.xy,
                                                 ruler.color, ruler.visible, is_date)
                     if not ruler.visible:
                         for r in self._parser.get_rulers(impl_plot):
@@ -191,11 +192,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     return
 
     def _get_plot_by_id(self, plot_id):
-        for col in self._parser.canvas.plots:
-            for plot in col:
-                if plot and [plot.col, plot.row] == list(plot_id):
-                    return plot
-        return None
+        return self._plot_at_canvas_position(plot_id)
 
     def _get_impl_plot_for_plot(self, plot):
         """Return the first impl PlotItem hosting *plot* (lowest stack key).
@@ -261,7 +258,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         plot.add_ruler(ruler)
         self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
         is_date = bool(getattr(plot.axes[0], 'is_date', False))
-        self._ruler_window.add_row(name, (plot.col, plot.row), (x, y), ruler.color,
+        plot_id = self._canvas_position_of(plot) or (1, 1)
+        self._ruler_window.add_row(name, plot_id, (x, y), ruler.color,
                                     visible=True, is_date=is_date)
         if not self._ruler_window.isVisible():
             self._ruler_window.show()
@@ -505,8 +503,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 elif event.button() == Qt.MouseButton.RightButton:
                     hit = self._find_ruler_near(impl_plot, event.scenePos())
                     if hit is not None:
-                        self.delete_ruler(hit.name, (plot.col, plot.row), True)
-                        self._ruler_window.remove_row_by_name(hit.name, (plot.col, plot.row))
+                        plot_id = self._canvas_position_of(plot) or (1, 1)
+                        self.delete_ruler(hit.name, plot_id, True)
+                        self._ruler_window.remove_row_by_name(hit.name, plot_id)
                         event.accept()
                 return
 

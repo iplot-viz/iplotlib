@@ -89,9 +89,8 @@ class IplotQtRulerWindowTest(unittest.TestCase):
 
 
 class IplotQtRulerViewModeTest(unittest.TestCase):
-    """The Rulers window supports two layouts: rows-per-ruler (default, editable)
-    and columns-per-ruler (read-only, side-by-side). The toggle must preserve
-    data across switches and only allow row-based edit actions in rows mode."""
+    """Rulers window supports two layouts: rows (one ruler per row, editable)
+    and columns (one section per plot with X / Y values and Δ, read-only)."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -110,19 +109,48 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertTrue(self.window.rows_radio.isChecked())
         self.assertEqual(self.window.table.rowCount(), 2)
         self.assertEqual(self.window.table.columnCount(), 6)
+        self.assertIs(self.window.view_stack.currentWidget(), self.window.table)
 
-    def test_switching_to_columns_transposes_the_table(self):
+    def test_switching_to_columns_swaps_the_view_stack(self):
         self.window.columns_radio.setChecked(True)
         self.assertEqual(self.window.view_mode, IplotQtRuler.VIEW_COLUMNS)
-        # 5 fields (Plot, X, Y, Visible, Color) x 2 rulers (A, B).
-        self.assertEqual(self.window.table.rowCount(), 5)
-        self.assertEqual(self.window.table.columnCount(), 2)
+        self.assertIs(self.window.view_stack.currentWidget(), self.window.columns_scroll)
 
-    def test_columns_mode_uses_ruler_names_as_column_headers(self):
+    def test_single_plot_renders_one_section_with_xy_rows_and_delta(self):
         self.window.columns_radio.setChecked(True)
-        headers = [self.window.table.horizontalHeaderItem(c).text()
-                   for c in range(self.window.table.columnCount())]
-        self.assertEqual(headers, ['A', 'B'])
+        self.assertEqual(len(self.window.column_sections), 1)
+        plot_id, table = self.window.column_sections[0]
+        self.assertEqual(plot_id, (1, 1))
+        self.assertEqual(table.rowCount(), 2)
+        self.assertEqual(table.columnCount(), 3)
+        headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
+        self.assertEqual(headers, ['1', '2', IplotQtRuler._DELTA_HEADER])
+        v_headers = [table.verticalHeaderItem(r).text() for r in range(table.rowCount())]
+        self.assertEqual(v_headers, list(IplotQtRuler._COLUMNS_AXIS_LABELS))
+
+    def test_section_cells_carry_each_rulers_xy_value(self):
+        self.window.columns_radio.setChecked(True)
+        _, table = self.window.column_sections[0]
+        self.assertEqual(table.item(0, 0).text(), '1')
+        self.assertEqual(table.item(1, 0).text(), '2')
+        self.assertEqual(table.item(0, 1).text(), '3')
+        self.assertEqual(table.item(1, 1).text(), '4')
+
+    def test_delta_in_section_is_range_of_its_rulers(self):
+        self.window.add_row('C', (1, 1), (8.0, 7.0), '#0000FF')
+        self.window.columns_radio.setChecked(True)
+        _, table = self.window.column_sections[0]
+        delta_col = table.columnCount() - 1
+        self.assertEqual(table.item(0, delta_col).text(), '7')
+        self.assertEqual(table.item(1, delta_col).text(), '5')
+
+    def test_singleton_plot_section_has_no_delta_column(self):
+        self.window.remove_row_by_name('B', (1, 1))
+        self.window.columns_radio.setChecked(True)
+        _, table = self.window.column_sections[0]
+        self.assertEqual(table.columnCount(), 1)
+        headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
+        self.assertEqual(headers, ['1'])
 
     def test_columns_mode_disables_edit_action_buttons(self):
         self.window.columns_radio.setChecked(True)
@@ -136,40 +164,68 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertTrue(self.window.distance_button.isEnabled())
         self.assertEqual(self.window.table.rowCount(), 2)
         self.assertEqual(self.window.table.columnCount(), 6)
+        self.assertEqual(self.window.column_sections, [])
 
     def test_data_survives_mode_switch(self):
         self.window.columns_radio.setChecked(True)
         self.window.rows_radio.setChecked(True)
-        # Edit widgets must be restored (rows mode), not just text cells.
         cb = self.window.table.cellWidget(0, IplotQtRuler.COL_VISIBLE)
         btn = self.window.table.cellWidget(0, IplotQtRuler.COL_COLOR)
         self.assertIsNotNone(cb)
         self.assertIsNotNone(btn)
         self.assertTrue(cb.isChecked())  # Ruler A starts visible
 
-    def test_columns_mode_paints_color_cell_background(self):
-        from PySide6.QtGui import QColor
+    def test_section_cells_are_tinted_with_ruler_color(self):
         self.window.columns_radio.setChecked(True)
-        color_row = IplotQtRuler._COLUMNS_MODE_FIELDS.index('Color')
-        cell_a = self.window.table.item(color_row, 0)
-        self.assertEqual(cell_a.text(), '#FF0000')
-        self.assertEqual(cell_a.background().color(), QColor('#FF0000'))
+        _, table = self.window.column_sections[0]
+        for axis_row in (0, 1):
+            bg = table.item(axis_row, 0).background().color()
+            self.assertEqual((bg.red(), bg.green(), bg.blue()), (255, 0, 0))
+            self.assertLess(bg.alpha(), 255)
 
-    def test_columns_mode_cells_are_read_only(self):
+    def test_section_cells_are_read_only(self):
         self.window.columns_radio.setChecked(True)
-        for row in range(self.window.table.rowCount()):
-            for col in range(self.window.table.columnCount()):
-                item = self.window.table.item(row, col)
-                self.assertFalse(bool(item.flags() & Qt.ItemFlag.ItemIsEditable),
-                                 f"Cell ({row},{col}) is editable in columns mode")
+        for _, table in self.window.column_sections:
+            for row in range(table.rowCount()):
+                for col in range(table.columnCount()):
+                    item = table.item(row, col)
+                    self.assertFalse(bool(item.flags() & Qt.ItemFlag.ItemIsEditable),
+                                     f"Cell ({row},{col}) is editable in columns mode")
 
-    def test_add_row_while_in_columns_mode_extends_columns(self):
+    def test_adding_a_ruler_extends_the_existing_section(self):
         self.window.columns_radio.setChecked(True)
         self.window.add_row('C', (1, 1), (5.0, 6.0), '#0000FF')
-        self.assertEqual(self.window.table.columnCount(), 3)
-        headers = [self.window.table.horizontalHeaderItem(c).text()
-                   for c in range(self.window.table.columnCount())]
-        self.assertEqual(headers, ['A', 'B', 'C'])
+        self.assertEqual(len(self.window.column_sections), 1)
+        _, table = self.window.column_sections[0]
+        self.assertEqual(table.columnCount(), 4)
+        headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
+        self.assertEqual(headers, ['1', '2', '3', IplotQtRuler._DELTA_HEADER])
+
+    def test_multiple_plots_produce_one_section_per_plot(self):
+        self.window.add_row('C', (2, 1), (10.0, 20.0), '#0000FF')
+        self.window.add_row('D', (2, 1), (30.0, 40.0), '#FFFF00')
+        self.window.columns_radio.setChecked(True)
+
+        self.assertEqual(len(self.window.column_sections), 2)
+        plot_ids = [pid for pid, _ in self.window.column_sections]
+        self.assertEqual(plot_ids, [(1, 1), (2, 1)])
+
+        _, first = self.window.column_sections[0]
+        _, second = self.window.column_sections[1]
+        # Each section is independent: own Δ from its own rulers.
+        self.assertEqual(first.item(0, first.columnCount() - 1).text(), '2')    # 3 - 1
+        self.assertEqual(second.item(0, second.columnCount() - 1).text(), '20')  # 30 - 10
+
+    def test_singleton_plot_section_appears_without_delta_when_other_plot_has_more(self):
+        self.window.add_row('C', (2, 1), (10.0, 20.0), '#0000FF')
+        self.window.columns_radio.setChecked(True)
+        # First section: 2 rulers + Δ. Second section: 1 ruler, no Δ.
+        _, first = self.window.column_sections[0]
+        _, second = self.window.column_sections[1]
+        first_headers = [first.horizontalHeaderItem(c).text() for c in range(first.columnCount())]
+        second_headers = [second.horizontalHeaderItem(c).text() for c in range(second.columnCount())]
+        self.assertEqual(first_headers, ['1', '2', IplotQtRuler._DELTA_HEADER])
+        self.assertEqual(second_headers, ['1'])
 
 
 class RulerLeftToRightDeltaTest(unittest.TestCase):

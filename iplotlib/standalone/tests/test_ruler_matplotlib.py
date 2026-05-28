@@ -87,6 +87,35 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         impl_color = self.widget._parser.get_rulers(self.impl_plot)[0].v_line.get_color()
         self.assertEqual(to_hex(impl_color).upper(), '#FF0000')
 
+    def test_ruler_on_second_plot_uses_correct_plot_id(self):
+        """Stacked plots must get distinct plot_ids so delete/visibility/color
+        operations route to the correct plot."""
+        c = Canvas(2, 1, title="multi_plot_mpl")
+        x = np.linspace(0, 10, 50)
+        for _ in range(2):
+            p = PlotXY()
+            s = SignalXY(label="s")
+            s.set_data([x, np.sin(x)])
+            p.add_signal(s)
+            c.add_plot(p, 0)
+        widget = QtMatplotlibCanvas(canvas=c)
+        try:
+            plot_one, plot_two = c.plots[0]
+            impl_one = widget._get_impl_plot_for_plot(plot_one)
+            impl_two = widget._get_impl_plot_for_plot(plot_two)
+            widget._add_ruler_at(impl_one, plot_one, 1.0, 0.1)
+            widget._add_ruler_at(impl_two, plot_two, 2.0, 0.2)
+
+            self.assertEqual(widget._ruler_window._rows[0]['plot_id'], (1, 1))
+            self.assertEqual(widget._ruler_window._rows[1]['plot_id'], (2, 1))
+
+            widget.delete_ruler('B', (2, 1), True)
+            self.assertEqual([r.name for r in plot_two.rulers], [])
+            self.assertEqual([r.name for r in plot_one.rulers], ['A'])
+        finally:
+            widget._ruler_window.close()
+            widget.deleteLater()
+
     def test_repaint_after_setting_canvas_with_rulers(self):
         c2 = _build_canvas()
         plot2 = c2.plots[0][0]

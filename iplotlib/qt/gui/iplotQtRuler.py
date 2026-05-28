@@ -4,9 +4,9 @@ from typing import Dict, List, Tuple
 import pandas as pd
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QHBoxLayout, QHeaderView,
-                                QLabel, QMessageBox, QPushButton, QRadioButton, QTableWidget, QTableWidgetItem,
-                                QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QFrame, QHBoxLayout,
+                                QHeaderView, QLabel, QMessageBox, QPushButton, QRadioButton, QScrollArea,
+                                QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 import iplotLogging.setupLogger as Sl
 
@@ -14,12 +14,8 @@ logger = Sl.get_logger(__name__)
 
 
 class IplotQtRuler(QWidget):
-    """Ruler manager window. Lists rulers per plot with X/Y values, color and deltas.
-
-    Two view modes:
-      * ``rows`` (default): one row per ruler, fully editable.
-      * ``columns``: one column per ruler, read-only — for side-by-side comparison.
-    """
+    """Ruler manager window with two layouts: rows (one ruler per row, editable)
+    and columns (one ruler per column with X/Y axis rows and Δ, read-only)."""
 
     deleteRuler = Signal(object, object, object)               # name, plot_id, persist
     visibilityRuler = Signal(object, object, bool)             # name, plot_id, visible
@@ -38,8 +34,8 @@ class IplotQtRuler(QWidget):
     VIEW_ROWS = 'rows'
     VIEW_COLUMNS = 'columns'
 
-    # Vertical header labels for columns mode, in display order.
-    _COLUMNS_MODE_FIELDS = ['Plot', 'X value', 'Y value', 'Visible', 'Color']
+    _COLUMNS_AXIS_LABELS = ['X', 'Y']
+    _DELTA_HEADER = 'Δ'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -50,12 +46,13 @@ class IplotQtRuler(QWidget):
         self.count = 0
         self.view_mode = self.VIEW_ROWS
         self._rows: List[Dict] = []
+        self.column_sections: List[Tuple[Tuple[int, int], QTableWidget]] = []
 
         self.rows_radio = QRadioButton("Rows")
         self.rows_radio.setToolTip("One row per ruler. Editable.")
         self.rows_radio.setChecked(True)
         self.columns_radio = QRadioButton("Columns")
-        self.columns_radio.setToolTip("One column per ruler. Display only — for side-by-side comparison.")
+        self.columns_radio.setToolTip("One section per plot with X / Y values and Δ. Read-only.")
         view_group = QButtonGroup(self)
         view_group.addButton(self.rows_radio)
         view_group.addButton(self.columns_radio)
@@ -72,6 +69,20 @@ class IplotQtRuler(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.selectionModel().selectionChanged.connect(self._update_selection_history)
 
+        self.columns_scroll = QScrollArea()
+        self.columns_scroll.setWidgetResizable(True)
+        self.columns_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        columns_inner = QWidget()
+        self.columns_layout = QVBoxLayout(columns_inner)
+        self.columns_layout.setContentsMargins(4, 4, 4, 4)
+        self.columns_layout.setSpacing(12)
+        self.columns_layout.addStretch()
+        self.columns_scroll.setWidget(columns_inner)
+
+        self.view_stack = QStackedWidget()
+        self.view_stack.addWidget(self.table)
+        self.view_stack.addWidget(self.columns_scroll)
+
         self.remove_button = QPushButton("Remove ruler")
         self.distance_button = QPushButton("Compute distance")
         self.remove_button.pressed.connect(self._remove_selected)
@@ -79,7 +90,7 @@ class IplotQtRuler(QWidget):
 
         main_layout = QVBoxLayout()
         main_layout.addLayout(view_layout)
-        main_layout.addWidget(self.table)
+        main_layout.addWidget(self.view_stack)
         buttons = QHBoxLayout()
         buttons.addWidget(self.remove_button)
         buttons.addWidget(self.distance_button)
@@ -123,14 +134,13 @@ class IplotQtRuler(QWidget):
         self.count = 0
         self._render_table()
 
-    # View-mode plumbing
     def _on_view_mode_changed(self):
         self.view_mode = self.VIEW_ROWS if self.rows_radio.isChecked() else self.VIEW_COLUMNS
         self.selection_history.clear()
         self._render_table()
 
     def _render_table(self):
-        """Rebuild the QTableWidget from ``self._rows`` according to the current view mode."""
+        """Rebuild the active view from ``self._rows``."""
         # selectionChanged would fire spuriously during rebuild; disconnect briefly.
         try:
             self.table.selectionModel().selectionChanged.disconnect(self._update_selection_history)
@@ -140,13 +150,16 @@ class IplotQtRuler(QWidget):
         self.table.clear()
         self.table.setRowCount(0)
         self.table.setColumnCount(0)
-        self.table.verticalHeader().setVisible(self.view_mode == self.VIEW_COLUMNS)
+        self.table.verticalHeader().setVisible(False)
+        self._clear_column_sections()
 
         if self.view_mode == self.VIEW_ROWS:
+            self.view_stack.setCurrentWidget(self.table)
             self._render_rows()
             edit_enabled = True
         else:
-            self._render_columns()
+            self.view_stack.setCurrentWidget(self.columns_scroll)
+            self._render_column_sections()
             edit_enabled = False
 
         self.remove_button.setEnabled(edit_enabled)
@@ -196,51 +209,97 @@ class IplotQtRuler(QWidget):
             lambda _=False, btn=color_btn: self._on_color_clicked(self.table.indexAt(btn.pos()).row(), btn))
         self.table.setCellWidget(row_idx, self.COL_COLOR, color_btn)
 
-    def _render_columns(self):
-        self.table.setRowCount(len(self._COLUMNS_MODE_FIELDS))
-        self.table.setColumnCount(len(self._rows))
-        self.table.setVerticalHeaderLabels(self._COLUMNS_MODE_FIELDS)
-        self.table.setHorizontalHeaderLabels([row['name'] for row in self._rows])
+    def _clear_column_sections(self):
+        self.column_sections.clear()
+        # Remove every widget before the trailing stretch.
+        while self.columns_layout.count() > 1:
+            item = self.columns_layout.takeAt(0)
+            w = item.widget() if item is not None else None
+            if w is not None:
+                w.deleteLater()
 
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setStretchLastSection(True)
+    def _render_column_sections(self):
+        groups: Dict[Tuple[int, int], List[Dict]] = {}
+        for r in self._rows:
+            groups.setdefault(r['plot_id'], []).append(r)
 
-        for col_idx, row in enumerate(self._rows):
-            self._populate_column_cells(col_idx, row)
+        stretch_idx = self.columns_layout.count() - 1
+        for plot_id, rulers in groups.items():
+            section, table = self._build_plot_section(plot_id, rulers)
+            self.columns_layout.insertWidget(stretch_idx, section)
+            stretch_idx += 1
+            self.column_sections.append((plot_id, table))
 
-    def _populate_column_cells(self, col_idx: int, row: Dict):
-        x, y = row['xy']
-        x_text = str(pd.Timestamp(x)) if row['is_date'] else f"{x:.6g}"
+    def _build_plot_section(self, plot_id: Tuple[int, int],
+                             rulers: List[Dict]) -> Tuple[QWidget, QTableWidget]:
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
 
-        values = [
-            f"{row['plot_id'][0]}.{row['plot_id'][1]}",
-            x_text,
-            f"{y:.6g}",
-            "Yes" if row['visible'] else "No",
-            row['color'],
-        ]
+        title = QLabel(f"Plot {plot_id[0]}.{plot_id[1]}")
+        title.setStyleSheet("font-weight: bold;")
+        layout.addWidget(title)
 
-        for field_idx, text in enumerate(values):
-            item = QTableWidgetItem(text)
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(field_idx, col_idx, item)
+        show_delta = len(rulers) >= 2
+        col_count = len(rulers) + (1 if show_delta else 0)
 
-        # Paint the color cell with the ruler color as background so users can
-        # eyeball it without parsing the hex value.
-        color_cell = self.table.item(self._COLUMNS_MODE_FIELDS.index('Color'), col_idx)
-        qcolor = QColor(row['color'])
-        color_cell.setBackground(QBrush(qcolor))
-        color_cell.setForeground(QBrush(self._contrast_text_color(qcolor)))
+        table = QTableWidget(len(self._COLUMNS_AXIS_LABELS), col_count)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        table.setVerticalHeaderLabels(list(self._COLUMNS_AXIS_LABELS))
+
+        headers = [str(i + 1) for i in range(len(rulers))]
+        if show_delta:
+            headers.append(self._DELTA_HEADER)
+        table.setHorizontalHeaderLabels(headers)
+        h_header = table.horizontalHeader()
+        h_header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        h_header.setStretchLastSection(True)
+
+        for col_idx, r in enumerate(rulers):
+            self._set_axis_cell(table, 0, col_idx, self._format_x(r), r['color'])
+            self._set_axis_cell(table, 1, col_idx, f"{r['xy'][1]:.6g}", r['color'])
+
+        if show_delta:
+            xs = [r['xy'][0] for r in rulers]
+            ys = [r['xy'][1] for r in rulers]
+            is_date = rulers[0]['is_date']
+            self._set_plain_cell(table, 0, col_count - 1,
+                                 self._format_dx(min(xs), max(xs), is_date))
+            self._set_plain_cell(table, 1, col_count - 1, f"{max(ys) - min(ys):.6g}")
+
+        table.setFixedHeight(self._section_table_height(table))
+        layout.addWidget(table)
+        return section, table
 
     @staticmethod
-    def _contrast_text_color(color: QColor) -> QColor:
-        # Pick black or white text depending on the cell background luminance,
-        # so the hex code stays readable on any palette entry.
-        luminance = 0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue()
-        return QColor('black') if luminance > 140 else QColor('white')
+    def _section_table_height(table: QTableWidget) -> int:
+        rows_height = sum(table.rowHeight(r) for r in range(table.rowCount()))
+        frame = 2 * table.frameWidth()
+        return table.horizontalHeader().height() + rows_height + frame
 
-    # Selection-based actions (rows mode only)
+    @staticmethod
+    def _format_x(row: Dict) -> str:
+        x = row['xy'][0]
+        return str(pd.Timestamp(x)) if row['is_date'] else f"{x:.6g}"
+
+    @staticmethod
+    def _set_axis_cell(table: QTableWidget, axis_row: int, col_idx: int, text: str, color: str):
+        item = QTableWidgetItem(text)
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        tint = QColor(color)
+        tint.setAlpha(60)
+        item.setBackground(QBrush(tint))
+        table.setItem(axis_row, col_idx, item)
+
+    @staticmethod
+    def _set_plain_cell(table: QTableWidget, axis_row: int, col_idx: int, text: str):
+        item = QTableWidgetItem(text)
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        table.setItem(axis_row, col_idx, item)
 
     def _update_selection_history(self):
         selected = [idx.row() for idx in self.table.selectionModel().selectedRows()]
