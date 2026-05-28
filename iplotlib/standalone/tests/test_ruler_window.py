@@ -88,6 +88,90 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         self.assertEqual(emitted[-1], ('A', (1, 1), True))
 
 
+class IplotQtRulerViewModeTest(unittest.TestCase):
+    """The Rulers window supports two layouts: rows-per-ruler (default, editable)
+    and columns-per-ruler (read-only, side-by-side). The toggle must preserve
+    data across switches and only allow row-based edit actions in rows mode."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def setUp(self):
+        self.window = IplotQtRuler()
+        self.window.add_row('A', (1, 1), (1.0, 2.0), '#FF0000', visible=True)
+        self.window.add_row('B', (1, 1), (3.0, 4.0), '#00FF00', visible=False)
+
+    def tearDown(self):
+        self.window.close()
+
+    def test_default_view_mode_is_rows(self):
+        self.assertEqual(self.window.view_mode, IplotQtRuler.VIEW_ROWS)
+        self.assertTrue(self.window.rows_radio.isChecked())
+        self.assertEqual(self.window.table.rowCount(), 2)
+        self.assertEqual(self.window.table.columnCount(), 6)
+
+    def test_switching_to_columns_transposes_the_table(self):
+        self.window.columns_radio.setChecked(True)
+        self.assertEqual(self.window.view_mode, IplotQtRuler.VIEW_COLUMNS)
+        # 5 fields (Plot, X, Y, Visible, Color) x 2 rulers (A, B).
+        self.assertEqual(self.window.table.rowCount(), 5)
+        self.assertEqual(self.window.table.columnCount(), 2)
+
+    def test_columns_mode_uses_ruler_names_as_column_headers(self):
+        self.window.columns_radio.setChecked(True)
+        headers = [self.window.table.horizontalHeaderItem(c).text()
+                   for c in range(self.window.table.columnCount())]
+        self.assertEqual(headers, ['A', 'B'])
+
+    def test_columns_mode_disables_edit_action_buttons(self):
+        self.window.columns_radio.setChecked(True)
+        self.assertFalse(self.window.remove_button.isEnabled())
+        self.assertFalse(self.window.distance_button.isEnabled())
+
+    def test_switching_back_to_rows_re_enables_edit_actions(self):
+        self.window.columns_radio.setChecked(True)
+        self.window.rows_radio.setChecked(True)
+        self.assertTrue(self.window.remove_button.isEnabled())
+        self.assertTrue(self.window.distance_button.isEnabled())
+        self.assertEqual(self.window.table.rowCount(), 2)
+        self.assertEqual(self.window.table.columnCount(), 6)
+
+    def test_data_survives_mode_switch(self):
+        self.window.columns_radio.setChecked(True)
+        self.window.rows_radio.setChecked(True)
+        # Edit widgets must be restored (rows mode), not just text cells.
+        cb = self.window.table.cellWidget(0, IplotQtRuler.COL_VISIBLE)
+        btn = self.window.table.cellWidget(0, IplotQtRuler.COL_COLOR)
+        self.assertIsNotNone(cb)
+        self.assertIsNotNone(btn)
+        self.assertTrue(cb.isChecked())  # Ruler A starts visible
+
+    def test_columns_mode_paints_color_cell_background(self):
+        from PySide6.QtGui import QColor
+        self.window.columns_radio.setChecked(True)
+        color_row = IplotQtRuler._COLUMNS_MODE_FIELDS.index('Color')
+        cell_a = self.window.table.item(color_row, 0)
+        self.assertEqual(cell_a.text(), '#FF0000')
+        self.assertEqual(cell_a.background().color(), QColor('#FF0000'))
+
+    def test_columns_mode_cells_are_read_only(self):
+        self.window.columns_radio.setChecked(True)
+        for row in range(self.window.table.rowCount()):
+            for col in range(self.window.table.columnCount()):
+                item = self.window.table.item(row, col)
+                self.assertFalse(bool(item.flags() & Qt.ItemFlag.ItemIsEditable),
+                                 f"Cell ({row},{col}) is editable in columns mode")
+
+    def test_add_row_while_in_columns_mode_extends_columns(self):
+        self.window.columns_radio.setChecked(True)
+        self.window.add_row('C', (1, 1), (5.0, 6.0), '#0000FF')
+        self.assertEqual(self.window.table.columnCount(), 3)
+        headers = [self.window.table.horizontalHeaderItem(c).text()
+                   for c in range(self.window.table.columnCount())]
+        self.assertEqual(headers, ['A', 'B', 'C'])
+
+
 class RulerLeftToRightDeltaTest(unittest.TestCase):
     """When computing deltas, rulers must be ordered by X regardless of
     selection order. The issue specifies ``left to right`` explicitly."""
