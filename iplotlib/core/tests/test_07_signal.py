@@ -34,5 +34,66 @@ class TestSignalContour(unittest.TestCase):
         self.assertEqual(len(s.data_store[1]), 2)
 
 
+class SetLimitsTest(unittest.TestCase):
+    """Custom x_expr with sparse x_data must not collapse the zoom range."""
+
+    @staticmethod
+    def _make_signal(x_expr, x_data, data_store_time):
+        s = SignalXY(label="s")
+        s.data_store[0] = data_store_time
+        s.data_store[1] = np.ones_like(data_store_time, dtype=float)
+        s.x_data = x_data
+        s.x_expr = x_expr
+        return s
+
+    def test_passes_ranges_when_x_data_is_sparse_summary(self):
+        time = np.linspace(1000, 2000, 100).astype(np.int64)
+        s = self._make_signal(
+            x_expr="np.array([${self}.time[0],${self}.time[-1]])",
+            x_data=np.asarray([time[0], time[-1]], dtype=np.int64),
+            data_store_time=time,
+        )
+        s.set_limits((1200, 1500))
+        self.assertEqual(s.ts_start, 1200)
+        self.assertEqual(s.ts_end, 1500)
+
+    def test_snaps_when_x_data_matches_data_store_length(self):
+        # 1:1 mapping keeps the snap behaviour: result is bounded by the
+        # requested window expanded by one sample on each side.
+        time = np.linspace(1000, 2000, 101).astype(np.int64)
+        s = self._make_signal(
+            x_expr="${alias}.time",
+            x_data=time.copy(),
+            data_store_time=time,
+        )
+        s.set_limits((1200, 1500))
+        self.assertGreaterEqual(s.ts_start, 1180)
+        self.assertLessEqual(s.ts_start, 1210)
+        self.assertGreaterEqual(s.ts_end, 1490)
+        self.assertLessEqual(s.ts_end, 1520)
+
+    def test_passes_ranges_for_default_x_expr(self):
+        time = np.linspace(1000, 2000, 100).astype(np.int64)
+        s = self._make_signal(
+            x_expr="${self}.time",
+            x_data=time.copy(),
+            data_store_time=time,
+        )
+        s.set_limits((1234, 1789))
+        self.assertEqual(s.ts_start, 1234)
+        self.assertEqual(s.ts_end, 1789)
+
+    def test_passes_ranges_when_x_data_is_empty(self):
+        time = np.linspace(1000, 2000, 100).astype(np.int64)
+        s = self._make_signal(
+            x_expr="np.array([])",
+            x_data=np.array([], dtype=np.int64),
+            data_store_time=time,
+        )
+        s.set_limits((1111, 1999))
+        self.assertEqual(s.ts_start, 1111)
+        self.assertEqual(s.ts_end, 1999)
+
+
 if __name__ == '__main__':
     unittest.main()
