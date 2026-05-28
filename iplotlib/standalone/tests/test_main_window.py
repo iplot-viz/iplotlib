@@ -181,13 +181,14 @@ class PreferencesWindowTest(unittest.TestCase):
         from iplotlib.core.axis import LinearAxis
         from iplotlib.core.plot import (PlotContour, PlotContourWithSlider,
                                         PlotXY, PlotXYWithSlider)
+        from iplotlib.core.ruler import Ruler
         from iplotlib.core.signal import SignalContour, SignalXY
 
         win = IplotQtPreferencesWindow(QStandardItemModel())
         try:
             expected = {Canvas, PlotXY, PlotXYWithSlider, PlotContour,
                         PlotContourWithSlider, LinearAxis, SignalXY,
-                        SignalContour, type(None)}
+                        SignalContour, Ruler, type(None)}
             self.assertEqual(expected, set(win._forms.keys()))
         finally:
             win.close()

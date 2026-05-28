@@ -22,10 +22,11 @@ from PySide6.QtGui import QColor, QIcon, QPixmap
 
 from iplotlib.core.axis import Axis, LinearAxis
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.ruler import Ruler
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 from iplotlib.core.plot import Plot, PlotXY, PlotContour, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.qt.gui.forms import (IplotPreferencesForm, AxisForm, CanvasForm, PlotXYForm, PlotContourForm,
-                                   SignalXYForm, SignalContourForm)
+                                   RulerForm, SignalXYForm, SignalContourForm)
 
 from iplotLogging import setupLogger as Sl
 
@@ -65,6 +66,7 @@ class IplotQtPreferencesWindow(QMainWindow):
             LinearAxis: AxisForm(self),
             SignalXY: SignalXYForm(self),
             SignalContour: SignalContourForm(self),
+            Ruler: RulerForm(self),
             type(None): QPushButton("Select item", parent=self)
         }
         self.formsStack = QStackedWidget()

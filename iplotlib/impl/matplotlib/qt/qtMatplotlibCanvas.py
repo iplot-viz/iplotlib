@@ -27,6 +27,7 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as Navigation
 from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
+from iplotlib.core.ruler import Ruler
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
@@ -91,6 +92,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self.render()
         super().set_canvas(canvas)
+        self._repaint_rulers_from_canvas()
 
     def _is_signal_visible(self, signal) -> bool:
         """Check if signal is visible (Matplotlib implementation)."""
@@ -161,6 +163,121 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     annotation.remove()
                     self._parser.figure.canvas.draw()
                     return
+
+    def _get_plot_by_id(self, plot_id):
+        for col in self._parser.canvas.plots:
+            for plot in col:
+                if plot and [plot.col, plot.row] == list(plot_id):
+                    return plot
+        return None
+
+    def _get_impl_plot_for_plot(self, plot):
+        """Return the matplotlib Axes hosting *plot* (first matching axes)."""
+        for ax in self._parser.figure.axes:
+            ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
+            if ci and hasattr(ci, 'plot') and ci.plot() is plot:
+                return ax
+        return None
+
+    def delete_ruler(self, name, plot_id, persist):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        impl_plot = self._get_impl_plot_for_plot(plot)
+        if impl_plot is not None:
+            self._parser.remove_ruler(impl_plot, name)
+        if persist:
+            plot.remove_ruler(name)
+        self.render()
+
+    def toggle_ruler_visibility(self, name, plot_id, visible):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.visible = visible
+        impl_plot = self._get_impl_plot_for_plot(plot)
+        if impl_plot is None:
+            return
+        for r in self._parser.get_rulers(impl_plot):
+            if r.name == name:
+                r.set_visible(visible)
+        self.render()
+
+    def change_ruler_color(self, name, plot_id, color):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.color = color
+        impl_plot = self._get_impl_plot_for_plot(plot)
+        if impl_plot is None:
+            return
+        for r in self._parser.get_rulers(impl_plot):
+            if r.name == name:
+                r.set_color(color)
+        self.render()
+
+    def _add_ruler_at(self, impl_plot, plot, x: float, y: float):
+        name = self._ruler_window.next_name()
+        color = self._ruler_window.next_color()
+        ruler = Ruler(name=name, xy=(x, y), color=color, visible=True)
+        plot.add_ruler(ruler)
+        self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
+        is_date = bool(getattr(plot.axes[0], 'is_date', False))
+        self._ruler_window.add_row(name, (plot.col, plot.row), (x, y), ruler.color,
+                                    visible=True, is_date=is_date)
+        if not self._ruler_window.isVisible():
+            self._ruler_window.show()
+        else:
+            self._ruler_window.raise_()
+            self._ruler_window.activateWindow()
+
+    def _find_ruler_near(self, impl_plot, event):
+        rulers = self._parser.get_rulers(impl_plot)
+        if not rulers or event.x is None or event.y is None:
+            return None
+        click_px = np.array([event.x, event.y])
+        best = None
+        best_dist = float('inf')
+        for r in rulers:
+            try:
+                ruler_px = impl_plot.transData.transform((r.xy[0], r.xy[1]))
+            except (ValueError, TypeError):
+                continue
+            d = float(np.linalg.norm(ruler_px - click_px))
+            if d < best_dist:
+                best_dist = d
+                best = r
+        if best is not None and best_dist <= self.PICK_RADIUS_PX:
+            return best
+        return None
+
+    def _repaint_rulers_from_canvas(self):
+        self._ruler_window.clear_info()
+        canvas = self._parser.canvas
+        if not canvas:
+            return
+        for col in canvas.plots:
+            for plot in col:
+                if not plot or not getattr(plot, 'rulers', None):
+                    continue
+                impl_plot = self._get_impl_plot_for_plot(plot)
+                if impl_plot is None:
+                    continue
+                is_date = bool(getattr(plot.axes[0], 'is_date', False))
+                for ruler in plot.rulers:
+                    self._parser.add_ruler(impl_plot, ruler.name, ruler.xy[0], ruler.xy[1], ruler.color)
+                    self._ruler_window.add_row(ruler.name, (plot.col, plot.row), ruler.xy,
+                                                ruler.color, ruler.visible, is_date)
+                    if not ruler.visible:
+                        for r in self._parser.get_rulers(impl_plot):
+                            if r.name == ruler.name:
+                                r.set_visible(False)
+                self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
+        self.render()
 
     def autoscale_y(self, impl_plot):
         """
@@ -248,6 +365,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             else:
                 self._marker_window.raise_()
                 self._marker_window.activateWindow()
+        elif mode == Canvas.MOUSE_MODE_RULER:
+            if not self._ruler_window.isVisible():
+                self._ruler_window.show()
+            elif self._ruler_window.isMinimized():
+                self._ruler_window.showNormal()
+            else:
+                self._ruler_window.raise_()
+                self._ruler_window.activateWindow()
 
     def undo(self):
         self._parser.undo()
@@ -502,6 +627,21 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             if not hasattr(ci, 'plot'):
                 return
             plot = ci.plot()
+            if self._mmode == Canvas.MOUSE_MODE_RULER:
+                if isinstance(plot, (PlotContour, PlotContourWithSlider)):
+                    logger.warning(f"Rulers are not supported for {type(plot).__name__}")
+                    return
+                if (event.button == MouseButton.LEFT
+                        and event.xdata is not None and event.ydata is not None):
+                    self._add_ruler_at(event.inaxes, plot, event.xdata, event.ydata)
+                    self.render()
+                    return
+                if event.button == MouseButton.RIGHT:
+                    hit = self._find_ruler_near(event.inaxes, event)
+                    if hit is not None:
+                        self.delete_ruler(hit.name, (plot.col, plot.row), True)
+                        self._ruler_window.remove_row_by_name(hit.name, (plot.col, plot.row))
+                    return
             if event.button == MouseButton.RIGHT:
                 if getattr(self._mpl_toolbar, '_zoom_info', None) is not None:
                     self._mpl_toolbar.release_zoom(event)

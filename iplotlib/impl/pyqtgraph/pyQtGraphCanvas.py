@@ -31,6 +31,7 @@ from iplotlib.core import (Axis,
                            SignalXY,
                            SignalContour)
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
+from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
 
 logger = setupLogger.get_logger(__name__)
@@ -135,6 +136,7 @@ class PyQtGraphParser(BackendParserBase):
         self.legend_size = 8
         self._cursors = []
         self._cursor_active = False
+        self._rulers = []  # type: List[pyQtRuler]
         self._grid_spacing_labels = {}  # PlotItem -> TextItem
         self._cell_gl = {}
         self._layout_stacks = {}
@@ -1130,6 +1132,7 @@ class PyQtGraphParser(BackendParserBase):
                 self.align_y_axis(c)
                 break
         self.update_grid_spacing_label(current_plot)
+        self.refresh_rulers(current_plot)
 
     def _x_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
@@ -1137,6 +1140,7 @@ class PyQtGraphParser(BackendParserBase):
         current_plot = view_box.parentItem()  # type: PlotItem
         super()._x_axis_update_callback(current_plot)
         self.update_grid_spacing_label(current_plot)
+        self.refresh_rulers(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':
@@ -1283,6 +1287,11 @@ class PyQtGraphParser(BackendParserBase):
         for c in self._cursors:
             c.remove()
         self._cursors.clear()
+
+        # remove any active rulers (impl items only — Plot.rulers data is preserved)
+        for r in self._rulers:
+            r.remove()
+        self._rulers.clear()
 
         self._cell_gl = {}
         self._layout_stacks = {}
@@ -1753,6 +1762,34 @@ class PyQtGraphParser(BackendParserBase):
 
         self._cursors.clear()
         self._cursor_active = False
+
+    @BackendParserBase.run_in_one_thread
+    def add_ruler(self, impl_plot: PlotItem, name: str, x: float, y: float,
+                  color: str = "#FFFFFF") -> pyQtRuler:
+        font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
+        ruler = pyQtRuler(plot=impl_plot, name=name, xy=(x, y), color=color, font_size=font_size)
+        self._rulers.append(ruler)
+        return ruler
+
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler(self, impl_plot: PlotItem, name: str):
+        remaining = []
+        for r in self._rulers:
+            if r.plot is impl_plot and r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
+    def refresh_rulers(self, impl_plot: PlotItem = None):
+        for r in self._rulers:
+            if impl_plot is None or r.plot is impl_plot:
+                r.refresh_labels()
+
+    def get_rulers(self, impl_plot: PlotItem = None) -> List[pyQtRuler]:
+        if impl_plot is None:
+            return list(self._rulers)
+        return [r for r in self._rulers if r.plot is impl_plot]
 
     def get_impl_x_axis(self, plot: PlotItem) -> AxisItem:
         return plot.getAxis('bottom')

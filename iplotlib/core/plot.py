@@ -17,6 +17,7 @@ import weakref
 import pandas as pd
 
 from iplotlib.core.axis import Axis, LinearAxis
+from iplotlib.core.ruler import Ruler
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 
 
@@ -59,6 +60,7 @@ class Plot(ABC):
     plot_title: str = None
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None
+    rulers: List[Ruler] = None
     legend: bool = None
     legend_position: str = None
     legend_layout: str = None
@@ -75,6 +77,8 @@ class Plot(ABC):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.signals is None:
             self.signals = {}
+        if self.rulers is None:
+            self.rulers = []
         if self.axes is None:
             self.axes = [LinearAxis(), [LinearAxis()]]
 
@@ -87,6 +91,18 @@ class Plot(ABC):
         if stack not in self.signals:
             self.signals[stack] = []
         self.signals[stack].append(signal)
+
+    def add_ruler(self, ruler: Ruler):
+        self.rulers.append(ruler)
+
+    def remove_ruler(self, name: str):
+        self.rulers = [r for r in self.rulers if r.name != name]
+
+    def get_ruler(self, name: str):
+        for r in self.rulers:
+            if r.name == name:
+                return r
+        return None
 
     def reset_preferences(self):
         self.plot_title = Plot.plot_title

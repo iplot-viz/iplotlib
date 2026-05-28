@@ -1,0 +1,129 @@
+"""End-to-end tests for the Ruler feature on the matplotlib backend.
+
+Mirrors test_ruler_pyqtgraph.py to guarantee both backends behave the same
+from the perspective of Plot.rulers / parser._rulers / window contents and
+support the same operations (add, delete, toggle visibility, change color,
+repaint on canvas reload).
+"""
+
+import os
+import unittest
+
+import numpy as np
+
+from iplotlib.core.canvas import Canvas
+from iplotlib.core.plot import PlotXY
+from iplotlib.core.ruler import Ruler
+from iplotlib.core.signal import SignalXY
+from iplotlib.impl.matplotlib.iplotMplRuler import iplotMplRuler
+from iplotlib.impl.matplotlib.qt.qtMatplotlibCanvas import QtMatplotlibCanvas
+from iplotlib.qt.testing import ensure_qapp
+
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+
+
+def _build_canvas() -> Canvas:
+    c = Canvas(1, 1, title="ruler_test_mpl")
+    x = np.linspace(0, 10, 50)
+    plot = PlotXY()
+    sig = SignalXY(label="s")
+    sig.set_data([x, np.sin(x)])
+    plot.add_signal(sig)
+    c.add_plot(plot, 0)
+    return c
+
+
+class RulerMatplotlibEndToEndTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def setUp(self):
+        self.canvas = _build_canvas()
+        self.widget = QtMatplotlibCanvas(canvas=self.canvas)
+        self.plot = self.canvas.plots[0][0]
+        self.impl_plot = self.widget._get_impl_plot_for_plot(self.plot)
+        self.assertIsNotNone(self.impl_plot, "Axes for plot must be available after set_canvas")
+
+    def tearDown(self):
+        self.widget._ruler_window.close()
+        self.widget.deleteLater()
+
+    def test_add_ruler_populates_data_model_and_backend_and_window(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 2.5, 0.5)
+        self.assertEqual([r.name for r in self.plot.rulers], ['A'])
+        self.assertEqual(self.plot.rulers[0].xy, (2.5, 0.5))
+        parser_rulers = self.widget._parser.get_rulers(self.impl_plot)
+        self.assertEqual(len(parser_rulers), 1)
+        self.assertIsInstance(parser_rulers[0], iplotMplRuler)
+        self.assertEqual(self.widget._ruler_window.table.rowCount(), 1)
+
+    def test_add_rulers_picks_different_default_colors(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 3.0, 0.3)
+        self.assertNotEqual(self.plot.rulers[0].color, self.plot.rulers[1].color)
+
+    def test_delete_ruler_removes_from_plot_parser_and_window(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 3.0, 0.3)
+        self.widget.delete_ruler('A', (self.plot.col, self.plot.row), True)
+        self.widget._ruler_window.remove_row_by_name('A', (self.plot.col, self.plot.row))
+        self.assertEqual([r.name for r in self.plot.rulers], ['B'])
+        self.assertEqual([r.name for r in self.widget._parser.get_rulers(self.impl_plot)], ['B'])
+        self.assertEqual(self.widget._ruler_window.table.rowCount(), 1)
+
+    def test_toggle_ruler_visibility_updates_model_and_backend(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
+        self.widget.toggle_ruler_visibility('A', (self.plot.col, self.plot.row), False)
+        self.assertFalse(self.plot.rulers[0].visible)
+        self.assertFalse(self.widget._parser.get_rulers(self.impl_plot)[0].v_line.get_visible())
+
+    def test_change_ruler_color_updates_model_and_backend(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
+        self.widget.change_ruler_color('A', (self.plot.col, self.plot.row), '#FF0000')
+        self.assertEqual(self.plot.rulers[0].color, '#FF0000')
+        # matplotlib reports colors as RGBA tuples after set_color; compare back to hex.
+        from matplotlib.colors import to_hex
+        impl_color = self.widget._parser.get_rulers(self.impl_plot)[0].v_line.get_color()
+        self.assertEqual(to_hex(impl_color).upper(), '#FF0000')
+
+    def test_repaint_after_setting_canvas_with_rulers(self):
+        c2 = _build_canvas()
+        plot2 = c2.plots[0][0]
+        plot2.add_ruler(Ruler(name='X', xy=(2.0, 0.2), color='#00FF00', visible=True))
+        plot2.add_ruler(Ruler(name='Y', xy=(5.0, -0.5), color='#0000FF', visible=False))
+
+        self.widget.set_canvas(c2)
+
+        impl_plot = self.widget._get_impl_plot_for_plot(plot2)
+        self.assertIsNotNone(impl_plot)
+        names = sorted(r.name for r in self.widget._parser.get_rulers(impl_plot))
+        self.assertEqual(names, ['X', 'Y'])
+        self.assertEqual(self.widget._ruler_window.table.rowCount(), 2)
+        backend_y = next(r for r in self.widget._parser.get_rulers(impl_plot) if r.name == 'Y')
+        self.assertFalse(backend_y.v_line.get_visible())
+
+
+class RulerMatplotlibRegressionTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def test_crosshair_still_activates(self):
+        widget = QtMatplotlibCanvas(canvas=_build_canvas())
+        try:
+            widget.set_mouse_mode(Canvas.MOUSE_MODE_CROSSHAIR)
+            self.assertTrue(len(widget._parser._cursors) >= 1)
+        finally:
+            widget.deleteLater()
+
+    def test_marker_and_ruler_windows_are_independent(self):
+        widget = QtMatplotlibCanvas(canvas=_build_canvas())
+        try:
+            self.assertIsNot(widget._marker_window, widget._ruler_window)
+        finally:
+            widget.deleteLater()
+
+
+if __name__ == '__main__':
+    unittest.main()

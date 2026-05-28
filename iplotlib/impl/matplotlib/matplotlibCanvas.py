@@ -36,6 +36,7 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
+from iplotlib.impl.matplotlib.iplotMplRuler import iplotMplRuler
 
 logger = setupLogger.get_logger(__name__)
 
@@ -61,6 +62,7 @@ class MatplotlibParser(BackendParserBase):
         self._legend_signal_lut = {}  # legend_line -> Signal
         self.legend_size = 8
         self._cursors = []
+        self._rulers = []  # type: List[iplotMplRuler]
         self._grid_spacing_annotations = {}  # MPLAxes -> Text artist
         self._impl_plot_ranges_hash = dict()
 
@@ -521,6 +523,11 @@ class MatplotlibParser(BackendParserBase):
         for c in self._cursors:
             c.remove()
         self._cursors.clear()
+
+        # remove any active rulers (impl artists only — Plot.rulers data is preserved)
+        for r in self._rulers:
+            r.remove()
+        self._rulers.clear()
 
         # drop cache items and remove each Axes to release all artists and callbacks
         # for ax in list(self.figure.axes):
@@ -1282,6 +1289,34 @@ class MatplotlibParser(BackendParserBase):
         for cursor in self._cursors:
             cursor.remove()
         self._cursors.clear()
+
+    @BackendParserBase.run_in_one_thread
+    def add_ruler(self, impl_plot: MPLAxes, name: str, x: float, y: float,
+                  color: str = "#FFFFFF") -> iplotMplRuler:
+        font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
+        ruler = iplotMplRuler(ax=impl_plot, name=name, xy=(x, y), color=color, font_size=font_size)
+        self._rulers.append(ruler)
+        return ruler
+
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler(self, impl_plot: MPLAxes, name: str):
+        remaining = []
+        for r in self._rulers:
+            if r.ax is impl_plot and r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
+    def refresh_rulers(self, impl_plot: MPLAxes = None):
+        for r in self._rulers:
+            if impl_plot is None or r.ax is impl_plot:
+                r.refresh_labels()
+
+    def get_rulers(self, impl_plot: MPLAxes = None) -> List[iplotMplRuler]:
+        if impl_plot is None:
+            return list(self._rulers)
+        return [r for r in self._rulers if r.ax is impl_plot]
 
     def get_signal_style(self, signal: SignalXY) -> dict:
         style = dict()

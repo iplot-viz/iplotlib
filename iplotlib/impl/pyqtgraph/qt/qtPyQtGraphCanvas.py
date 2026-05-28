@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox
 import numpy as np
 from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY, PlotContourWithSlider
 from iplotlib.core.distance import DistanceCalculator
+from iplotlib.core.ruler import Ruler
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
@@ -71,6 +72,30 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     self._connected_viewboxes.add(vb_id)
 
         super().set_canvas(canvas)
+        self._repaint_rulers_from_canvas()
+
+    def _repaint_rulers_from_canvas(self):
+        self._ruler_window.clear_info()
+        canvas = self._parser.canvas
+        if not canvas:
+            return
+        for col in canvas.plots:
+            for plot in col:
+                if not plot or not getattr(plot, 'rulers', None):
+                    continue
+                impl_plot = self._get_impl_plot_for_plot(plot)
+                if impl_plot is None:
+                    continue
+                is_date = bool(getattr(plot.axes[0], 'is_date', False))
+                for ruler in plot.rulers:
+                    self._parser.add_ruler(impl_plot, ruler.name, ruler.xy[0], ruler.xy[1], ruler.color)
+                    self._ruler_window.add_row(ruler.name, (plot.col, plot.row), ruler.xy,
+                                                ruler.color, ruler.visible, is_date)
+                    if not ruler.visible:
+                        for r in self._parser.get_rulers(impl_plot):
+                            if r.name == ruler.name:
+                                r.set_visible(False)
+                self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
 
     def get_base_plot(self) -> PlotItem:
         for stack in self._parser._layout_stacks.values():
@@ -165,6 +190,104 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     ax.removeItem(annotation)
                     return
 
+    def _get_plot_by_id(self, plot_id):
+        for col in self._parser.canvas.plots:
+            for plot in col:
+                if plot and [plot.col, plot.row] == list(plot_id):
+                    return plot
+        return None
+
+    def _get_impl_plot_for_plot(self, plot):
+        """Return the first impl PlotItem hosting *plot* (lowest stack key).
+
+        The layout_stacks key is the 0-indexed (row_idx, col_idx) from the
+        canvas grid iteration, which is not the same as plot.row / plot.col.
+        """
+        canvas = self._parser.canvas
+        if canvas is None:
+            return None
+        for col_idx, col in enumerate(canvas.plots):
+            for row_idx, p in enumerate(col):
+                if p is plot:
+                    stack_dict = self._parser._layout_stacks.get((row_idx, col_idx), {})
+                    if not stack_dict:
+                        return None
+                    first_key = min(stack_dict.keys())
+                    return stack_dict[first_key]
+        return None
+
+    def delete_ruler(self, name, plot_id, persist):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        impl_plot = self._get_impl_plot_for_plot(plot)
+        if impl_plot is not None:
+            self._parser.remove_ruler(impl_plot, name)
+        if persist:
+            plot.remove_ruler(name)
+
+    def toggle_ruler_visibility(self, name, plot_id, visible):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.visible = visible
+        impl_plot = self._get_impl_plot_for_plot(plot)
+        if impl_plot is None:
+            return
+        for r in self._parser.get_rulers(impl_plot):
+            if r.name == name:
+                r.set_visible(visible)
+
+    def change_ruler_color(self, name, plot_id, color):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.color = color
+        impl_plot = self._get_impl_plot_for_plot(plot)
+        if impl_plot is None:
+            return
+        for r in self._parser.get_rulers(impl_plot):
+            if r.name == name:
+                r.set_color(color)
+
+    def _add_ruler_at(self, impl_plot, plot, x: float, y: float):
+        name = self._ruler_window.next_name()
+        color = self._ruler_window.next_color()
+        ruler = Ruler(name=name, xy=(x, y), color=color, visible=True)
+        plot.add_ruler(ruler)
+        self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
+        is_date = bool(getattr(plot.axes[0], 'is_date', False))
+        self._ruler_window.add_row(name, (plot.col, plot.row), (x, y), ruler.color,
+                                    visible=True, is_date=is_date)
+        if not self._ruler_window.isVisible():
+            self._ruler_window.show()
+        else:
+            self._ruler_window.raise_()
+            self._ruler_window.activateWindow()
+
+    def _find_ruler_near(self, impl_plot, scene_pos):
+        rulers = self._parser.get_rulers(impl_plot)
+        if not rulers:
+            return None
+        vb = impl_plot.getViewBox()
+        click_scene = np.array([scene_pos.x(), scene_pos.y()])
+        best = None
+        best_dist = float('inf')
+        for r in rulers:
+            ruler_scene_pt = vb.mapViewToScene(pg.Qt.QtCore.QPointF(r.xy[0], r.xy[1]))
+            ruler_scene = np.array([ruler_scene_pt.x(), ruler_scene_pt.y()])
+            d = float(np.linalg.norm(ruler_scene - click_scene))
+            if d < best_dist:
+                best_dist = d
+                best = r
+        if best is not None and best_dist <= self.PICK_RADIUS_PX:
+            return best
+        return None
+
     def autoscale_y(self, impl_plot):
         """
             Autoscale the Y axis of a single PlotXY and store the action for undo/redo
@@ -258,6 +381,15 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             else:
                 self._marker_window.raise_()
                 self._marker_window.activateWindow()
+        elif mode == Canvas.MOUSE_MODE_RULER:
+            self._parser.set_view_box()
+            if not self._ruler_window.isVisible():
+                self._ruler_window.show()
+            elif self._ruler_window.isMinimized():
+                self._ruler_window.showNormal()
+            else:
+                self._ruler_window.raise_()
+                self._ruler_window.activateWindow()
 
     def undo(self):
         self._parser.undo()
@@ -362,6 +494,22 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                                 logger.warning("Shift is not supported for envelope signals.")
                                 break
 
+            elif self._mmode == Canvas.MOUSE_MODE_RULER:
+                if isinstance(plot, (PlotContour, PlotContourWithSlider)):
+                    logger.warning(f"Rulers are not supported for {type(plot).__name__}")
+                    return
+                if event.button() == Qt.MouseButton.LeftButton:
+                    system_coord = view_box.mapSceneToView(event.scenePos())
+                    self._add_ruler_at(impl_plot, plot, system_coord.x(), system_coord.y())
+                    event.accept()
+                elif event.button() == Qt.MouseButton.RightButton:
+                    hit = self._find_ruler_near(impl_plot, event.scenePos())
+                    if hit is not None:
+                        self.delete_ruler(hit.name, (plot.col, plot.row), True)
+                        self._ruler_window.remove_row_by_name(hit.name, (plot.col, plot.row))
+                        event.accept()
+                return
+
             elif self._mmode == Canvas.MOUSE_MODE_DIST:
                 # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
                 system_coord = view_box.mapSceneToView(event.scenePos())
@@ -429,6 +577,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self.stats(self.get_canvas())
 
         is_double = callable(getattr(event, 'double', None)) and event.double()
+        if self._mmode == Canvas.MOUSE_MODE_RULER:
+            # Right-click in ruler mode is handled in press to delete the ruler — do not show menu.
+            return
         if event is not None and event.button() == Qt.MouseButton.RightButton and not is_double:
             autoscale_menu = QMenu(self)
             autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(impl_plot))

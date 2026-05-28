@@ -21,6 +21,7 @@ from iplotlib.core.impl_base import BackendParserBase
 import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
+from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
 
 logger = Sl.get_logger(__name__)
 
@@ -50,6 +51,12 @@ class IplotQtCanvas(QWidget):
         self._marker_window = IplotQtMarker()
         self._marker_window.dropMarker.connect(self.draw_marker_label)
         self._marker_window.deleteMarker.connect(self.delete_marker_label)
+
+        # Iplotlib rulers
+        self._ruler_window = IplotQtRuler()
+        self._ruler_window.deleteRuler.connect(self.delete_ruler)
+        self._ruler_window.visibilityRuler.connect(self.toggle_ruler_visibility)
+        self._ruler_window.colorRuler.connect(self.change_ruler_color)
 
         # Statistics
         self._stats_table = IplotQtStatistics()
@@ -136,6 +143,8 @@ class IplotQtCanvas(QWidget):
         elif self._mmode == Canvas.MOUSE_MODE_DIST:
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_MARKER:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        elif self._mmode == Canvas.MOUSE_MODE_RULER:
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_PAN:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -236,6 +245,18 @@ class IplotQtCanvas(QWidget):
     @abstractmethod
     def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
         """"""
+
+    @abstractmethod
+    def delete_ruler(self, name, plot_id, persist):
+        """Remove a ruler from the backend (and from Plot.rulers when persist=True)."""
+
+    @abstractmethod
+    def toggle_ruler_visibility(self, name, plot_id, visible):
+        """Toggle a ruler's visibility on the backend."""
+
+    @abstractmethod
+    def change_ruler_color(self, name, plot_id, color):
+        """Update a ruler's color on the backend."""
 
     def get_signals(self, canvas: Canvas):
         signal_list = []
