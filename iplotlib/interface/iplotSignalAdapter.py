@@ -337,7 +337,7 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.result = Result.FAIL
         self.status_info.msg = msg
         self.status_info.num_points = 0
-        logger.warning(f"Data Access Error: {msg}")
+        logger.warning(f"Data Access Error in {self._signal_context()}: {msg}")
 
     def set_proc_success(self):
         self.status_info.reset()
@@ -352,7 +352,21 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.result = Result.FAIL
         self.status_info.msg = msg
         self.status_info.num_points = 0
-        logger.warning(f"Processing Error: {msg}")
+        logger.warning(f"Processing Error in {self._signal_context()}: {msg}")
+
+    def _signal_context(self) -> str:
+        alias = getattr(self, 'alias', '') or ''
+        name = getattr(self, 'name', '') or ''
+        parts = []
+        if alias and alias != name:
+            parts.append(f"signal '{alias}'")
+        if name:
+            parts.append(f"variable/expression='{name}'")
+        for attr in ('x_expr', 'y_expr', 'z_expr'):
+            expr = getattr(self, attr, '') or ''
+            if expr and expr not in ('${self}.time', '${self}.data', '${self}.data_store[2]'):
+                parts.append(f"{attr}='{expr}'")
+        return ', '.join(parts) if parts else 'signal'
 
     def inject_external(self, append: bool = False, **kwargs):
         AccessHelper.on_fetch_done(self, kwargs, append=append)
