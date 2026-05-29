@@ -43,6 +43,35 @@ def _canvas_with_noisy_signal() -> Canvas:
     return core
 
 
+def _stacked_canvas(rows: int) -> Canvas:
+    core = Canvas(rows, 1, title="stacked")
+    x = np.linspace(0, 10, 200)
+    for i in range(rows):
+        plot = PlotXY()
+        sig = SignalXY(label=f"sig{i}")
+        sig.set_data([x, np.sin(x + i)])
+        plot.add_signal(sig)
+        core.add_plot(plot, 0)
+    return core
+
+
+def _multi_column_canvas() -> Canvas:
+    core = Canvas(1, 2, title="multi_col")
+    x = np.linspace(0, 10, 200)
+    for col in range(2):
+        plot = PlotXY()
+        sig = SignalXY(label=f"col{col}")
+        sig.set_data([x, np.sin(x + col)])
+        plot.add_signal(sig)
+        core.add_plot(plot, col)
+    return core
+
+
+def _stats_signal_names(qt_canvas) -> list:
+    table = qt_canvas._stats_table.table
+    return [table.item(r, 0).text() for r in range(table.rowCount()) if table.item(r, 0)]
+
+
 class StatsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -73,6 +102,47 @@ class StatsTest(unittest.TestCase):
 
                 qt_canvas.stats(canvas)
                 self.app.processEvents()
+
+    def test_stats_signal_name_uses_stack_only_for_single_column_canvas(self):
+        """Stacked plots in a single-column canvas should label each signal
+        with just the row index ("Plot 1", "Plot 2", ...) — matching the
+        Stack column users see in the variables config."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = _stacked_canvas(rows=2)
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(400, 300)
+                self.app.processEvents()
+
+                qt_canvas.stats(canvas)
+                self.app.processEvents()
+
+                names = _stats_signal_names(qt_canvas)
+                self.assertEqual(len(names), 2)
+                self.assertTrue(all(n.endswith(', 1') or n.endswith(', 2') for n in names),
+                                f"unexpected stack suffixes: {names}")
+                # No ".col" noise must leak through when there is only one column.
+                self.assertFalse(any('.' in n.rsplit(', ', 1)[-1] for n in names),
+                                 f"single-column canvas leaked a col suffix: {names}")
+
+    def test_stats_signal_name_uses_row_dot_col_for_multi_column_canvas(self):
+        """Side-by-side plots must keep the full row.col suffix so the user
+        can tell columns apart."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = _multi_column_canvas()
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(400, 300)
+                self.app.processEvents()
+
+                qt_canvas.stats(canvas)
+                self.app.processEvents()
+
+                names = _stats_signal_names(qt_canvas)
+                suffixes = sorted(n.rsplit(', ', 1)[-1] for n in names)
+                self.assertEqual(suffixes, ['1.1', '1.2'])
 
 
 class AutoscaleTest(unittest.TestCase):

@@ -47,6 +47,8 @@ class IplotQtStatistics(QWidget):
         self.resize(1050, 500)
         self.setWindowTitle("Statistics table")
 
+        self.canvas_columns: int = 1
+
         self.column_names = ['Signal name', 'Min', 'Avg', 'Max', 'First', 'Last', 'Samples', 'First Time', 'Last Time']
 
         # Marker table creation
@@ -131,6 +133,18 @@ class IplotQtStatistics(QWidget):
         main_v_layout.addLayout(top_v_layout)
         self.setLayout(main_v_layout)
 
+    def set_canvas_columns(self, n: int):
+        """Inform the table how many columns the canvas grid has so the plot
+        identifier shown in the Signal name column matches the Stack convention
+        used in the variables config (single number when one column, row.col
+        when several)."""
+        self.canvas_columns = max(1, int(n))
+
+    def _format_plot_id(self, plot_id) -> str:
+        if self.canvas_columns <= 1:
+            return f"{plot_id[0]}"
+        return f"{plot_id[0]}.{plot_id[1]}"
+
     def _format_float(self, value):
         """
             Format float: show as integer if no decimals
@@ -194,15 +208,20 @@ class IplotQtStatistics(QWidget):
 
     def fill_table(self, info_stats: list):
         """
-            Fill the statistics table with data for each signal
+            Fill the statistics table with data for each signal.
+
+            ``info_stats`` items are ``(signal, impl_plot, plot_id)`` tuples;
+            ``plot_id`` is the (row, col) position of the signal's plot in the
+            canvas grid, used to label the signal name with the same Stack
+            convention shown in the variables config.
         """
         self.table.setRowCount(0)
         self._current_info_stats = info_stats
         idx = 0
 
-        for signal, impl_plot in info_stats:
+        for signal, impl_plot, plot_id in info_stats:
             lines = signal.lines
-            stack = signal.get_stack()
+            stack = self._format_plot_id(plot_id)
             has_envelope = signal.data_store[2].size > 0 and signal.data_store[3].size > 0
 
             for line in lines:

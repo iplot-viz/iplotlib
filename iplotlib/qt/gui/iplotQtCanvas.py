@@ -376,7 +376,9 @@ class IplotQtCanvas(QWidget):
                     impl_plot = self._parser._signal_impl_plot_lut.get(signal.uid)
                     if impl_plot is None:
                         continue
-                    info_stats.append((signal, impl_plot))
+                    plot_id = self._canvas_position_of(signal.parent()) or (1, 1)
+                    info_stats.append((signal, impl_plot, plot_id))
+            self._stats_table.set_canvas_columns(len(canvas.plots))
             self._stats_table.fill_table(info_stats)
 
     @contextmanager
