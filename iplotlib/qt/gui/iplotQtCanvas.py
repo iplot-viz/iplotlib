@@ -30,6 +30,7 @@ class IplotQtCanvas(QWidget):
     Base class for all Qt related canvas implementations
     """
     cmdDone = Signal(IplotCommand)
+    focusChanged = Signal()
     openPlotPreferences = Signal(object)
     signalShiftRequested = Signal(str, str, str, str, float, float, bool)
     # Unified shift signals (work for both drag and DIST)
@@ -86,6 +87,23 @@ class IplotQtCanvas(QWidget):
         else:
             self._stats_table.raise_()
             self._stats_table.activateWindow()
+
+    def set_minimap(self, on: bool) -> None:
+        if self._parser is None:
+            return
+        canvas = self.get_canvas()
+        if canvas is None:
+            return
+        canvas.show_minimap = bool(on)
+        if not on:
+            canvas.snapshot_minimap_baseline(None, None)
+        else:
+            target = canvas.get_minimap_target_plot()
+            if target is not None and target.axes:
+                axis = target.axes[0]
+                canvas.snapshot_minimap_baseline(axis.original_begin, axis.original_end)
+        with self.view_retainer():
+            self.refresh()
 
     def drop_history(self):
         """history: clear undo history. after this, can no longer undo"""

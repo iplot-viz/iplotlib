@@ -81,6 +81,8 @@ class Canvas(ABC):
         only one of the subplots
     auto_refresh : int
         Auto redraw canvas every X seconds
+    show_minimap : bool
+        Show a mini-map below the main plot. Only valid with a single visible plot.
     _type : str
         type of the canvas
     max_diff: int
@@ -115,6 +117,7 @@ class Canvas(ABC):
     shared_x_axis: bool = None
     full_mode_all_stack: bool = None
     auto_refresh: int = 0
+    show_minimap: bool = False
     undo_redo: bool = False
     max_diff: int = None
     _type: str = None
@@ -147,6 +150,7 @@ class Canvas(ABC):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.plots is None:
             self.plots = [[] for _ in range(self.cols)]
+        self._minimap_baseline_x_range = None
 
     def add_plot(self, plot, col=0):
         """
@@ -238,6 +242,7 @@ class Canvas(ABC):
         self.full_mode_all_stack = Canvas.full_mode_all_stack
         self.focus_plot = Canvas.focus_plot
         self.max_diff = Canvas.max_diff
+        self.show_minimap = Canvas.show_minimap
 
         for _, col in enumerate(self.plots):
             for _, plot in enumerate(col):
@@ -289,6 +294,7 @@ class Canvas(ABC):
         self.full_mode_all_stack = old_canvas['full_mode_all_stack']
         self.focus_plot = old_canvas['focus_plot']
         self.max_diff = old_canvas['max_diff']
+        self.show_minimap = old_canvas.get('show_minimap', False)
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
@@ -335,6 +341,29 @@ class Canvas(ABC):
                             key = compute_signal_uniqkey(signal)
                             if key in map_old_signals:
                                 signal.merge(map_old_signals[key])
+
+    def is_minimap_eligible(self) -> bool:
+        target = self.get_minimap_target_plot()
+        if target is None:
+            return False
+        return isinstance(target, PlotXY) and not isinstance(target, PlotXYWithSlider)
+
+    def get_minimap_target_plot(self):
+        if self.focus_plot is not None:
+            return self.focus_plot
+        visible = [p for col in self.plots for p in col if p is not None]
+        if len(visible) != 1:
+            return None
+        return visible[0]
+
+    def snapshot_minimap_baseline(self, x_min, x_max) -> None:
+        if x_min is None or x_max is None:
+            self._minimap_baseline_x_range = None
+            return
+        self._minimap_baseline_x_range = (x_min, x_max)
+
+    def get_minimap_baseline(self):
+        return self._minimap_baseline_x_range
 
     def get_signals_as_csv(self):
         x = pd.DataFrame()

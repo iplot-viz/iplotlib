@@ -67,11 +67,13 @@ class IplotQtMainWindow(QMainWindow):
         self.toolBar.undoAction.triggered.connect(self.undo)
         self.toolBar.redoAction.triggered.connect(self.redo)
         self.toolBar.statistics.triggered.connect(self.show_stats)
+        self.toolBar.minimapAction.toggled.connect(self.on_minimap_toggled)
         self.toolBar.toolActivated.connect(
             lambda tool_name:
             [self.canvasStack.widget(i).set_mouse_mode(tool_name) for i in range(self.canvasStack.count())])
         self.canvasStack.canvasAdded.connect(self.on_canvas_add)
         self.canvasStack.currentChanged.connect(lambda idx: self.check_history(self.canvasStack.widget(idx)))
+        self.canvasStack.currentChanged.connect(lambda _: self.refresh_minimap_availability())
         self.toolBar.saveImageAction.triggered.connect(self.save_canvas_image)
         self.toolBar.redrawAction.triggered.connect(self.re_draw)
         self.toolBar.detachAction.triggered.connect(self.detach)
@@ -108,6 +110,29 @@ class IplotQtMainWindow(QMainWindow):
         if not w:
             return
         w.show_stats()
+
+    def on_minimap_toggled(self, checked: bool):
+        w = self.canvasStack.currentWidget()
+        if not w:
+            return
+        w.set_minimap(checked)
+
+    def refresh_minimap_availability(self):
+        w = self.canvasStack.currentWidget()
+        action = self.toolBar.minimapAction
+        if not w:
+            action.setEnabled(False)
+            return
+        canvas = w.get_canvas()
+        eligible = canvas is not None and canvas.is_minimap_eligible()
+        action.setEnabled(eligible)
+        desired = bool(eligible and canvas is not None and canvas.show_minimap)
+        if action.isChecked() != desired:
+            action.blockSignals(True)
+            action.setChecked(desired)
+            action.blockSignals(False)
+        if not eligible and canvas is not None and canvas.show_minimap:
+            w.set_minimap(False)
 
     def save_canvas_image(self):
         w = self.canvasStack.currentWidget()
@@ -156,6 +181,8 @@ class IplotQtMainWindow(QMainWindow):
         """
         w.cmdDone.connect(partial(self.on_cmd_done, w))
         w.openPlotPreferences.connect(self._open_plot_preferences)
+        w.focusChanged.connect(self.refresh_minimap_availability)
+        self.refresh_minimap_availability()
 
     def on_cmd_done(self, w: IplotQtCanvas, cmd: IplotCommand):
         """
@@ -165,6 +192,7 @@ class IplotQtMainWindow(QMainWindow):
         """
         self.check_history(w)
         self.toolBar.undoAction.setText(f"Undo {cmd.name}")
+        self.refresh_minimap_availability()
 
     def _open_plot_preferences(self, target):
         """Open preferences window and navigate to the given Plot or Signal in the tree.
@@ -223,6 +251,7 @@ class IplotQtMainWindow(QMainWindow):
                 w.refresh()
         self.prefWindow.set_canvas_from_preferences()
         self.prefWindow.post_applied()
+        self.refresh_minimap_availability()
 
     def reset_prefs(self):
         w = self.canvasStack.currentWidget()
@@ -278,6 +307,7 @@ class IplotQtMainWindow(QMainWindow):
         super().showEvent(event)
         for i in range(self.canvasStack.count()):
             self.check_history(self.canvasStack.widget(i))
+        self.refresh_minimap_availability()
         super().showEvent(event)
 
     def closeEvent(self, event: QCloseEvent):
