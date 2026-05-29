@@ -79,6 +79,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         canvas = self._parser.canvas
         if not canvas:
             return
+        self._ruler_window.set_canvas_columns(len(canvas.plots))
         for col_idx, col in enumerate(canvas.plots):
             for row_idx, plot in enumerate(col):
                 if not plot or not getattr(plot, 'rulers', None):
@@ -253,12 +254,13 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def _add_ruler_at(self, impl_plot, plot, x: float, y: float):
         name = self._ruler_window.next_name()
-        color = self._ruler_window.next_color()
+        color = self._ruler_window.next_color(name)
         ruler = Ruler(name=name, xy=(x, y), color=color, visible=True)
         plot.add_ruler(ruler)
         self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
         is_date = bool(getattr(plot.axes[0], 'is_date', False))
         plot_id = self._canvas_position_of(plot) or (1, 1)
+        self._ruler_window.set_canvas_columns(len(self._parser.canvas.plots))
         self._ruler_window.add_row(name, plot_id, (x, y), ruler.color,
                                     visible=True, is_date=is_date)
         if not self._ruler_window.isVisible():

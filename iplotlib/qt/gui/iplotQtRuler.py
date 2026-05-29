@@ -46,6 +46,7 @@ class IplotQtRuler(QWidget):
         self.count = 0
         self.view_mode = self.VIEW_ROWS
         self._rows: List[Dict] = []
+        self.canvas_columns: int = 1
         self.column_sections: List[Tuple[Tuple[int, int], QTableWidget]] = []
 
         self.rows_radio = QRadioButton("Rows")
@@ -100,11 +101,20 @@ class IplotQtRuler(QWidget):
         self._render_table()
 
     def next_name(self) -> str:
+        used = {r['name'] for r in self._rows}
+        for letter in ascii_uppercase:
+            if letter not in used:
+                self.count = max(self.count, ascii_uppercase.index(letter) + 1)
+                return letter
+        # Fallback when all 26 letters are taken.
         name = ascii_uppercase[self.count % len(ascii_uppercase)]
         self.count += 1
         return name
 
-    def next_color(self) -> str:
+    def next_color(self, name: str = None) -> str:
+        if name and name in ascii_uppercase:
+            idx = ascii_uppercase.index(name)
+            return self.DEFAULT_COLOR_CYCLE[idx % len(self.DEFAULT_COLOR_CYCLE)]
         return self.DEFAULT_COLOR_CYCLE[(self.count - 1) % len(self.DEFAULT_COLOR_CYCLE)] \
             if self.count > 0 else self.DEFAULT_COLOR_CYCLE[0]
 
@@ -118,14 +128,25 @@ class IplotQtRuler(QWidget):
             'visible': visible,
             'is_date': is_date,
         })
-        self._render_table()
+        if self.view_mode == self.VIEW_ROWS and self.table.columnCount() == 6:
+            row_idx = len(self._rows) - 1
+            self.table.insertRow(row_idx)
+            self._populate_row_cells(row_idx, self._rows[-1])
+        else:
+            self._render_table()
 
     def remove_row_by_name(self, name: str, plot_id):
         target = tuple(plot_id)
         for i, row in enumerate(self._rows):
             if row['name'] == name and row['plot_id'] == target:
                 del self._rows[i]
-                self._render_table()
+                if self.view_mode == self.VIEW_ROWS:
+                    self.table.removeRow(i)
+                    self.selection_history = [r if r < i else r - 1
+                                              for r in self.selection_history
+                                              if r != i]
+                else:
+                    self._render_table()
                 return
 
     def clear_info(self):
@@ -133,6 +154,20 @@ class IplotQtRuler(QWidget):
         self.selection_history.clear()
         self.count = 0
         self._render_table()
+
+    def set_canvas_columns(self, n: int):
+        """Inform the window how many columns the canvas grid has so the Plot
+        id can be displayed concisely (just the row when there is a single
+        column, full row.col when there are several)."""
+        n = max(1, int(n))
+        if n != self.canvas_columns:
+            self.canvas_columns = n
+            self._render_table()
+
+    def _format_plot_id(self, plot_id) -> str:
+        if self.canvas_columns <= 1:
+            return f"{plot_id[0]}"
+        return f"{plot_id[0]}.{plot_id[1]}"
 
     def _on_view_mode_changed(self):
         self.view_mode = self.VIEW_ROWS if self.rows_radio.isChecked() else self.VIEW_COLUMNS
@@ -183,7 +218,7 @@ class IplotQtRuler(QWidget):
         name_item.setData(Qt.ItemDataRole.UserRole, row['is_date'])
         self.table.setItem(row_idx, self.COL_NAME, name_item)
 
-        plot_item = QTableWidgetItem(f"{row['plot_id'][0]}.{row['plot_id'][1]}")
+        plot_item = QTableWidgetItem(self._format_plot_id(row['plot_id']))
         plot_item.setData(Qt.ItemDataRole.UserRole, row['plot_id'])
         self.table.setItem(row_idx, self.COL_PLOT, plot_item)
 
@@ -237,7 +272,7 @@ class IplotQtRuler(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        title = QLabel(f"Plot {plot_id[0]}.{plot_id[1]}")
+        title = QLabel(f"Plot {self._format_plot_id(plot_id)}")
         title.setStyleSheet("font-weight: bold;")
         layout.addWidget(title)
 

@@ -37,28 +37,55 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         self.window.add_row('A', (1, 1), (2.5, 7.5), '#FFFFFF', visible=True, is_date=False)
         self.assertEqual(self.window.table.rowCount(), 1)
         self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_NAME).text(), 'A')
-        self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_PLOT).text(), '1.1')
+        self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_PLOT).text(), '1')
         self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_X).data(Qt.ItemDataRole.UserRole), 2.5)
         self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_Y).data(Qt.ItemDataRole.UserRole), 7.5)
 
     def test_next_name_cycles_through_alphabet(self):
-        names = [self.window.next_name() for _ in range(3)]
+        names = []
+        for _ in range(3):
+            n = self.window.next_name()
+            self.window.add_row(n, (1, 1), (0.0, 0.0), '#FFFFFF')
+            names.append(n)
         self.assertEqual(names, ['A', 'B', 'C'])
 
-    def test_next_color_cycles_through_default_palette_and_stays_distinct(self):
-        cycle_len = len(IplotQtRuler.DEFAULT_COLOR_CYCLE)
-        colors = []
-        for _ in range(cycle_len):
-            self.window.next_name()
-            colors.append(self.window.next_color())
-        self.assertEqual(len(set(colors)), cycle_len)
-        self.assertEqual(colors, list(IplotQtRuler.DEFAULT_COLOR_CYCLE))
+    def test_next_name_fills_gaps_after_removal(self):
+        for _ in range(3):
+            n = self.window.next_name()
+            self.window.add_row(n, (1, 1), (0.0, 0.0), '#FFFFFF')
+        self.window.remove_row_by_name('B', (1, 1))
+        self.assertEqual(self.window.next_name(), 'B')
+
+    def test_next_color_is_stable_per_letter(self):
+        palette = IplotQtRuler.DEFAULT_COLOR_CYCLE
+        self.assertEqual(self.window.next_color('A'), palette[0])
+        self.assertEqual(self.window.next_color('B'), palette[1])
+        self.assertEqual(self.window.next_color('J'), palette[9])
+        self.assertEqual(self.window.next_color('A'), palette[0])
 
     def test_remove_row_by_name_finds_matching_plot(self):
         self.window.add_row('A', (1, 1), (1.0, 2.0), '#FFFFFF')
         self.window.add_row('A', (2, 1), (3.0, 4.0), '#FFFFFF')
         self.window.remove_row_by_name('A', (1, 1))
         self.assertEqual(self.window.table.rowCount(), 1)
+        self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_PLOT).text(), '2')
+
+    def test_plot_id_drops_column_suffix_for_single_column_canvas(self):
+        self.window.set_canvas_columns(1)
+        self.window.add_row('A', (3, 1), (1.0, 2.0), '#FFFFFF')
+        self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_PLOT).text(), '3')
+
+    def test_plot_id_keeps_column_suffix_when_canvas_has_multiple_columns(self):
+        self.window.set_canvas_columns(2)
+        self.window.add_row('A', (3, 1), (1.0, 2.0), '#FFFFFF')
+        self.window.add_row('B', (1, 2), (3.0, 4.0), '#FFFFFF')
+        self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_PLOT).text(), '3.1')
+        self.assertEqual(self.window.table.item(1, IplotQtRuler.COL_PLOT).text(), '1.2')
+
+    def test_set_canvas_columns_re_renders_existing_rows(self):
+        self.window.add_row('A', (2, 1), (1.0, 2.0), '#FFFFFF')
+        self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_PLOT).text(), '2')
+        self.window.set_canvas_columns(2)
         self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_PLOT).text(), '2.1')
 
     def test_clear_info_resets_state(self):
