@@ -627,6 +627,12 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if nearest_signal:
             autoscale_menu.addAction("Signal Preferences",
                                      lambda s=nearest_signal: self.openPlotPreferences.emit(s))
+        extender = getattr(self._parser, 'context_menu_extender', None)
+        if callable(extender):
+            try:
+                extender(autoscale_menu)
+            except Exception:
+                logger.exception("context_menu_extender failed")
         autoscale_menu.popup(event.guiEvent.globalPos())
 
     def keyPressEvent(self, event: QKeyEvent):

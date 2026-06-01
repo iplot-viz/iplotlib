@@ -447,6 +447,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             if nearest_signal:
                 autoscale_menu.addAction("Signal Preferences",
                                          lambda s=nearest_signal: self.openPlotPreferences.emit(s))
+            extender = getattr(self._parser, 'context_menu_extender', None)
+            if callable(extender):
+                try:
+                    extender(autoscale_menu)
+                except Exception:
+                    logger.exception("context_menu_extender failed")
             screen_pos = event.screenPos()
             if hasattr(screen_pos, 'toPoint'):
                 screen_pos = screen_pos.toPoint()
