@@ -308,7 +308,6 @@ class IplotQtMainWindow(QMainWindow):
         for i in range(self.canvasStack.count()):
             self.check_history(self.canvasStack.widget(i))
         self.refresh_minimap_availability()
-        super().showEvent(event)
 
     def closeEvent(self, event: QCloseEvent):
         """

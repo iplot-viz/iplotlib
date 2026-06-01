@@ -217,11 +217,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self._minimap_figure.tight_layout()
             self._minimap_signature = signature
 
-        update_rect = functools.partial(self._viewlims_update_rect, self._minimap_viewport_patch)
-        self._minimap_xlim_cid = main_ax.callbacks.connect('xlim_changed', update_rect)
-        self._minimap_ylim_cid = main_ax.callbacks.connect('ylim_changed', update_rect)
-        self._minimap_connected_main_ax = main_ax
-        update_rect(main_ax)
+        if self._minimap_connected_main_ax is not main_ax:
+            self._disconnect_minimap_xlim()
+            update_rect = functools.partial(self._viewlims_update_rect, self._minimap_viewport_patch)
+            self._minimap_xlim_cid = main_ax.callbacks.connect('xlim_changed', update_rect)
+            self._minimap_ylim_cid = main_ax.callbacks.connect('ylim_changed', update_rect)
+            self._minimap_connected_main_ax = main_ax
+        self._viewlims_update_rect(self._minimap_viewport_patch, main_ax)
 
     def _viewlims_update_rect(self, rect, ax):
         x_lo, x_hi = self._parser.get_oaw_axis_limits(ax, 0)
