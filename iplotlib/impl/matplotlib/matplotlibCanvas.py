@@ -386,7 +386,8 @@ class MatplotlibParser(BackendParserBase):
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+            if (x_data.ndim == y_data.ndim == z_data.ndim == 2
+                    and x_data.size and y_data.size and z_data.size):
                 plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'in_lines':
                     if not contour_filled:
@@ -399,7 +400,8 @@ class MatplotlibParser(BackendParserBase):
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+            if (x_data.ndim == y_data.ndim == z_data.ndim == 2
+                    and x_data.size and y_data.size and z_data.size):
                 plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'color_bar':
                     color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
@@ -445,7 +447,8 @@ class MatplotlibParser(BackendParserBase):
             else:
                 draw_fn = mpl_axes.contour
 
-            if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
+            if (xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2
+                    and xsub_data.size and ysub_data.size and zsub_data.size):
                 plot_lines = draw_fn(xsub_data, ysub_data, zsub_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'in_lines':
                     if not contour_filled:
@@ -464,7 +467,8 @@ class MatplotlibParser(BackendParserBase):
             else:
                 draw_fn = mpl_axes.contour
 
-            if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
+            if (xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2
+                    and xsub_data.size and ysub_data.size and zsub_data.size):
                 plot_lines = draw_fn(xsub_data, ysub_data, zsub_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'color_bar':
                     color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')

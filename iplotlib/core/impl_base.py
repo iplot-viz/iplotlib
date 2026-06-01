@@ -389,18 +389,32 @@ class BackendParserBase(ABC):
 
         self._update = False
 
+    @staticmethod
+    def _plot_signal_ts_range(plot):
+        """(ts_start, ts_end) of the first numeric-valued signal on ``plot``, or None."""
+        if plot is None or not plot.signals:
+            return None
+        for stack in plot.signals.values():
+            for signal in stack:
+                if signal is None:
+                    continue
+                ts_start = getattr(signal, 'ts_start', None)
+                ts_end = getattr(signal, 'ts_end', None)
+                if isinstance(ts_start, (int, float)) and isinstance(ts_end, (int, float)):
+                    return (ts_start, ts_end)
+        return None
+
     def _get_all_shared_axes(self, base_impl_plot: Any) -> List[Any]:
         cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
         base_plot = cache_item.plot()
 
-        # When the base plot is a PlotXYWithSlider, or no base plot is defined, zoom events must not be propagated
-        # to other plots
         if isinstance(base_plot, PlotXYWithSlider) or base_plot is None:
             return []
 
-        shared = list()
+        base_ts = self._plot_signal_ts_range(base_plot)
         base_begin, base_end = base_plot.axes[0].get_limits('original')
 
+        shared = list()
         plot_list = self.get_canvas_plots()
         for plot_item in plot_list:
             cache_item = self._impl_plot_cache_table.get_cache_item(plot_item)
@@ -410,22 +424,30 @@ class BackendParserBase(ABC):
             except AttributeError:
                 continue
 
-            plot = cache_item.plot()
-            begin, end = plot.axes[0].get_limits('original')
-
-            # Check if it is date and the max difference is 1 second
-            # Need to differentiate if it is absolute or relative
+            # Slider plots: X axis follows z_data, not signal ts. Keep axis-original check.
             if isinstance(plot, PlotXYWithSlider):
+                begin, end = plot.axes[0].get_limits('original')
                 slider_values = plot.signals[1][0].z_data
                 is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
+                max_diff = self._pm.get_value(self.canvas, 'max_diff')
+                max_diff_ns = max_diff * 1e9 if is_date else max_diff
+                if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
+                    shared.append(plot_item)
+                continue
+
+            # XY plots: compare requested ts to bypass axis-original drift from
+            # partial UDA coverage or data-derived x_expr.
+            plot_ts = self._plot_signal_ts_range(plot)
+            if base_ts is not None and plot_ts is not None:
+                if plot_ts == base_ts:
+                    shared.append(plot_item)
             else:
+                begin, end = plot.axes[0].get_limits('original')
                 is_date = plot.axes[0].is_date
-
-            max_diff = self._pm.get_value(self.canvas, 'max_diff')
-            max_diff_ns = max_diff * 1e9 if is_date else max_diff
-
-            if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
-                shared.append(plot_item)
+                max_diff = self._pm.get_value(self.canvas, 'max_diff')
+                max_diff_ns = max_diff * 1e9 if is_date else max_diff
+                if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
+                    shared.append(plot_item)
 
         return shared
 

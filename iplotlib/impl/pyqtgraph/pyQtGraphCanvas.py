@@ -452,63 +452,63 @@ class PyQtGraphParser(BackendParserBase):
         color_map = self._pm.get_value(signal, 'color_map')
         curves = []
 
-        # TODO: Check size z_data
         if plot_lines is not None:
             for curve in plot_lines:
                 if isinstance(curve, IsocurveItem):
                     curve.setParentItem(None)
                     plot_item.removeItem(curve)
             plot_lines.clear()
+
+        if contour_filled:
+            img = pg.ImageItem(z_data)
         else:
+            img = pg.ImageItem()
+
+        if (x_data.ndim == y_data.ndim == z_data.ndim == 2
+                and x_data.size and y_data.size and z_data.size):
+            x_min, x_max = np.min(x_data).item(), np.max(x_data).item()
+            y_min, y_max = np.min(y_data).item(), np.max(y_data).item()
+            z_min, z_max = np.min(z_data).item(), np.max(z_data).item()
+
+            # 1. Configure and add the image first, before any children
+            # Set rectangle view for the image. Values correspond to: x, y, w, h
+            # Transformations needed to convert pixels into real data values
+            img.setRect(QtCore.QRectF(x_min, y_min, np.ptp(x_data), np.ptp(y_data)))
+
+            tr = QTransform()
+            tr.translate(x_min, y_min)
+            tr.scale((x_max - x_min) / np.shape(z_data)[0], (y_max - y_min) / np.shape(z_data)[1])
+            img.setTransform(tr)
             if contour_filled:
-                img = pg.ImageItem(z_data)
-            else:
-                img = pg.ImageItem()
+                img.setImage(z_data)
+            plot_item.addItem(img)
 
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                x_min, x_max = np.min(x_data).item(), np.max(x_data).item()
-                y_min, y_max = np.min(y_data).item(), np.max(y_data).item()
-                z_min, z_max = np.min(z_data).item(), np.max(z_data).item()
+            # 2. Set ColorBarItem
+            colormap_obj = pg.colormap.get(color_map)
+            img.setColorMap(colormap_obj)
 
-                # 1. Configure and add the image first, before any children
-                # Set rectangle view for the image. Values correspond to: x, y, w, h
-                # Transformations needed to convert pixels into real data values
-                img.setRect(QtCore.QRectF(x_min, y_min, np.ptp(x_data), np.ptp(y_data)))
+            bar = self._colorbar_lut.get(id(signal))
+            bar.setImageItem(img)
+            bar.setLevels(low=z_min, high=z_max)
 
-                tr = QTransform()
-                tr.translate(x_min, y_min)
-                tr.scale((x_max - x_min) / np.shape(z_data)[0], (y_max - y_min) / np.shape(z_data)[1])
-                img.setTransform(tr)
+            # 3. Isocurves creation after img is fully set up in the scene
+            levels = np.linspace(z_min, z_max, contour_levels)
+            lut = None if contour_filled else colormap_obj.getLookupTable(nPts=256, alpha=False)
+            z_range = z_max - z_min
+
+            for i, level in enumerate(levels):
                 if contour_filled:
-                    img.setImage(z_data)
-                plot_item.addItem(img)
+                    pen = (i, len(levels) * 1.5)
+                else:
+                    norm = (level - z_min) / z_range if z_range != 0.0 else 0.0
+                    r, g, b = lut[int(norm * 255)]
+                    pen = pg.mkPen(color=(int(r), int(g), int(b)), cosmetic=True)
 
-                # 2. Set ColorBarItem
-                colormap_obj = pg.colormap.get(color_map)
-                img.setColorMap(colormap_obj)
-
-                bar = self._colorbar_lut.get(id(signal))
-                bar.setImageItem(img)
-                bar.setLevels(low=z_min, high=z_max)
-
-                # 3. Isocurves creation after img is fully set up in the scene
-                levels = np.linspace(z_min, z_max, contour_levels)
-                lut = None if contour_filled else colormap_obj.getLookupTable(nPts=256, alpha=False)
-                z_range = z_max - z_min
-
-                for i, level in enumerate(levels):
-                    if contour_filled:
-                        pen = (i, len(levels) * 1.5)
-                    else:
-                        norm = (level - z_min) / z_range if z_range != 0.0 else 0.0
-                        r, g, b = lut[int(norm * 255)]
-                        pen = pg.mkPen(color=(int(r), int(g), int(b)), cosmetic=True)
-
-                    iso_curve = pg.IsocurveItem(data=z_data, level=level, pen=pen)
-                    iso_curve.setZValue(10)
-                    iso_curve.setParentItem(img)
-                    curves.append(iso_curve)
-            return curves
+                iso_curve = pg.IsocurveItem(data=z_data, level=level, pen=pen)
+                iso_curve.setZValue(10)
+                iso_curve.setParentItem(img)
+                curves.append(iso_curve)
+        return curves
 
     def do_impl_line_plot_contour_slider(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContourWithSlider,
                                          x_data, y_data, z_data):
@@ -538,7 +538,8 @@ class PyQtGraphParser(BackendParserBase):
         else:
             img = pg.ImageItem()
 
-        if x_sub_data.ndim == y_sub_data.ndim == z_sub_data.ndim == 2:
+        if (x_sub_data.ndim == y_sub_data.ndim == z_sub_data.ndim == 2
+                and x_sub_data.size and y_sub_data.size and z_sub_data.size):
             x_min, x_max = np.min(x_sub_data).item(), np.max(x_sub_data).item()
             y_min, y_max = np.min(y_sub_data).item(), np.max(y_sub_data).item()
             z_min, z_max = np.min(z_sub_data).item(), np.max(z_sub_data).item()
@@ -653,6 +654,10 @@ class PyQtGraphParser(BackendParserBase):
     def process_ipl_plot_contour_colorbar(self, i_plot: PlotContour | PlotContourWithSlider, visible_stack_ids,
                                           cell_gl):
         z_data = i_plot.signals[1][0].z_data
+        # Cannot derive colorbar levels without data; defer creation until z_data is populated.
+        if z_data is None or np.asarray(z_data).size == 0:
+            return cell_gl
+
         color_map = self._pm.get_value(i_plot.signals[1][0], 'color_map')
         colormap_obj = pg.colormap.get(color_map)
 
