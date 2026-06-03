@@ -1292,9 +1292,10 @@ class MatplotlibParser(BackendParserBase):
 
     @BackendParserBase.run_in_one_thread
     def add_ruler(self, impl_plot: MPLAxes, name: str, x: float, y: float,
-                  color: str = "#FFFFFF") -> iplotMplRuler:
+                  color: str = "#FFFFFF", animated: bool = False) -> iplotMplRuler:
         font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
-        ruler = iplotMplRuler(ax=impl_plot, name=name, xy=(x, y), color=color, font_size=font_size)
+        ruler = iplotMplRuler(ax=impl_plot, name=name, xy=(x, y), color=color,
+                              font_size=font_size, animated=animated)
         self._rulers.append(ruler)
         return ruler
 

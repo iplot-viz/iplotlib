@@ -67,6 +67,8 @@ class pyQtRuler:
         vb = plot.getViewBox()
         [[xmin, xmax], [ymin, ymax]] = vb.viewRange()
         x, y = self.xy
+        self.v_line.setPos(x)
+        self.h_line.setPos(y)
 
         axis_b = plot.getAxis("bottom")
         if isinstance(axis_b, NanosecondDateFormatter):
@@ -93,6 +95,9 @@ class pyQtRuler:
         self.y_label.setVisible(ymin < y < ymax)
 
         self.name_label.setPos(x, y)
+
+    def set_label_text(self, text: str):
+        self.name_label.setText(text)
 
     def set_color(self, color):
         self.color = color

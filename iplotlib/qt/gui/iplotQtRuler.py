@@ -414,17 +414,18 @@ class IplotQtRuler(QWidget):
         if not is_date:
             return f"{abs(x2 - x1):.6g}"
         dx = abs(pd.Timestamp(x2, unit='ns') - pd.Timestamp(x1, unit='ns'))
+        c = dx.components
+        sub_ns = c.milliseconds * 1_000_000 + c.microseconds * 1_000 + c.nanoseconds
         parts = []
-        if dx.components.days:
-            parts.append(f"{dx.components.days}D")
-        parts.append(f"T{dx.components.hours}H{dx.components.minutes}M{dx.components.seconds}S")
-        if dx.components.milliseconds:
-            parts.append(f"+{dx.components.milliseconds}m")
-        if dx.components.microseconds:
-            parts.append(f"+{dx.components.microseconds}u")
-        if dx.components.nanoseconds:
-            parts.append(f"+{dx.components.nanoseconds}n")
-        return "".join(parts)
+        if c.days:
+            parts.append(f"{c.days}d")
+        if c.hours or parts:
+            parts.append(f"{c.hours:02d}h")
+        if c.minutes or parts:
+            parts.append(f"{c.minutes:02d}m")
+        seconds = c.seconds + sub_ns / 1_000_000_000
+        parts.append(f"{seconds:09.6f}s" if parts else f"{seconds:.6f}s")
+        return " ".join(parts)
 
     def _warn(self, msg: str):
         box = QMessageBox()

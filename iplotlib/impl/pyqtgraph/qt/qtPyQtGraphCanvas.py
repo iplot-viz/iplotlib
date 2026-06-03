@@ -21,12 +21,16 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     """Qt widget that internally uses a matplotlib canvas backend"""
 
     dropSignal = Signal(object)
+    _PREVIEW_RULER_NAME = "__preview__"
 
     def __init__(self, parent=None, tight_layout=True, **kwargs):
         super().__init__(parent, **kwargs)
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
+        self._preview_ruler_plot = None
+        self._preview_ruler_identity = None
+        self._preview_scene = None
 
         self._parser = PyQtGraphParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
         self._parser._on_legend_right_click = self._on_legend_right_click
@@ -50,8 +54,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
             self.unfocus_plot()
-            # Clear tracking set since ViewBoxes will be recreated
             self._connected_viewboxes.clear()
+            self._disconnect_preview_scene()
 
         self._parser.deactivate_cursor()
         self._parser.process_ipl_canvas(canvas)
@@ -75,6 +79,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._repaint_rulers_from_canvas()
 
     def _repaint_rulers_from_canvas(self):
+        self._clear_preview_ruler()
+        self._preview_ruler_identity = None
         self._ruler_window.clear_info()
         canvas = self._parser.canvas
         if not canvas:
@@ -90,7 +96,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 plot_id = (row_idx + 1, col_idx + 1)
                 is_date = bool(getattr(plot.axes[0], 'is_date', False))
                 for ruler in plot.rulers:
-                    self._parser.add_ruler(impl_plot, ruler.name, ruler.xy[0], ruler.xy[1], ruler.color)
+                    x_view = self._parser.transform_value(impl_plot, 0, ruler.xy[0], inverse=True)
+                    self._parser.add_ruler(impl_plot, ruler.name, x_view, ruler.xy[1], ruler.color)
                     self._ruler_window.add_row(ruler.name, plot_id, ruler.xy,
                                                 ruler.color, ruler.visible, is_date)
                     if not ruler.visible:
@@ -223,6 +230,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._parser.remove_ruler(impl_plot, name)
         if persist:
             plot.remove_ruler(name)
+        if self._preview_ruler_plot is not None:
+            self._clear_preview_ruler()
+        self._preview_ruler_identity = None
 
     def toggle_ruler_visibility(self, name, plot_id, visible):
         plot = self._get_plot_by_id(plot_id)
@@ -252,16 +262,20 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             if r.name == name:
                 r.set_color(color)
 
-    def _add_ruler_at(self, impl_plot, plot, x: float, y: float):
-        name = self._ruler_window.next_name()
-        color = self._ruler_window.next_color(name)
-        ruler = Ruler(name=name, xy=(x, y), color=color, visible=True)
+    def _add_ruler_at(self, impl_plot, plot, x: float, y: float,
+                      name: str = None, color: str = None):
+        if name is None:
+            name = self._ruler_window.next_name()
+        if color is None:
+            color = self._ruler_window.next_color(name)
+        x_abs = self._parser.transform_value(impl_plot, 0, x)
+        ruler = Ruler(name=name, xy=(x_abs, y), color=color, visible=True)
         plot.add_ruler(ruler)
         self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
         is_date = bool(getattr(plot.axes[0], 'is_date', False))
         plot_id = self._canvas_position_of(plot) or (1, 1)
         self._ruler_window.set_canvas_columns(len(self._parser.canvas.plots))
-        self._ruler_window.add_row(name, plot_id, (x, y), ruler.color,
+        self._ruler_window.add_row(name, plot_id, (x_abs, y), ruler.color,
                                     visible=True, is_date=is_date)
         if not self._ruler_window.isVisible():
             self._ruler_window.show()
@@ -269,18 +283,110 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._ruler_window.raise_()
             self._ruler_window.activateWindow()
 
+    def _preview_identity_for_next(self):
+        if self._preview_ruler_identity is not None:
+            return self._preview_ruler_identity
+        name = self._ruler_window.next_name()
+        return {'name': name, 'color': self._ruler_window.next_color(name)}
+
+    def _show_preview_ruler(self, impl_plot, x: float, y: float):
+        ident = self._preview_identity_for_next()
+        existing = next((r for r in self._parser.get_rulers(impl_plot)
+                         if r.name == self._PREVIEW_RULER_NAME), None)
+        if existing is not None and self._preview_ruler_plot is impl_plot:
+            existing.xy = (x, y)
+            existing.refresh_labels()
+        else:
+            self._clear_preview_ruler()
+            ruler = self._parser.add_ruler(impl_plot, self._PREVIEW_RULER_NAME,
+                                            x, y, ident['color'])
+            ruler.set_label_text(ident['name'])
+            self._preview_ruler_plot = impl_plot
+            self._preview_ruler_identity = ident
+
+    def _clear_preview_ruler(self):
+        plots_with_preview = {r.plot for r in self._parser.get_rulers()
+                              if r.name == self._PREVIEW_RULER_NAME}
+        for plot in plots_with_preview:
+            self._parser.remove_ruler(plot, self._PREVIEW_RULER_NAME)
+        self._preview_ruler_plot = None
+
+    def _commit_preview_ruler(self):
+        if self._preview_ruler_plot is None or self._preview_ruler_identity is None:
+            return
+        impl_plot = self._preview_ruler_plot
+        ident = self._preview_ruler_identity
+        preview = next((r for r in self._parser.get_rulers(impl_plot)
+                        if r.name == self._PREVIEW_RULER_NAME), None)
+        if preview is None:
+            return
+        x, y = preview.xy
+        plot = self._parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+        self._clear_preview_ruler()
+        self._preview_ruler_identity = None
+        self._add_ruler_at(impl_plot, plot, x, y,
+                            name=ident['name'], color=ident['color'])
+
+    def _plot_at_scene_pos(self, scene_pos):
+        for stack in self._parser._layout_stacks.values():
+            for plot in stack.values():
+                vb = plot.getViewBox()
+                if vb is None:
+                    continue
+                rect = vb.sceneBoundingRect()
+                if rect.contains(scene_pos):
+                    return plot, vb
+        return None, None
+
+    def _connect_preview_scene(self):
+        if self._preview_scene is not None:
+            return
+        for stack in self._parser._layout_stacks.values():
+            for plot in stack.values():
+                scene = plot.scene()
+                if scene is not None and hasattr(scene, 'sigMouseMoved'):
+                    scene.sigMouseMoved.connect(self._on_scene_mouse_moved)
+                    self._preview_scene = scene
+                    return
+
+    def _disconnect_preview_scene(self):
+        if self._preview_scene is None:
+            return
+        try:
+            self._preview_scene.sigMouseMoved.disconnect(self._on_scene_mouse_moved)
+        except (RuntimeError, TypeError):
+            pass
+        self._preview_scene = None
+
+    def _on_scene_mouse_moved(self, scene_pos):
+        if self._mmode != Canvas.MOUSE_MODE_RULER:
+            return
+        impl_plot, vb = self._plot_at_scene_pos(scene_pos)
+        if impl_plot is None:
+            self._clear_preview_ruler()
+            return
+        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        if not hasattr(ci, 'plot'):
+            return
+        plot = ci.plot()
+        if isinstance(plot, (PlotContour, PlotContourWithSlider)):
+            return
+        view_pos = vb.mapSceneToView(scene_pos)
+        self._show_preview_ruler(impl_plot, view_pos.x(), view_pos.y())
+
     def _find_ruler_near(self, impl_plot, scene_pos):
         rulers = self._parser.get_rulers(impl_plot)
         if not rulers:
             return None
         vb = impl_plot.getViewBox()
-        click_scene = np.array([scene_pos.x(), scene_pos.y()])
         best = None
         best_dist = float('inf')
         for r in rulers:
+            if r.name == self._PREVIEW_RULER_NAME:
+                continue
             ruler_scene_pt = vb.mapViewToScene(pg.Qt.QtCore.QPointF(r.xy[0], r.xy[1]))
-            ruler_scene = np.array([ruler_scene_pt.x(), ruler_scene_pt.y()])
-            d = float(np.linalg.norm(ruler_scene - click_scene))
+            d = min(abs(ruler_scene_pt.x() - scene_pos.x()),
+                    abs(ruler_scene_pt.y() - scene_pos.y()))
             if d < best_dist:
                 best_dist = d
                 best = r
@@ -362,6 +468,13 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         if self._mmode is None:
             return
 
+        if mode != Canvas.MOUSE_MODE_RULER:
+            self._clear_preview_ruler()
+            self._preview_ruler_identity = None
+            self._disconnect_preview_scene()
+        else:
+            self._connect_preview_scene()
+
         if mode == Canvas.MOUSE_MODE_SELECT:
             self._parser.set_view_box()
         elif mode == Canvas.MOUSE_MODE_CROSSHAIR:
@@ -425,6 +538,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         )
 
         if is_double_click:
+            if self._mmode == Canvas.MOUSE_MODE_RULER:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._commit_preview_ruler()
+                    event.accept()
+                return
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER,
                                Canvas.MOUSE_MODE_CROSSHAIR]:
                 if event.button() == Qt.MouseButton.RightButton:
@@ -498,13 +616,26 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 if isinstance(plot, (PlotContour, PlotContourWithSlider)):
                     logger.warning(f"Rulers are not supported for {type(plot).__name__}")
                     return
+                is_double = callable(getattr(event, 'double', None)) and event.double()
                 if event.button() == Qt.MouseButton.LeftButton:
-                    system_coord = view_box.mapSceneToView(event.scenePos())
-                    self._add_ruler_at(impl_plot, plot, system_coord.x(), system_coord.y())
-                    event.accept()
+                    if is_double:
+                        self._commit_preview_ruler()
+                        event.accept()
+                        return
+                    hit = self._find_ruler_near(impl_plot, event.scenePos())
+                    if hit is not None and hit.name != self._PREVIEW_RULER_NAME:
+                        plot_id = self._canvas_position_of(plot) or (1, 1)
+                        identity = {'name': hit.name, 'color': hit.color}
+                        self.delete_ruler(hit.name, plot_id, True)
+                        self._ruler_window.remove_row_by_name(hit.name, plot_id)
+                        self._clear_preview_ruler()
+                        self._preview_ruler_identity = identity
+                        system_coord = view_box.mapSceneToView(event.scenePos())
+                        self._show_preview_ruler(impl_plot, system_coord.x(), system_coord.y())
+                        event.accept()
                 elif event.button() == Qt.MouseButton.RightButton:
                     hit = self._find_ruler_near(impl_plot, event.scenePos())
-                    if hit is not None:
+                    if hit is not None and hit.name != self._PREVIEW_RULER_NAME:
                         plot_id = self._canvas_position_of(plot) or (1, 1)
                         self.delete_ruler(hit.name, plot_id, True)
                         self._ruler_window.remove_row_by_name(hit.name, plot_id)
