@@ -321,6 +321,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             return None
         best = None
         best_dist = float('inf')
+        renderer = self.figure.canvas.get_renderer() if hasattr(self.figure.canvas, 'get_renderer') else None
         for r in rulers:
             if r.name == self._PREVIEW_RULER_NAME:
                 continue
@@ -330,10 +331,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 continue
             dx = abs(ruler_px[0] - event.x)
             dy = abs(ruler_px[1] - event.y)
-            if dx > self.PICK_RADIUS_PX and dy > self.PICK_RADIUS_PX:
-                continue
-            d = float(np.hypot(dx, dy))
-            if d < best_dist:
+            d = None
+            if dx <= self.PICK_RADIUS_PX and dy <= self.PICK_RADIUS_PX:
+                d = float(np.hypot(dx, dy))
+            else:
+                name_label = getattr(r, 'name_label', None)
+                if name_label is not None and name_label.get_visible():
+                    try:
+                        bbox = name_label.get_window_extent(renderer)
+                        if bbox.contains(event.x, event.y):
+                            d = 0.0
+                    except (RuntimeError, AttributeError):
+                        pass
+            if d is not None and d < best_dist:
                 best_dist = d
                 best = r
         return best

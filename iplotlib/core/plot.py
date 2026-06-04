@@ -150,6 +150,12 @@ class Plot(ABC):
                     old_axis_properties = old_plot['axes'][idxAxis]
                     axis.merge(old_axis_properties)
 
+        self.rulers = [
+            Ruler(name=r.get('name'), xy=tuple(r['xy']) if r.get('xy') is not None else None,
+                  color=r.get('color', Ruler.color), visible=r.get('visible', True))
+            for r in old_plot.get('rulers') or []
+        ]
+
         # signals are merged at canvas level to handle move between plots
 
     @abstractmethod

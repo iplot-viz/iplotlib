@@ -126,6 +126,27 @@ class RulerWorkspaceRoundtripTest(unittest.TestCase):
         c2 = Canvas.from_dict(d)
         self.assertEqual(c2.plots[0][0].rulers, [])
 
+    def test_plot_merge_restores_rulers_from_dict(self):
+        """Plot.merge() must restore rulers from the old_plot dict so that
+        rebuilding the canvas on Draw does not drop user-placed rulers."""
+        old = self._build_canvas_with_rulers().to_dict()['plots'][0][0]
+        fresh = PlotXY()
+        fresh.merge(old)
+        self.assertEqual([r.name for r in fresh.rulers], ['A', 'B'])
+        self.assertEqual(fresh.rulers[0].xy, (1.0, 2.0))
+        self.assertEqual(fresh.rulers[0].color, '#FF0000')
+        self.assertFalse(fresh.rulers[1].visible)
+
+    def test_plot_merge_with_no_rulers_in_dict_yields_empty_list(self):
+        """Merging a dict that lacks the 'rulers' key must leave rulers as []."""
+        c = Canvas(rows=1, cols=1)
+        c.add_plot(PlotXY(), 0)
+        old = c.to_dict()['plots'][0][0]
+        old.pop('rulers', None)
+        fresh = PlotXY()
+        fresh.merge(old)
+        self.assertEqual(fresh.rulers, [])
+
 
 class CanvasMouseModeRulerTest(unittest.TestCase):
     def test_mouse_mode_ruler_constant_exists(self):

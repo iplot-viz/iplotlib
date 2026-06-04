@@ -151,25 +151,28 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertEqual(table.rowCount(), 2)
         self.assertEqual(table.columnCount(), 3)
         headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
-        self.assertEqual(headers, ['1', '2', IplotQtRuler._DELTA_HEADER])
+        self.assertEqual(headers, ['A', IplotQtRuler._DELTA_HEADER, 'B'])
         v_headers = [table.verticalHeaderItem(r).text() for r in range(table.rowCount())]
         self.assertEqual(v_headers, list(IplotQtRuler._COLUMNS_AXIS_LABELS))
 
     def test_section_cells_carry_each_rulers_xy_value(self):
         self.window.columns_radio.setChecked(True)
         _, table = self.window.column_sections[0]
+        # Column 0: ruler A; column 1: Δ(B-A); column 2: ruler B.
         self.assertEqual(table.item(0, 0).text(), '1')
         self.assertEqual(table.item(1, 0).text(), '2')
-        self.assertEqual(table.item(0, 1).text(), '3')
-        self.assertEqual(table.item(1, 1).text(), '4')
+        self.assertEqual(table.item(0, 2).text(), '3')
+        self.assertEqual(table.item(1, 2).text(), '4')
 
-    def test_delta_in_section_is_range_of_its_rulers(self):
+    def test_delta_in_section_is_consecutive_difference(self):
         self.window.add_row('C', (1, 1), (8.0, 7.0), '#0000FF')
         self.window.columns_radio.setChecked(True)
         _, table = self.window.column_sections[0]
-        delta_col = table.columnCount() - 1
-        self.assertEqual(table.item(0, delta_col).text(), '7')
-        self.assertEqual(table.item(1, delta_col).text(), '5')
+        # Headers: [A, Δ, B, Δ, C]; Δ(B-A) at col 1, Δ(C-B) at col 3.
+        self.assertEqual(table.item(0, 1).text(), '2')   # B.x - A.x = 3 - 1
+        self.assertEqual(table.item(1, 1).text(), '2')   # B.y - A.y = 4 - 2
+        self.assertEqual(table.item(0, 3).text(), '5')   # C.x - B.x = 8 - 3
+        self.assertEqual(table.item(1, 3).text(), '3')   # C.y - B.y = 7 - 4
 
     def test_singleton_plot_section_has_no_delta_column(self):
         self.window.remove_row_by_name('B', (1, 1))
@@ -177,7 +180,7 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         _, table = self.window.column_sections[0]
         self.assertEqual(table.columnCount(), 1)
         headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
-        self.assertEqual(headers, ['1'])
+        self.assertEqual(headers, ['A'])
 
     def test_columns_mode_disables_edit_action_buttons(self):
         self.window.columns_radio.setChecked(True)
@@ -224,9 +227,11 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.window.add_row('C', (1, 1), (5.0, 6.0), '#0000FF')
         self.assertEqual(len(self.window.column_sections), 1)
         _, table = self.window.column_sections[0]
-        self.assertEqual(table.columnCount(), 4)
+        # 3 rulers + 2 deltas = 5 columns.
+        self.assertEqual(table.columnCount(), 5)
         headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
-        self.assertEqual(headers, ['1', '2', '3', IplotQtRuler._DELTA_HEADER])
+        delta = IplotQtRuler._DELTA_HEADER
+        self.assertEqual(headers, ['A', delta, 'B', delta, 'C'])
 
     def test_multiple_plots_produce_one_section_per_plot(self):
         self.window.add_row('C', (2, 1), (10.0, 20.0), '#0000FF')
@@ -239,20 +244,20 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
 
         _, first = self.window.column_sections[0]
         _, second = self.window.column_sections[1]
-        # Each section is independent: own Δ from its own rulers.
-        self.assertEqual(first.item(0, first.columnCount() - 1).text(), '2')    # 3 - 1
-        self.assertEqual(second.item(0, second.columnCount() - 1).text(), '20')  # 30 - 10
+        # Δ column lives between the two ruler columns: index 1 in both sections.
+        self.assertEqual(first.item(0, 1).text(), '2')     # B.x - A.x = 3 - 1
+        self.assertEqual(second.item(0, 1).text(), '20')   # D.x - C.x = 30 - 10
 
     def test_singleton_plot_section_appears_without_delta_when_other_plot_has_more(self):
         self.window.add_row('C', (2, 1), (10.0, 20.0), '#0000FF')
         self.window.columns_radio.setChecked(True)
-        # First section: 2 rulers + Δ. Second section: 1 ruler, no Δ.
+        # First section: A, Δ, B. Second section: C only, no Δ.
         _, first = self.window.column_sections[0]
         _, second = self.window.column_sections[1]
         first_headers = [first.horizontalHeaderItem(c).text() for c in range(first.columnCount())]
         second_headers = [second.horizontalHeaderItem(c).text() for c in range(second.columnCount())]
-        self.assertEqual(first_headers, ['1', '2', IplotQtRuler._DELTA_HEADER])
-        self.assertEqual(second_headers, ['1'])
+        self.assertEqual(first_headers, ['A', IplotQtRuler._DELTA_HEADER, 'B'])
+        self.assertEqual(second_headers, ['C'])
 
 
 class RulerLeftToRightDeltaTest(unittest.TestCase):
@@ -270,18 +275,16 @@ class RulerLeftToRightDeltaTest(unittest.TestCase):
             window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
             window.add_row('C', (1, 1), (9.0, 0.0), '#FFFFFF')
 
-            # User selects in arbitrary order: B (row 0), A (row 1), C (row 2).
-            window.selection_history = [0, 1, 2]
-            xs = [window.table.item(r, IplotQtRuler.COL_X).data(Qt.ItemDataRole.UserRole)
-                  for r in window.selection_history]
-            self.assertEqual(xs, [5.0, 1.0, 9.0])  # unsorted by X
+            # Default sort orders by Ruler name (A, B, C), so visual rows hold xs [1, 5, 9].
+            xs_visual = [window.table.item(r, IplotQtRuler.COL_X).data(Qt.ItemDataRole.UserRole)
+                         for r in range(window.table.rowCount())]
+            self.assertEqual(xs_visual, [1.0, 5.0, 9.0])
 
-            sorted_rows = sorted(window.selection_history,
-                                  key=lambda r: window.table.item(r, IplotQtRuler.COL_X)
-                                                   .data(Qt.ItemDataRole.UserRole))
-            sorted_xs = [window.table.item(r, IplotQtRuler.COL_X).data(Qt.ItemDataRole.UserRole)
-                         for r in sorted_rows]
-            self.assertEqual(sorted_xs, [1.0, 5.0, 9.0])
+            # The user may sort by any column afterwards (X ascending here).
+            window.table.sortItems(IplotQtRuler.COL_X, Qt.SortOrder.AscendingOrder)
+            xs_after_sort = [window.table.item(r, IplotQtRuler.COL_X).data(Qt.ItemDataRole.UserRole)
+                             for r in range(window.table.rowCount())]
+            self.assertEqual(xs_after_sort, [1.0, 5.0, 9.0])
         finally:
             window.close()
 

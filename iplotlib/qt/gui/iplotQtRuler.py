@@ -13,6 +13,17 @@ import iplotLogging.setupLogger as Sl
 logger = Sl.get_logger(__name__)
 
 
+class _NumericTableItem(QTableWidgetItem):
+    """Sort by the numeric value stored as UserRole, not by the displayed text."""
+
+    def __lt__(self, other):
+        a = self.data(Qt.ItemDataRole.UserRole)
+        b = other.data(Qt.ItemDataRole.UserRole)
+        if a is None or b is None:
+            return super().__lt__(other)
+        return a < b
+
+
 class IplotQtRuler(QWidget):
     """Ruler manager window with two layouts: rows (one ruler per row, editable)
     and columns (one ruler per column with X/Y axis rows and Δ, read-only)."""
@@ -128,12 +139,8 @@ class IplotQtRuler(QWidget):
             'visible': visible,
             'is_date': is_date,
         })
-        if self.view_mode == self.VIEW_ROWS and self.table.columnCount() == 6:
-            row_idx = len(self._rows) - 1
-            self.table.insertRow(row_idx)
-            self._populate_row_cells(row_idx, self._rows[-1])
-        else:
-            self._render_table()
+        # Sorting must be off during insertion; re-render to handle both modes uniformly.
+        self._render_table()
 
     def remove_row_by_name(self, name: str, plot_id):
         target = tuple(plot_id)
@@ -203,15 +210,25 @@ class IplotQtRuler(QWidget):
         self.table.selectionModel().selectionChanged.connect(self._update_selection_history)
 
     def _render_rows(self):
+        self.table.setSortingEnabled(False)
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(['Ruler', 'Plot', 'X value', 'Y value', 'Visible', 'Color'])
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setStretchLastSection(True)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(False)
 
         for row_idx, row in enumerate(self._rows):
             self.table.insertRow(row_idx)
             self._populate_row_cells(row_idx, row)
+
+        self.table.resizeColumnsToContents()
+        # Add padding so the sort-indicator arrow does not clip the header text.
+        sort_arrow_pad = 24
+        for col in range(self.table.columnCount()):
+            self.table.setColumnWidth(col, self.table.columnWidth(col) + sort_arrow_pad)
+        self.table.setColumnWidth(self.COL_COLOR, 160)
+        self.table.setSortingEnabled(True)
+        self.table.sortItems(self.COL_NAME, Qt.SortOrder.AscendingOrder)
 
     def _populate_row_cells(self, row_idx: int, row: Dict):
         name_item = QTableWidgetItem(row['name'])
@@ -224,11 +241,11 @@ class IplotQtRuler(QWidget):
 
         x, y = row['xy']
         x_text = str(pd.Timestamp(x)) if row['is_date'] else f"{x:.6g}"
-        x_item = QTableWidgetItem(x_text)
+        x_item = _NumericTableItem(x_text)
         x_item.setData(Qt.ItemDataRole.UserRole, x)
         self.table.setItem(row_idx, self.COL_X, x_item)
 
-        y_item = QTableWidgetItem(f"{y:.6g}")
+        y_item = _NumericTableItem(f"{y:.6g}")
         y_item.setData(Qt.ItemDataRole.UserRole, y)
         self.table.setItem(row_idx, self.COL_Y, y_item)
 
@@ -259,7 +276,8 @@ class IplotQtRuler(QWidget):
             groups.setdefault(r['plot_id'], []).append(r)
 
         stretch_idx = self.columns_layout.count() - 1
-        for plot_id, rulers in groups.items():
+        for plot_id in sorted(groups.keys()):
+            rulers = groups[plot_id]
             section, table = self._build_plot_section(plot_id, rulers)
             self.columns_layout.insertWidget(stretch_idx, section)
             stretch_idx += 1
@@ -276,33 +294,36 @@ class IplotQtRuler(QWidget):
         title.setStyleSheet("font-weight: bold;")
         layout.addWidget(title)
 
-        show_delta = len(rulers) >= 2
-        col_count = len(rulers) + (1 if show_delta else 0)
+        n_deltas = max(0, len(rulers) - 1)
+        col_count = len(rulers) + n_deltas
 
         table = QTableWidget(len(self._COLUMNS_AXIS_LABELS), col_count)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         table.setVerticalHeaderLabels(list(self._COLUMNS_AXIS_LABELS))
 
-        headers = [str(i + 1) for i in range(len(rulers))]
-        if show_delta:
-            headers.append(self._DELTA_HEADER)
+        headers = []
+        for i, r in enumerate(rulers):
+            if i > 0:
+                headers.append(self._DELTA_HEADER)
+            headers.append(r['name'])
         table.setHorizontalHeaderLabels(headers)
         h_header = table.horizontalHeader()
         h_header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         h_header.setStretchLastSection(True)
 
-        for col_idx, r in enumerate(rulers):
+        col_idx = 0
+        for i, r in enumerate(rulers):
+            if i > 0:
+                prev = rulers[i - 1]
+                is_date = prev['is_date']
+                self._set_plain_cell(table, 0, col_idx,
+                                     self._format_consecutive_dx(prev['xy'][0], r['xy'][0], is_date))
+                self._set_plain_cell(table, 1, col_idx, f"{r['xy'][1] - prev['xy'][1]:.6g}")
+                col_idx += 1
             self._set_axis_cell(table, 0, col_idx, self._format_x(r), r['color'])
             self._set_axis_cell(table, 1, col_idx, f"{r['xy'][1]:.6g}", r['color'])
-
-        if show_delta:
-            xs = [r['xy'][0] for r in rulers]
-            ys = [r['xy'][1] for r in rulers]
-            is_date = rulers[0]['is_date']
-            self._set_plain_cell(table, 0, col_count - 1,
-                                 self._format_dx(min(xs), max(xs), is_date))
-            self._set_plain_cell(table, 1, col_count - 1, f"{max(ys) - min(ys):.6g}")
+            col_idx += 1
 
         table.setFixedHeight(self._section_table_height(table))
         layout.addWidget(table)
@@ -349,11 +370,18 @@ class IplotQtRuler(QWidget):
         # Qt may demote tuples to lists when stored as UserRole data; normalize.
         return name, tuple(plot_id)
 
+    def _find_row_index(self, name: str, plot_id: Tuple[int, int]) -> int:
+        for idx, r in enumerate(self._rows):
+            if r['name'] == name and r['plot_id'] == plot_id:
+                return idx
+        return -1
+
     def _on_visibility_changed(self, row: int, state):
         visible = state == Qt.CheckState.Checked.value
         name, plot_id = self._row_metadata(row)
-        if 0 <= row < len(self._rows):
-            self._rows[row]['visible'] = visible
+        idx = self._find_row_index(name, plot_id)
+        if idx >= 0:
+            self._rows[idx]['visible'] = visible
         self.visibilityRuler.emit(name, plot_id, visible)
 
     def _on_color_clicked(self, row: int, button: QPushButton):
@@ -364,15 +392,19 @@ class IplotQtRuler(QWidget):
         color = new_color.name()
         button.setStyleSheet(f"background-color: {color}; border: 1px solid black")
         name, plot_id = self._row_metadata(row)
-        if 0 <= row < len(self._rows):
-            self._rows[row]['color'] = color
+        idx = self._find_row_index(name, plot_id)
+        if idx >= 0:
+            self._rows[idx]['color'] = color
         self.colorRuler.emit(name, plot_id, color)
 
     def _remove_selected(self):
-        for row in sorted(self.selection_history, reverse=True):
-            name, plot_id = self._row_metadata(row)
+        # Resolve identities BEFORE deletion so visual rows stay valid until we drop them.
+        identities = [self._row_metadata(row) for row in self.selection_history]
+        for name, plot_id in identities:
             self.deleteRuler.emit(name, plot_id, True)
-            del self._rows[row]
+            idx = self._find_row_index(name, plot_id)
+            if idx >= 0:
+                del self._rows[idx]
         self.selection_history.clear()
         self._render_table()
 
@@ -408,6 +440,13 @@ class IplotQtRuler(QWidget):
         box.setText("\n".join(lines))
         logger.info("\n".join(lines))
         box.exec_()
+
+    @classmethod
+    def _format_consecutive_dx(cls, x_prev, x_curr, is_date: bool) -> str:
+        if not is_date:
+            return f"{x_curr - x_prev:.6g}"
+        sign = '-' if x_curr < x_prev else ''
+        return sign + cls._format_dx(x_prev, x_curr, is_date)
 
     @staticmethod
     def _format_dx(x1, x2, is_date: bool) -> str:
