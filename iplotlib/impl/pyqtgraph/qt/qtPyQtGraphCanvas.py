@@ -175,8 +175,21 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     continue
                 if len(x_data) == 0 or len(y_data) == 0:
                     continue
-                pen = pg.mkPen(sig.color or '#1976d2', width=1)
-                self._minimap_plot.plot(x_data, y_data, pen=pen)
+                color = sig.color or '#1976d2'
+                pen = pg.mkPen(color, width=1)
+                y_max = getattr(sig, '_minimap_y_max_data', None)
+                y_avg = getattr(sig, '_minimap_y_avg_data', None)
+                if (getattr(sig, 'envelope', False) and y_max is not None
+                        and y_avg is not None and len(y_max) == len(x_data)
+                        and len(y_avg) == len(x_data)):
+                    c_min = self._minimap_plot.plot(x_data, y_data, pen=pg.mkPen(color, width=0))
+                    c_max = self._minimap_plot.plot(x_data, y_max, pen=pg.mkPen(color, width=0))
+                    qcolor = pg.mkColor(color)
+                    qcolor.setAlphaF(0.3)
+                    self._minimap_plot.addItem(pg.FillBetweenItem(c_min, c_max, brush=pg.mkBrush(qcolor)))
+                    self._minimap_plot.plot(x_data, y_avg, pen=pen)
+                else:
+                    self._minimap_plot.plot(x_data, y_data, pen=pen)
         self._minimap_plot.getViewBox().setLimits(xMin=baseline[0], xMax=baseline[1])
         self._minimap_plot.setXRange(baseline[0], baseline[1], padding=0)
         self._minimap_plot.getViewBox().disableAutoRange(axis=pg.ViewBox.XAxis)

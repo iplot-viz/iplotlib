@@ -191,7 +191,15 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     if len(x_data) == 0 or len(y_data) == 0:
                         continue
                     color = sig.color or '#1976d2'
-                    ax.plot(x_data, y_data, linewidth=0.7, color=color)
+                    y_max = getattr(sig, '_minimap_y_max_data', None)
+                    y_avg = getattr(sig, '_minimap_y_avg_data', None)
+                    if (getattr(sig, 'envelope', False) and y_max is not None
+                            and y_avg is not None and len(y_max) == len(x_data)
+                            and len(y_avg) == len(x_data)):
+                        ax.fill_between(x_data, y_data, y_max, alpha=0.3, color=color, linewidth=0)
+                        ax.plot(x_data, y_avg, linewidth=0.7, color=color)
+                    else:
+                        ax.plot(x_data, y_data, linewidth=0.7, color=color)
             ax.relim()
             ax.autoscale_view(scalex=False, scaley=True)
             ax.set_xlim(baseline[0], baseline[1], auto=False)
