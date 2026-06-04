@@ -328,13 +328,15 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 ruler_px = impl_plot.transData.transform((r.xy[0], r.xy[1]))
             except (ValueError, TypeError):
                 continue
-            d = min(abs(ruler_px[0] - event.x), abs(ruler_px[1] - event.y))
+            dx = abs(ruler_px[0] - event.x)
+            dy = abs(ruler_px[1] - event.y)
+            if dx > self.PICK_RADIUS_PX and dy > self.PICK_RADIUS_PX:
+                continue
+            d = float(np.hypot(dx, dy))
             if d < best_dist:
                 best_dist = d
                 best = r
-        if best is not None and best_dist <= self.PICK_RADIUS_PX:
-            return best
-        return None
+        return best
 
     def _repaint_rulers_from_canvas(self):
         self._clear_preview_ruler()

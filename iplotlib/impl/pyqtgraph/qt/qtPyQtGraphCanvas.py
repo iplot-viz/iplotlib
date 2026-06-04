@@ -385,14 +385,15 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             if r.name == self._PREVIEW_RULER_NAME:
                 continue
             ruler_scene_pt = vb.mapViewToScene(pg.Qt.QtCore.QPointF(r.xy[0], r.xy[1]))
-            d = min(abs(ruler_scene_pt.x() - scene_pos.x()),
-                    abs(ruler_scene_pt.y() - scene_pos.y()))
+            dx = abs(ruler_scene_pt.x() - scene_pos.x())
+            dy = abs(ruler_scene_pt.y() - scene_pos.y())
+            if dx > self.PICK_RADIUS_PX and dy > self.PICK_RADIUS_PX:
+                continue
+            d = float(np.hypot(dx, dy))
             if d < best_dist:
                 best_dist = d
                 best = r
-        if best is not None and best_dist <= self.PICK_RADIUS_PX:
-            return best
-        return None
+        return best
 
     def autoscale_y(self, impl_plot):
         """
