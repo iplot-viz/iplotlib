@@ -166,8 +166,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             for sig in signals:
                 if not isinstance(sig, SignalXY):
                     continue
-                x_data = getattr(sig, 'x_data', None)
-                y_data = getattr(sig, 'y_data', None)
+                x_data = getattr(sig, '_minimap_x_data', None)
+                y_data = getattr(sig, '_minimap_y_data', None)
+                if x_data is None or len(x_data) == 0:
+                    x_data = getattr(sig, 'x_data', None)
+                    y_data = getattr(sig, 'y_data', None)
                 if x_data is None or y_data is None:
                     continue
                 if len(x_data) == 0 or len(y_data) == 0:

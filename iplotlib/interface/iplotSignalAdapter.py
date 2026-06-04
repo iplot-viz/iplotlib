@@ -145,6 +145,10 @@ class IplotSignalAdapter(ProcessingSignal):
         self.x_data = BufferObject()
         self.y_data = BufferObject()
         self.z_data = BufferObject()
+        # Full-range snapshot used by the minimap. Captured the first time
+        # data is finalised for this signal and invalidated by clear_minimap_snapshot().
+        self._minimap_x_data = None
+        self._minimap_y_data = None
 
         # 2. Post-initialize ArraySignal's properties and our name.
         self._init_label()
@@ -502,7 +506,22 @@ class IplotSignalAdapter(ProcessingSignal):
         self.z_data = self.truncate_to_target(self.z_data, self.x_data,
                                               source_label='z', target_label='x')
 
+        # 4. Capture full-range snapshot for the minimap the first time
+        # data is populated. Cleared by clear_minimap_snapshot() at Draw / import.
+        if self._minimap_x_data is None and len(self.x_data) > 0:
+            self._minimap_x_data = self.x_data.copy()
+            self._minimap_y_data = self.y_data.copy()
+
         self._report_xyz_data()
+
+    def clear_minimap_snapshot(self):
+        """Drop the cached full-range data used by the minimap.
+
+        Call this whenever the requested time/pulse range changes so that the
+        next data load populates a fresh snapshot.
+        """
+        self._minimap_x_data = None
+        self._minimap_y_data = None
 
     def _process_data(self):
         # 1. Cannot process data when _fetch_data failed or did not occur
