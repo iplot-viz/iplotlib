@@ -508,6 +508,13 @@ class IplotSignalAdapter(ProcessingSignal):
         self.z_data = self.truncate_to_target(self.z_data, self.x_data,
                                               source_label='z', target_label='x')
 
+        # 3b. Align envelope avg buffer (data_store[3]) to x_data so the
+        # minimap snapshot guard below accepts it.
+        if getattr(self, 'envelope', False) and len(self.data_store) >= 4:
+            self.data_store[3] = self.truncate_to_target(
+                self.data_store[3], self.x_data,
+                source_label='avg', target_label='x')
+
         # 4. Capture full-range snapshot for the minimap the first time
         # data is populated. Cleared by clear_minimap_snapshot() at Draw / import.
         if self._minimap_x_data is None and len(self.x_data) > 0:
