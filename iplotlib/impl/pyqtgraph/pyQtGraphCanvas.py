@@ -547,7 +547,7 @@ class PyQtGraphParser(BackendParserBase):
             # 1. Configure and add the image first, before any children
             # Set rectangle view for the image. Values correspond to: x, y, w, h
             # Transformations needed to convert pixels into real data values
-            img.setRect(QtCore.QRectF(x_min, y_min, np.ptp(x_sub_data), np.ptp(y_sub_data)))
+            img.setRect(QtCore.QRectF(x_min, y_min, x_max - x_min, y_max - y_min))
 
             # scale() - Moves origin from (0,0) to the data minimum
             # translate() - Each pixel in X becomes (x_max - x_min)/ n_cols wide, and each pixel in Y becomes
