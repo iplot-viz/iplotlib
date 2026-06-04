@@ -198,7 +198,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                             and len(y_avg) == len(x_data)):
                         ax.plot(x_data, y_data, linewidth=0, color=color)
                         ax.plot(x_data, y_max, linewidth=0, color=color)
-                        ax.fill_between(x_data, y_data, y_max, alpha=0.3, color=color, linewidth=0)
+                        ax.fill_between(x_data, y_data, y_max, alpha=0.6, color=color, linewidth=0)
                         ax.plot(x_data, y_avg, linewidth=0.7, color=color)
                     else:
                         ax.plot(x_data, y_data, linewidth=0.7, color=color)
