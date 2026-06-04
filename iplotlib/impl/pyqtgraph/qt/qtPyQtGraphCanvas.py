@@ -174,7 +174,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     continue
                 pen = pg.mkPen(sig.color or '#1976d2', width=1)
                 self._minimap_plot.plot(x_data, y_data, pen=pen)
+        self._minimap_plot.getViewBox().setLimits(xMin=baseline[0], xMax=baseline[1])
         self._minimap_plot.setXRange(baseline[0], baseline[1], padding=0)
+        self._minimap_plot.getViewBox().disableAutoRange(axis=pg.ViewBox.XAxis)
 
         region = pg.LinearRegionItem(values=[cur_min, cur_max], movable=False,
                                      brush=pg.mkBrush(255, 179, 0, 120),

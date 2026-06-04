@@ -189,9 +189,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                         continue
                     color = sig.color or '#1976d2'
                     ax.plot(x_data, y_data, linewidth=0.7, color=color)
-            ax.set_xlim(baseline[0], baseline[1])
             ax.relim()
             ax.autoscale_view(scalex=False, scaley=True)
+            ax.set_xlim(baseline[0], baseline[1], auto=False)
+            ax.set_autoscalex_on(False)
             ax.tick_params(axis='x', labelsize=7)
             ax.tick_params(axis='y', labelsize=7)
             ax.set_facecolor('#f5f5f5')
