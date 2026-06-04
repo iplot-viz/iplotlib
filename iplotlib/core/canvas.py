@@ -365,6 +365,17 @@ class Canvas(ABC):
     def get_minimap_baseline(self):
         return self._minimap_baseline_x_range
 
+    def invalidate_minimap_snapshots(self) -> None:
+        for columns in self.plots:
+            for plot in columns:
+                if not plot:
+                    continue
+                for signals in plot.signals.values():
+                    for signal in signals:
+                        clear = getattr(signal, 'clear_minimap_snapshot', None)
+                        if clear is not None:
+                            clear()
+
     def get_signals_as_csv(self):
         x = pd.DataFrame()
         focus_plot = self.focus_plot
