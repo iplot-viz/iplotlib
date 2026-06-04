@@ -145,8 +145,7 @@ class IplotSignalAdapter(ProcessingSignal):
         self.x_data = BufferObject()
         self.y_data = BufferObject()
         self.z_data = BufferObject()
-        # Full-range snapshot used by the minimap. Captured the first time
-        # data is finalised for this signal and invalidated by clear_minimap_snapshot().
+        # Full-range minimap snapshot; invalidated by clear_minimap_snapshot().
         self._minimap_x_data = None
         self._minimap_y_data = None
         self._minimap_y_max_data = None
@@ -508,15 +507,13 @@ class IplotSignalAdapter(ProcessingSignal):
         self.z_data = self.truncate_to_target(self.z_data, self.x_data,
                                               source_label='z', target_label='x')
 
-        # 3b. Align envelope avg buffer (data_store[3]) to x_data so the
-        # minimap snapshot guard below accepts it.
+        # 3b. Align envelope avg buffer to x_data for the minimap snapshot guard below.
         if getattr(self, 'envelope', False) and len(self.data_store) >= 4:
             self.data_store[3] = self.truncate_to_target(
                 self.data_store[3], self.x_data,
                 source_label='avg', target_label='x')
 
-        # 4. Capture full-range snapshot for the minimap the first time
-        # data is populated. Cleared by clear_minimap_snapshot() at Draw / import.
+        # 4. Capture the full-range minimap snapshot on first populate.
         if self._minimap_x_data is None and len(self.x_data) > 0:
             self._minimap_x_data = self.x_data.copy()
             self._minimap_y_data = self.y_data.copy()
@@ -529,11 +526,7 @@ class IplotSignalAdapter(ProcessingSignal):
         self._report_xyz_data()
 
     def clear_minimap_snapshot(self):
-        """Drop the cached full-range data used by the minimap.
-
-        Call this whenever the requested time/pulse range changes so that the
-        next data load populates a fresh snapshot.
-        """
+        """Drop the cached full-range minimap data so the next load repopulates it."""
         self._minimap_x_data = None
         self._minimap_y_data = None
         self._minimap_y_max_data = None
