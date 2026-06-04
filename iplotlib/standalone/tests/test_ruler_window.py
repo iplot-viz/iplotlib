@@ -301,8 +301,13 @@ class RulerDistanceFormattingTest(unittest.TestCase):
     def test_datetime_dx_renders_components(self):
         one_second_ns = 1_000_000_000
         out = IplotQtRuler._format_dx(0, one_second_ns, is_date=True)
-        self.assertIn('T', out)
-        self.assertIn('1S', out)
+        self.assertEqual(out, "1.000000s")
+
+    def test_datetime_dx_with_days_hours_minutes(self):
+        one_day_ns = 86_400 * 1_000_000_000
+        five_hours_ns = 5 * 3_600 * 1_000_000_000
+        out = IplotQtRuler._format_dx(0, one_day_ns + five_hours_ns + 1_000_000_000, is_date=True)
+        self.assertEqual(out, "1d 05h 00m 01.000000s")
 
 
 if __name__ == '__main__':
