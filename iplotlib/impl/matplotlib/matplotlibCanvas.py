@@ -1066,7 +1066,7 @@ class MatplotlibParser(BackendParserBase):
 
     def get_impl_lines(self, impl_plot: MPLAxes):
         lines = impl_plot.get_lines()
-        lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY"]]
+        lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY", "_RulerLine"]]
         lo, hi = impl_plot.get_xlim()
         return lines, lo, hi
 

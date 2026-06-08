@@ -10,7 +10,6 @@ This module is deprecated and unused.
 #              -Port to PySide2 [Jaswant Sai Panchumarti]
 
 
-from functools import partial
 import typing
 
 from PySide6.QtCore import QMargins, Signal
@@ -51,12 +50,8 @@ class IplotQtCanvasToolbar(QToolBar):
                           Canvas.MOUSE_MODE_RULER]:
             tool_action = QAction(tool_name[3:], parent=self)
             tool_action.setCheckable(True)
-            # RULER stays outside the exclusive group so a second click can deactivate it.
-            if tool_name != Canvas.MOUSE_MODE_RULER:
-                tool_action.setActionGroup(self._actions)
-                tool_action.triggered.connect(partial(self._on_exclusive_tool_triggered, tool_name))
-            else:
-                tool_action.triggered.connect(self._on_ruler_toggled)
+            tool_action.setActionGroup(self._actions)
+            tool_action.triggered.connect(lambda _checked, n=tool_name: self.toolActivated.emit(n))
             self.addAction(tool_action)
             self._tool_actions[tool_name] = tool_action
 
@@ -102,14 +97,3 @@ class IplotQtCanvasToolbar(QToolBar):
         # Detach..
         self.detachAction = QAction('Detach', self)
         self.addAction(self.detachAction)
-
-    def _on_exclusive_tool_triggered(self, tool_name: str):
-        self._tool_actions[Canvas.MOUSE_MODE_RULER].setChecked(False)
-        self.toolActivated.emit(tool_name)
-
-    def _on_ruler_toggled(self, checked: bool):
-        if checked:
-            self.toolActivated.emit(Canvas.MOUSE_MODE_RULER)
-        else:
-            self._tool_actions[Canvas.MOUSE_MODE_SELECT].setChecked(True)
-            self.toolActivated.emit(Canvas.MOUSE_MODE_SELECT)

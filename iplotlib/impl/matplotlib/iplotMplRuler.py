@@ -24,9 +24,9 @@ class iplotMplRuler:
         self.animated = animated
 
         self.v_line = ax.axvline(xy[0], color=color, linewidth=lw, linestyle='--',
-                                  animated=animated, zorder=20)
+                                  animated=animated, zorder=20, label='_RulerLine')
         self.h_line = ax.axhline(xy[1], color=color, linewidth=lw, linestyle='--',
-                                  animated=animated, zorder=20)
+                                  animated=animated, zorder=20, label='_RulerLine')
 
         bbox = dict(boxstyle="round", pad=0.1, fill=True, color=color)
         text_kwargs = dict(annotation_clip=False, clip_on=False, bbox=bbox,

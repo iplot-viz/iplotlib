@@ -100,6 +100,10 @@ class QtViewBox(pg.ViewBox):
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
 
+    def mouseDoubleClickEvent(self, ev):
+        super().mouseDoubleClickEvent(ev)
+        self.pressed.emit(self, ev)
+
     def mouseMoveEvent(self, ev):
         super().mouseMoveEvent(ev)
         # Emit dragged signal when mouse moves (for drag preview)
