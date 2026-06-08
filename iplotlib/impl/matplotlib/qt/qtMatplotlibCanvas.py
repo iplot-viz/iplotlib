@@ -10,24 +10,28 @@
 #               -Introduce distance calculator. [Jaswant Sai Panchumarti]
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
+import functools
 import typing
 from collections.abc import Collection
 
 import numpy as np
 from PySide6.QtCore import QMargins, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QMenu
+from PySide6.QtWidgets import QMessageBox, QSizePolicy, QSplitter, QVBoxLayout, QMenu
 
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.figure import Figure
+from matplotlib.patches import Rectangle
 
 from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
+from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
 import iplotLogging.setupLogger as Sl
@@ -54,10 +58,31 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_toolbar = NavigationToolbar(self._mpl_renderer, self)
         self._mpl_toolbar.setVisible(False)
 
+        self._minimap_figure = Figure()
+        self._minimap_renderer = FigureCanvas(self._minimap_figure)
+        self._minimap_renderer.setParent(self)
+        self._minimap_renderer.setSizePolicy(self._mpl_size_pol)
+        self._minimap_renderer.setMinimumHeight(110)
+        self._minimap_renderer.setVisible(False)
+        self._minimap_axes = None
+        self._minimap_viewport_patch = None
+        self._minimap_xlim_cid = None
+        self._minimap_ylim_cid = None
+        self._minimap_connected_main_ax = None
+        self._minimap_signature = None
+
+        self._splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self._splitter.setContentsMargins(QMargins())
+        self._splitter.setChildrenCollapsible(False)
+        self._splitter.addWidget(self._mpl_renderer)
+        self._splitter.addWidget(self._minimap_renderer)
+        self._splitter.setStretchFactor(0, 4)
+        self._splitter.setStretchFactor(1, 1)
+
         self._vlayout = QVBoxLayout(self)
         self._vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._vlayout.setContentsMargins(QMargins())
-        self._vlayout.addWidget(self._mpl_renderer)
+        self._vlayout.addWidget(self._splitter)
 
         # GUI event handlers
         self._mpl_renderer.mpl_connect('draw_event', self._mpl_draw_finish)
@@ -87,10 +112,146 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self.set_mouse_mode(self._mmode or canvas.mouse_mode)
         else:
             self.render()
+            self._update_minimap()
             return
 
         self.render()
+        self._update_minimap()
         super().set_canvas(canvas)
+
+    def _get_main_axes_for_minimap(self):
+        canvas = self.get_canvas()
+        if canvas is None:
+            return None
+        target = canvas.get_minimap_target_plot()
+        if target is None:
+            return None
+        impl_list = self._parser._plot_impl_plot_lut.get(id(target))
+        if not impl_list:
+            return None
+        return impl_list[-1]
+
+    def _disconnect_minimap_xlim(self):
+        if self._minimap_connected_main_ax is not None:
+            for cid in (self._minimap_xlim_cid, self._minimap_ylim_cid):
+                if cid is None:
+                    continue
+                try:
+                    self._minimap_connected_main_ax.callbacks.disconnect(cid)
+                except Exception:
+                    pass
+        self._minimap_xlim_cid = None
+        self._minimap_ylim_cid = None
+        self._minimap_connected_main_ax = None
+
+    def _update_minimap(self):
+        canvas = self.get_canvas()
+        show = canvas is not None and canvas.show_minimap and canvas.is_minimap_eligible()
+        self._minimap_renderer.setVisible(show)
+        if show:
+            total = max(self._splitter.height(), 1)
+            minimap_h = max(int(total * 0.22), 110)
+            self._splitter.setSizes([total - minimap_h, minimap_h])
+        if not show:
+            self._disconnect_minimap_xlim()
+            self._minimap_figure.clear()
+            self._minimap_axes = None
+            self._minimap_viewport_patch = None
+            self._minimap_signature = None
+            self._minimap_renderer.draw_idle()
+            return
+
+        main_ax = self._get_main_axes_for_minimap()
+        if main_ax is None:
+            return
+
+        target_plot = canvas.get_minimap_target_plot()
+        baseline = canvas.get_minimap_baseline()
+        if baseline is None:
+            x_min, x_max = self._parser.get_oaw_axis_limits(main_ax, 0)
+            canvas.snapshot_minimap_baseline(x_min, x_max)
+            baseline = canvas.get_minimap_baseline()
+
+        signature = (id(target_plot), baseline)
+        if self._minimap_signature != signature or self._minimap_axes is None:
+            self._disconnect_minimap_xlim()
+            self._minimap_figure.clear()
+            ax = self._minimap_figure.add_subplot(111)
+            for signals in target_plot.signals.values():
+                for sig in signals:
+                    if not isinstance(sig, SignalXY):
+                        continue
+                    x_data = getattr(sig, '_minimap_x_data', None)
+                    y_data = getattr(sig, '_minimap_y_data', None)
+                    if x_data is None or len(x_data) == 0:
+                        x_data = getattr(sig, 'x_data', None)
+                        y_data = getattr(sig, 'y_data', None)
+                    if x_data is None or y_data is None:
+                        continue
+                    if len(x_data) == 0 or len(y_data) == 0:
+                        continue
+                    color = sig.color or '#1976d2'
+                    y_max = getattr(sig, '_minimap_y_max_data', None)
+                    y_avg = getattr(sig, '_minimap_y_avg_data', None)
+                    if (getattr(sig, 'envelope', False) and y_max is not None
+                            and y_avg is not None and len(y_max) == len(x_data)
+                            and len(y_avg) == len(x_data)):
+                        ax.plot(x_data, y_data, linewidth=0, color=color)
+                        ax.plot(x_data, y_max, linewidth=0, color=color)
+                        ax.fill_between(x_data, y_data, y_max, alpha=0.6, color=color, linewidth=0)
+                        ax.plot(x_data, y_avg, linewidth=0.7, color=color)
+                    else:
+                        ax.plot(x_data, y_data, linewidth=0.7, color=color)
+            ax.relim()
+            ax.autoscale_view(scalex=False, scaley=True)
+            ax.set_xlim(baseline[0], baseline[1], auto=False)
+            ax.set_autoscalex_on(False)
+            ax.tick_params(axis='x', labelsize=7)
+            ax.tick_params(axis='y', labelsize=7)
+            ax.set_facecolor('#f5f5f5')
+            main_x_formatter = main_ax.xaxis.get_major_formatter()
+            if isinstance(main_x_formatter, NanosecondDateFormatter):
+                clone = NanosecondDateFormatter(
+                    ax_idx=0,
+                    label_segments=main_x_formatter.label_segments,
+                    postfix_end=main_x_formatter.postfix_end,
+                    postfix_start=main_x_formatter.postfix_start,
+                    offset_lut=None,
+                    roundh=main_x_formatter._round,
+                )
+                ax.xaxis.set_major_formatter(clone)
+
+            rect = Rectangle((baseline[0], 0), baseline[1] - baseline[0], 1,
+                             facecolor='#ffb300', edgecolor='#e65100',
+                             alpha=0.5, linewidth=2.0, zorder=10,
+                             transform=ax.get_xaxis_transform(), clip_on=False)
+            ax.add_patch(rect)
+            self._minimap_viewport_patch = rect
+            self._minimap_axes = ax
+            self._minimap_figure.tight_layout()
+            self._minimap_signature = signature
+
+        if self._minimap_connected_main_ax is not main_ax:
+            self._disconnect_minimap_xlim()
+            update_rect = functools.partial(self._viewlims_update_rect, self._minimap_viewport_patch)
+            self._minimap_xlim_cid = main_ax.callbacks.connect('xlim_changed', update_rect)
+            self._minimap_ylim_cid = main_ax.callbacks.connect('ylim_changed', update_rect)
+            self._minimap_connected_main_ax = main_ax
+        self._viewlims_update_rect(self._minimap_viewport_patch, main_ax)
+
+    def _viewlims_update_rect(self, rect, ax):
+        x_lo, x_hi = self._parser.get_oaw_axis_limits(ax, 0)
+        if x_lo is None or x_hi is None:
+            return
+        canvas = self.get_canvas()
+        baseline = canvas.get_minimap_baseline() if canvas is not None else None
+        if baseline is not None:
+            full_span = baseline[1] - baseline[0]
+            shows_full = full_span > 0 and abs(x_lo - baseline[0]) < full_span * 1e-6 and abs(x_hi - baseline[1]) < full_span * 1e-6
+            rect.set_visible(not shows_full)
+        rect.set_x(x_lo)
+        rect.set_width(x_hi - x_lo)
+        self._minimap_renderer.draw_idle()
 
     def _is_signal_visible(self, signal) -> bool:
         """Check if signal is visible (Matplotlib implementation)."""
@@ -301,13 +462,21 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _full_screen_mode_on(self, impl_plot):
         self._parser.set_focus_plot(impl_plot)
+        canvas = self.get_canvas()
+        if canvas is not None:
+            canvas.snapshot_minimap_baseline(None, None)
         self.refresh()
         self.stats(self.get_canvas())
+        self.focusChanged.emit()
 
     def _full_screen_mode_off(self):
         self._parser.set_focus_plot(None)
+        canvas = self.get_canvas()
+        if canvas is not None:
+            canvas.snapshot_minimap_baseline(None, None)
         self.refresh()
         self.stats(self.get_canvas())
+        self.focusChanged.emit()
 
     def _create_drag_preview(self, dy_offset, dx_offset=0.0):
         """Create/update preview line during drag for Matplotlib."""

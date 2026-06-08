@@ -1,12 +1,13 @@
 import os
 
-from PySide6.QtCore import QMargins, Qt, Signal, QEvent
-from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox
+from PySide6.QtCore import QMargins, Qt, Signal, QEvent, QTimer
+from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox, QSplitter
 
 import numpy as np
 from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY, PlotContourWithSlider
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
+from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
 import iplotLogging.setupLogger as Sl
@@ -33,10 +34,33 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         # Track connected ViewBoxes to avoid duplicate connections
         self._connected_viewboxes = set()
 
+        self._minimap_widget = pg.GraphicsLayoutWidget()
+        self._minimap_widget.setMinimumHeight(110)
+        self._minimap_widget.setVisible(False)
+        self._minimap_widget.setBackground('#f5f5f5')
+        self._minimap_plot = self._minimap_widget.addPlot(row=0, col=0)
+        self._minimap_plot.setMouseEnabled(x=False, y=False)
+        self._minimap_plot.showAxis('left')
+        self._minimap_plot.showAxis('bottom')
+        self._minimap_plot.setMenuEnabled(False)
+        self._minimap_plot.hideButtons()
+        self._minimap_common_label = None
+        self._minimap_viewport_item = None
+        self._minimap_connected_main_vb = None
+        self._minimap_signature = None
+
+        self._splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self._splitter.setContentsMargins(QMargins())
+        self._splitter.setChildrenCollapsible(False)
+        self._splitter.addWidget(self._parser.figure)
+        self._splitter.addWidget(self._minimap_widget)
+        self._splitter.setStretchFactor(0, 4)
+        self._splitter.setStretchFactor(1, 1)
+
         self._vlayout = QVBoxLayout(self)
         self._vlayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._vlayout.setContentsMargins(QMargins())
-        self._vlayout.addWidget(self._parser.figure)
+        self._vlayout.addWidget(self._splitter)
 
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
@@ -71,6 +95,155 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     self._connected_viewboxes.add(vb_id)
 
         super().set_canvas(canvas)
+        self._update_minimap()
+
+    def _get_main_plot_for_minimap(self) -> PlotItem:
+        canvas = self.get_canvas()
+        if canvas is None:
+            return None
+        target = canvas.get_minimap_target_plot()
+        if target is None:
+            return None
+        impl_list = self._parser._plot_impl_plot_lut.get(id(target))
+        if impl_list:
+            return impl_list[-1]
+        for stack in self._parser._layout_stacks.values():
+            for plot in stack.values():
+                return plot
+        return None
+
+    def _update_minimap(self):
+        canvas = self.get_canvas()
+        show = canvas is not None and canvas.show_minimap and canvas.is_minimap_eligible()
+        self._minimap_widget.setVisible(show)
+        if show:
+            total = max(self._splitter.height(), 1)
+            minimap_h = max(int(total * 0.22), 110)
+            self._splitter.setSizes([total - minimap_h, minimap_h])
+        if not show:
+            self._minimap_plot.clear()
+            self._minimap_viewport_item = None
+            self._minimap_signature = None
+            self._disconnect_minimap_signals()
+            return
+
+        main_plot = self._get_main_plot_for_minimap()
+        if main_plot is None:
+            QTimer.singleShot(0, self._update_minimap)
+            return
+
+        target_plot = canvas.get_minimap_target_plot()
+        baseline = canvas.get_minimap_baseline()
+        cur_min, cur_max = self._parser.get_oaw_axis_limits(main_plot, 0)
+        if cur_min is None or cur_max is None:
+            return
+        if baseline is None:
+            canvas.snapshot_minimap_baseline(cur_min, cur_max)
+            baseline = canvas.get_minimap_baseline()
+
+        signature = (id(target_plot), baseline)
+        if self._minimap_signature == signature and self._minimap_viewport_item is not None:
+            self._minimap_viewport_item.setRegion((cur_min, cur_max))
+            self._connect_minimap_signals(main_plot)
+            return
+
+        self._minimap_plot.clear()
+        self._minimap_viewport_item = None
+        is_date_axis = bool(target_plot.axes and getattr(target_plot.axes[0], 'is_date', False))
+        bottom_axis = self._minimap_plot.getAxis('bottom')
+        if not isinstance(bottom_axis, NanosecondDateFormatter) or getattr(bottom_axis, 'is_date', None) != is_date_axis:
+            new_bottom = NanosecondDateFormatter(is_date=is_date_axis, orientation='bottom')
+            self._minimap_plot.setAxisItems({'bottom': new_bottom})
+            if self._minimap_common_label is not None:
+                try:
+                    self._minimap_widget.ci.removeItem(self._minimap_common_label)
+                except Exception:
+                    pass
+            self._minimap_widget.ci.addItem(new_bottom.common_label, row=1, col=0)
+            new_bottom.common_label.setMaximumHeight(14)
+            self._minimap_common_label = new_bottom.common_label
+        for signals in target_plot.signals.values():
+            for sig in signals:
+                if not isinstance(sig, SignalXY):
+                    continue
+                x_data = getattr(sig, '_minimap_x_data', None)
+                y_data = getattr(sig, '_minimap_y_data', None)
+                if x_data is None or len(x_data) == 0:
+                    x_data = getattr(sig, 'x_data', None)
+                    y_data = getattr(sig, 'y_data', None)
+                if x_data is None or y_data is None:
+                    continue
+                if len(x_data) == 0 or len(y_data) == 0:
+                    continue
+                color = sig.color or '#1976d2'
+                pen = pg.mkPen(color, width=1)
+                y_max = getattr(sig, '_minimap_y_max_data', None)
+                y_avg = getattr(sig, '_minimap_y_avg_data', None)
+                if (getattr(sig, 'envelope', False) and y_max is not None
+                        and y_avg is not None and len(y_max) == len(x_data)
+                        and len(y_avg) == len(x_data)):
+                    c_min = self._minimap_plot.plot(x_data, y_data, pen=pg.mkPen(color, width=0))
+                    c_max = self._minimap_plot.plot(x_data, y_max, pen=pg.mkPen(color, width=0))
+                    qcolor = pg.mkColor(color)
+                    qcolor.setAlphaF(0.3)
+                    self._minimap_plot.addItem(pg.FillBetweenItem(c_min, c_max, brush=pg.mkBrush(qcolor)))
+                    self._minimap_plot.plot(x_data, y_avg, pen=pen)
+                else:
+                    self._minimap_plot.plot(x_data, y_data, pen=pen)
+        self._minimap_plot.getViewBox().setLimits(xMin=baseline[0], xMax=baseline[1])
+        self._minimap_plot.setXRange(baseline[0], baseline[1], padding=0)
+        self._minimap_plot.getViewBox().disableAutoRange(axis=pg.ViewBox.XAxis)
+
+        region = pg.LinearRegionItem(values=[cur_min, cur_max], movable=False,
+                                     brush=pg.mkBrush(255, 179, 0, 120),
+                                     pen=pg.mkPen('#e65100', width=2))
+        region.setZValue(10)
+        self._minimap_plot.addItem(region, ignoreBounds=True)
+        self._minimap_viewport_item = region
+        self._minimap_signature = signature
+        full_span = baseline[1] - baseline[0]
+        shows_full = full_span > 0 and abs(cur_min - baseline[0]) < full_span * 1e-6 and abs(cur_max - baseline[1]) < full_span * 1e-6
+        region.setVisible(not shows_full)
+
+        self._connect_minimap_signals(main_plot)
+
+    def _connect_minimap_signals(self, main_plot):
+        if self._minimap_connected_main_vb is main_plot:
+            return
+        self._disconnect_minimap_signals()
+        main_plot.sigRangeChanged.connect(self._on_main_x_range_changed)
+        self._minimap_connected_main_vb = main_plot
+
+    def _disconnect_minimap_signals(self):
+        if self._minimap_connected_main_vb is not None:
+            try:
+                self._minimap_connected_main_vb.sigRangeChanged.disconnect(self._on_main_x_range_changed)
+            except Exception:
+                pass
+            self._minimap_connected_main_vb = None
+
+    def _on_main_x_range_changed(self, window, view_range):
+        if self._minimap_viewport_item is None:
+            return
+        main_plot = self._get_main_plot_for_minimap()
+        if main_plot is None:
+            return
+        x_lo, x_hi = self._parser.get_oaw_axis_limits(main_plot, 0)
+        if x_lo is None or x_hi is None:
+            return
+        canvas = self.get_canvas()
+        baseline = canvas.get_minimap_baseline() if canvas is not None else None
+        if baseline is not None:
+            full_span = baseline[1] - baseline[0]
+            shows_full = full_span > 0 and abs(x_lo - baseline[0]) < full_span * 1e-6 and abs(x_hi - baseline[1]) < full_span * 1e-6
+            self._minimap_viewport_item.setVisible(not shows_full)
+        self._minimap_viewport_item.setRegion((x_lo, x_hi))
+
+    def _sync_minimap_viewport(self):
+        main_plot = self._get_main_plot_for_minimap()
+        if main_plot is None or self._minimap_viewport_item is None:
+            return
+        self._on_main_x_range_changed(main_plot, main_plot.getViewBox().viewRange())
 
     def get_base_plot(self) -> PlotItem:
         for stack in self._parser._layout_stacks.values():
@@ -267,13 +440,21 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def _full_screen_mode_on(self, impl_plot):
         self._parser.set_focus_plot(impl_plot)
+        canvas = self.get_canvas()
+        if canvas is not None:
+            canvas.snapshot_minimap_baseline(None, None)
         self.refresh()
         self.stats(self.get_canvas())
+        self.focusChanged.emit()
 
     def _full_screen_mode_off(self):
         self._parser.set_focus_plot(None)
+        canvas = self.get_canvas()
+        if canvas is not None:
+            canvas.snapshot_minimap_baseline(None, None)
         self.refresh()
         self.stats(self.get_canvas())
+        self.focusChanged.emit()
 
     def _impl_mouse_press_handler(self, view_box, event):
         """Handle mouse press events in PyQtGraph."""
@@ -427,6 +608,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 self.push_view_lim_cmd()
             # Update statistics
             self.stats(self.get_canvas())
+            self._sync_minimap_viewport()
 
         is_double = callable(getattr(event, 'double', None)) and event.double()
         if event is not None and event.button() == Qt.MouseButton.RightButton and not is_double:

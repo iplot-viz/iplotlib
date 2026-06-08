@@ -145,6 +145,11 @@ class IplotSignalAdapter(ProcessingSignal):
         self.x_data = BufferObject()
         self.y_data = BufferObject()
         self.z_data = BufferObject()
+        # Full-range minimap snapshot; invalidated by clear_minimap_snapshot().
+        self._minimap_x_data = None
+        self._minimap_y_data = None
+        self._minimap_y_max_data = None
+        self._minimap_y_avg_data = None
 
         # 2. Post-initialize ArraySignal's properties and our name.
         self._init_label()
@@ -502,7 +507,30 @@ class IplotSignalAdapter(ProcessingSignal):
         self.z_data = self.truncate_to_target(self.z_data, self.x_data,
                                               source_label='z', target_label='x')
 
+        # 3b. Align envelope avg buffer to x_data for the minimap snapshot guard below.
+        if getattr(self, 'envelope', False) and len(self.data_store) >= 4:
+            self.data_store[3] = self.truncate_to_target(
+                self.data_store[3], self.x_data,
+                source_label='avg', target_label='x')
+
+        # 4. Capture the full-range minimap snapshot on first populate.
+        if self._minimap_x_data is None and len(self.x_data) > 0:
+            self._minimap_x_data = self.x_data.copy()
+            self._minimap_y_data = self.y_data.copy()
+            if (getattr(self, 'envelope', False) and len(self.data_store) >= 4
+                    and len(self.z_data) == len(self.x_data)
+                    and len(self.data_store[3]) == len(self.x_data)):
+                self._minimap_y_max_data = self.z_data.copy()
+                self._minimap_y_avg_data = self.data_store[3].copy()
+
         self._report_xyz_data()
+
+    def clear_minimap_snapshot(self):
+        """Drop the cached full-range minimap data so the next load repopulates it."""
+        self._minimap_x_data = None
+        self._minimap_y_data = None
+        self._minimap_y_max_data = None
+        self._minimap_y_avg_data = None
 
     def _process_data(self):
         # 1. Cannot process data when _fetch_data failed or did not occur
