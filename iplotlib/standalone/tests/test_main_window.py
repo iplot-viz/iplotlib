@@ -223,5 +223,136 @@ class PreferencesWindowTest(unittest.TestCase):
             win.close()
 
 
+class MinimapStateTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def test_default_state_is_off(self):
+        c = Canvas(1, 1)
+        self.assertFalse(c.show_minimap)
+        self.assertIsNone(c.get_minimap_baseline())
+
+    def test_eligibility_single_plot(self):
+        c = _canvas_with_signal()
+        self.assertTrue(c.is_minimap_eligible())
+        self.assertIsNotNone(c.get_minimap_target_plot())
+
+    def test_eligibility_multiple_plots(self):
+        c = Canvas(2, 1)
+        for _ in range(2):
+            p = PlotXY()
+            sig = SignalXY(label='s')
+            sig.set_data([np.linspace(0, 1, 10), np.zeros(10)])
+            p.add_signal(sig)
+            c.add_plot(p, 0)
+        self.assertFalse(c.is_minimap_eligible())
+
+    def test_eligibility_with_focus_plot(self):
+        c = Canvas(2, 1)
+        for _ in range(2):
+            p = PlotXY()
+            sig = SignalXY(label='s')
+            sig.set_data([np.linspace(0, 1, 10), np.zeros(10)])
+            p.add_signal(sig)
+            c.add_plot(p, 0)
+        c.focus_plot = c.plots[0][0]
+        self.assertTrue(c.is_minimap_eligible())
+
+    def test_eligibility_rejects_non_xy_plots(self):
+        from iplotlib.core.plot import PlotContour, PlotXYWithSlider
+        c = Canvas(1, 1)
+        c.add_plot(PlotContour(), 0)
+        self.assertFalse(c.is_minimap_eligible())
+
+        c2 = Canvas(1, 1)
+        c2.add_plot(PlotXYWithSlider(), 0)
+        self.assertFalse(c2.is_minimap_eligible())
+
+    def test_baseline_snapshot_roundtrip(self):
+        c = Canvas(1, 1)
+        c.snapshot_minimap_baseline(10, 20)
+        self.assertEqual(c.get_minimap_baseline(), (10, 20))
+        c.snapshot_minimap_baseline(None, None)
+        self.assertIsNone(c.get_minimap_baseline())
+
+    def test_show_minimap_serialization_roundtrip(self):
+        c = _canvas_with_signal()
+        c.show_minimap = True
+        d = c.to_dict()
+        self.assertTrue(d['show_minimap'])
+        restored = Canvas.from_dict(d)
+        self.assertTrue(restored.show_minimap)
+
+    def test_old_workspace_without_show_minimap_defaults_off(self):
+        c = _canvas_with_signal()
+        d = c.to_dict()
+        d.pop('show_minimap', None)
+        restored = Canvas.from_dict(d)
+        self.assertFalse(restored.show_minimap)
+
+
+class MinimapToolbarTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def _add_canvas(self, win, core=None):
+        qt_canvas = IplotQtCanvasFactory.new('matplotlib',
+                                             canvas=core or _canvas_with_signal())
+        qt_canvas.set_canvas(qt_canvas.get_canvas())
+        win.canvasStack.addWidget(qt_canvas)
+        self.app.processEvents()
+        return qt_canvas
+
+    def test_minimap_action_exists_and_disabled_by_default(self):
+        win = IplotQtMainWindow()
+        try:
+            self.assertIsNotNone(win.toolBar.minimapAction)
+            self.assertTrue(win.toolBar.minimapAction.isCheckable())
+            self.assertFalse(win.toolBar.minimapAction.isEnabled())
+        finally:
+            win.close()
+
+    def test_minimap_action_enabled_for_single_plot_canvas(self):
+        win = IplotQtMainWindow()
+        try:
+            self._add_canvas(win)
+            win.refresh_minimap_availability()
+            self.assertTrue(win.toolBar.minimapAction.isEnabled())
+        finally:
+            win.close()
+
+    def test_minimap_action_disabled_for_multi_plot_canvas(self):
+        win = IplotQtMainWindow()
+        try:
+            multi = Canvas(2, 1)
+            for _ in range(2):
+                p = PlotXY()
+                sig = SignalXY(label='s')
+                sig.set_data([np.linspace(0, 1, 10), np.zeros(10)])
+                p.add_signal(sig)
+                multi.add_plot(p, 0)
+            self._add_canvas(win, multi)
+            win.refresh_minimap_availability()
+            self.assertFalse(win.toolBar.minimapAction.isEnabled())
+        finally:
+            win.close()
+
+    def test_toggle_minimap_updates_canvas_flag(self):
+        win = IplotQtMainWindow()
+        try:
+            qt_canvas = self._add_canvas(win)
+            win.refresh_minimap_availability()
+            win.toolBar.minimapAction.setChecked(True)
+            self.app.processEvents()
+            self.assertTrue(qt_canvas.get_canvas().show_minimap)
+            win.toolBar.minimapAction.setChecked(False)
+            self.app.processEvents()
+            self.assertFalse(qt_canvas.get_canvas().show_minimap)
+        finally:
+            win.close()
+
+
 if __name__ == '__main__':
     unittest.main()
