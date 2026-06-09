@@ -285,6 +285,17 @@ class NanosecondDateFormatter(pg.AxisItem):
                     values = [f"{v:g}" for v in adjusted]
                 self.common_label.setText("")
                 self._updateLabel()
+            elif self.logMode:
+                # Y axis in log mode: un-log so labels stay in data-space.
+                values = [10 ** v for v in values]
+                if self.labelUnit in ['', 'k']:
+                    values = [f"{v:g}" for v in values]
+                    self.common_label.setText("")
+                else:
+                    scale_factor = self.autoSIPrefixScale
+                    values = [f"{v * scale_factor:g}" for v in values]
+                    if self.common_label.text != self.offset_str:
+                        self.common_label.setText(self.offset_str)
             else:
                 # Y axis: fn.siScale formatting
                 if self.labelUnit in ['', 'k']:

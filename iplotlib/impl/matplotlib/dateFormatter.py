@@ -14,6 +14,7 @@ class ExponentScalarFormatter(ScalarFormatter):
 
     def __init__(self, label_props: dict = None):
         super().__init__(useOffset=True, useMathText=False)
+        self.set_powerlimits((-3, 3))
         self._label_props = label_props or {}
 
     def _get_base_label(self) -> str:
@@ -28,13 +29,20 @@ class ExponentScalarFormatter(ScalarFormatter):
         return current_label or ''
 
     def get_offset(self):
-        """Update axis label with exponent prefix (X only) and return offset string."""
-        if not isinstance(self.axis, XAxis):
-            return super().get_offset()
+        """Return offset string; embed exponent in label only for linear X axis."""
+        # Native matplotlib offsetText already renders in a usable position for Y axis
+        # (above the plot) and for log X axis. Label embedding is only needed for the
+        # linear X axis case where the native offset clashes with right-edge ticks.
+        use_native_offset = False
+        if self.axis is not None and self.axis.axes is not None:
+            if isinstance(self.axis, XAxis):
+                use_native_offset = self.axis.axes.get_xscale() == 'log'
+            else:
+                use_native_offset = True
 
         base_label = self._get_base_label()
 
-        if self.orderOfMagnitude and self.orderOfMagnitude != 0:
+        if not use_native_offset and self.orderOfMagnitude and self.orderOfMagnitude != 0:
             exp_str = f'1e{self.orderOfMagnitude}'
             if self.axis:
                 new_label = f'{exp_str}  {base_label}'.strip()
@@ -42,12 +50,12 @@ class ExponentScalarFormatter(ScalarFormatter):
                 if current_label != new_label:
                     self.axis.set_label_text(new_label, **self._label_props)
             return ''
-        else:
-            if self.axis and base_label:
-                current_label = self.axis.get_label().get_text()
-                if current_label != base_label and '1e' in current_label:
-                    self.axis.set_label_text(base_label, **self._label_props)
-            return super().get_offset()
+
+        if self.axis and base_label:
+            current_label = self.axis.get_label().get_text()
+            if current_label != base_label and '1e' in current_label:
+                self.axis.set_label_text(base_label, **self._label_props)
+        return super().get_offset()
 
 
 class NanosecondDateFormatter(ScalarFormatter):

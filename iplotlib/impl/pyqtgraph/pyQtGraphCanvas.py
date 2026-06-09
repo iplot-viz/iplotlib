@@ -1506,7 +1506,12 @@ class PyQtGraphParser(BackendParserBase):
         bot, top = super().autoscale_y_axis(impl_plot)
         vb = impl_plot.getViewBox()
 
-        # Set new Y axis limits
+        if impl_plot.getAxis('left').logMode:
+            if bot is not None and top is not None and bot > 0 and top > 0:
+                vb.setYRange(np.log10(bot), np.log10(top), padding=padding)
+            else:
+                vb.enableAutoRange(axis='y')
+            return
         vb.setYRange(bot, top, padding=padding)
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
@@ -1763,8 +1768,11 @@ class PyQtGraphParser(BackendParserBase):
     def get_impl_y_axis(self, plot: PlotItem) -> AxisItem:
         return plot.getAxis('left')
 
-    def get_impl_y_axis_limits(self, plot: PlotItem) -> AxisItem:
-        return plot.getViewBox().viewRange()[1]
+    def get_impl_y_axis_limits(self, plot: PlotItem) -> Tuple[float, float]:
+        lo, hi = plot.getViewBox().viewRange()[1]
+        if plot.getAxis('left').logMode:
+            return 10 ** lo, 10 ** hi
+        return lo, hi
 
     def set_impl_x_axis_label_text(self, plot: PlotItem, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(plot)
@@ -1798,9 +1806,17 @@ class PyQtGraphParser(BackendParserBase):
         self.process_ipl_axis_params_label(self.get_impl_y_axis(plot), text, fc, fs)
 
     def set_impl_y_axis_limits(self, plot: PlotItem, limits: tuple):
-        if isinstance(plot, PlotItem):
-            vb = plot.getViewBox()
-            vb.setYRange(limits[0], limits[1], padding=0)
+        if not isinstance(plot, PlotItem):
+            return
+        vb = plot.getViewBox()
+        if plot.getAxis('left').logMode:
+            lo, hi = limits
+            if lo is not None and hi is not None and lo > 0 and hi > 0:
+                vb.setYRange(np.log10(lo), np.log10(hi), padding=0)
+            else:
+                vb.enableAutoRange(axis='y')
+            return
+        vb.setYRange(limits[0], limits[1], padding=0)
 
     def align_y_axis(self, col: int) -> None:
         """

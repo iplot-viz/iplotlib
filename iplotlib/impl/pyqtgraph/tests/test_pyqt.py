@@ -141,5 +141,70 @@ class PyQtGraphTesting(QAppOffscreenTestAdapter):
             self.assertIsInstance(dobj.ydata, (np.ndarray, list))
 
 
+class SetYAxisLimitsLogModeTests(QAppOffscreenTestAdapter):
+    """In log mode the viewport bounds must be log10-transformed so the
+    log-projected curve stays visible without the user invoking Autoscale."""
+
+    def _new_plot_item(self):
+        import pyqtgraph as pg
+        return pg.PlotItem()
+
+    def test_linear_mode_passes_limits_through(self):
+        parser = PyQtGraphParser()
+        plot = self._new_plot_item()
+        parser.set_impl_y_axis_limits(plot, (1.0, 10.0))
+        lo, hi = plot.getViewBox().viewRange()[1]
+        self.assertAlmostEqual(lo, 1.0, places=5)
+        self.assertAlmostEqual(hi, 10.0, places=5)
+
+    def test_log_mode_log10_transforms_limits(self):
+        parser = PyQtGraphParser()
+        plot = self._new_plot_item()
+        plot.setLogMode(x=False, y=True)
+        parser.set_impl_y_axis_limits(plot, (1e-4, 2e-4))
+        lo, hi = plot.getViewBox().viewRange()[1]
+        self.assertAlmostEqual(lo, np.log10(1e-4), places=5)
+        self.assertAlmostEqual(hi, np.log10(2e-4), places=5)
+
+    def test_log_mode_falls_back_to_autorange_on_non_positive(self):
+        parser = PyQtGraphParser()
+        plot = self._new_plot_item()
+        plot.setLogMode(x=False, y=True)
+        parser.set_impl_y_axis_limits(plot, (-1.0, 5.0))
+        state = plot.getViewBox().state['autoRange']
+        self.assertTrue(state[1])
+
+    def test_set_then_get_log_mode_roundtrip_is_data_space(self):
+        parser = PyQtGraphParser()
+        plot = self._new_plot_item()
+        plot.setLogMode(x=False, y=True)
+        parser.set_impl_y_axis_limits(plot, (1e-4, 2e-4))
+        lo, hi = parser.get_impl_y_axis_limits(plot)
+        self.assertAlmostEqual(lo, 1e-4, places=10)
+        self.assertAlmostEqual(hi, 2e-4, places=10)
+
+    def test_set_then_get_linear_mode_passes_through(self):
+        parser = PyQtGraphParser()
+        plot = self._new_plot_item()
+        parser.set_impl_y_axis_limits(plot, (1.0, 10.0))
+        lo, hi = parser.get_impl_y_axis_limits(plot)
+        self.assertAlmostEqual(lo, 1.0, places=5)
+        self.assertAlmostEqual(hi, 10.0, places=5)
+
+    def test_log_mode_round_trip_stable_across_two_iterations(self):
+        # Simulates the undo/redo flow: get -> set -> get must keep values stable.
+        parser = PyQtGraphParser()
+        plot = self._new_plot_item()
+        plot.setLogMode(x=False, y=True)
+        parser.set_impl_y_axis_limits(plot, (1e-4, 2e-4))
+        lo1, hi1 = parser.get_impl_y_axis_limits(plot)
+        parser.set_impl_y_axis_limits(plot, (lo1, hi1))
+        lo2, hi2 = parser.get_impl_y_axis_limits(plot)
+        self.assertAlmostEqual(lo1, lo2, places=10)
+        self.assertAlmostEqual(hi1, hi2, places=10)
+        self.assertFalse(np.isnan(lo2))
+        self.assertFalse(np.isnan(hi2))
+
+
 if __name__ == '__main__':
     unittest.main()
