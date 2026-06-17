@@ -351,5 +351,36 @@ class CrosshairMouseMotionTest(unittest.TestCase):
         self.assertIsNotNone(parser._cursors[0]._last_x)
 
 
+class MarkerSizeSinglePointTest(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def test_matplotlib_single_point_honours_configured_size(self):
+        from matplotlib.lines import Line2D
+        from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
+
+        line = Line2D([0.0], [0.0])
+        MatplotlibParser._update_marker_by_point_count(line, [0.0], {'markersize': 12})
+        self.assertEqual(line.get_markersize(), 12)
+
+        line_default = Line2D([0.0], [0.0])
+        MatplotlibParser._update_marker_by_point_count(line_default, [0.0], {})
+        self.assertEqual(line_default.get_markersize(), 5)
+
+    def test_pyqtgraph_single_point_honours_configured_size(self):
+        import pyqtgraph as pg
+        from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
+
+        item = pg.PlotDataItem([0.0], [0.0])
+        PyQtGraphParser._update_marker_by_point_count(item, [0.0], {'symbolSize': 12})
+        self.assertEqual(item.opts['symbolSize'], 12)
+
+        item_default = pg.PlotDataItem([0.0], [0.0])
+        PyQtGraphParser._update_marker_by_point_count(item_default, [0.0], {})
+        self.assertEqual(item_default.opts['symbolSize'], 5)
+
+
 if __name__ == '__main__':
     unittest.main()
