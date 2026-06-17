@@ -272,6 +272,71 @@ class SharedXAxisTest(unittest.TestCase):
                 shared = qt_canvas._parser._get_all_shared_axes(plots[0])
                 self.assertEqual(len(shared), 1)
 
+    def _build_time_and_xy_plots(self, backend: str):
+        """Two time-vs-data plots plus one X-versus-Y plot whose X is data (not time),
+        with shared_x_axis enabled."""
+        canvas = Canvas(3, 1, title="shared_x_with_xy", shared_x_axis=True)
+        time = np.linspace(0, 1_000_000, 200)
+        time_plots = []
+        for i in range(2):
+            plot = PlotXY()
+            sig = SignalXY(label=f"t{i}")  # x_expr defaults to '${self}.time'
+            # Matching ts groups the two time plots via the ts path (avoids max_diff=None fallback).
+            sig.ts_start = 0
+            sig.ts_end = 1_000_000
+            sig.set_data([time, np.sin(time * 1e-5 + i)])
+            plot.add_signal(sig)
+            canvas.add_plot(plot, 0)
+            time_plots.append(plot)
+        # X-versus-Y: X is data from another signal, ranging well below the time scale.
+        xy_plot = PlotXY()
+        xy_sig = SignalXY(label="xy", x_expr="${T}.data")
+        xy_sig.processing_enabled = False  # keep the directly-set data (no alias to evaluate)
+        xy_sig.set_data([np.linspace(5, 295, 150), np.linspace(0, 50, 150)])
+        xy_plot.add_signal(xy_sig)
+        canvas.add_plot(xy_plot, 0)
+
+        qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+        qt_canvas.set_canvas(canvas)
+        qt_canvas.resize(600, 400)
+        self.app.processEvents()
+        return canvas, qt_canvas, time_plots, xy_plot
+
+    def test_non_time_xy_plot_keeps_own_x_range_under_shared_time(self):
+        """An X-versus-Y plot must keep its data-derived X range (~5..295) rather than be
+        forced onto the shared time range (~1e6) when shared_x_axis is enabled."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                _, qt_canvas, _, xy_plot = self._build_time_and_xy_plots(backend)
+                limits = qt_canvas._parser.get_all_plot_limits()
+                xy_limits = next(lim for lim in limits if lim.plot_ref() is xy_plot)
+                x_begin = xy_limits.axes_ranges[0].begin
+                x_end = xy_limits.axes_ranges[0].end
+                # The time plots span 0..1e6; the XY plot's X must stay in temperature territory.
+                self.assertLess(x_begin, 10_000.0)
+                self.assertLess(x_end, 10_000.0)
+
+    def test_non_time_xy_plot_is_isolated_from_shared_group(self):
+        """The X-versus-Y plot must not join the shared-time group, while the two time
+        plots still share their X axis."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                _, qt_canvas, _, xy_plot = self._build_time_and_xy_plots(backend)
+                parser = qt_canvas._parser
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                xy_impl = next(p for p in plots if logical(p) is xy_plot)
+                time_impl = next(p for p in plots if logical(p) is not xy_plot)
+
+                # XY plot syncs only its own stacked sub-plots (behaves as shared_x_axis off).
+                self.assertEqual(len(parser._get_all_shared_axes(xy_impl)),
+                                 len(parser._plot_impl_plot_lut.get(id(xy_plot))))
+                # The two time plots still group together; the XY plot is excluded.
+                self.assertEqual(len(parser._get_all_shared_axes(time_impl)), 2)
+
 
 class CrosshairMouseMotionTest(unittest.TestCase):
     """Drive the crosshair drawing path by invoking the mouse-motion handlers.

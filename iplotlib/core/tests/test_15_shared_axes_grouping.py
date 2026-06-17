@@ -58,5 +58,29 @@ class PlotSignalTsRangeTest(unittest.TestCase):
         )
 
 
+class PlotXIsTimeTest(unittest.TestCase):
+    def test_default_x_expr_is_time(self):
+        plot = PlotXY()
+        plot.add_signal(SignalXY(label="t"))  # x_expr defaults to '${self}.time'
+        self.assertTrue(BackendParserBase._plot_x_is_time(plot))
+
+    def test_data_derived_x_expr_is_not_time(self):
+        plot = PlotXY()
+        plot.add_signal(SignalXY(label="xy", x_expr="${T}.data"))
+        self.assertFalse(BackendParserBase._plot_x_is_time(plot))
+
+    def test_any_non_time_signal_makes_plot_non_time(self):
+        plot = PlotXY()
+        plot.add_signal(SignalXY(label="t"), stack=1)
+        plot.add_signal(SignalXY(label="xy", x_expr="${C}.data"), stack=2)
+        self.assertFalse(BackendParserBase._plot_x_is_time(plot))
+
+    def test_none_plot_defaults_to_time(self):
+        self.assertTrue(BackendParserBase._plot_x_is_time(None))
+
+    def test_plot_without_signals_defaults_to_time(self):
+        self.assertTrue(BackendParserBase._plot_x_is_time(PlotXY()))
+
+
 if __name__ == '__main__':
     unittest.main()

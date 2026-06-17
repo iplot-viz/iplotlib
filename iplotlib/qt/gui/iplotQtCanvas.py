@@ -207,7 +207,9 @@ class IplotQtCanvas(QWidget):
             relative = False
             for row_idx, col in enumerate(canvas.plots, start=1):
                 for col_idx, plot in enumerate(col, start=1):
-                    if plot:
+                    # An X-versus-Y plot has no time axis, so it must not trigger the
+                    # different-time-range warning.
+                    if plot and self._parser._plot_x_is_time(plot):
                         axis = plot.axes[0]
                         if not axis.is_date and not isinstance(plot, PlotXYWithSlider):
                             relative = True

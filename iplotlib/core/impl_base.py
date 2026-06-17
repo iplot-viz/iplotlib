@@ -404,12 +404,32 @@ class BackendParserBase(ABC):
                     return (ts_start, ts_end)
         return None
 
+    @staticmethod
+    def _plot_x_is_time(plot):
+        """Whether the plot's X axis represents time.
+
+        X-versus-Y plots draw data on X (not time) and are not treated as time plots.
+        """
+        if plot is None or not plot.signals:
+            return True
+        for stack in plot.signals.values():
+            for signal in stack:
+                if signal is None:
+                    continue
+                if getattr(signal, 'x_expr', '${self}.time') != '${self}.time':
+                    return False
+        return True
+
     def _get_all_shared_axes(self, base_impl_plot: Any) -> List[Any]:
         cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
         base_plot = cache_item.plot()
 
         if isinstance(base_plot, PlotXYWithSlider) or base_plot is None:
             return []
+
+        # An X-versus-Y plot does not follow the shared time; keep it on its own.
+        if not self._plot_x_is_time(base_plot):
+            return self._plot_impl_plot_lut.get(id(base_plot), [])
 
         base_ts = self._plot_signal_ts_range(base_plot)
         base_begin, base_end = base_plot.axes[0].get_limits('original')
@@ -433,6 +453,10 @@ class BackendParserBase(ABC):
                 max_diff_ns = max_diff * 1e9 if is_date else max_diff
                 if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
                     shared.append(plot_item)
+                continue
+
+            # Never group an X-versus-Y plot together with the time plots.
+            if not self._plot_x_is_time(plot):
                 continue
 
             # XY plots: compare requested ts to bypass axis-original drift from
@@ -573,13 +597,14 @@ class BackendParserBase(ABC):
 
         begin, end = +np.inf, -np.inf
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        # X axis with shared_x_axis: aggregate across all non-slider plots so single-point
-        # signals in sibling subplots land on one consolidated range.
-        if ax_idx == 0 and self._pm.get_value(self.canvas, 'shared_x_axis'):
+        current_plot = ci.plot() if ci else None
+        # Under shared time the time plots share one common X range. An X-versus-Y plot is left
+        # out so it keeps its own X range instead of being stretched to the time range.
+        if ax_idx == 0 and self._pm.get_value(self.canvas, 'shared_x_axis') and self._plot_x_is_time(current_plot):
             signals = []
             for col in self.canvas.plots:
                 for p in col:
-                    if p is None or isinstance(p, PlotXYWithSlider) or not p.signals:
+                    if p is None or isinstance(p, PlotXYWithSlider) or not p.signals or not self._plot_x_is_time(p):
                         continue
                     for stack in p.signals.values():
                         signals.extend(weakref.ref(s) for s in stack)
