@@ -18,6 +18,7 @@ import os
 import unittest
 
 import numpy as np
+from PySide6.QtCore import Qt
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
@@ -73,6 +74,74 @@ class StatsTest(unittest.TestCase):
 
                 qt_canvas.stats(canvas)
                 self.app.processEvents()
+
+
+class StatsVerticalZoomTest(unittest.TestCase):
+    """Regression: a tight vertical zoom must not collapse the sample count.
+
+    A near-flat signal zoomed in Y below its own amplitude used to report 0
+    samples, because the stats mask gated the count on the Y view. The count
+    must reflect the visible time (X) window only and stay independent of the
+    vertical zoom.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    @staticmethod
+    def _flat_signal_canvas():
+        """Single near-flat signal around a small non-zero mean (the
+        GY_APS_I_MEAS / MiniMapIssue.json scenario)."""
+        core = Canvas(1, 1, title="flat")
+        x = np.linspace(0.0, 10.0, 200)
+        y = 0.00275 + 1e-4 * np.sin(x)
+        plot = PlotXY()
+        sig = SignalXY(label="flat")
+        sig.set_data([x, y])
+        plot.add_signal(sig)
+        core.add_plot(plot, 0)
+        return core, sig, x
+
+    def _set_view(self, impl_plot, backend, x, y_lo, y_hi):
+        if backend == 'pyqt':
+            vb = impl_plot.getViewBox()
+            vb.setXRange(float(x.min()), float(x.max()), padding=0)
+            vb.setYRange(y_lo, y_hi, padding=0)
+        else:
+            impl_plot.set_xlim(float(x.min()), float(x.max()))
+            impl_plot.set_ylim(y_lo, y_hi)
+        self.app.processEvents()
+
+    def _samples(self, qt_canvas, canvas):
+        qt_canvas.stats(canvas)
+        self.app.processEvents()
+        table = qt_canvas._stats_table.table
+        self.assertEqual(table.rowCount(), 1)
+        return table.item(0, 6).data(Qt.ItemDataRole.UserRole)
+
+    def test_narrow_y_view_keeps_samples_and_is_y_independent(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, sig, x = self._flat_signal_canvas()
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(400, 300)
+                self.app.processEvents()
+
+                impl_plot = qt_canvas._parser._signal_impl_plot_lut.get(sig.uid)
+                self.assertIsNotNone(impl_plot)
+
+                # Y view that covers none of the samples (a deep vertical zoom
+                # off the flat signal); X spans the full time range.
+                self._set_view(impl_plot, backend, x, 0.0030, 0.0031)
+                narrow = self._samples(qt_canvas, canvas)
+                self.assertGreater(narrow, 0)
+
+                # A wide Y view containing all the data yields the same count.
+                self._set_view(impl_plot, backend, x, -1.0, 1.0)
+                wide = self._samples(qt_canvas, canvas)
+                self.assertEqual(narrow, wide)
 
 
 class AutoscaleTest(unittest.TestCase):

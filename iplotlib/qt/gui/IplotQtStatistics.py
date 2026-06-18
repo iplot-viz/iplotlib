@@ -217,12 +217,10 @@ class IplotQtStatistics(QWidget):
                     if isinstance(impl_plot, PlotItem):
                         x_data = line.getData()[0]
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
-                        y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
                         signal_name = f"{line.name()}, {stack}"
                     else:
                         x_data = line.get_xdata()
                         lo, hi = impl_plot.get_xlim()
-                        y_lo, y_hi = impl_plot.get_ylim()
                         signal_name = f"{line.get_label()}, {stack}"
 
                     # The rows correspond to the signals and their corresponding stacks
@@ -233,11 +231,10 @@ class IplotQtStatistics(QWidget):
                     y_max = np.array(signal.data_store[2])
                     y_mean = np.array(signal.data_store[3])
 
-                    # Filter values
-                    mask = ((x_data >= lo) & (x_data <= hi) &
-                            (y_min >= y_lo) & (y_min <= y_hi) &
-                            (y_mean >= y_lo) & (y_mean <= y_hi) &
-                            (y_max >= y_lo) & (y_max <= y_hi))
+                    # Filter by the visible time (X) window only: gating on the Y
+                    # view zeroes the count when a flat signal is zoomed past its
+                    # spread.
+                    mask = (x_data >= lo) & (x_data <= hi)
 
                     y_min_displayed = y_min[mask]
                     y_max_displayed = y_max[mask]
@@ -304,13 +301,11 @@ class IplotQtStatistics(QWidget):
                         x_data = line.getData()[0] if line.getData()[0] is not None else []
                         y_data = line.getData()[1] if line.getData()[1] is not None else []
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
-                        y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
                         signal_name = f"{line.name()}, {stack}"
                     else:
                         x_data = line.get_xdata()
                         y_data = line.get_ydata()
                         lo, hi = impl_plot.get_xlim()
-                        y_lo, y_hi = impl_plot.get_ylim()
                         signal_name = f"{line.get_label()}, {stack}"
 
                     # The rows correspond to the signals and their corresponding stacks
@@ -319,9 +314,10 @@ class IplotQtStatistics(QWidget):
                     x_data = np.asarray(x_data)
                     y_data = np.asarray(y_data)
 
-                    # Filter values
+                    # Filter by the visible time (X) window only (see envelope
+                    # case): the Y view must not gate the sample count.
                     if (len(x_data), len(y_data)) != (0, 0):
-                        mask = ((x_data >= lo) & (x_data <= hi) & (y_data >= y_lo) & (y_data <= y_hi))
+                        mask = (x_data >= lo) & (x_data <= hi)
                         y_displayed = y_data[mask]
                         samples = y_displayed.size
                     else:
