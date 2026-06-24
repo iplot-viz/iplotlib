@@ -353,5 +353,54 @@ class MinimapToolbarTest(unittest.TestCase):
             win.close()
 
 
+class LogScaleInvalidationTest(unittest.TestCase):
+    """A log<->linear toggle must invalidate the affected plots' retained Y view so
+    the refresh re-autoscales them. ``_plots_with_log_scale_change`` is what decides
+    which plots are affected, comparing the live canvas against the last applied dict.
+    """
+
+    @staticmethod
+    def _two_plot_canvas() -> Canvas:
+        core = Canvas(2, 1, title="log_invalidation")
+        x = np.linspace(0, 10, 50)
+        for _ in range(2):
+            plot = PlotXY()
+            sig = SignalXY(label="s")
+            sig.set_data([x, np.sin(x)])
+            plot.add_signal(sig)
+            core.add_plot(plot, 0)
+        return core
+
+    def test_no_change_returns_empty(self):
+        canvas = self._two_plot_canvas()
+        prev = canvas.to_dict()
+        self.assertEqual(IplotQtMainWindow._plots_with_log_scale_change(canvas, prev), [])
+
+    def test_canvas_level_toggle_flags_all_plots(self):
+        canvas = self._two_plot_canvas()
+        prev = canvas.to_dict()
+        canvas.log_scale = True
+        changed = IplotQtMainWindow._plots_with_log_scale_change(canvas, prev)
+        self.assertEqual({id(p) for p in changed},
+                         {id(canvas.plots[0][0]), id(canvas.plots[0][1])})
+
+    def test_plot_level_toggle_flags_only_that_plot(self):
+        canvas = self._two_plot_canvas()
+        prev = canvas.to_dict()
+        canvas.plots[0][1].log_scale = True
+        changed = IplotQtMainWindow._plots_with_log_scale_change(canvas, prev)
+        self.assertEqual([id(p) for p in changed], [id(canvas.plots[0][1])])
+
+    def test_explicit_plot_override_not_flagged_by_canvas_toggle(self):
+        # Plot pins log_scale=True explicitly, so a canvas-level None->True change does
+        # not alter its effective value and it must not be flagged.
+        canvas = self._two_plot_canvas()
+        canvas.plots[0][0].log_scale = True
+        prev = canvas.to_dict()
+        canvas.log_scale = True
+        changed = IplotQtMainWindow._plots_with_log_scale_change(canvas, prev)
+        self.assertEqual([id(p) for p in changed], [id(canvas.plots[0][1])])
+
+
 if __name__ == '__main__':
     unittest.main()
