@@ -46,6 +46,8 @@ class iplotMplRuler:
                                        verticalalignment="bottom", horizontalalignment="left",
                                        **text_kwargs)
 
+        self._apply_view_visibility()
+
     def _format_x(self, x: float) -> str:
         try:
             return self.ax.format_xdata(x)
@@ -67,9 +69,8 @@ class iplotMplRuler:
         self._apply_view_visibility()
 
     def _apply_view_visibility(self):
-        """Hide the ruler when its anchor leaves the view: the whole crosshair
-        disappears once x is outside the time window, and the horizontal part
-        once y is off-screen. Honour a user-hidden ruler (self.visible)."""
+        """Hide the whole crosshair when x leaves the time window, and the horizontal
+        part when y is off-screen. Honours a user-hidden ruler."""
         if not self.visible:
             return
         x, y = self.xy

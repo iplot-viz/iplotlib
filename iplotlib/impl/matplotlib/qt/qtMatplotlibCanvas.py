@@ -792,6 +792,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 plot = ci.plot() if hasattr(ci, 'plot') else None
                 if plot is None or isinstance(plot, (PlotContour, PlotContourWithSlider)):
                     return
+                # Double-clicking on an existing ruler must not stack a new one on top.
+                if self._find_ruler_near(event.inaxes, event) is not None:
+                    return
                 # Double-click creates a ruler at the cursor.
                 self._add_ruler_at(event.inaxes, plot, event.xdata, event.ydata)
                 self.render()

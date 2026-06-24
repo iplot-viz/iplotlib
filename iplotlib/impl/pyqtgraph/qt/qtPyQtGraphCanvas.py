@@ -647,6 +647,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 if event.button() == Qt.MouseButton.LeftButton:
                     if isinstance(plot, (PlotContour, PlotContourWithSlider)):
                         return
+                    # Double-clicking on an existing ruler must not stack a new one on top.
+                    if self._find_ruler_near(impl_plot, event.scenePos()) is not None:
+                        event.accept()
+                        return
                     # Double-click creates a ruler at the cursor.
                     system_coord = view_box.mapSceneToView(event.scenePos())
                     self._add_ruler_at(impl_plot, plot, system_coord.x(), system_coord.y())
