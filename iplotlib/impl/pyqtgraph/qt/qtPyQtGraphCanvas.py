@@ -1,7 +1,7 @@
 import os
 
 from PySide6.QtCore import QMargins, Qt, Signal, QEvent, QTimer
-from PySide6.QtWidgets import QApplication, QVBoxLayout, QMenu, QMessageBox, QSplitter
+from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox, QSplitter
 
 import numpy as np
 from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY, PlotContourWithSlider
@@ -28,11 +28,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
-        # Deferred ruler-add timer: lets a second click cancel a pending single-click add.
-        self._ruler_pending_timer = QTimer(self)
-        self._ruler_pending_timer.setSingleShot(True)
-        self._ruler_pending_timer.timeout.connect(self._commit_pending_ruler)
-        self._ruler_pending_args = None
+        # Ruler drag state: an existing ruler grabbed with a single left click.
+        self._ruler_drag = None
 
         self._parser = PyQtGraphParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
         self._parser._on_legend_right_click = self._on_legend_right_click
@@ -447,16 +444,31 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                                     visible=True, is_date=is_date)
         if not self._ruler_window.isVisible():
             self._ruler_window.show()
-        else:
-            self._ruler_window.raise_()
-            self._ruler_window.activateWindow()
+        # Keep the canvas in front; do not steal focus to the ruler window.
+        self.window().activateWindow()
 
-    def _commit_pending_ruler(self):
-        if self._ruler_pending_args is None:
-            return
-        impl_plot, plot, x, y = self._ruler_pending_args
-        self._ruler_pending_args = None
-        self._add_ruler_at(impl_plot, plot, x, y)
+    def _begin_ruler_drag(self, impl_plot, plot, ruler):
+        """Grab an existing ruler to drag it across the plot."""
+        self._ruler_drag = (impl_plot, plot, ruler)
+
+    def _drag_ruler_to(self, view_box, scene_pos):
+        """Move the grabbed ruler to the cursor position (live, no blit needed)."""
+        _, _, ruler = self._ruler_drag
+        view_pos = view_box.mapSceneToView(scene_pos)
+        ruler.xy = (view_pos.x(), view_pos.y())
+        ruler.refresh_labels()
+
+    def _end_ruler_drag(self):
+        """Persist the dragged ruler's new position to the model and the window."""
+        impl_plot, plot, ruler = self._ruler_drag
+        x_view, y = ruler.xy
+        x_abs = self._parser.transform_value(impl_plot, 0, x_view)
+        core = plot.get_ruler(ruler.name)
+        if core is not None:
+            core.xy = (x_abs, y)
+        plot_id = self._canvas_position_of(plot) or (1, 1)
+        self._ruler_window.update_row_xy(ruler.name, plot_id, (x_abs, y))
+        self._ruler_drag = None
 
     def _find_ruler_near(self, impl_plot, scene_pos):
         rulers = self._parser.get_rulers(impl_plot)
@@ -584,9 +596,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 self._ruler_window.show()
             elif self._ruler_window.isMinimized():
                 self._ruler_window.showNormal()
-            else:
-                self._ruler_window.raise_()
-                self._ruler_window.activateWindow()
+            # Open behind the canvas so it does not cover the plot.
+            self._ruler_window.lower()
+            self.window().activateWindow()
+            self.window().raise_()
 
     def undo(self):
         self._parser.undo()
@@ -632,15 +645,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         if is_double_click:
             if self._mmode == Canvas.MOUSE_MODE_RULER:
                 if event.button() == Qt.MouseButton.LeftButton:
-                    self._ruler_pending_timer.stop()
-                    self._ruler_pending_args = None
                     if isinstance(plot, (PlotContour, PlotContourWithSlider)):
                         return
-                    hit = self._find_ruler_near(impl_plot, event.scenePos())
-                    if hit is not None:
-                        plot_id = self._canvas_position_of(plot) or (1, 1)
-                        self.delete_ruler(hit.name, plot_id, True)
-                        self._ruler_window.remove_row_by_name(hit.name, plot_id)
+                    # Double-click creates a ruler at the cursor.
+                    system_coord = view_box.mapSceneToView(event.scenePos())
+                    self._add_ruler_at(impl_plot, plot, system_coord.x(), system_coord.y())
                     event.accept()
                 return
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER,
@@ -717,10 +726,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     logger.warning(f"Rulers are not supported for {type(plot).__name__}")
                     return
                 if event.button() == Qt.MouseButton.LeftButton:
-                    system_coord = view_box.mapSceneToView(event.scenePos())
-                    self._ruler_pending_args = (impl_plot, plot, system_coord.x(), system_coord.y())
-                    self._ruler_pending_timer.start(QApplication.doubleClickInterval())
-                    event.accept()
+                    # Single left click grabs the nearest ruler to drag it; empty space does nothing.
+                    hit = self._find_ruler_near(impl_plot, event.scenePos())
+                    if hit is not None:
+                        self._begin_ruler_drag(impl_plot, plot, hit)
+                        event.accept()
                 return
 
             elif self._mmode == Canvas.MOUSE_MODE_DIST:
@@ -764,9 +774,17 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     x = self._parser.transform_value(impl_plot, 0, x_value)
                     self._dist_calculator.set_src(x, y_value, plot, ci.stack_key)
 
+    def _remove_ruler_from_menu(self, name, plot_id):
+        self.delete_ruler(name, plot_id, True)
+        self._ruler_window.remove_row_by_name(name, plot_id)
+
     def _impl_mouse_release_handler(self, view_box, event):
         """Handle mouse release events in PyQtGraph."""
         impl_plot = view_box.parentItem()
+
+        if self._ruler_drag is not None:
+            self._end_ruler_drag()
+            return
 
         # Handle drag shift completion in Select mode
         if self._drag_shift_active and self._mmode == Canvas.MOUSE_MODE_SELECT:
@@ -793,6 +811,17 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         is_double = callable(getattr(event, 'double', None)) and event.double()
         if event is not None and event.button() == Qt.MouseButton.RightButton and not is_double:
             autoscale_menu = QMenu(self)
+            if self._mmode == Canvas.MOUSE_MODE_RULER:
+                hit = self._find_ruler_near(impl_plot, event.scenePos())
+                if hit is not None:
+                    ci_plot = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+                    plot = ci_plot.plot() if hasattr(ci_plot, 'plot') else None
+                    if plot is not None:
+                        plot_id = self._canvas_position_of(plot) or (1, 1)
+                        autoscale_menu.addAction(
+                            f"Remove ruler {hit.name}",
+                            lambda n=hit.name, p=plot_id: self._remove_ruler_from_menu(n, p))
+                        autoscale_menu.addSeparator()
             autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(impl_plot))
             autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
             if self._parser.canvas.focus_plot is None:
@@ -835,7 +864,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         pass
 
     def _impl_mouse_drag_handler(self, view_box, event):
-        """Handle mouse drag events for preview during drag shift."""
+        """Handle mouse drag events for ruler drag and drag-shift preview."""
+        if self._ruler_drag is not None:
+            if event is not None and view_box.parentItem() is self._ruler_drag[0]:
+                self._drag_ruler_to(view_box, event.scenePos())
+            return
         if not self._drag_shift_active or self._drag_shift_signal is None:
             return
 

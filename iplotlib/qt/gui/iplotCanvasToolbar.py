@@ -51,7 +51,9 @@ class IplotQtCanvasToolbar(QToolBar):
             tool_action = QAction(tool_name[3:], parent=self)
             tool_action.setCheckable(True)
             tool_action.setActionGroup(self._actions)
-            tool_action.triggered.connect(lambda _checked, n=tool_name: self.toolActivated.emit(n))
+            # *_ absorbs the optional `checked` arg: QAction.triggered passes it on
+            # PySide6 6.10 but not on 6.6, so a fixed positional param crashes the latter.
+            tool_action.triggered.connect(lambda *_, n=tool_name: self.toolActivated.emit(n))
             self.addAction(tool_action)
             self._tool_actions[tool_name] = tool_action
 

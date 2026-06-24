@@ -15,9 +15,9 @@ import typing
 from collections.abc import Collection
 
 import numpy as np
-from PySide6.QtCore import QMargins, Qt, Slot, Signal, QTimer
+from PySide6.QtCore import QMargins, Qt, Slot, Signal
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication, QMessageBox, QSizePolicy, QSplitter, QVBoxLayout, QMenu
+from PySide6.QtWidgets import QMessageBox, QSizePolicy, QSplitter, QVBoxLayout, QMenu
 
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes as MPLAxes
@@ -50,11 +50,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
-        # Deferred ruler-add timer: lets a second click cancel a pending single-click add.
-        self._ruler_pending_timer = QTimer(self)
-        self._ruler_pending_timer.setSingleShot(True)
-        self._ruler_pending_timer.timeout.connect(self._commit_pending_ruler)
-        self._ruler_pending_args = None
+        # Ruler drag state: an existing ruler grabbed with a single left click,
+        # plus the blit background captured when the drag starts.
+        self._ruler_drag = None
+        self._ruler_drag_bg = None
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
@@ -399,16 +398,39 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                                     visible=True, is_date=is_date)
         if not self._ruler_window.isVisible():
             self._ruler_window.show()
-        else:
-            self._ruler_window.raise_()
-            self._ruler_window.activateWindow()
+        # Keep the canvas in front; do not steal focus to the ruler window.
+        self.window().activateWindow()
 
-    def _commit_pending_ruler(self):
-        if self._ruler_pending_args is None:
-            return
-        impl_plot, plot, x, y = self._ruler_pending_args
-        self._ruler_pending_args = None
-        self._add_ruler_at(impl_plot, plot, x, y)
+    def _begin_ruler_drag(self, impl_plot, plot, ruler):
+        """Grab an existing ruler to drag it; capture a clean blit background."""
+        self._ruler_drag = (impl_plot, plot, ruler)
+        ruler.set_visible(False)
+        self._mpl_renderer.draw()
+        self._ruler_drag_bg = self._mpl_renderer.copy_from_bbox(self._parser.figure.bbox)
+        ruler.set_visible(True)
+
+    def _drag_ruler_to(self, x: float, y: float):
+        """Move the grabbed ruler to (x, y) in view coordinates and blit it."""
+        _, _, ruler = self._ruler_drag
+        ruler.xy = (x, y)
+        ruler.refresh_labels()
+        if self._ruler_drag_bg is not None:
+            self._mpl_renderer.restore_region(self._ruler_drag_bg)
+            ruler.draw_artists()
+            self._mpl_renderer.blit(self._parser.figure.bbox)
+
+    def _end_ruler_drag(self):
+        """Persist the dragged ruler's new position to the model and the window."""
+        impl_plot, plot, ruler = self._ruler_drag
+        x_view, y = ruler.xy
+        x_abs = self._parser.transform_value(impl_plot, 0, x_view)
+        core = plot.get_ruler(ruler.name)
+        if core is not None:
+            core.xy = (x_abs, y)
+        plot_id = self._canvas_position_of(plot) or (1, 1)
+        self._ruler_window.update_row_xy(ruler.name, plot_id, (x_abs, y))
+        self._ruler_drag = None
+        self._ruler_drag_bg = None
         self.render()
 
     def _find_ruler_near(self, impl_plot, event):
@@ -560,9 +582,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 self._ruler_window.show()
             elif self._ruler_window.isMinimized():
                 self._ruler_window.showNormal()
-            else:
-                self._ruler_window.raise_()
-                self._ruler_window.activateWindow()
+            # Open behind the canvas so it does not cover the plot.
+            self._ruler_window.lower()
+            self.window().activateWindow()
+            self.window().raise_()
 
     def undo(self):
         self._parser.undo()
@@ -716,7 +739,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         return None, None, None
 
     def _mpl_mouse_motion_handler(self, event: MouseEvent):
-        """Handle mouse motion for drag shift preview."""
+        """Handle mouse motion for ruler drag and drag shift preview."""
+        if self._ruler_drag is not None:
+            impl_plot = self._ruler_drag[0]
+            if (event.inaxes is impl_plot
+                    and event.xdata is not None and event.ydata is not None):
+                self._drag_ruler_to(event.xdata, event.ydata)
+            return
         if not self._drag_shift_active or self._drag_shift_signal is None:
             return
         if event.inaxes != self._drag_shift_impl_plot:
@@ -759,14 +788,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 plot = ci.plot() if hasattr(ci, 'plot') else None
                 if plot is None or isinstance(plot, (PlotContour, PlotContourWithSlider)):
                     return
-                self._ruler_pending_timer.stop()
-                self._ruler_pending_args = None
-                hit = self._find_ruler_near(event.inaxes, event)
-                if hit is not None:
-                    plot_id = self._canvas_position_of(plot) or (1, 1)
-                    self.delete_ruler(hit.name, plot_id, True)
-                    self._ruler_window.remove_row_by_name(hit.name, plot_id)
-                    self.render()
+                # Double-click creates a ruler at the cursor.
+                self._add_ruler_at(event.inaxes, plot, event.xdata, event.ydata)
+                self.render()
                 return
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN] and event.button == MouseButton.RIGHT:
                 mpl_axes = event.inaxes
@@ -848,18 +872,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     return
                 if event.xdata is None or event.ydata is None:
                     return
-                if event.dblclick:
-                    self._ruler_pending_timer.stop()
-                    self._ruler_pending_args = None
-                    hit = self._find_ruler_near(event.inaxes, event)
-                    if hit is not None:
-                        plot_id = self._canvas_position_of(plot) or (1, 1)
-                        self.delete_ruler(hit.name, plot_id, True)
-                        self._ruler_window.remove_row_by_name(hit.name, plot_id)
-                        self.render()
-                    return
-                self._ruler_pending_args = (event.inaxes, plot, event.xdata, event.ydata)
-                self._ruler_pending_timer.start(QApplication.doubleClickInterval())
+                # Single left click grabs the nearest ruler to drag it; empty space does nothing.
+                hit = self._find_ruler_near(event.inaxes, event)
+                if hit is not None:
+                    self._begin_ruler_drag(event.inaxes, plot, hit)
                 return
             if event.button == MouseButton.RIGHT:
                 if getattr(self._mpl_toolbar, '_zoom_info', None) is not None:
@@ -945,6 +961,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _mpl_mouse_release_handler(self, event: MouseEvent):
         self._debug_log_event(event, "Mouse released")
+        if self._ruler_drag is not None:
+            self._end_ruler_drag()
+            return
         if event.dblclick:
             pass
         else:
@@ -967,11 +986,23 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # Update statistics
                 self.stats(self.get_canvas())
 
+    def _remove_ruler_from_menu(self, name, plot_id):
+        self.delete_ruler(name, plot_id, True)  # delete_ruler already re-renders
+        self._ruler_window.remove_row_by_name(name, plot_id)
+
     def _show_autoscale_menu(self, event: MouseEvent):
         if event.inaxes is None:
             return
         ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
         autoscale_menu = QMenu(self)
+        if self._mmode == Canvas.MOUSE_MODE_RULER and hasattr(ci, 'plot'):
+            hit = self._find_ruler_near(event.inaxes, event)
+            if hit is not None:
+                plot_id = self._canvas_position_of(ci.plot()) or (1, 1)
+                autoscale_menu.addAction(
+                    f"Remove ruler {hit.name}",
+                    lambda n=hit.name, p=plot_id: self._remove_ruler_from_menu(n, p))
+                autoscale_menu.addSeparator()
         autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
         autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
         if self._parser.canvas.focus_plot is None:
