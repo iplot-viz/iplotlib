@@ -22,6 +22,7 @@ class iplotMplRuler:
         self.color = color
         self.font_size = font_size
         self.animated = animated
+        self.visible = True
 
         self.v_line = ax.axvline(xy[0], color=color, linewidth=lw, linestyle='--',
                                   animated=animated, zorder=20, label='_RulerLine')
@@ -63,6 +64,24 @@ class iplotMplRuler:
         self.y_label.set_position((0, y))
         self.name_label.xy = (x, y)
         self.name_label.set_position((x, y))
+        self._apply_view_visibility()
+
+    def _apply_view_visibility(self):
+        """Hide the ruler when its anchor leaves the view: the whole crosshair
+        disappears once x is outside the time window, and the horizontal part
+        once y is off-screen. Honour a user-hidden ruler (self.visible)."""
+        if not self.visible:
+            return
+        x, y = self.xy
+        xmin, xmax = sorted(self.ax.get_xlim())
+        ymin, ymax = sorted(self.ax.get_ylim())
+        in_x = xmin <= x <= xmax
+        in_y = ymin <= y <= ymax
+        self.v_line.set_visible(in_x)
+        self.x_label.set_visible(in_x)
+        self.h_line.set_visible(in_x and in_y)
+        self.y_label.set_visible(in_x and in_y)
+        self.name_label.set_visible(in_x and in_y)
 
     def set_label_text(self, text: str):
         self.name_label.set_text(text)
@@ -76,11 +95,11 @@ class iplotMplRuler:
             label.get_bbox_patch().set_edgecolor(color)
 
     def set_visible(self, visible: bool):
-        self.v_line.set_visible(visible)
-        self.h_line.set_visible(visible)
-        self.x_label.set_visible(visible)
-        self.y_label.set_visible(visible)
-        self.name_label.set_visible(visible)
+        self.visible = visible
+        for artist in (self.v_line, self.h_line, self.x_label, self.y_label, self.name_label):
+            artist.set_visible(visible)
+        if visible:
+            self._apply_view_visibility()
 
     def draw_artists(self):
         for a in (self.v_line, self.h_line, self.x_label, self.y_label, self.name_label):

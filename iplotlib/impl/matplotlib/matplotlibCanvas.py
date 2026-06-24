@@ -977,9 +977,11 @@ class MatplotlibParser(BackendParserBase):
 
     def _x_axis_update_callback(self, current_plot: MPLAxes):
         super()._x_axis_update_callback(current_plot)
+        self.refresh_rulers(current_plot)
 
     def _y_axis_update_callback(self, current_plot: MPLAxes):
         super()._y_axis_update_callback(current_plot)
+        self.refresh_rulers(current_plot)
 
     def process_ipl_log_axis(self, mpl_axis: MPLAxis, plot: Plot):
         if isinstance(mpl_axis, YAxis):

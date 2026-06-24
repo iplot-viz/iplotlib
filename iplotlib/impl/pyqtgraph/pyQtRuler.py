@@ -24,6 +24,7 @@ class pyQtRuler:
         self.name = name
         self.xy = xy
         self.color = color
+        self.visible = True
 
         pen = pg.mkPen(color=color, width=lw, style=QtCore.Qt.PenStyle.DashLine, cosmetic=True)
         font = QtGui.QFont()
@@ -85,16 +86,24 @@ class pyQtRuler:
         x_scene = vb.mapViewToScene(QPointF(x, ymin)).x()
         y_scene = vr.bottom()
         self.x_label.setPos(axis_b.mapFromScene(QPointF(x_scene, y_scene)))
-        self.x_label.setVisible(xmin < x < xmax)
 
         axis_l = plot.getAxis("left")
         self.y_label.setText(f"{y:.6g}")
         y_scene = vb.mapViewToScene(QPointF(xmin, y)).y()
         x_scene = vr.left()
         self.y_label.setPos(axis_l.mapFromScene(QPointF(x_scene, y_scene)))
-        self.y_label.setVisible(ymin < y < ymax)
 
         self.name_label.setPos(x, y)
+
+        # The ruler disappears when its x leaves the time window; the horizontal
+        # part also hides when y is off-screen. Honour a user-hidden ruler.
+        in_x = xmin < x < xmax
+        in_y = ymin < y < ymax
+        self.v_line.setVisible(self.visible and in_x)
+        self.x_label.setVisible(self.visible and in_x)
+        self.h_line.setVisible(self.visible and in_x and in_y)
+        self.y_label.setVisible(self.visible and in_x and in_y)
+        self.name_label.setVisible(self.visible and in_x and in_y)
 
     def set_label_text(self, text: str):
         self.name_label.setText(text)
@@ -111,11 +120,14 @@ class pyQtRuler:
             label.update()
 
     def set_visible(self, visible: bool):
+        self.visible = visible
         self.v_line.setVisible(visible)
         self.h_line.setVisible(visible)
         self.x_label.setVisible(visible)
         self.y_label.setVisible(visible)
         self.name_label.setVisible(visible)
+        if visible:
+            self.refresh_labels()
 
     def remove(self):
         items = [self.v_line, self.h_line, self.name_label, self.x_label, self.y_label]
