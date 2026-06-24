@@ -444,7 +444,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                                     visible=True, is_date=is_date)
         if not self._ruler_window.isVisible():
             self._ruler_window.show()
-        # Keep the canvas in front; do not steal focus to the ruler window.
+        # Do not steal focus from the canvas.
         self.window().activateWindow()
 
     def _begin_ruler_drag(self, impl_plot, plot, ruler):
@@ -596,7 +596,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 self._ruler_window.show()
             elif self._ruler_window.isMinimized():
                 self._ruler_window.showNormal()
-            # Open behind the canvas so it does not cover the plot.
+            # Open behind the canvas.
             self._ruler_window.lower()
             self.window().activateWindow()
             self.window().raise_()
@@ -726,7 +726,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     logger.warning(f"Rulers are not supported for {type(plot).__name__}")
                     return
                 if event.button() == Qt.MouseButton.LeftButton:
-                    # Single left click grabs the nearest ruler to drag it; empty space does nothing.
+                    # Grab the nearest ruler to drag; empty space is a no-op.
                     hit = self._find_ruler_near(impl_plot, event.scenePos())
                     if hit is not None:
                         self._begin_ruler_drag(impl_plot, plot, hit)

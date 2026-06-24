@@ -52,7 +52,7 @@ class IplotQtRuler(QWidget):
         super().__init__(*args, **kwargs)
         self.resize(850, 500)
         self.setWindowTitle("Rulers window")
-        # Give the window minimize/maximize controls so it can be moved out of the way.
+        # Add minimize/maximize controls to the window.
         self.setWindowFlags(self.windowFlags()
                             | Qt.WindowMinimizeButtonHint
                             | Qt.WindowMaximizeButtonHint)
@@ -161,7 +161,7 @@ class IplotQtRuler(QWidget):
                 return
 
     def update_row_xy(self, name: str, plot_id, xy: Tuple[float, float]):
-        """Refresh a ruler row's (x, y) after the ruler has been dragged on the canvas."""
+        """Update a ruler row's (x, y) after it is dragged on the canvas."""
         target = tuple(plot_id)
         for row in self._rows:
             if row['name'] == name and row['plot_id'] == target:

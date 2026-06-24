@@ -101,7 +101,8 @@ class QtViewBox(pg.ViewBox):
         self.pressed.emit(self, ev)
 
     def mouseDoubleClickEvent(self, ev):
-        super().mouseDoubleClickEvent(ev)
+        # Skip super(): its default re-invokes mousePressEvent, emitting `pressed`
+        # twice and duplicating the action. Emit once here.
         self.pressed.emit(self, ev)
 
     def mouseMoveEvent(self, ev):

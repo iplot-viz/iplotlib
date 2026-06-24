@@ -50,8 +50,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
-        # Ruler drag state: an existing ruler grabbed with a single left click,
-        # plus the blit background captured when the drag starts.
+        # Ruler grabbed for dragging, and its blit background captured on first motion.
         self._ruler_drag = None
         self._ruler_drag_bg = None
 
@@ -398,30 +397,37 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                                     visible=True, is_date=is_date)
         if not self._ruler_window.isVisible():
             self._ruler_window.show()
-        # Keep the canvas in front; do not steal focus to the ruler window.
+        # Do not steal focus from the canvas.
         self.window().activateWindow()
 
     def _begin_ruler_drag(self, impl_plot, plot, ruler):
-        """Grab an existing ruler to drag it; capture a clean blit background."""
+        """Grab a ruler for dragging; blit background is captured lazily on first motion."""
         self._ruler_drag = (impl_plot, plot, ruler)
-        ruler.set_visible(False)
-        self._mpl_renderer.draw()
-        self._ruler_drag_bg = self._mpl_renderer.copy_from_bbox(self._parser.figure.bbox)
-        ruler.set_visible(True)
+        self._ruler_drag_bg = None
 
     def _drag_ruler_to(self, x: float, y: float):
         """Move the grabbed ruler to (x, y) in view coordinates and blit it."""
         _, _, ruler = self._ruler_drag
+        if self._ruler_drag_bg is None:
+            # First motion: capture a clean background without the dragged ruler.
+            ruler.set_visible(False)
+            self._mpl_renderer.draw()
+            self._ruler_drag_bg = self._mpl_renderer.copy_from_bbox(self._parser.figure.bbox)
+            ruler.set_visible(True)
         ruler.xy = (x, y)
         ruler.refresh_labels()
-        if self._ruler_drag_bg is not None:
-            self._mpl_renderer.restore_region(self._ruler_drag_bg)
-            ruler.draw_artists()
-            self._mpl_renderer.blit(self._parser.figure.bbox)
+        self._mpl_renderer.restore_region(self._ruler_drag_bg)
+        ruler.draw_artists()
+        self._mpl_renderer.blit(self._parser.figure.bbox)
 
     def _end_ruler_drag(self):
-        """Persist the dragged ruler's new position to the model and the window."""
+        """Persist the dragged ruler's position to the model and the window."""
         impl_plot, plot, ruler = self._ruler_drag
+        moved = self._ruler_drag_bg is not None
+        self._ruler_drag = None
+        self._ruler_drag_bg = None
+        if not moved:
+            return  # click without motion: nothing to persist
         x_view, y = ruler.xy
         x_abs = self._parser.transform_value(impl_plot, 0, x_view)
         core = plot.get_ruler(ruler.name)
@@ -429,8 +435,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             core.xy = (x_abs, y)
         plot_id = self._canvas_position_of(plot) or (1, 1)
         self._ruler_window.update_row_xy(ruler.name, plot_id, (x_abs, y))
-        self._ruler_drag = None
-        self._ruler_drag_bg = None
         self.render()
 
     def _find_ruler_near(self, impl_plot, event):
@@ -582,7 +586,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 self._ruler_window.show()
             elif self._ruler_window.isMinimized():
                 self._ruler_window.showNormal()
-            # Open behind the canvas so it does not cover the plot.
+            # Open behind the canvas.
             self._ruler_window.lower()
             self.window().activateWindow()
             self.window().raise_()
@@ -872,7 +876,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     return
                 if event.xdata is None or event.ydata is None:
                     return
-                # Single left click grabs the nearest ruler to drag it; empty space does nothing.
+                # Grab the nearest ruler to drag; empty space is a no-op.
                 hit = self._find_ruler_near(event.inaxes, event)
                 if hit is not None:
                     self._begin_ruler_drag(event.inaxes, plot, hit)
