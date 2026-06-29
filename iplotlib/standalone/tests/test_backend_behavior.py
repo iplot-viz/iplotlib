@@ -420,5 +420,85 @@ class CrosshairMouseMotionTest(unittest.TestCase):
         self.assertIsNotNone(parser._cursors[0]._last_x)
 
 
+class CrosshairYLabelFormatTest(unittest.TestCase):
+    """The pyqtgraph crosshair Y label must follow the left axis tick
+    formatting instead of a raw ``:.6g``, which rendered scientific notation
+    even when the Y ticks did not (mint #94)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def test_y_label_follows_left_axis_tick_strings(self):
+        import pyqtgraph as pg
+        from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
+
+        plot = pg.PlotItem()
+        axis = plot.getAxis('left')
+        ymin, ymax, y = 1e7, 2e7, 1.5e7
+        axis.autoSIPrefixScale = 1e-6
+
+        got = pyQtCrosshair._format_left_axis_value(axis, y, ymin, ymax)
+
+        self.assertNotIn('e', got.lower())
+        self.assertNotEqual(got, f"{y:.6g}")
+
+        size = axis.geometry().height() or 800
+        spacing = axis.tickValues(ymin, ymax, size)[0][0]
+        scale = axis.autoSIPrefixScale * axis.scale
+        expected = axis.tickStrings([y], scale, spacing)[0]
+        self.assertEqual(got, expected)
+
+
+class CrosshairMatplotlibYLabelFormatTest(unittest.TestCase):
+    """The matplotlib crosshair Y label must follow the Y tick formatter
+    instead of ``format_ydata`` (``format_data_short``), which renders
+    scientific notation even when the Y ticks do not (mint #94)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def test_matplotlib_y_label_matches_tick_formatter(self):
+        from matplotlib.backend_bases import MouseEvent
+
+        core = Canvas(1, 1, title="mpl_y_fmt")
+        x = np.linspace(0, 10, 200)
+        plot = PlotXY()
+        sig = SignalXY(label="big")
+        sig.set_data([x, np.linspace(-30000.0, 30000.0, 200)])
+        plot.add_signal(sig)
+        core.add_plot(plot, 0)
+        core.enable_crosshair(color="#d62728", linewidth=1,
+                              horizontal=True, vertical=True)
+        qt_canvas = IplotQtCanvasFactory.new('matplotlib', canvas=core)
+        qt_canvas.set_canvas(core)
+        qt_canvas.resize(600, 400)
+        self.app.processEvents()
+        qt_canvas.set_mouse_mode(Canvas.MOUSE_MODE_CROSSHAIR)
+        self.app.processEvents()
+
+        parser = qt_canvas._parser
+        fig = parser.figure
+        ax = fig.axes[0]
+        bbox = ax.get_position()
+        fw = fig.get_figwidth() * fig.dpi
+        fh = fig.get_figheight() * fig.dpi
+        x_pixel = (bbox.x0 + bbox.width / 2) * fw
+        # Off-centre so the cursor Y is a mid-magnitude value where the old
+        # format_ydata path produced scientific notation.
+        y_pixel = (bbox.y0 + bbox.height * 0.7) * fh
+
+        event = MouseEvent('motion_notify_event', fig.canvas, x_pixel, y_pixel)
+        fig.canvas.callbacks.process('motion_notify_event', event)
+        self.app.processEvents()
+
+        arrow = parser._cursors[0].y_arrows[0]
+        y = arrow.get_position()[1]
+        self.assertIn('e', ax.format_ydata(y).lower())
+        self.assertEqual(arrow.get_text(), ax.yaxis.get_major_formatter()(y))
+        self.assertNotIn('e', arrow.get_text().lower())
+
+
 if __name__ == '__main__':
     unittest.main()
