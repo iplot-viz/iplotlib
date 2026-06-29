@@ -296,7 +296,7 @@ class PyQtGraphParser(BackendParserBase):
     def _update_marker_by_point_count(marker_line: PlotDataItem, signal_x_data, signal_style: dict):
         if len(signal_x_data) == 1:
             marker_line.setSymbol('x')
-            marker_line.setSymbolSize(5)
+            marker_line.setSymbolSize(signal_style.get('symbolSize') or 5)
         else:
             symbol = signal_style.get('symbol')
             marker_line.setSymbol(symbol or None)

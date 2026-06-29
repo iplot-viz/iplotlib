@@ -107,6 +107,21 @@ class pyQtCrosshair:
                         view_box.addItem(annotation, ignoreBounds=True)
                         self.value_annotations.append(annotation)
 
+    @staticmethod
+    def _format_left_axis_value(axis, value, vmin, vmax):
+        try:
+            size = axis.geometry().height()
+            if size <= 0:
+                size = 800
+            tick_levels = axis.tickValues(vmin, vmax, size)
+            spacing = tick_levels[0][0] if tick_levels else 0
+            scale = getattr(axis, 'autoSIPrefixScale', 1.0) * getattr(axis, 'scale', 1.0)
+            if spacing > 0:
+                return axis.tickStrings([value], scale, spacing)[0]
+            return f"{value * scale:g}"
+        except Exception:
+            return f"{value:g}"
+
     def on_move(self, pos):
         if not self._is_active:
             return
@@ -199,7 +214,7 @@ class pyQtCrosshair:
                     axis_l = plot.getAxis("left")
                     text_key = f"y{i}"
                     current_text = self._text_cache.get(text_key)
-                    new_text = f"{y:.6g}"
+                    new_text = self._format_left_axis_value(axis_l, y, ymin, ymax)
                     if current_text != new_text:
                         self.y_arrows[i].setText(new_text)
                         self._text_cache[text_key] = new_text

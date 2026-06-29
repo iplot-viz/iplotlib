@@ -524,10 +524,9 @@ class BackendParserBase(ABC):
 
         # Set axis limits
         if ax_idx != 1 or not self.canvas.streaming:  # In case of Streaming, just set X limits at the start
-            # Recalculate when limits are missing OR degenerate (begin == end), which
-            # can happen with single-point workspaces where the stored range doesn't
-            # span the data of all signals sharing the axis.
-            if (axis.begin is None and axis.end is None) or (axis.begin == axis.end):
+            # Recalculate when the stored range is unusable: either end undefined, or
+            # degenerate (begin == end) as with single-point workspaces.
+            if axis.begin is None or axis.end is None or axis.begin == axis.end:
                 self.update_original_axis_limits(axis, impl_plot, ax_idx)
                 padding_begin, padding_end = True, True
 
