@@ -34,7 +34,8 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
-from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter
+from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter, \
+    NiceNanosecondLocator, RelativeTimeLocator, is_time_label
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
 logger = setupLogger.get_logger(__name__)
@@ -258,7 +259,7 @@ class MatplotlibParser(BackendParserBase):
     def _update_marker_by_point_count(marker_line: Line2D, signal_x_data, signal_style: dict):
         if len(signal_x_data) == 1:
             marker_line.set_marker('x')
-            marker_line.set_markersize(signal_style.get('markersize') or 5)
+            marker_line.set_markersize(5)
         else:
             marker_line.set_marker(signal_style.get('marker') or "")
             marker_line.set_markersize(signal_style.get('markersize'))
@@ -1002,18 +1003,40 @@ class MatplotlibParser(BackendParserBase):
         mpl_axis.get_offset_text().set_fontsize(fs)
 
         if not axis.is_date:
-            mpl_axis.set_major_formatter(ExponentScalarFormatter(label_props=label_props))
+            mpl_axis.set_major_formatter(
+                ExponentScalarFormatter(label_props=label_props))
 
         mpl_axis.set_tick_params(**tick_props)
 
-        # Set number of ticks and labels
-        mpl_axis.set_major_locator(MaxNLocator(tick_number))
+        # Stash the requested tick count so the date locator built later in
+        # process_ipl_axis_formatter can use it as its target.
+        mpl_axis._ipl_tick_number = tick_number
+
+        # Numeric axes: a date axis gets the time-aware NiceNanosecondLocator
+        # (set in process_ipl_axis_formatter). For a non-date X axis we always
+        # attach the RelativeTimeLocator, which self-gates: if the axis label is
+        # 'Time' it lays ticks on round durations (1d, 12h, 5m, ...), otherwise
+        # it falls back to MaxNLocator. (The 'Time' label is applied later, in
+        # signal processing, so we can't decide here -- the locator and the
+        # ExponentScalarFormatter both read the label live at draw time.) The Y
+        # axis keeps the plain MaxNLocator.
+        if not axis.is_date:
+            if getattr(mpl_axis, 'axis_name', None) == 'x':
+                mpl_axis.set_major_locator(RelativeTimeLocator(tick_number))
+            else:
+                mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
     def process_ipl_axis_formatter(self, impl_plot: MPLAxes, mpl_axis: MPLAxis, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        # Time-aware locator that shares the per-axis offset table with the
+        # formatter, so tick positions and labels always agree (UTC).
+        target_ticks = getattr(mpl_axis, '_ipl_tick_number', 6)
+        locator = NiceNanosecondLocator(ax_idx, offset_lut=ci.offsets, target_ticks=target_ticks)
+        mpl_axis.set_major_locator(locator)
         mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx,
                                                              offset_lut=ci.offsets,
-                                                             roundh=self._pm.get_value(self.canvas, 'round_hour')))
+                                                             roundh=self._pm.get_value(self.canvas, 'round_hour'),
+                                                             nice_locator=locator))
 
     def process_ipl_signal_impl_plot(self, signal: Signal):
         mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
@@ -1349,7 +1372,21 @@ class MatplotlibParser(BackendParserBase):
             label_props['color'] = fc
         if fs and fs > 0:
             label_props['fontsize'] = fs
-        self.get_impl_x_axis(impl_plot).set_label_text(text, **label_props)
+        x_axis = self.get_impl_x_axis(impl_plot)
+        x_axis.set_label_text(text, **label_props)
+
+        # The 'Time' label is applied here, during signal processing, which is
+        # the authoritative moment to decide whether this is a relative-time
+        # axis. Set the flag directly on the formatter and locator so neither
+        # has to re-sniff the label later (the label string/timing at draw time
+        # proved unreliable).
+        x_is_time = is_time_label(text)
+        fmt = x_axis.get_major_formatter()
+        if isinstance(fmt, ExponentScalarFormatter):
+            fmt._is_time = x_is_time
+        loc = x_axis.get_major_locator()
+        if isinstance(loc, RelativeTimeLocator):
+            loc._force_time = x_is_time
 
     def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
         if not isinstance(impl_plot, MPLAxes):
