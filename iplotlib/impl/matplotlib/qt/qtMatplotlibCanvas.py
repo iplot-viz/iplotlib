@@ -506,6 +506,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if not canvas:
             return
         self._ruler_window.set_canvas_columns(len(canvas.plots))
+        added = False
         for col_idx, col in enumerate(canvas.plots):
             for row_idx, plot in enumerate(col):
                 if not plot or not getattr(plot, 'rulers', None):
@@ -527,8 +528,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                         for r in self._parser.get_rulers():
                             if r.name == ruler.name:
                                 r.set_visible(False)
+                    added = True
                 self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
-        self.render()
+        # Only re-draw when rulers were actually restored.
+        if added:
+            self.render()
 
     def autoscale_y(self, impl_plot):
         """
