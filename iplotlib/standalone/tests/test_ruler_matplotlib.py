@@ -153,6 +153,50 @@ class RulerMatplotlibRegressionTest(unittest.TestCase):
         finally:
             widget.deleteLater()
 
+    def test_zoom_with_legend_and_ruler_keeps_axis_callback_alive(self):
+        """Ruler '_RulerLine' helpers must not be counted as signal lines: if they
+        are, zooming a legend plot raises inside the axis-update callback and
+        leaves the ``_update`` guard stuck True, freezing later zoom/pan/undo."""
+        import copy
+        from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
+
+        canvas = Canvas(2, 1, title="legend_ruler", shared_x_axis=True)
+        x = np.linspace(0, 10, 400)
+        for _ in range(2):
+            p = PlotXY(legend=True)
+            s = SignalXY(label="s")
+            s.set_data([x, np.sin(x)])
+            p.add_signal(s)
+            canvas.add_plot(p, 0)
+        widget = QtMatplotlibCanvas(canvas=canvas)
+        try:
+            plot0 = canvas.plots[0][0]
+            ip0 = widget._get_impl_plot_for_plot(plot0)
+            widget._add_ruler_at(ip0, plot0, 5.0, 0.0)
+
+            parser = widget._parser
+            current = parser.get_all_plot_limits()
+            narrowed = copy.deepcopy(current)
+            for src, dst in zip(current, narrowed):
+                dst.plot_ref = src.plot_ref
+                for a, b in zip(src.signals_ranges, dst.signals_ranges):
+                    b.signal_ref = a.signal_ref
+            span = current[0].axes_ranges[0].end - current[0].axes_ranges[0].begin
+            narrowed[0].axes_ranges[0].set_limits(
+                current[0].axes_ranges[0].begin + span * 0.25,
+                current[0].axes_ranges[0].end - span * 0.25)
+            cmd = IplotAxesRangeCmd('Zoom', old_limits=current,
+                                    new_limits=narrowed, parser=parser)
+            parser._hm.done(cmd)
+            cmd()
+            parser._hm.undo()
+
+            self.assertFalse(parser._update,
+                             "axis-update guard left stuck True after zoom+undo")
+        finally:
+            widget._ruler_window.close()
+            widget.deleteLater()
+
 
 if __name__ == '__main__':
     unittest.main()

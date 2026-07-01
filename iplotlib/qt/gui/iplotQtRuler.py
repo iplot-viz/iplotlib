@@ -2,7 +2,7 @@ from string import ascii_uppercase
 from typing import Dict, List, Tuple
 
 import pandas as pd
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QFrame, QHBoxLayout,
                                 QHeaderView, QLabel, QMessageBox, QPushButton, QRadioButton, QScrollArea,
@@ -290,7 +290,8 @@ class IplotQtRuler(QWidget):
 
         stretch_idx = self.columns_layout.count() - 1
         for plot_id in sorted(groups.keys()):
-            rulers = groups[plot_id]
+            # Columns read left-to-right by ascending X so the Δ between neighbours is meaningful.
+            rulers = sorted(groups[plot_id], key=lambda r: r['xy'][0])
             section, table = self._build_plot_section(plot_id, rulers)
             self.columns_layout.insertWidget(stretch_idx, section)
             stretch_idx += 1
@@ -323,7 +324,7 @@ class IplotQtRuler(QWidget):
         table.setHorizontalHeaderLabels(headers)
         h_header = table.horizontalHeader()
         h_header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        h_header.setStretchLastSection(True)
+        h_header.setStretchLastSection(False)
 
         col_idx = 0
         for i, r in enumerate(rulers):
@@ -340,7 +341,27 @@ class IplotQtRuler(QWidget):
 
         table.setFixedHeight(self._section_table_height(table))
         layout.addWidget(table)
+        # A horizontal scrollbar (shown when a plot has many ruler columns) would
+        # overlap the Y row; grow the fixed height by it once the layout has
+        # settled and the scrollbar's visibility is known.
+        QTimer.singleShot(0, lambda: self._fit_section_height(table))
         return section, table
+
+    def _fit_section_height(self, table: QTableWidget):
+        try:
+            scrollbar = table.horizontalScrollBar()
+            extra = scrollbar.height() if scrollbar.isVisible() else 0
+            table.setFixedHeight(self._section_table_height(table) + extra)
+        except RuntimeError:
+            pass  # table destroyed by a re-render before the timer fired
+
+    def resizeEvent(self, event):
+        # Shrinking the window can bring up a section's horizontal scrollbar, which
+        # would otherwise overlap the Y row; re-fit each section to its new width.
+        super().resizeEvent(event)
+        if self.view_mode == self.VIEW_COLUMNS:
+            for _, table in self.column_sections:
+                self._fit_section_height(table)
 
     @staticmethod
     def _section_table_height(table: QTableWidget) -> int:
@@ -426,12 +447,9 @@ class IplotQtRuler(QWidget):
             self._warn("Select at least 2 rulers to compute deltas.")
             return
 
+        # Deltas span plots too (e.g. two stacked plots sharing the time axis):
+        # dx is the time distance between rulers, dy the value difference.
         rows = list(self.selection_history)
-        plot_id = tuple(self.table.item(rows[0], self.COL_PLOT).data(Qt.ItemDataRole.UserRole))
-        if any(tuple(self.table.item(r, self.COL_PLOT).data(Qt.ItemDataRole.UserRole)) != plot_id for r in rows):
-            self._warn("All selected rulers must belong to the same plot.")
-            return
-
         rows.sort(key=lambda r: self.table.item(r, self.COL_X).data(Qt.ItemDataRole.UserRole))
 
         is_date = self.table.item(rows[0], self.COL_NAME).data(Qt.ItemDataRole.UserRole)

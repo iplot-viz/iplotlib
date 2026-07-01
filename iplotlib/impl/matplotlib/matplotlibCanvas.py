@@ -95,9 +95,13 @@ class MatplotlibParser(BackendParserBase):
         if legend is None:
             return
 
-        # Filter out '_child' lines from mpl_axes, which are added in envelope plots
-        # These lines should not be considered when matching lines to legend entries
-        valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
+        # Only signal lines map to legend entries. Exclude envelope ('_child') and
+        # ruler ('_RulerLine') helper lines, which would shift the index; a freshly
+        # re-plotted line may be briefly absent, so guard the lookup.
+        valid_lines = [line for line in mpl_axes.get_lines()
+                       if not line.get_label().startswith(("_child", "_RulerLine"))]
+        if plot_lines not in valid_lines:
+            return
         pos = valid_lines.index(plot_lines)
         legend_label = legend.get_texts()[pos]
         legend_text = legend.get_texts()[pos].get_text()
@@ -1294,12 +1298,29 @@ class MatplotlibParser(BackendParserBase):
 
     @BackendParserBase.run_in_one_thread
     def add_ruler(self, impl_plot: MPLAxes, name: str, x: float, y: float,
-                  color: str = "#FFFFFF", animated: bool = False) -> iplotMplRuler:
+                  color: str = "#FFFFFF", animated: bool = False,
+                  is_echo: bool = False) -> iplotMplRuler:
         font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
         ruler = iplotMplRuler(ax=impl_plot, name=name, xy=(x, y), color=color,
                               font_size=font_size, animated=animated)
+        ruler.abs_x = self.transform_value(impl_plot, 0, x)
+        ruler.abs_y = self.transform_value(impl_plot, 1, y)
+        ruler.is_echo = is_echo
         self._rulers.append(ruler)
         return ruler
+
+    def create_ruler_echoes(self, origin_impl_plot: MPLAxes, name: str,
+                            x_abs: float, y_abs: float, color: str):
+        """Mirror a ruler onto every plot sharing the time axis. Each echo carries
+        the same absolute X/Y and re-projects them to its own plot's offsets."""
+        if not self._pm.get_value(self.canvas, 'shared_x_axis'):
+            return
+        for sibling in self._get_all_shared_axes(origin_impl_plot):
+            if sibling is origin_impl_plot:
+                continue
+            x_view = self.transform_value(sibling, 0, x_abs, inverse=True)
+            y_view = self.transform_value(sibling, 1, y_abs, inverse=True)
+            self.add_ruler(sibling, name, x_view, y_view, color, is_echo=True)
 
     @BackendParserBase.run_in_one_thread
     def remove_ruler(self, impl_plot: MPLAxes, name: str):
@@ -1311,9 +1332,23 @@ class MatplotlibParser(BackendParserBase):
                 remaining.append(r)
         self._rulers = remaining
 
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler_by_name(self, name: str):
+        """Remove a ruler and its shared-x echoes across every plot (names are
+        canvas-global unique)."""
+        remaining = []
+        for r in self._rulers:
+            if r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
     def refresh_rulers(self, impl_plot: MPLAxes = None):
         for r in self._rulers:
             if impl_plot is None or r.ax is impl_plot:
+                r.xy = (self.transform_value(r.ax, 0, r.abs_x, inverse=True),
+                        self.transform_value(r.ax, 1, r.abs_y, inverse=True))
                 r.refresh_labels()
 
     def get_rulers(self, impl_plot: MPLAxes = None) -> List[iplotMplRuler]:

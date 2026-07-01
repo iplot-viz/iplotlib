@@ -80,6 +80,15 @@ class RulerPyQtGraphEndToEndTest(unittest.TestCase):
         self.assertEqual(self.widget._ruler_window.table.rowCount(), 1)
         self.assertEqual(self.widget._ruler_window.table.item(0, 0).text(), 'B')
 
+    def test_refresh_labels_tolerates_numpy_view_values(self):
+        """View range and xy may be numpy floats, so the in-range flags become
+        numpy.bool — which PySide's setVisible rejects. refresh_labels must cast
+        them, otherwise dragging/zooming a ruler raises TypeError."""
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 2.5, 0.5)
+        ruler = self.widget._parser.get_rulers(self.impl_plot)[0]
+        ruler.xy = (np.float64(2.5), np.float64(0.5))
+        ruler.refresh_labels()  # must not raise
+
     def test_toggle_ruler_visibility_updates_model_and_backend(self):
         self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
         self.widget.toggle_ruler_visibility('A', (self.plot.col, self.plot.row), False)

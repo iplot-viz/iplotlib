@@ -19,6 +19,11 @@ class iplotMplRuler:
         self.ax = ax
         self.name = name
         self.xy = xy
+        # Absolute (offset-free) X and Y; re-projected to the axis offsets on each
+        # refresh so zoom/pan keep the ruler anchored to its data position.
+        self.abs_x = xy[0]
+        self.abs_y = xy[1]
+        self.is_echo = False
         self.color = color
         self.font_size = font_size
         self.animated = animated
@@ -64,13 +69,13 @@ class iplotMplRuler:
         self.y_label.set_text(f"{y:.6g}")
         self.y_label.xy = (0, y)
         self.y_label.set_position((0, y))
-        self.name_label.xy = (x, y)
-        self.name_label.set_position((x, y))
         self._apply_view_visibility()
 
     def _apply_view_visibility(self):
-        """Hide the whole crosshair when x leaves the time window, and the horizontal
-        part when y is off-screen. Honours a user-hidden ruler."""
+        """Show X whenever it is in the time window; show the horizontal line and
+        Y value only when y is in range. The name sits at the X·Y intersection, or
+        drops to the bottom of the plot when y is out of range. Honours a hidden
+        ruler."""
         if not self.visible:
             return
         x, y = self.xy
@@ -82,7 +87,10 @@ class iplotMplRuler:
         self.x_label.set_visible(in_x)
         self.h_line.set_visible(in_x and in_y)
         self.y_label.set_visible(in_x and in_y)
-        self.name_label.set_visible(in_x and in_y)
+        self.name_label.set_visible(in_x)
+        name_y = y if in_y else ymin
+        self.name_label.xy = (x, name_y)
+        self.name_label.set_position((x, name_y))
 
     def set_label_text(self, text: str):
         self.name_label.set_text(text)

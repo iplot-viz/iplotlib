@@ -23,6 +23,11 @@ class pyQtRuler:
         self.plot = plot
         self.name = name
         self.xy = xy
+        # Absolute (offset-free) X and Y; re-projected to the plot offsets on each
+        # refresh so zoom/pan keep the ruler anchored to its data position.
+        self.abs_x = xy[0]
+        self.abs_y = xy[1]
+        self.is_echo = False
         self.color = color
         self.visible = True
 
@@ -93,17 +98,19 @@ class pyQtRuler:
         x_scene = vr.left()
         self.y_label.setPos(axis_l.mapFromScene(QPointF(x_scene, y_scene)))
 
-        self.name_label.setPos(x, y)
-
-        # The ruler disappears when its x leaves the time window; the horizontal
-        # part also hides when y is off-screen. Honour a user-hidden ruler.
-        in_x = xmin < x < xmax
-        in_y = ymin < y < ymax
+        # X shows whenever it is in the time window; the horizontal line and Y
+        # value only when y is in range. The name sits at the X·Y intersection, or
+        # drops to the bottom when y is out of range. Honour a hidden ruler.
+        # Inclusive bounds match the matplotlib backend (iplotMplRuler); bool()
+        # because view range / xy may be numpy and setVisible rejects numpy.bool.
+        in_x = bool(xmin <= x <= xmax)
+        in_y = bool(ymin <= y <= ymax)
+        self.name_label.setPos(x, y if in_y else ymin)
         self.v_line.setVisible(self.visible and in_x)
         self.x_label.setVisible(self.visible and in_x)
         self.h_line.setVisible(self.visible and in_x and in_y)
         self.y_label.setVisible(self.visible and in_x and in_y)
-        self.name_label.setVisible(self.visible and in_x and in_y)
+        self.name_label.setVisible(self.visible and in_x)
 
     def set_label_text(self, text: str):
         self.name_label.setText(text)

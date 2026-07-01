@@ -53,6 +53,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # Ruler grabbed for dragging, and its blit background captured on first motion.
         self._ruler_drag = None
         self._ruler_drag_bg = None
+        self._ruler_drag_echoes = []
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
@@ -345,7 +346,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             return
         impl_plot = self._get_impl_plot_for_plot(plot)
         if impl_plot is not None:
-            self._parser.remove_ruler(impl_plot, name)
+            # Removes the origin and its shared-x echoes across every plot.
+            self._parser.remove_ruler_by_name(name)
         if persist:
             plot.remove_ruler(name)
         self.render()
@@ -357,10 +359,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         ruler = plot.get_ruler(name)
         if ruler:
             ruler.visible = visible
-        impl_plot = self._get_impl_plot_for_plot(plot)
-        if impl_plot is None:
-            return
-        for r in self._parser.get_rulers(impl_plot):
+        # Apply to the origin and its echoes (names are canvas-global unique).
+        for r in self._parser.get_rulers():
             if r.name == name:
                 r.set_visible(visible)
         self.render()
@@ -372,10 +372,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         ruler = plot.get_ruler(name)
         if ruler:
             ruler.color = color
-        impl_plot = self._get_impl_plot_for_plot(plot)
-        if impl_plot is None:
-            return
-        for r in self._parser.get_rulers(impl_plot):
+        for r in self._parser.get_rulers():
             if r.name == name:
                 r.set_color(color)
         self.render()
@@ -387,13 +384,15 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if color is None:
             color = self._ruler_window.next_color(name)
         x_abs = self._parser.transform_value(impl_plot, 0, x)
-        ruler = Ruler(name=name, xy=(x_abs, y), color=color, visible=True)
+        y_abs = self._parser.transform_value(impl_plot, 1, y)
+        ruler = Ruler(name=name, xy=(x_abs, y_abs), color=color, visible=True)
         plot.add_ruler(ruler)
         self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
+        self._parser.create_ruler_echoes(impl_plot, name, x_abs, y_abs, ruler.color)
         is_date = bool(getattr(plot.axes[0], 'is_date', False))
         plot_id = self._canvas_position_of(plot) or (1, 1)
         self._ruler_window.set_canvas_columns(len(self._parser.canvas.plots))
-        self._ruler_window.add_row(name, plot_id, (x_abs, y), ruler.color,
+        self._ruler_window.add_row(name, plot_id, (x_abs, y_abs), ruler.color,
                                     visible=True, is_date=is_date)
         if not self._ruler_window.isVisible():
             self._ruler_window.show()
@@ -404,38 +403,71 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Grab a ruler for dragging; blit background is captured lazily on first motion."""
         self._ruler_drag = (impl_plot, plot, ruler)
         self._ruler_drag_bg = None
+        # Shared-x echoes move in lockstep with the origin during the drag.
+        self._ruler_drag_echoes = [r for r in self._parser.get_rulers()
+                                   if r.name == ruler.name and r is not ruler]
 
     def _drag_ruler_to(self, x: float, y: float):
-        """Move the grabbed ruler to (x, y) in view coordinates and blit it."""
-        _, _, ruler = self._ruler_drag
+        """Move the grabbed ruler (and its shared-x echoes) to (x, y) and blit."""
+        impl_plot, _, ruler = self._ruler_drag
+        echoes = self._ruler_drag_echoes
         if self._ruler_drag_bg is None:
-            # First motion: capture a clean background without the dragged ruler.
+            # First motion: capture a clean background without the moving artists.
             ruler.set_visible(False)
+            for echo in echoes:
+                echo.set_visible(False)
             self._mpl_renderer.draw()
             self._ruler_drag_bg = self._mpl_renderer.copy_from_bbox(self._parser.figure.bbox)
             ruler.set_visible(True)
+            for echo in echoes:
+                echo.set_visible(True)
+        x_abs = self._parser.transform_value(impl_plot, 0, x)
+        y_abs = self._parser.transform_value(impl_plot, 1, y)
+        ruler.abs_x = x_abs
+        ruler.abs_y = y_abs
         ruler.xy = (x, y)
         ruler.refresh_labels()
+        for echo in echoes:
+            echo.abs_x = x_abs
+            echo.abs_y = y_abs
+            echo.xy = (self._parser.transform_value(echo.ax, 0, x_abs, inverse=True),
+                       self._parser.transform_value(echo.ax, 1, y_abs, inverse=True))
+            echo.refresh_labels()
         self._mpl_renderer.restore_region(self._ruler_drag_bg)
         ruler.draw_artists()
+        for echo in echoes:
+            echo.draw_artists()
         self._mpl_renderer.blit(self._parser.figure.bbox)
 
     def _end_ruler_drag(self):
-        """Persist the dragged ruler's position to the model and the window."""
-        impl_plot, plot, ruler = self._ruler_drag
+        """Persist the dragged ruler's position to the model and the window. The
+        model ruler and its window row live on the origin's plot, so route there
+        even when a shared-x echo was the artist being dragged."""
+        _, _, ruler = self._ruler_drag
+        echoes = self._ruler_drag_echoes
         moved = self._ruler_drag_bg is not None
         self._ruler_drag = None
         self._ruler_drag_bg = None
+        self._ruler_drag_echoes = []
         if not moved:
             return  # click without motion: nothing to persist
-        x_view, y = ruler.xy
-        x_abs = self._parser.transform_value(impl_plot, 0, x_view)
-        core = plot.get_ruler(ruler.name)
-        if core is not None:
-            core.xy = (x_abs, y)
-        plot_id = self._canvas_position_of(plot) or (1, 1)
-        self._ruler_window.update_row_xy(ruler.name, plot_id, (x_abs, y))
+        origin = next((r for r in [ruler] + echoes if not r.is_echo), ruler)
+        self._persist_ruler_position(origin)
         self.render()
+
+    def _persist_ruler_position(self, origin):
+        """Write an origin ruler's current (abs_x, y) to its model ruler and its
+        row in the Ruler window."""
+        ci = self._parser._impl_plot_cache_table.get_cache_item(origin.ax)
+        origin_plot = ci.plot() if ci else None
+        if origin_plot is None:
+            return
+        x_abs, y_abs = origin.abs_x, origin.abs_y
+        core = origin_plot.get_ruler(origin.name)
+        if core is not None:
+            core.xy = (x_abs, y_abs)
+        plot_id = self._canvas_position_of(origin_plot) or (1, 1)
+        self._ruler_window.update_row_xy(origin.name, plot_id, (x_abs, y_abs))
 
     def _find_ruler_near(self, impl_plot, event):
         rulers = self._parser.get_rulers(impl_plot)
@@ -485,11 +517,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 is_date = bool(getattr(plot.axes[0], 'is_date', False))
                 for ruler in plot.rulers:
                     x_view = self._parser.transform_value(impl_plot, 0, ruler.xy[0], inverse=True)
-                    self._parser.add_ruler(impl_plot, ruler.name, x_view, ruler.xy[1], ruler.color)
+                    y_view = self._parser.transform_value(impl_plot, 1, ruler.xy[1], inverse=True)
+                    self._parser.add_ruler(impl_plot, ruler.name, x_view, y_view, ruler.color)
+                    self._parser.create_ruler_echoes(impl_plot, ruler.name,
+                                                     ruler.xy[0], ruler.xy[1], ruler.color)
                     self._ruler_window.add_row(ruler.name, plot_id, ruler.xy,
                                                 ruler.color, ruler.visible, is_date)
                     if not ruler.visible:
-                        for r in self._parser.get_rulers(impl_plot):
+                        for r in self._parser.get_rulers():
                             if r.name == ruler.name:
                                 r.set_visible(False)
                 self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))

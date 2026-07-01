@@ -413,7 +413,7 @@ class IplotQtCanvas(QWidget):
         """stage a view command"""
 
         name = self._mmode[3:]
-        old_limits = [self._parser.get_plot_limits(impl_plot)]
+        old_limits = self._parser.get_view_cmd_limits(impl_plot)
         cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
         self._staging_cmds.append(cmd)
         logger.debug(f"Staged {cmd}")
@@ -421,7 +421,7 @@ class IplotQtCanvas(QWidget):
     def commit_view_lim_cmd(self, impl_plot):
         """commit a view command"""
         cmd = self._staging_cmds.pop()
-        cmd.new_lim = [self._parser.get_plot_limits(impl_plot)]
+        cmd.new_lim = self._parser.get_view_cmd_limits(impl_plot)
         assert len(cmd.new_lim) == len(cmd.old_lim)
 
         # Check if any limit actually changed
@@ -429,14 +429,6 @@ class IplotQtCanvas(QWidget):
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             QApplication.processEvents()
             QApplication.restoreOverrideCursor()
-
-            # Update new limits after data refresh.
-            # Focus case: If focus plot is active and X-axis is shared, retrieve synchronized limits across
-            # all shared plots.
-            # if self._parser.canvas.focus_plot and self._parser.canvas.shared_x_axis:
-            #     cmd.new_lim = self._parser.get_all_plot_limits_focus()
-            # else:
-            #     cmd.new_lim = self._parser.get_all_plot_limits()
 
             self._commitd_cmds.append(cmd)
             logger.debug(f"Committed {cmd}")
