@@ -259,7 +259,7 @@ class MatplotlibParser(BackendParserBase):
     def _update_marker_by_point_count(marker_line: Line2D, signal_x_data, signal_style: dict):
         if len(signal_x_data) == 1:
             marker_line.set_marker('x')
-            marker_line.set_markersize(5)
+            marker_line.set_markersize(signal_style.get('markersize') or 5)
         else:
             marker_line.set_marker(signal_style.get('marker') or "")
             marker_line.set_markersize(signal_style.get('markersize'))

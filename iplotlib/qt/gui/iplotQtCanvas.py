@@ -394,10 +394,7 @@ class IplotQtCanvas(QWidget):
         """stage a view command"""
 
         name = self._mmode[3:]
-        # Capture limits for ALL plots (get_all_plot_limits honors focus), not
-        # just the plot under the cursor. A zoom with a shared X axis moves every
-        # plot, so recording only one meant undo/redo restored only that plot.
-        old_limits = self._parser.get_all_plot_limits()
+        old_limits = [self._parser.get_plot_limits(impl_plot)]
         cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
         self._staging_cmds.append(cmd)
         logger.debug(f"Staged {cmd}")
@@ -405,7 +402,7 @@ class IplotQtCanvas(QWidget):
     def commit_view_lim_cmd(self, impl_plot):
         """commit a view command"""
         cmd = self._staging_cmds.pop()
-        cmd.new_lim = self._parser.get_all_plot_limits()
+        cmd.new_lim = [self._parser.get_plot_limits(impl_plot)]
         assert len(cmd.new_lim) == len(cmd.old_lim)
 
         # Check if any limit actually changed

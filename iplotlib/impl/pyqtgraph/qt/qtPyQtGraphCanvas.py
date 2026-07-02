@@ -454,13 +454,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             Autoscale the Y axis of all PlotXY instances in the figure and store the action for undo/redo
         """
         axes = self._parser.get_canvas_plots()
-        if not axes:
-            return
-
-        # Single undoable step: stage once (stage_view_lim_cmd now captures the
-        # limits of ALL plots), autoscale every PlotXY, then commit/push once.
-        # One undo reverts the whole "autoscale all" instead of one plot per undo.
-        self.stage_view_lim_cmd(axes[0])
         for ax in axes:
             ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
             if not hasattr(ci, 'plot'):
@@ -468,13 +461,20 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             plot = ci.plot()
             if not isinstance(plot, PlotXY):
                 continue
+
+            # Stage a command to obtain original view limits
+            self.stage_view_lim_cmd(ax)
+
+            # Autoscale on Y axis for the given plot
             self._parser.autoscale_y_axis(ax)
 
-        # Commit and push the single staged command
-        while len(self._staging_cmds):
-            self.commit_view_lim_cmd(axes[0])
-        while len(self._commitd_cmds):
-            self.push_view_lim_cmd()
+            # Commit staged command
+            while len(self._staging_cmds):
+                self.commit_view_lim_cmd(ax)
+
+            # Push committed command
+            while len(self._commitd_cmds):
+                self.push_view_lim_cmd()
 
     def save_canvas_image(self, filename: str):
         """Use pyqtgraph exporters instead of QWidget.grab() for accurate rendering."""
