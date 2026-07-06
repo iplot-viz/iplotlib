@@ -312,6 +312,8 @@ class IplotQtCanvas(QWidget):
                 r.set_font_color(ruler.font_color)
             if not ruler.show_label:
                 r.set_show_label(False)
+            if not ruler.show_val_label:
+                r.set_show_val_label(False)
             if not ruler.visible:
                 r.set_visible(False)
 
@@ -340,8 +342,8 @@ class IplotQtCanvas(QWidget):
         """Update a ruler's label font color on the backend."""
 
     @abstractmethod
-    def toggle_ruler_label(self, name, plot_id, show):
-        """Toggle a ruler's name label on the backend."""
+    def toggle_ruler_label(self, name, plot_id, show_label, show_val_label):
+        """Toggle a ruler's name label and signal value labels on the backend."""
 
     def get_signals(self, canvas: Canvas):
         signal_list = []

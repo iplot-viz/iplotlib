@@ -10,7 +10,17 @@ import unittest
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
-from iplotlib.core.ruler import Ruler
+from iplotlib.core.ruler import Ruler, contrast_text_color
+
+
+class ContrastTextColorTest(unittest.TestCase):
+    def test_light_backgrounds_get_black_text(self):
+        self.assertEqual(contrast_text_color((255, 255, 255)), 'black')
+        self.assertEqual(contrast_text_color((255, 255, 0)), 'black')  # yellow
+
+    def test_dark_backgrounds_get_white_text(self):
+        self.assertEqual(contrast_text_color((0, 0, 0)), 'white')
+        self.assertEqual(contrast_text_color((0, 0, 139)), 'white')  # dark blue
 
 
 class RulerDefaultsTest(unittest.TestCase):
@@ -149,19 +159,20 @@ class RulerWorkspaceRoundtripTest(unittest.TestCase):
         fresh.merge(old)
         self.assertEqual(fresh.rulers, [])
 
-    def test_font_color_and_show_label_survive_dict_roundtrip(self):
+    def test_font_color_and_label_flags_survive_dict_roundtrip(self):
         c = Canvas(rows=1, cols=1)
         p = PlotXY()
         p.add_ruler(Ruler(name='A', xy=(1.0, 2.0), color='#FF0000',
-                          font_color='#000000', show_label=False))
+                          font_color='#000000', show_label=False, show_val_label=False))
         c.add_plot(p, 0)
         restored = Canvas.from_dict(c.to_dict()).plots[0][0].rulers[0]
         self.assertEqual(restored.font_color, '#000000')
         self.assertFalse(restored.show_label)
+        self.assertFalse(restored.show_val_label)
 
     def test_plot_merge_defaults_new_fields_for_pre_existing_workspaces(self):
-        """Ruler dicts serialized before font_color / show_label existed must
-        load with the dataclass defaults."""
+        """Ruler dicts serialized before font_color / show_label / show_val_label
+        existed must load with the dataclass defaults."""
         c = Canvas(rows=1, cols=1)
         p = PlotXY()
         p.add_ruler(Ruler(name='A', xy=(1.0, 2.0), color='#FF0000'))
@@ -170,10 +181,12 @@ class RulerWorkspaceRoundtripTest(unittest.TestCase):
         for ruler_dict in old['rulers']:
             ruler_dict.pop('font_color', None)
             ruler_dict.pop('show_label', None)
+            ruler_dict.pop('show_val_label', None)
         fresh = PlotXY()
         fresh.merge(old)
         self.assertEqual(fresh.rulers[0].font_color, Ruler.font_color)
         self.assertTrue(fresh.rulers[0].show_label)
+        self.assertTrue(fresh.rulers[0].show_val_label)
 
 
 class CanvasMouseModeRulerTest(unittest.TestCase):

@@ -2,15 +2,15 @@ from string import ascii_uppercase
 from typing import Dict, List, Tuple
 
 import pandas as pd
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QColorDialog, QFrame,
-                                QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QRadioButton,
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence, QStandardItem, QStandardItemModel
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox,
+                                QFrame, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QRadioButton,
                                 QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 import iplotLogging.setupLogger as Sl
 from iplotlib.core.plot import PlotXY
-from iplotlib.core.ruler import Ruler
+from iplotlib.core.ruler import Ruler, contrast_text_color
 
 logger = Sl.get_logger(__name__)
 
@@ -26,6 +26,69 @@ class _NumericTableItem(QTableWidgetItem):
         return a < b
 
 
+class _CheckableComboBox(QComboBox):
+    """Combo box whose items carry independent check marks. The popup stays open
+    while toggling and the (read-only) field summarises the checked items."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setModel(QStandardItemModel(self))
+        self.setEditable(True)
+        self.lineEdit().setReadOnly(True)
+        self.view().viewport().installEventFilter(self)
+        # Open the popup from a click on the field, not only on the arrow.
+        self.lineEdit().installEventFilter(self)
+
+    def add_checkable_item(self, text: str, checked: bool):
+        item = QStandardItem(text)
+        item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+        item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+        self.model().appendRow(item)
+        self._update_text()
+
+    def checked_flags(self) -> List[bool]:
+        model = self.model()
+        return [model.item(i).checkState() == Qt.CheckState.Checked
+                for i in range(model.rowCount())]
+
+    def set_checked(self, index: int, checked: bool):
+        item = self.model().item(index)
+        if item is None:
+            return
+        item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+        self._update_text()
+        self.changed.emit()
+
+    def eventFilter(self, obj, event):
+        if obj is self.lineEdit() and event.type() == QEvent.Type.MouseButtonPress:
+            self.showPopup()
+            return True
+        # Toggle the item under the cursor in place of the default select-and-close,
+        # so several options can be checked without reopening the popup.
+        if obj is self.view().viewport() and event.type() == QEvent.Type.MouseButtonRelease:
+            index = self.view().indexAt(event.position().toPoint())
+            if index.isValid():
+                item = self.model().itemFromIndex(index)
+                self.set_checked(index.row(), item.checkState() != Qt.CheckState.Checked)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _update_text(self):
+        model = self.model()
+        count = model.rowCount()
+        checked = [model.item(i).text() for i in range(count)
+                   if model.item(i).checkState() == Qt.CheckState.Checked]
+        if not checked:
+            text = "None"
+        elif len(checked) == count:
+            text = "All"
+        else:
+            text = ", ".join(checked)
+        self.lineEdit().setText(text)
+
+
 class IplotQtRuler(QWidget):
     """Ruler manager window with two layouts: rows (one ruler per row, editable)
     and columns (one ruler per column with X/Y axis rows and Δ, read-only)."""
@@ -34,7 +97,7 @@ class IplotQtRuler(QWidget):
     visibilityRuler = Signal(object, object, bool)             # name, plot_id, visible
     colorRuler = Signal(object, object, object)                # name, plot_id, color
     fontColorRuler = Signal(object, object, object)            # name, plot_id, color
-    labelVisibilityRuler = Signal(object, object, bool)        # name, plot_id, show
+    labelVisibilityRuler = Signal(object, object, bool, bool)  # name, plot_id, show_label, show_val_label
 
     COL_NAME = 0
     COL_PLOT = 1
@@ -44,6 +107,9 @@ class IplotQtRuler(QWidget):
     COL_LABEL = 5
     COL_COLOR = 6
     COL_FONT_COLOR = 7
+
+    # Independent toggles shown in the Labels column, in check order.
+    LABEL_TOGGLES = ['Ruler label', 'Val label']
 
     # Signal palette reversed so a ruler rarely matches the signals it crosses.
     DEFAULT_COLOR_CYCLE = list(reversed(PlotXY._color_cycle))
@@ -142,7 +208,8 @@ class IplotQtRuler(QWidget):
 
     def add_row(self, name: str, plot_id, xy: Tuple[float, float], color: str,
                 visible: bool = True, is_date: bool = False,
-                font_color: str = Ruler.font_color, show_label: bool = True):
+                font_color: str = Ruler.font_color, show_label: bool = True,
+                show_val_label: bool = True):
         self._rows.append({
             'name': name,
             'plot_id': tuple(plot_id),
@@ -152,6 +219,7 @@ class IplotQtRuler(QWidget):
             'is_date': is_date,
             'font_color': font_color,
             'show_label': show_label,
+            'show_val_label': show_val_label,
         })
         # Sorting must be off during insertion; re-render to handle both modes uniformly.
         self._render_table()
@@ -236,7 +304,7 @@ class IplotQtRuler(QWidget):
         self.table.setSortingEnabled(False)
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels(['Ruler', 'Plot', 'X value', 'Y value',
-                                              'Visible', 'Label', 'Color', 'Font color'])
+                                              'Visible', 'Labels', 'Color', 'Font color'])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
@@ -250,8 +318,6 @@ class IplotQtRuler(QWidget):
         sort_arrow_pad = 24
         for col in range(self.table.columnCount()):
             self.table.setColumnWidth(col, self.table.columnWidth(col) + sort_arrow_pad)
-        self.table.setColumnWidth(self.COL_COLOR, 160)
-        self.table.setColumnWidth(self.COL_FONT_COLOR, 160)
         self.table.setSortingEnabled(True)
         self.table.sortItems(self.COL_NAME, Qt.SortOrder.AscendingOrder)
 
@@ -280,11 +346,12 @@ class IplotQtRuler(QWidget):
             lambda state, cb=visible_cb: self._on_visibility_changed(self.table.indexAt(cb.pos()).row(), state))
         self.table.setCellWidget(row_idx, self.COL_VISIBLE, visible_cb)
 
-        label_cb = QCheckBox()
-        label_cb.setChecked(row['show_label'])
-        label_cb.stateChanged.connect(
-            lambda state, cb=label_cb: self._on_label_changed(self.table.indexAt(cb.pos()).row(), state))
-        self.table.setCellWidget(row_idx, self.COL_LABEL, label_cb)
+        label_combo = _CheckableComboBox()
+        label_combo.add_checkable_item(self.LABEL_TOGGLES[0], row['show_label'])
+        label_combo.add_checkable_item(self.LABEL_TOGGLES[1], row['show_val_label'])
+        label_combo.changed.connect(
+            lambda cb=label_combo: self._on_label_mode_changed(self.table.indexAt(cb.pos()).row(), cb))
+        self.table.setCellWidget(row_idx, self.COL_LABEL, label_combo)
 
         color_btn = self._make_color_button(row['color'], self._on_color_clicked)
         self.table.setCellWidget(row_idx, self.COL_COLOR, color_btn)
@@ -300,8 +367,15 @@ class IplotQtRuler(QWidget):
         return btn
 
     @staticmethod
-    def _paint_color_button(button: QPushButton, color: str):
-        button.setStyleSheet(f"background-color: {color}; border: 1px solid black")
+    def _contrast_text_color(color: str) -> str:
+        """Black label on light backgrounds, white on dark ones (YIQ luminance)."""
+        c = QColor(color)
+        return contrast_text_color((c.red(), c.green(), c.blue()))
+
+    @classmethod
+    def _paint_color_button(cls, button: QPushButton, color: str):
+        text = cls._contrast_text_color(color)
+        button.setStyleSheet(f"background-color: {color}; color: {text}; border: 1px solid black")
         # The stylesheet cannot be read back; keep the color for clipboard export.
         button.setProperty('color', color)
 
@@ -450,6 +524,8 @@ class IplotQtRuler(QWidget):
         widget = table.cellWidget(row, col)
         if isinstance(widget, QCheckBox):
             return str(widget.isChecked()).lower()
+        if isinstance(widget, QComboBox):
+            return widget.currentText()
         if isinstance(widget, QPushButton):
             return widget.property('color') or ''
         return ''
@@ -474,18 +550,21 @@ class IplotQtRuler(QWidget):
         return -1
 
     def _on_visibility_changed(self, row: int, state):
-        self._set_row_flag(row, state, 'visible', self.visibilityRuler)
-
-    def _on_label_changed(self, row: int, state):
-        self._set_row_flag(row, state, 'show_label', self.labelVisibilityRuler)
-
-    def _set_row_flag(self, row: int, state, key: str, signal):
-        value = state == Qt.CheckState.Checked.value
+        visible = state == Qt.CheckState.Checked.value
         name, plot_id = self._row_metadata(row)
         idx = self._find_row_index(name, plot_id)
         if idx >= 0:
-            self._rows[idx][key] = value
-        signal.emit(name, plot_id, value)
+            self._rows[idx]['visible'] = visible
+        self.visibilityRuler.emit(name, plot_id, visible)
+
+    def _on_label_mode_changed(self, row: int, combo: '_CheckableComboBox'):
+        show_label, show_val_label = combo.checked_flags()
+        name, plot_id = self._row_metadata(row)
+        idx = self._find_row_index(name, plot_id)
+        if idx >= 0:
+            self._rows[idx]['show_label'] = show_label
+            self._rows[idx]['show_val_label'] = show_val_label
+        self.labelVisibilityRuler.emit(name, plot_id, show_label, show_val_label)
 
     def _on_color_clicked(self, row: int, button: QPushButton):
         self._pick_color(row, button, 'color', self.colorRuler)

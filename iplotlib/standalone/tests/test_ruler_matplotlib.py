@@ -95,13 +95,65 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         backend = self.widget._parser.get_rulers(self.impl_plot)[0]
         self.assertEqual(to_hex(backend.name_label.get_color()).upper(), '#000000')
 
+    def test_default_font_autocontrasts_with_ruler_color(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1, color='#ffff00')
+        backend = self.widget._parser.get_rulers(self.impl_plot)[0]
+        self.assertEqual(backend.name_label.get_color(), 'black')  # light ruler
+        self.widget.change_ruler_color('A', (self.plot.col, self.plot.row), '#000080')
+        self.assertEqual(backend.name_label.get_color(), 'white')  # dark ruler
+
+    def test_explicit_font_color_overrides_autocontrast(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1, color='#ffff00')
+        self.widget.change_ruler_font_color('A', (self.plot.col, self.plot.row), '#123456')
+        from matplotlib.colors import to_hex
+        backend = self.widget._parser.get_rulers(self.impl_plot)[0]
+        self.assertEqual(to_hex(backend.name_label.get_color()).upper(), '#123456')
+
     def test_toggle_ruler_label_hides_only_the_name_label(self):
         self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
-        self.widget.toggle_ruler_label('A', (self.plot.col, self.plot.row), False)
+        self.widget.toggle_ruler_label('A', (self.plot.col, self.plot.row), False, True)
         self.assertFalse(self.plot.rulers[0].show_label)
         backend = self.widget._parser.get_rulers(self.impl_plot)[0]
         self.assertFalse(backend.name_label.get_visible())
         self.assertTrue(backend.v_line.get_visible())
+
+    def test_ruler_shows_one_value_label_per_signal(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 2.5, 0.5)
+        backend = self.widget._parser.get_rulers(self.impl_plot)[0]
+        self.assertEqual(len(backend.value_labels), 1)
+        annotation = backend.value_labels[0]
+        self.assertTrue(annotation.get_visible())
+        x = np.linspace(0, 10, 50)
+        nearest = int(np.argmin(np.abs(x - 2.5)))
+        self.assertEqual(annotation.get_text(), self.impl_plot.format_ydata(np.sin(x)[nearest]))
+
+    def test_toggle_val_label_hides_signal_value_labels(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 2.5, 0.5)
+        self.widget.toggle_ruler_label('A', (self.plot.col, self.plot.row), True, False)
+        backend = self.widget._parser.get_rulers(self.impl_plot)[0]
+        self.assertFalse(backend.value_labels[0].get_visible())
+        self.assertTrue(backend.name_label.get_visible())
+
+    def test_preview_ruler_shows_next_identity_without_touching_the_model(self):
+        self.widget._show_preview_ruler(self.impl_plot, 2.0, 0.2)
+        ghost = next(r for r in self.widget._parser.get_rulers(self.impl_plot)
+                     if r.name == self.widget._PREVIEW_RULER_NAME)
+        self.assertEqual(ghost.name_label.get_text(), 'A')
+        self.assertEqual(self.plot.rulers, [])
+        self.assertEqual(self.widget._ruler_window.table.rowCount(), 0)
+
+    def test_add_ruler_clears_preview_and_takes_its_identity(self):
+        self.widget._show_preview_ruler(self.impl_plot, 2.0, 0.2)
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 2.0, 0.2)
+        names = [r.name for r in self.widget._parser.get_rulers(self.impl_plot)]
+        self.assertEqual(names, ['A'])
+
+    def test_preview_identity_reuses_freed_name(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 3.0, 0.3)
+        self.widget.delete_ruler('A', (self.plot.col, self.plot.row), True)
+        self.widget._ruler_window.remove_row_by_name('A', (self.plot.col, self.plot.row))
+        self.assertEqual(self.widget._preview_identity_for_next()['name'], 'A')
 
     def test_remove_from_menu_on_shared_x_echo_deletes_the_owner_ruler(self):
         """Deleting via the context menu of another shared-x plot hits the echo:
@@ -140,13 +192,15 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         c2 = _build_canvas()
         plot2 = c2.plots[0][0]
         plot2.add_ruler(Ruler(name='X', xy=(2.0, 0.2), color='#00FF00',
-                              font_color='#000000', show_label=False))
+                              font_color='#000000', show_label=False, show_val_label=False))
         self.widget.set_canvas(c2)
         impl_plot = self.widget._get_impl_plot_for_plot(plot2)
         backend = self.widget._parser.get_rulers(impl_plot)[0]
         self.assertEqual(backend.font_color, '#000000')
         self.assertFalse(backend.show_label)
         self.assertFalse(backend.name_label.get_visible())
+        self.assertFalse(backend.show_val_label)
+        self.assertFalse(backend.value_labels[0].get_visible())
 
     def test_ruler_on_second_plot_uses_correct_plot_id(self):
         """Stacked plots must get distinct plot_ids so delete/visibility/color

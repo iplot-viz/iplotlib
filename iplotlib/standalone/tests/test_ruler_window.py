@@ -118,28 +118,43 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         from iplotlib.core.plot import PlotXY
         self.assertEqual(IplotQtRuler.DEFAULT_COLOR_CYCLE, list(reversed(PlotXY._color_cycle)))
 
-    def test_add_row_defaults_show_label_and_white_font(self):
+    def test_color_button_label_contrasts_with_background(self):
+        self.assertEqual(IplotQtRuler._contrast_text_color('#ffffff'), 'black')
+        self.assertEqual(IplotQtRuler._contrast_text_color('#ffff00'), 'black')  # yellow
+        self.assertEqual(IplotQtRuler._contrast_text_color('#000000'), 'white')
+        self.assertEqual(IplotQtRuler._contrast_text_color('#00008b'), 'white')  # dark blue
+
+    def test_add_row_defaults_all_labels_and_white_font(self):
         self.window.add_row('A', (1, 1), (1.0, 2.0), '#FF0000')
-        self.assertTrue(self.window.table.cellWidget(0, IplotQtRuler.COL_LABEL).isChecked())
+        combo = self.window.table.cellWidget(0, IplotQtRuler.COL_LABEL)
+        self.assertEqual(combo.checked_flags(), [True, True])
+        self.assertEqual(combo.currentText(), 'All')
         font_btn = self.window.table.cellWidget(0, IplotQtRuler.COL_FONT_COLOR)
         self.assertEqual(font_btn.property('color'), '#FFFFFF')
 
-    def test_label_signal_carries_state(self):
+    def test_label_toggles_carry_each_flag_independently(self):
         emitted = []
-        self.window.labelVisibilityRuler.connect(lambda name, pid, show: emitted.append((name, pid, show)))
+        self.window.labelVisibilityRuler.connect(
+            lambda name, pid, show, show_val: emitted.append((name, pid, show, show_val)))
         self.window.add_row('A', (1, 1), (1.0, 2.0), '#FFFFFF')
-        cb = self.window.table.cellWidget(0, IplotQtRuler.COL_LABEL)
-        cb.setChecked(False)
+        combo = self.window.table.cellWidget(0, IplotQtRuler.COL_LABEL)
+        combo.set_checked(0, False)  # uncheck Ruler label
         QApplication.processEvents()
-        self.assertEqual(emitted[-1], ('A', (1, 1), False))
+        self.assertEqual(emitted[-1], ('A', (1, 1), False, True))
         self.assertFalse(self.window._rows[0]['show_label'])
+        self.assertTrue(self.window._rows[0]['show_val_label'])
+        self.assertEqual(combo.currentText(), 'Val label')
+        combo.set_checked(1, False)  # uncheck Val label too
+        QApplication.processEvents()
+        self.assertEqual(emitted[-1], ('A', (1, 1), False, False))
+        self.assertEqual(combo.currentText(), 'None')
 
     def test_copy_rows_view_selection_as_tab_separated_text(self):
         self.window.add_row('A', (1, 1), (2.5, 7.5), '#FF0000')
         self.window.table.selectRow(0)
         self.window._copy_table_selection(self.window.table)
         copied = QApplication.clipboard().text()
-        self.assertEqual(copied, 'A\t1\t2.5\t7.5\ttrue\ttrue\t#FF0000\t#FFFFFF')
+        self.assertEqual(copied, 'A\t1\t2.5\t7.5\ttrue\tAll\t#FF0000\t#FFFFFF')
 
 
 class IplotQtRulerViewModeTest(unittest.TestCase):

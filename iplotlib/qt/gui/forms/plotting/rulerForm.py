@@ -21,7 +21,8 @@ class RulerForm(IplotPreferencesForm):
             {"label": "Color", "property": "color", "widget": ColorPicker("color")},
             {"label": "Font color", "property": "font_color", "widget": ColorPicker("font_color")},
             {"label": "Visible", "property": "visible", "widget": self.create_checkbox()},
-            {"label": "Show label", "property": "show_label", "widget": self.create_checkbox()},
+            {"label": "Ruler label", "property": "show_label", "widget": self.create_checkbox()},
+            {"label": "Val label", "property": "show_val_label", "widget": self.create_checkbox()},
         ]
         super().__init__(fields=prototype, label="A ruler", parent=parent, f=f)
 
@@ -34,5 +35,6 @@ class RulerForm(IplotPreferencesForm):
         py_object.font_color = Ruler.font_color
         py_object.visible = Ruler.visible
         py_object.show_label = Ruler.show_label
+        py_object.show_val_label = Ruler.show_val_label
         self.widgetMapper.revert()
         super().reset_prefs()

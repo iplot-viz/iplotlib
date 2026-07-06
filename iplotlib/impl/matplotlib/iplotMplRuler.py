@@ -1,12 +1,20 @@
 """Frozen crosshair (Ruler) anchored to a single Matplotlib Axes."""
 
-from typing import Tuple
+from typing import List, Tuple
 
 from matplotlib.axes import Axes as MPLAxes
+from matplotlib.colors import to_hex, to_rgb
+
+from iplotlib.core.ruler import contrast_text_color
+from iplotlib.impl.matplotlib.iplotMultiCursor import get_values_from_line
 
 
 class iplotMplRuler:
     """A frozen vertical + horizontal line pair anchored at (x, y) of an Axes."""
+
+    # Same tolerance as the crosshair: a signal value label only shows when the
+    # nearest sample is within this fraction of the visible X range.
+    VAL_TOLERANCE = 0.05
 
     def __init__(self,
                  ax: MPLAxes,
@@ -16,7 +24,8 @@ class iplotMplRuler:
                  font_color: str = "#FFFFFF",
                  lw: int = 1,
                  font_size: int = 8,
-                 animated: bool = False):
+                 animated: bool = False,
+                 value_lines: List = None):
         self.ax = ax
         self.name = name
         self.xy = xy
@@ -31,6 +40,7 @@ class iplotMplRuler:
         self.animated = animated
         self.visible = True
         self.show_label = True
+        self.show_val_label = True
 
         self.v_line = ax.axvline(xy[0], color=color, linewidth=lw, linestyle='--',
                                   animated=animated, zorder=20, label='_RulerLine')
@@ -54,7 +64,39 @@ class iplotMplRuler:
                                        verticalalignment="bottom", horizontalalignment="left",
                                        **text_kwargs)
 
+        # One value annotation per signal line, styled like the crosshair's.
+        value_bbox = dict(boxstyle="round", pad=0.1, fill=True, color="green")
+        value_kwargs = dict(annotation_clip=False, clip_on=False, bbox=value_bbox,
+                             color=font_color, fontsize=font_size, zorder=21,
+                             animated=animated)
+        self.value_labels = []
+        for lines in value_lines or []:
+            annotation = ax.annotate("", xy=xy, xycoords='data',
+                                      verticalalignment="top", horizontalalignment="left",
+                                      **value_kwargs)
+            annotation.line = lines
+            self.value_labels.append(annotation)
+
+        self._apply_text_colors()
         self._apply_view_visibility()
+
+    def _text_color_for(self, background) -> str:
+        """Label text colour: an explicit (non-default) font colour wins;
+        otherwise auto-contrast with the label background so light rulers stay
+        legible."""
+        if self.font_color and to_hex(self.font_color).upper() != "#FFFFFF":
+            return self.font_color
+        r, g, b = (int(round(v * 255)) for v in to_rgb(background))
+        return contrast_text_color((r, g, b))
+
+    def _apply_text_colors(self):
+        # Name/X/Y sit on the ruler colour; value tags sit on green.
+        name_xy = self._text_color_for(self.color)
+        for label in (self.x_label, self.y_label, self.name_label):
+            label.set_color(name_xy)
+        value = self._text_color_for("green")
+        for label in self.value_labels:
+            label.set_color(value)
 
     def _format_x(self, x: float) -> str:
         try:
@@ -94,6 +136,25 @@ class iplotMplRuler:
         name_y = y if in_y else ymin
         self.name_label.xy = (x, name_y)
         self.name_label.set_position((x, name_y))
+        self._refresh_value_labels(in_x, xmin, xmax, ymin, ymax)
+
+    def _refresh_value_labels(self, in_x, xmin, xmax, ymin, ymax):
+        """Pin each signal's value label to the sample nearest to the ruler X,
+        following the crosshair behaviour (tolerance, hidden when off-signal)."""
+        x = self.xy[0]
+        for annotation in self.value_labels:
+            lines = annotation.line
+            shown = False
+            if (self.show_val_label and in_x and lines
+                    and lines[0].get_visible() and len(lines[0].get_xdata()) > 0):
+                x_sig, y_sig = get_values_from_line(lines, x)
+                if (abs(x - x_sig) < (xmax - xmin) * self.VAL_TOLERANCE
+                        and ymin <= y_sig <= ymax):
+                    annotation.xy = (x_sig, y_sig)
+                    annotation.set_position((x_sig, y_sig))
+                    annotation.set_text(self.ax.format_ydata(y_sig))
+                    shown = True
+            annotation.set_visible(shown)
 
     def set_label_text(self, text: str):
         self.name_label.set_text(text)
@@ -105,30 +166,39 @@ class iplotMplRuler:
         for label in (self.x_label, self.y_label, self.name_label):
             label.get_bbox_patch().set_facecolor(color)
             label.get_bbox_patch().set_edgecolor(color)
+        # A new background may flip the auto-contrast text colour.
+        self._apply_text_colors()
 
     def set_font_color(self, color: str):
         self.font_color = color
-        for label in (self.x_label, self.y_label, self.name_label):
-            label.set_color(color)
+        self._apply_text_colors()
 
     def set_show_label(self, show: bool):
         self.show_label = show
         if self.visible:
             self._apply_view_visibility()
 
+    def set_show_val_label(self, show: bool):
+        self.show_val_label = show
+        if self.visible:
+            self._apply_view_visibility()
+
     def set_visible(self, visible: bool):
         self.visible = visible
-        for artist in (self.v_line, self.h_line, self.x_label, self.y_label, self.name_label):
+        for artist in (self.v_line, self.h_line, self.x_label, self.y_label,
+                       self.name_label, *self.value_labels):
             artist.set_visible(visible)
         if visible:
             self._apply_view_visibility()
 
     def draw_artists(self):
-        for a in (self.v_line, self.h_line, self.x_label, self.y_label, self.name_label):
+        for a in (self.v_line, self.h_line, self.x_label, self.y_label,
+                  self.name_label, *self.value_labels):
             self.ax.draw_artist(a)
 
     def remove(self):
-        for artist in (self.v_line, self.h_line, self.x_label, self.y_label, self.name_label):
+        for artist in (self.v_line, self.h_line, self.x_label, self.y_label,
+                       self.name_label, *self.value_labels):
             try:
                 artist.remove()
             except (ValueError, NotImplementedError):

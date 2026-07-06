@@ -1296,13 +1296,28 @@ class MatplotlibParser(BackendParserBase):
             cursor.remove()
         self._cursors.clear()
 
+    def _ruler_value_lines(self, impl_plot: MPLAxes) -> list:
+        """Signal line groups of *impl_plot*, one per ruler value label
+        (mirrors the crosshair's value annotations)."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        groups = []
+        if ci and hasattr(ci, 'signals') and ci.signals:
+            for sig_ref in ci.signals:
+                signal = sig_ref()
+                if not signal or isinstance(signal, SignalContour):
+                    continue
+                for line in getattr(signal, 'lines', []):
+                    groups.append(line if isinstance(line, Collection) else [line])
+        return groups
+
     @BackendParserBase.run_in_one_thread
     def add_ruler(self, impl_plot: MPLAxes, name: str, x: float, y: float,
                   color: str = "#FFFFFF", animated: bool = False,
                   is_echo: bool = False) -> iplotMplRuler:
         font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
         ruler = iplotMplRuler(ax=impl_plot, name=name, xy=(x, y), color=color,
-                              font_size=font_size, animated=animated)
+                              font_size=font_size, animated=animated,
+                              value_lines=self._ruler_value_lines(impl_plot))
         ruler.abs_x = self.transform_value(impl_plot, 0, x)
         ruler.abs_y = self.transform_value(impl_plot, 1, y)
         ruler.is_echo = is_echo

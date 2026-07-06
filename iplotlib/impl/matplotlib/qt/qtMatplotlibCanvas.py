@@ -44,6 +44,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     """Qt widget that internally uses a matplotlib canvas backend"""
 
     dropSignal = Signal(object)
+    _PREVIEW_RULER_NAME = "__preview__"
 
     def __init__(self, parent=None, tight_layout=True, **kwargs):
         super().__init__(parent, **kwargs)
@@ -54,6 +55,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._ruler_drag = None
         self._ruler_drag_bg = None
         self._ruler_drag_echoes = []
+        # Ghost ruler previewing where a double-click would place the next one.
+        self._preview_ruler_ax = None
+        self._preview_ruler_identity = None
+        self._preview_background = None
+        self._preview_cid_draw = None
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
@@ -350,6 +356,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self._parser.remove_ruler_by_name(name)
         if persist:
             plot.remove_ruler(name)
+        # The freed name may change what the next ruler will be called.
+        self._clear_preview_ruler()
+        self._preview_ruler_identity = None
         self.render()
 
     def toggle_ruler_visibility(self, name, plot_id, visible):
@@ -389,16 +398,18 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 r.set_font_color(color)
         self.render()
 
-    def toggle_ruler_label(self, name, plot_id, show):
+    def toggle_ruler_label(self, name, plot_id, show_label, show_val_label):
         plot = self._get_plot_by_id(plot_id)
         if plot is None:
             return
         ruler = plot.get_ruler(name)
         if ruler:
-            ruler.show_label = show
+            ruler.show_label = show_label
+            ruler.show_val_label = show_val_label
         for r in self._parser.get_rulers():
             if r.name == name:
-                r.set_show_label(show)
+                r.set_show_label(show_label)
+                r.set_show_val_label(show_val_label)
         self.render()
 
     def _add_ruler_at(self, impl_plot, plot, x: float, y: float,
@@ -411,6 +422,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         y_abs = self._parser.transform_value(impl_plot, 1, y)
         ruler = Ruler(name=name, xy=(x_abs, y_abs), color=color, visible=True)
         plot.add_ruler(ruler)
+        # The ghost previewing this ruler is superseded by the real one.
+        self._clear_preview_ruler()
+        self._preview_ruler_identity = None
         self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
         self._parser.create_ruler_echoes(impl_plot, name, x_abs, y_abs, ruler.color)
         is_date = bool(getattr(plot.axes[0], 'is_date', False))
@@ -423,8 +437,67 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # Do not steal focus from the canvas.
         self.window().activateWindow()
 
+    def _preview_identity_for_next(self):
+        """Name/color the next ruler will get, so the ghost previews them."""
+        if self._preview_ruler_identity is not None:
+            return self._preview_ruler_identity
+        name = self._ruler_window.next_name()
+        return {'name': name, 'color': self._ruler_window.next_color(name)}
+
+    def _show_preview_ruler(self, impl_plot, x: float, y: float):
+        ident = self._preview_identity_for_next()
+        existing = next((r for r in self._parser.get_rulers(impl_plot)
+                         if r.name == self._PREVIEW_RULER_NAME), None)
+        if existing is not None and self._preview_ruler_ax is impl_plot:
+            existing.abs_x = self._parser.transform_value(impl_plot, 0, x)
+            existing.abs_y = self._parser.transform_value(impl_plot, 1, y)
+            existing.xy = (x, y)
+            existing.refresh_labels()
+            self._blit_preview()
+            return
+        self._clear_preview_ruler()
+        ruler = self._parser.add_ruler(impl_plot, self._PREVIEW_RULER_NAME,
+                                        x, y, ident['color'], animated=True)
+        ruler.set_label_text(ident['name'])
+        self._preview_ruler_ax = impl_plot
+        self._preview_ruler_identity = ident
+        if self._preview_cid_draw is None:
+            self._preview_cid_draw = self._mpl_renderer.mpl_connect(
+                'draw_event', self._on_draw_capture_bg)
+        self._preview_background = self._mpl_renderer.copy_from_bbox(
+            self._parser.figure.bbox)
+        self._blit_preview()
+
+    def _on_draw_capture_bg(self, event):
+        # A full redraw invalidates the blit background; recapture it.
+        if self._preview_ruler_ax is None:
+            return
+        self._preview_background = self._mpl_renderer.copy_from_bbox(
+            self._parser.figure.bbox)
+
+    def _blit_preview(self):
+        if self._preview_background is None or self._preview_ruler_ax is None:
+            return
+        self._mpl_renderer.restore_region(self._preview_background)
+        for r in self._parser.get_rulers(self._preview_ruler_ax):
+            if r.name == self._PREVIEW_RULER_NAME:
+                r.draw_artists()
+        self._mpl_renderer.blit(self._parser.figure.bbox)
+
+    def _clear_preview_ruler(self):
+        axes_with_preview = {r.ax for r in self._parser.get_rulers()
+                             if r.name == self._PREVIEW_RULER_NAME}
+        for ax in axes_with_preview:
+            self._parser.remove_ruler(ax, self._PREVIEW_RULER_NAME)
+        self._preview_ruler_ax = None
+        self._preview_background = None
+        if self._preview_cid_draw is not None:
+            self._mpl_renderer.mpl_disconnect(self._preview_cid_draw)
+            self._preview_cid_draw = None
+
     def _begin_ruler_drag(self, impl_plot, plot, ruler):
         """Grab a ruler for dragging; blit background is captured lazily on first motion."""
+        self._clear_preview_ruler()
         self._ruler_drag = (impl_plot, plot, ruler)
         self._ruler_drag_bg = None
         # Shared-x echoes move in lockstep with the origin during the drag.
@@ -501,6 +574,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         best_dist = float('inf')
         renderer = self._mpl_renderer.get_renderer() if hasattr(self._mpl_renderer, 'get_renderer') else None
         for r in rulers:
+            if r.name == self._PREVIEW_RULER_NAME:
+                continue
             try:
                 ruler_px = impl_plot.transData.transform((r.xy[0], r.xy[1]))
             except (ValueError, TypeError):
@@ -525,6 +600,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         return best
 
     def _repaint_rulers_from_canvas(self):
+        self._clear_preview_ruler()
+        self._preview_ruler_identity = None
         self._ruler_window.clear_info()
         canvas = self._parser.canvas
         if not canvas:
@@ -548,7 +625,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                                                      ruler.xy[0], ruler.xy[1], ruler.color)
                     self._ruler_window.add_row(ruler.name, plot_id, ruler.xy,
                                                 ruler.color, ruler.visible, is_date,
-                                                ruler.font_color, ruler.show_label)
+                                                ruler.font_color, ruler.show_label,
+                                                ruler.show_val_label)
                     self._apply_ruler_state(ruler)
                     added = True
                 self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
@@ -624,6 +702,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             return
         if self._mmode is None:
             return
+
+        if mode != Canvas.MOUSE_MODE_RULER and self._preview_ruler_ax is not None:
+            self._clear_preview_ruler()
+            self._preview_ruler_identity = None
+            self.render()
 
         if mode == Canvas.MOUSE_MODE_SELECT:
             self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
@@ -804,12 +887,31 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         return None, None, None
 
     def _mpl_mouse_motion_handler(self, event: MouseEvent):
-        """Handle mouse motion for ruler drag and drag shift preview."""
+        """Handle mouse motion for ruler drag, ruler ghost preview and drag shift."""
         if self._ruler_drag is not None:
             impl_plot = self._ruler_drag[0]
             if (event.inaxes is impl_plot
                     and event.xdata is not None and event.ydata is not None):
                 self._drag_ruler_to(event.xdata, event.ydata)
+            return
+        if self._mmode == Canvas.MOUSE_MODE_RULER:
+            if event.inaxes is None or event.xdata is None or event.ydata is None:
+                if self._preview_ruler_ax is not None:
+                    self._clear_preview_ruler()
+                    self._mpl_renderer.draw()
+                return
+            ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+            plot = ci.plot() if hasattr(ci, 'plot') else None
+            if plot is None or isinstance(plot, (PlotContour, PlotContourWithSlider)):
+                return
+            # No ghost while hovering an existing ruler (a double-click there
+            # grabs/ignores instead of creating).
+            if self._find_ruler_near(event.inaxes, event) is not None:
+                if self._preview_ruler_ax is not None:
+                    self._clear_preview_ruler()
+                    self._mpl_renderer.draw()
+                return
+            self._show_preview_ruler(event.inaxes, event.xdata, event.ydata)
             return
         if not self._drag_shift_active or self._drag_shift_signal is None:
             return
