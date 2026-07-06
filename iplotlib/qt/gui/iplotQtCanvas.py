@@ -18,6 +18,7 @@ from iplotlib.core.command import IplotCommand
 from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.impl_base import BackendParserBase
+from iplotlib.core.ruler import Ruler
 import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
@@ -58,6 +59,8 @@ class IplotQtCanvas(QWidget):
         self._ruler_window.deleteRuler.connect(self.delete_ruler)
         self._ruler_window.visibilityRuler.connect(self.toggle_ruler_visibility)
         self._ruler_window.colorRuler.connect(self.change_ruler_color)
+        self._ruler_window.fontColorRuler.connect(self.change_ruler_font_color)
+        self._ruler_window.labelVisibilityRuler.connect(self.toggle_ruler_label)
 
         # Statistics
         self._stats_table = IplotQtStatistics()
@@ -280,6 +283,38 @@ class IplotQtCanvas(QWidget):
                 return col[target_row]
         return None
 
+    def _ruler_owner_plot_id(self, name) -> Optional[Tuple[int, int]]:
+        """Position of the plot whose model owns ruler *name* (ruler names are
+        canvas-global unique)."""
+        canvas = self._parser.canvas if self._parser else None
+        if canvas is None:
+            return None
+        for col in canvas.plots:
+            for plot in col:
+                if plot is not None and plot.get_ruler(name) is not None:
+                    return self._canvas_position_of(plot)
+        return None
+
+    def _remove_ruler_from_menu(self, name, plot_id):
+        # The context menu can target a shared-x echo whose model ruler and
+        # window row belong to another plot; route the deletion to the owner.
+        plot_id = self._ruler_owner_plot_id(name) or plot_id
+        self.delete_ruler(name, plot_id, True)
+        self._ruler_window.remove_row_by_name(name, plot_id)
+
+    def _apply_ruler_state(self, ruler):
+        """Push a model ruler's non-default state onto its backend artists
+        (origin and shared-x echoes); re-added artists start with defaults."""
+        for r in self._parser.get_rulers():
+            if r.name != ruler.name:
+                continue
+            if ruler.font_color != Ruler.font_color:
+                r.set_font_color(ruler.font_color)
+            if not ruler.show_label:
+                r.set_show_label(False)
+            if not ruler.visible:
+                r.set_visible(False)
+
     @abstractmethod
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         """"""
@@ -299,6 +334,14 @@ class IplotQtCanvas(QWidget):
     @abstractmethod
     def change_ruler_color(self, name, plot_id, color):
         """Update a ruler's color on the backend."""
+
+    @abstractmethod
+    def change_ruler_font_color(self, name, plot_id, color):
+        """Update a ruler's label font color on the backend."""
+
+    @abstractmethod
+    def toggle_ruler_label(self, name, plot_id, show):
+        """Toggle a ruler's name label on the backend."""
 
     def get_signals(self, canvas: Canvas):
         signal_list = []

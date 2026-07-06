@@ -10,7 +10,7 @@ import os
 import unittest
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QHeaderView
 
 from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
 from iplotlib.qt.testing import ensure_qapp
@@ -114,6 +114,33 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         QApplication.processEvents()
         self.assertEqual(emitted[-1], ('A', (1, 1), True))
 
+    def test_default_palette_reverses_the_signal_palette(self):
+        from iplotlib.core.plot import PlotXY
+        self.assertEqual(IplotQtRuler.DEFAULT_COLOR_CYCLE, list(reversed(PlotXY._color_cycle)))
+
+    def test_add_row_defaults_show_label_and_white_font(self):
+        self.window.add_row('A', (1, 1), (1.0, 2.0), '#FF0000')
+        self.assertTrue(self.window.table.cellWidget(0, IplotQtRuler.COL_LABEL).isChecked())
+        font_btn = self.window.table.cellWidget(0, IplotQtRuler.COL_FONT_COLOR)
+        self.assertEqual(font_btn.property('color'), '#FFFFFF')
+
+    def test_label_signal_carries_state(self):
+        emitted = []
+        self.window.labelVisibilityRuler.connect(lambda name, pid, show: emitted.append((name, pid, show)))
+        self.window.add_row('A', (1, 1), (1.0, 2.0), '#FFFFFF')
+        cb = self.window.table.cellWidget(0, IplotQtRuler.COL_LABEL)
+        cb.setChecked(False)
+        QApplication.processEvents()
+        self.assertEqual(emitted[-1], ('A', (1, 1), False))
+        self.assertFalse(self.window._rows[0]['show_label'])
+
+    def test_copy_rows_view_selection_as_tab_separated_text(self):
+        self.window.add_row('A', (1, 1), (2.5, 7.5), '#FF0000')
+        self.window.table.selectRow(0)
+        self.window._copy_table_selection(self.window.table)
+        copied = QApplication.clipboard().text()
+        self.assertEqual(copied, 'A\t1\t2.5\t7.5\ttrue\ttrue\t#FF0000\t#FFFFFF')
+
 
 class IplotQtRulerViewModeTest(unittest.TestCase):
     """Rulers window supports two layouts: rows (one ruler per row, editable)
@@ -135,7 +162,7 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertEqual(self.window.view_mode, IplotQtRuler.VIEW_ROWS)
         self.assertTrue(self.window.rows_radio.isChecked())
         self.assertEqual(self.window.table.rowCount(), 2)
-        self.assertEqual(self.window.table.columnCount(), 6)
+        self.assertEqual(self.window.table.columnCount(), 8)
         self.assertIs(self.window.view_stack.currentWidget(), self.window.table)
 
     def test_switching_to_columns_swaps_the_view_stack(self):
@@ -174,6 +201,20 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertEqual(table.item(0, 3).text(), '5')   # C.x - B.x = 8 - 3
         self.assertEqual(table.item(1, 3).text(), '3')   # C.y - B.y = 7 - 4
 
+    def test_section_columns_are_user_resizable(self):
+        self.window.columns_radio.setChecked(True)
+        _, table = self.window.column_sections[0]
+        header = table.horizontalHeader()
+        self.assertEqual(header.sectionResizeMode(0), QHeaderView.ResizeMode.Interactive)
+
+    def test_copy_columns_view_selection_as_tab_separated_text(self):
+        self.window.columns_radio.setChecked(True)
+        _, table = self.window.column_sections[0]
+        table.selectAll()
+        self.window._copy_table_selection(table)
+        copied = QApplication.clipboard().text()
+        self.assertEqual(copied, '1\t2\t3\n2\t2\t4')
+
     def test_singleton_plot_section_has_no_delta_column(self):
         self.window.remove_row_by_name('B', (1, 1))
         self.window.columns_radio.setChecked(True)
@@ -193,7 +234,7 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertTrue(self.window.remove_button.isEnabled())
         self.assertTrue(self.window.distance_button.isEnabled())
         self.assertEqual(self.window.table.rowCount(), 2)
-        self.assertEqual(self.window.table.columnCount(), 6)
+        self.assertEqual(self.window.table.columnCount(), 8)
         self.assertEqual(self.window.column_sections, [])
 
     def test_data_survives_mode_switch(self):

@@ -102,6 +102,65 @@ class RulerPyQtGraphEndToEndTest(unittest.TestCase):
         self.assertEqual(self.plot.rulers[0].color, '#FF0000')
         self.assertEqual(self.widget._parser.get_rulers(self.impl_plot)[0].color, '#FF0000')
 
+    def test_change_ruler_font_color_updates_model_and_backend(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
+        self.widget.change_ruler_font_color('A', (self.plot.col, self.plot.row), '#000000')
+        self.assertEqual(self.plot.rulers[0].font_color, '#000000')
+        self.assertEqual(self.widget._parser.get_rulers(self.impl_plot)[0].font_color, '#000000')
+
+    def test_toggle_ruler_label_hides_only_the_name_label(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
+        self.widget.toggle_ruler_label('A', (self.plot.col, self.plot.row), False)
+        self.assertFalse(self.plot.rulers[0].show_label)
+        backend = self.widget._parser.get_rulers(self.impl_plot)[0]
+        self.assertFalse(backend.name_label.isVisible())
+        self.assertTrue(backend.v_line.isVisible())
+
+    def test_remove_from_menu_on_shared_x_echo_deletes_the_owner_ruler(self):
+        """Deleting via the context menu of another shared-x plot hits the echo:
+        the deletion must reach the owner plot's model and the window row, and
+        the ruler must not come back on the next canvas reload."""
+        c = Canvas(2, 1, title="shared_x_pg", shared_x_axis=True)
+        x = np.linspace(0, 10, 50)
+        for _ in range(2):
+            p = PlotXY()
+            s = SignalXY(label="s")
+            s.set_data([x, np.sin(x)])
+            p.add_signal(s)
+            c.add_plot(p, 0)
+        widget = QtPyQtGraphCanvas(canvas=c)
+        try:
+            plot_one, plot_two = c.plots[0]
+            impl_one = widget._get_impl_plot_for_plot(plot_one)
+            impl_two = widget._get_impl_plot_for_plot(plot_two)
+            widget._add_ruler_at(impl_one, plot_one, 5.0, 0.0)
+            self.assertTrue(any(r.is_echo for r in widget._parser.get_rulers(impl_two)))
+
+            widget._remove_ruler_from_menu('A', (2, 1))
+
+            self.assertEqual(plot_one.rulers, [])
+            self.assertEqual(widget._parser.get_rulers(), [])
+            self.assertEqual(widget._ruler_window.table.rowCount(), 0)
+
+            widget.set_canvas(c)
+            self.assertEqual(widget._parser.get_rulers(), [])
+            self.assertEqual(widget._ruler_window.table.rowCount(), 0)
+        finally:
+            widget._ruler_window.close()
+            widget.deleteLater()
+
+    def test_repaint_applies_font_color_and_label_state(self):
+        c2 = _build_canvas()
+        plot2 = c2.plots[0][0]
+        plot2.add_ruler(Ruler(name='X', xy=(2.0, 0.2), color='#00FF00',
+                              font_color='#000000', show_label=False))
+        self.widget.set_canvas(c2)
+        impl_plot = self.widget._get_impl_plot_for_plot(plot2)
+        backend = self.widget._parser.get_rulers(impl_plot)[0]
+        self.assertEqual(backend.font_color, '#000000')
+        self.assertFalse(backend.show_label)
+        self.assertFalse(backend.name_label.isVisible())
+
     def test_repaint_after_setting_canvas_with_rulers(self):
         """A canvas loaded from JSON already has Plot.rulers; reopening it must
         recreate the on-screen ruler items and repopulate the ruler window."""

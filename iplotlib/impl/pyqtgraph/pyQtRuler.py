@@ -18,6 +18,7 @@ class pyQtRuler:
                  name: str,
                  xy: Tuple[float, float],
                  color: Union[str, Tuple[int, int, int]] = "#FFFFFF",
+                 font_color: str = "#FFFFFF",
                  lw: int = 1,
                  font_size: int = 8):
         self.plot = plot
@@ -29,7 +30,9 @@ class pyQtRuler:
         self.abs_y = xy[1]
         self.is_echo = False
         self.color = color
+        self.font_color = font_color
         self.visible = True
+        self.show_label = True
 
         pen = pg.mkPen(color=color, width=lw, style=QtCore.Qt.PenStyle.DashLine, cosmetic=True)
         font = QtGui.QFont()
@@ -46,7 +49,7 @@ class pyQtRuler:
         self.h_line.setZValue(2000)
         vb.addItem(self.h_line, ignoreBounds=True)
 
-        text_fg = "white"
+        text_fg = font_color
         axis_b = plot.getAxis("bottom")
         self.x_label = TextItem(anchor=(0.5, 0.0), color=text_fg, border=color, fill=color)
         self.x_label.textItem.setFont(font)
@@ -110,7 +113,7 @@ class pyQtRuler:
         self.x_label.setVisible(self.visible and in_x)
         self.h_line.setVisible(self.visible and in_x and in_y)
         self.y_label.setVisible(self.visible and in_x and in_y)
-        self.name_label.setVisible(self.visible and in_x)
+        self.name_label.setVisible(self.visible and in_x and self.show_label)
 
     def set_label_text(self, text: str):
         self.name_label.setText(text)
@@ -125,6 +128,16 @@ class pyQtRuler:
             label.fill = pg.mkBrush(color)
             label.border = pg.mkPen(color)
             label.update()
+
+    def set_font_color(self, color: str):
+        self.font_color = color
+        for label in (self.x_label, self.y_label, self.name_label):
+            label.setColor(color)
+
+    def set_show_label(self, show: bool):
+        self.show_label = show
+        if self.visible:
+            self.refresh_labels()
 
     def set_visible(self, visible: bool):
         self.visible = visible

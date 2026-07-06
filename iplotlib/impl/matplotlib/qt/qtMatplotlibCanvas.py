@@ -377,6 +377,30 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 r.set_color(color)
         self.render()
 
+    def change_ruler_font_color(self, name, plot_id, color):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.font_color = color
+        for r in self._parser.get_rulers():
+            if r.name == name:
+                r.set_font_color(color)
+        self.render()
+
+    def toggle_ruler_label(self, name, plot_id, show):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.show_label = show
+        for r in self._parser.get_rulers():
+            if r.name == name:
+                r.set_show_label(show)
+        self.render()
+
     def _add_ruler_at(self, impl_plot, plot, x: float, y: float,
                       name: str = None, color: str = None):
         if name is None:
@@ -523,11 +547,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self._parser.create_ruler_echoes(impl_plot, ruler.name,
                                                      ruler.xy[0], ruler.xy[1], ruler.color)
                     self._ruler_window.add_row(ruler.name, plot_id, ruler.xy,
-                                                ruler.color, ruler.visible, is_date)
-                    if not ruler.visible:
-                        for r in self._parser.get_rulers():
-                            if r.name == ruler.name:
-                                r.set_visible(False)
+                                                ruler.color, ruler.visible, is_date,
+                                                ruler.font_color, ruler.show_label)
+                    self._apply_ruler_state(ruler)
                     added = True
                 self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
         # Only re-draw when rulers were actually restored.
@@ -1031,10 +1053,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self.push_view_lim_cmd()
                 # Update statistics
                 self.stats(self.get_canvas())
-
-    def _remove_ruler_from_menu(self, name, plot_id):
-        self.delete_ruler(name, plot_id, True)  # delete_ruler already re-renders
-        self._ruler_window.remove_row_by_name(name, plot_id)
 
     def _show_autoscale_menu(self, event: MouseEvent):
         if event.inaxes is None:

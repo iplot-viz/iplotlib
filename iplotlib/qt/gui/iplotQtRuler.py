@@ -3,12 +3,14 @@ from typing import Dict, List, Tuple
 
 import pandas as pd
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QFrame, QHBoxLayout,
-                                QHeaderView, QLabel, QMessageBox, QPushButton, QRadioButton, QScrollArea,
-                                QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QColorDialog, QFrame,
+                                QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QRadioButton,
+                                QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 import iplotLogging.setupLogger as Sl
+from iplotlib.core.plot import PlotXY
+from iplotlib.core.ruler import Ruler
 
 logger = Sl.get_logger(__name__)
 
@@ -31,16 +33,20 @@ class IplotQtRuler(QWidget):
     deleteRuler = Signal(object, object, object)               # name, plot_id, persist
     visibilityRuler = Signal(object, object, bool)             # name, plot_id, visible
     colorRuler = Signal(object, object, object)                # name, plot_id, color
+    fontColorRuler = Signal(object, object, object)            # name, plot_id, color
+    labelVisibilityRuler = Signal(object, object, bool)        # name, plot_id, show
 
     COL_NAME = 0
     COL_PLOT = 1
     COL_X = 2
     COL_Y = 3
     COL_VISIBLE = 4
-    COL_COLOR = 5
+    COL_LABEL = 5
+    COL_COLOR = 6
+    COL_FONT_COLOR = 7
 
-    DEFAULT_COLOR_CYCLE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b',
-                            '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+    # Signal palette reversed so a ruler rarely matches the signals it crosses.
+    DEFAULT_COLOR_CYCLE = list(reversed(PlotXY._color_cycle))
 
     VIEW_ROWS = 'rows'
     VIEW_COLUMNS = 'columns'
@@ -84,6 +90,7 @@ class IplotQtRuler(QWidget):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.selectionModel().selectionChanged.connect(self._update_selection_history)
+        self._install_copy_action(self.table)
 
         self.columns_scroll = QScrollArea()
         self.columns_scroll.setWidgetResizable(True)
@@ -134,7 +141,8 @@ class IplotQtRuler(QWidget):
             if self.count > 0 else self.DEFAULT_COLOR_CYCLE[0]
 
     def add_row(self, name: str, plot_id, xy: Tuple[float, float], color: str,
-                visible: bool = True, is_date: bool = False):
+                visible: bool = True, is_date: bool = False,
+                font_color: str = Ruler.font_color, show_label: bool = True):
         self._rows.append({
             'name': name,
             'plot_id': tuple(plot_id),
@@ -142,6 +150,8 @@ class IplotQtRuler(QWidget):
             'color': color,
             'visible': visible,
             'is_date': is_date,
+            'font_color': font_color,
+            'show_label': show_label,
         })
         # Sorting must be off during insertion; re-render to handle both modes uniformly.
         self._render_table()
@@ -224,8 +234,9 @@ class IplotQtRuler(QWidget):
 
     def _render_rows(self):
         self.table.setSortingEnabled(False)
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(['Ruler', 'Plot', 'X value', 'Y value', 'Visible', 'Color'])
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels(['Ruler', 'Plot', 'X value', 'Y value',
+                                              'Visible', 'Label', 'Color', 'Font color'])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
@@ -240,6 +251,7 @@ class IplotQtRuler(QWidget):
         for col in range(self.table.columnCount()):
             self.table.setColumnWidth(col, self.table.columnWidth(col) + sort_arrow_pad)
         self.table.setColumnWidth(self.COL_COLOR, 160)
+        self.table.setColumnWidth(self.COL_FONT_COLOR, 160)
         self.table.setSortingEnabled(True)
         self.table.sortItems(self.COL_NAME, Qt.SortOrder.AscendingOrder)
 
@@ -268,11 +280,30 @@ class IplotQtRuler(QWidget):
             lambda state, cb=visible_cb: self._on_visibility_changed(self.table.indexAt(cb.pos()).row(), state))
         self.table.setCellWidget(row_idx, self.COL_VISIBLE, visible_cb)
 
-        color_btn = QPushButton("Select color")
-        color_btn.setStyleSheet(f"background-color: {row['color']}; border: 1px solid black")
-        color_btn.clicked.connect(
-            lambda _=False, btn=color_btn: self._on_color_clicked(self.table.indexAt(btn.pos()).row(), btn))
+        label_cb = QCheckBox()
+        label_cb.setChecked(row['show_label'])
+        label_cb.stateChanged.connect(
+            lambda state, cb=label_cb: self._on_label_changed(self.table.indexAt(cb.pos()).row(), state))
+        self.table.setCellWidget(row_idx, self.COL_LABEL, label_cb)
+
+        color_btn = self._make_color_button(row['color'], self._on_color_clicked)
         self.table.setCellWidget(row_idx, self.COL_COLOR, color_btn)
+
+        font_btn = self._make_color_button(row['font_color'], self._on_font_color_clicked)
+        self.table.setCellWidget(row_idx, self.COL_FONT_COLOR, font_btn)
+
+    def _make_color_button(self, color: str, on_click) -> QPushButton:
+        btn = QPushButton("Select color")
+        self._paint_color_button(btn, color)
+        btn.clicked.connect(
+            lambda _=False, b=btn: on_click(self.table.indexAt(b.pos()).row(), b))
+        return btn
+
+    @staticmethod
+    def _paint_color_button(button: QPushButton, color: str):
+        button.setStyleSheet(f"background-color: {color}; border: 1px solid black")
+        # The stylesheet cannot be read back; keep the color for clipboard export.
+        button.setProperty('color', color)
 
     def _clear_column_sections(self):
         self.column_sections.clear()
@@ -313,8 +344,9 @@ class IplotQtRuler(QWidget):
 
         table = QTableWidget(len(self._COLUMNS_AXIS_LABELS), col_count)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         table.setVerticalHeaderLabels(list(self._COLUMNS_AXIS_LABELS))
+        self._install_copy_action(table)
 
         headers = []
         for i, r in enumerate(rulers):
@@ -323,7 +355,7 @@ class IplotQtRuler(QWidget):
             headers.append(r['name'])
         table.setHorizontalHeaderLabels(headers)
         h_header = table.horizontalHeader()
-        h_header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        h_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         h_header.setStretchLastSection(False)
 
         col_idx = 0
@@ -339,6 +371,7 @@ class IplotQtRuler(QWidget):
             self._set_axis_cell(table, 1, col_idx, f"{r['xy'][1]:.6g}", r['color'])
             col_idx += 1
 
+        table.resizeColumnsToContents()
         table.setFixedHeight(self._section_table_height(table))
         layout.addWidget(table)
         # A horizontal scrollbar (shown when a plot has many ruler columns) would
@@ -391,6 +424,36 @@ class IplotQtRuler(QWidget):
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         table.setItem(axis_row, col_idx, item)
 
+    def _install_copy_action(self, table: QTableWidget):
+        """Ctrl+C / context-menu copy of the selection as tab-separated text."""
+        action = QAction("Copy", table)
+        action.setShortcut(QKeySequence.StandardKey.Copy)
+        action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+        action.triggered.connect(lambda: self._copy_table_selection(table))
+        table.addAction(action)
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
+
+    def _copy_table_selection(self, table: QTableWidget):
+        indexes = table.selectedIndexes()
+        if not indexes:
+            return
+        rows = sorted({i.row() for i in indexes})
+        cols = sorted({i.column() for i in indexes})
+        lines = ['\t'.join(self._cell_text(table, r, c) for c in cols) for r in rows]
+        QApplication.clipboard().setText('\n'.join(lines))
+
+    @staticmethod
+    def _cell_text(table: QTableWidget, row: int, col: int) -> str:
+        item = table.item(row, col)
+        if item is not None:
+            return item.text()
+        widget = table.cellWidget(row, col)
+        if isinstance(widget, QCheckBox):
+            return str(widget.isChecked()).lower()
+        if isinstance(widget, QPushButton):
+            return widget.property('color') or ''
+        return ''
+
     def _update_selection_history(self):
         selected = [idx.row() for idx in self.table.selectionModel().selectedRows()]
         for row in selected:
@@ -411,25 +474,37 @@ class IplotQtRuler(QWidget):
         return -1
 
     def _on_visibility_changed(self, row: int, state):
-        visible = state == Qt.CheckState.Checked.value
+        self._set_row_flag(row, state, 'visible', self.visibilityRuler)
+
+    def _on_label_changed(self, row: int, state):
+        self._set_row_flag(row, state, 'show_label', self.labelVisibilityRuler)
+
+    def _set_row_flag(self, row: int, state, key: str, signal):
+        value = state == Qt.CheckState.Checked.value
         name, plot_id = self._row_metadata(row)
         idx = self._find_row_index(name, plot_id)
         if idx >= 0:
-            self._rows[idx]['visible'] = visible
-        self.visibilityRuler.emit(name, plot_id, visible)
+            self._rows[idx][key] = value
+        signal.emit(name, plot_id, value)
 
     def _on_color_clicked(self, row: int, button: QPushButton):
+        self._pick_color(row, button, 'color', self.colorRuler)
+
+    def _on_font_color_clicked(self, row: int, button: QPushButton):
+        self._pick_color(row, button, 'font_color', self.fontColorRuler)
+
+    def _pick_color(self, row: int, button: QPushButton, key: str, signal):
         current = button.palette().button().color()
         new_color = QColorDialog.getColor(current, self)
         if not new_color.isValid():
             return
         color = new_color.name()
-        button.setStyleSheet(f"background-color: {color}; border: 1px solid black")
+        self._paint_color_button(button, color)
         name, plot_id = self._row_metadata(row)
         idx = self._find_row_index(name, plot_id)
         if idx >= 0:
-            self._rows[idx]['color'] = color
-        self.colorRuler.emit(name, plot_id, color)
+            self._rows[idx][key] = color
+        signal.emit(name, plot_id, color)
 
     def _remove_selected(self):
         # Resolve identities BEFORE deletion so visual rows stay valid until we drop them.

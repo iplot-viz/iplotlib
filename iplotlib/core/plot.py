@@ -152,7 +152,8 @@ class Plot(ABC):
 
         self.rulers = [
             Ruler(name=r.get('name'), xy=tuple(r['xy']) if r.get('xy') is not None else None,
-                  color=r.get('color', Ruler.color), visible=r.get('visible', True))
+                  color=r.get('color', Ruler.color), font_color=r.get('font_color', Ruler.font_color),
+                  visible=r.get('visible', True), show_label=r.get('show_label', Ruler.show_label))
             for r in old_plot.get('rulers') or []
         ]
 

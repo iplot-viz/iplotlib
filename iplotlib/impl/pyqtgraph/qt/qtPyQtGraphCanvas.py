@@ -95,6 +95,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     vb.pressed.connect(self._impl_mouse_press_handler)
                     vb.released.connect(self._impl_mouse_release_handler)
                     vb.dragged.connect(self._impl_mouse_drag_handler)
+                    # Ruler labels are positioned in scene coordinates; a widget
+                    # resize moves the axes without a range change, so re-project.
+                    vb.sigResized.connect(self._on_viewbox_resized)
                     self._connected_viewboxes.add(vb_id)
 
         super().set_canvas(canvas)
@@ -123,11 +126,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     self._parser.create_ruler_echoes(impl_plot, ruler.name,
                                                      ruler.xy[0], ruler.xy[1], ruler.color)
                     self._ruler_window.add_row(ruler.name, plot_id, ruler.xy,
-                                                ruler.color, ruler.visible, is_date)
-                    if not ruler.visible:
-                        for r in self._parser.get_rulers():
-                            if r.name == ruler.name:
-                                r.set_visible(False)
+                                                ruler.color, ruler.visible, is_date,
+                                                ruler.font_color, ruler.show_label)
+                    self._apply_ruler_state(ruler)
                 self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
 
     def _get_main_plot_for_minimap(self) -> PlotItem:
@@ -427,6 +428,28 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             if r.name == name:
                 r.set_color(color)
 
+    def change_ruler_font_color(self, name, plot_id, color):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.font_color = color
+        for r in self._parser.get_rulers():
+            if r.name == name:
+                r.set_font_color(color)
+
+    def toggle_ruler_label(self, name, plot_id, show):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.show_label = show
+        for r in self._parser.get_rulers():
+            if r.name == name:
+                r.set_show_label(show)
+
     def _add_ruler_at(self, impl_plot, plot, x: float, y: float,
                       name: str = None, color: str = None):
         if name is None:
@@ -497,6 +520,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             core.xy = (x_abs, y_abs)
         plot_id = self._canvas_position_of(origin_plot) or (1, 1)
         self._ruler_window.update_row_xy(origin.name, plot_id, (x_abs, y_abs))
+
+    def _on_viewbox_resized(self, view_box):
+        impl_plot = view_box.parentItem()
+        if impl_plot is not None:
+            self._parser.refresh_rulers(impl_plot)
 
     def _find_ruler_near(self, impl_plot, scene_pos):
         rulers = self._parser.get_rulers(impl_plot)
@@ -805,10 +833,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 else:
                     x = self._parser.transform_value(impl_plot, 0, x_value)
                     self._dist_calculator.set_src(x, y_value, plot, ci.stack_key)
-
-    def _remove_ruler_from_menu(self, name, plot_id):
-        self.delete_ruler(name, plot_id, True)
-        self._ruler_window.remove_row_by_name(name, plot_id)
 
     def _impl_mouse_release_handler(self, view_box, event):
         """Handle mouse release events in PyQtGraph."""

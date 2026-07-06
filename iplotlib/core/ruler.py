@@ -14,7 +14,9 @@ class Ruler:
     name: str = None
     xy: Tuple[float, float] = None
     color: str = "#FFFFFF"
+    font_color: str = "#FFFFFF"
     visible: bool = True
+    show_label: bool = True
     _type: str = None
 
     def __post_init__(self):

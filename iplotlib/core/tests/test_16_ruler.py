@@ -19,7 +19,9 @@ class RulerDefaultsTest(unittest.TestCase):
         self.assertIsNone(r.name)
         self.assertIsNone(r.xy)
         self.assertEqual(r.color, '#FFFFFF')
+        self.assertEqual(r.font_color, '#FFFFFF')
         self.assertTrue(r.visible)
+        self.assertTrue(r.show_label)
 
     def test_attributes_store_values(self):
         r = Ruler(name='A', xy=(1.5, 3.2), color='#ff0000', visible=False)
@@ -146,6 +148,32 @@ class RulerWorkspaceRoundtripTest(unittest.TestCase):
         fresh = PlotXY()
         fresh.merge(old)
         self.assertEqual(fresh.rulers, [])
+
+    def test_font_color_and_show_label_survive_dict_roundtrip(self):
+        c = Canvas(rows=1, cols=1)
+        p = PlotXY()
+        p.add_ruler(Ruler(name='A', xy=(1.0, 2.0), color='#FF0000',
+                          font_color='#000000', show_label=False))
+        c.add_plot(p, 0)
+        restored = Canvas.from_dict(c.to_dict()).plots[0][0].rulers[0]
+        self.assertEqual(restored.font_color, '#000000')
+        self.assertFalse(restored.show_label)
+
+    def test_plot_merge_defaults_new_fields_for_pre_existing_workspaces(self):
+        """Ruler dicts serialized before font_color / show_label existed must
+        load with the dataclass defaults."""
+        c = Canvas(rows=1, cols=1)
+        p = PlotXY()
+        p.add_ruler(Ruler(name='A', xy=(1.0, 2.0), color='#FF0000'))
+        c.add_plot(p, 0)
+        old = c.to_dict()['plots'][0][0]
+        for ruler_dict in old['rulers']:
+            ruler_dict.pop('font_color', None)
+            ruler_dict.pop('show_label', None)
+        fresh = PlotXY()
+        fresh.merge(old)
+        self.assertEqual(fresh.rulers[0].font_color, Ruler.font_color)
+        self.assertTrue(fresh.rulers[0].show_label)
 
 
 class CanvasMouseModeRulerTest(unittest.TestCase):

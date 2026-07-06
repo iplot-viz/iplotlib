@@ -13,6 +13,7 @@ class iplotMplRuler:
                  name: str,
                  xy: Tuple[float, float],
                  color: str = "#FFFFFF",
+                 font_color: str = "#FFFFFF",
                  lw: int = 1,
                  font_size: int = 8,
                  animated: bool = False):
@@ -25,9 +26,11 @@ class iplotMplRuler:
         self.abs_y = xy[1]
         self.is_echo = False
         self.color = color
+        self.font_color = font_color
         self.font_size = font_size
         self.animated = animated
         self.visible = True
+        self.show_label = True
 
         self.v_line = ax.axvline(xy[0], color=color, linewidth=lw, linestyle='--',
                                   animated=animated, zorder=20, label='_RulerLine')
@@ -36,7 +39,7 @@ class iplotMplRuler:
 
         bbox = dict(boxstyle="round", pad=0.1, fill=True, color=color)
         text_kwargs = dict(annotation_clip=False, clip_on=False, bbox=bbox,
-                            color="white", fontsize=font_size, zorder=21,
+                            color=font_color, fontsize=font_size, zorder=21,
                             animated=animated)
 
         self.x_label = ax.annotate(self._format_x(xy[0]), xy=(xy[0], 0),
@@ -87,7 +90,7 @@ class iplotMplRuler:
         self.x_label.set_visible(in_x)
         self.h_line.set_visible(in_x and in_y)
         self.y_label.set_visible(in_x and in_y)
-        self.name_label.set_visible(in_x)
+        self.name_label.set_visible(in_x and self.show_label)
         name_y = y if in_y else ymin
         self.name_label.xy = (x, name_y)
         self.name_label.set_position((x, name_y))
@@ -102,6 +105,16 @@ class iplotMplRuler:
         for label in (self.x_label, self.y_label, self.name_label):
             label.get_bbox_patch().set_facecolor(color)
             label.get_bbox_patch().set_edgecolor(color)
+
+    def set_font_color(self, color: str):
+        self.font_color = color
+        for label in (self.x_label, self.y_label, self.name_label):
+            label.set_color(color)
+
+    def set_show_label(self, show: bool):
+        self.show_label = show
+        if self.visible:
+            self._apply_view_visibility()
 
     def set_visible(self, visible: bool):
         self.visible = visible
