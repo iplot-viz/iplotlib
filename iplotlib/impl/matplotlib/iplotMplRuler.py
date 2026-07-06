@@ -60,8 +60,10 @@ class iplotMplRuler:
                                     xycoords=('axes fraction', 'data'),
                                     verticalalignment="center", horizontalalignment="right",
                                     **text_kwargs)
+        # Name sits to the left of the vertical line so it never overlaps the value
+        # label, which hangs to the right of the crossing.
         self.name_label = ax.annotate(name, xy=xy, xycoords='data',
-                                       verticalalignment="bottom", horizontalalignment="left",
+                                       verticalalignment="bottom", horizontalalignment="right",
                                        **text_kwargs)
 
         # One value annotation per signal line, styled like the crosshair's.

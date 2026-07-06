@@ -145,6 +145,10 @@ class pyQtRuler:
         # because view range / xy may be numpy and setVisible rejects numpy.bool.
         in_x = bool(xmin <= x <= xmax)
         in_y = bool(ymin <= y <= ymax)
+        # Place the name on the opposite side of the vertical line from the value
+        # label (which hangs toward the side with more room) so they never overlap.
+        name_anchor_x = 1.0 if (x - xmin) < (xmax - x) else 0.0
+        self.name_label.setAnchor((name_anchor_x, 1.0))
         self.name_label.setPos(x, y if in_y else ymin)
         self.v_line.setVisible(self.visible and in_x)
         self.x_label.setVisible(self.visible and in_x)
