@@ -548,10 +548,10 @@ class BackendParserBase(ABC):
 
         # Set axis limits
         if ax_idx != 1 or not self.canvas.streaming:  # In case of Streaming, just set X limits at the start
-            # Recalculate when limits are missing OR degenerate (begin == end), which
-            # can happen with single-point workspaces where the stored range doesn't
-            # span the data of all signals sharing the axis.
-            if (axis.begin is None and axis.end is None) or (axis.begin == axis.end):
+            # Recalculate when the stored range is unusable: either end missing (an
+            # X range left open at one end) or degenerate (begin == end, as with
+            # single-point workspaces). A None end left as-is would crash offsetting.
+            if axis.begin is None or axis.end is None or axis.begin == axis.end:
                 self.update_original_axis_limits(axis, impl_plot, ax_idx)
                 padding_begin, padding_end = True, True
 
@@ -1452,14 +1452,25 @@ class BackendParserBase(ABC):
         E.g. if the limits are O(10^15) the n you cannot zoom in where the distance between both is less than 1000.
         """
         begin, end = vals
-        diff = end - begin
         if begin < 10 ** 15:
             offset = 0
         else:
-            if diff > 1e14:
-                offset = 100_000
-            else:
-                offset = (begin + end) / 2
+            # Always use an INTEGER midpoint reference, in nanosecond units.
+            #
+            # The previous design used offset == 100_000 (i.e. 100 us per axis
+            # unit) for windows wider than ~1e14 ns. That capped the usable
+            # resolution at ~400 ns regardless of how far you zoomed, because a
+            # float64 axis coordinate around abs/1e5 (~1.8e13) has a ULP of
+            # ~0.004 units. Zooming below that collapsed the view to zero width:
+            # pan had nothing to translate, and the date locator produced a
+            # single tick (so labels degenerated to the full timestamp instead
+            # of the trailing digits).
+            #
+            # An integer midpoint keeps the axis in ns units and keeps
+            # transform_value/transform_data in int64, so coordinates retain
+            # sub-ns resolution for spans up to ~a week (about 2 ns at year
+            # scale) -- enough to zoom, pan and label at nanosecond precision.
+            offset = int((begin + end) // 2)
 
         return offset
 

@@ -117,6 +117,25 @@ class BackendPipelineTest(unittest.TestCase):
                 pm = qt_canvas.grab()
                 self.assertFalse(pm.isNull())
 
+    def test_x_range_open_at_one_end_with_empty_signal(self):
+        """An X range with one end undefined and a no-data signal must draw, not raise."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = Canvas(1, 1, title="open_range")
+                plot = PlotXY()
+                sig = SignalXY(label="empty")
+                sig.set_data([np.array([]), np.array([])])
+                plot.add_signal(sig)
+                x_axis = plot.axes[0]
+                x_axis.set_limits(0, None, 'original')
+                x_axis.set_limits(0, None, 'current')
+                canvas.add_plot(plot, 0)
+
+                qt_canvas = self._build(backend, canvas)
+
+                pm = qt_canvas.grab()
+                self.assertFalse(pm.isNull())
+
 
 if __name__ == '__main__':
     unittest.main()
