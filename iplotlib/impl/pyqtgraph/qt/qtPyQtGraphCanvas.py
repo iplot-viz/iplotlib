@@ -8,7 +8,13 @@ from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY, PlotContourWith
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.core.ruler import Ruler
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
-from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
+from iplotlib.impl.pyqtgraph.dateFormatter import (
+    NanosecondDateFormatter,
+    is_time_label,
+    _pick_interval,
+    _generate_ticks,
+    _segments_for_interval,
+)
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
 import iplotLogging.setupLogger as Sl
@@ -186,15 +192,24 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             canvas.snapshot_minimap_baseline(cur_min, cur_max)
             baseline = canvas.get_minimap_baseline()
 
+        # The minimap works relative to an integer offset so that huge absolute
+        # nanosecond coordinates (~1.8e18) never reach the ViewBox, where they
+        # overflow numpy's cast in updateViewRange. That only applies to the
+        # absolute *date* axis; a relative-time (seconds) axis has small values
+        # and must NOT be shifted, or its labels would show the wrong time
+        # (and int() of a negative start would shift the wrong way).
+        is_date_axis = bool(target_plot.axes and getattr(target_plot.axes[0], 'is_date', False))
+        self._minimap_offset = int(baseline[0]) if (baseline is not None and is_date_axis) else 0
+
         signature = (id(target_plot), baseline)
         if self._minimap_signature == signature and self._minimap_viewport_item is not None:
-            self._minimap_viewport_item.setRegion((cur_min, cur_max))
+            mm_off = getattr(self, '_minimap_offset', 0)
+            self._minimap_viewport_item.setRegion((cur_min - mm_off, cur_max - mm_off))
             self._connect_minimap_signals(main_plot)
             return
 
         self._minimap_plot.clear()
         self._minimap_viewport_item = None
-        is_date_axis = bool(target_plot.axes and getattr(target_plot.axes[0], 'is_date', False))
         bottom_axis = self._minimap_plot.getAxis('bottom')
         if not isinstance(bottom_axis, NanosecondDateFormatter) or getattr(bottom_axis, 'is_date', None) != is_date_axis:
             new_bottom = NanosecondDateFormatter(is_date=is_date_axis, orientation='bottom')
@@ -207,6 +222,22 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._minimap_widget.ci.addItem(new_bottom.common_label, row=1, col=0)
             new_bottom.common_label.setMaximumHeight(14)
             self._minimap_common_label = new_bottom.common_label
+        # Keep the minimap axis on the same integer offset as the data we plot.
+        self._minimap_plot.getAxis('bottom').set_offset(self._minimap_offset)
+        # The minimap builds its own axis without the main plot's 'Time' label,
+        # so tell it explicitly whether this is a relative-time axis (only then
+        # does it render durations; otherwise plain numeric like the main axis).
+        # Mirror the main bottom axis's relative-time decision (it was flagged
+        # authoritatively when its 'Time' label was applied). Falls back to the
+        # iplotlib axis label if the main axis can't report.
+        _mm_is_time = False
+        if not is_date_axis:
+            try:
+                _mm_is_time = main_plot.getAxis('bottom')._is_rel_time()
+            except Exception:
+                _mm_is_time = (bool(target_plot.axes)
+                               and is_time_label(getattr(target_plot.axes[0], 'label', None)))
+        self._minimap_plot.getAxis('bottom')._force_is_time = _mm_is_time
         for signals in target_plot.signals.values():
             for sig in signals:
                 if not isinstance(sig, SignalXY):
@@ -220,6 +251,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     continue
                 if len(x_data) == 0 or len(y_data) == 0:
                     continue
+                # Plot relative to the minimap offset (keeps coordinates small).
+                x_data = np.asarray(x_data) - self._minimap_offset
                 color = sig.color or '#1976d2'
                 pen = pg.mkPen(color, width=1)
                 y_max = getattr(sig, '_minimap_y_max_data', None)
@@ -235,11 +268,21 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     self._minimap_plot.plot(x_data, y_avg, pen=pen)
                 else:
                     self._minimap_plot.plot(x_data, y_data, pen=pen)
-        self._minimap_plot.getViewBox().setLimits(xMin=baseline[0], xMax=baseline[1])
-        self._minimap_plot.setXRange(baseline[0], baseline[1], padding=0)
+        self._minimap_plot.getViewBox().setLimits(xMin=baseline[0] - self._minimap_offset,
+                                                  xMax=baseline[1] - self._minimap_offset)
+        self._minimap_plot.setXRange(baseline[0] - self._minimap_offset,
+                                     baseline[1] - self._minimap_offset, padding=0)
         self._minimap_plot.getViewBox().disableAutoRange(axis=pg.ViewBox.XAxis)
 
-        region = pg.LinearRegionItem(values=[cur_min, cur_max], movable=False,
+        # Give the minimap a FIXED set of human-readable ticks derived from the
+        # draw/baseline window. Pinning them with setTicks() means the labels
+        # describe the queried time range and stay put while the main plot is
+        # panned/zoomed, instead of inheriting the main axis's dynamic precision
+        # (which collapsed to a repeated hour field, e.g. "15").
+        self._apply_minimap_static_ticks(self._minimap_plot.getAxis('bottom'), baseline)
+
+        region = pg.LinearRegionItem(values=[cur_min - self._minimap_offset, cur_max - self._minimap_offset],
+                                     movable=False,
                                      brush=pg.mkBrush(255, 179, 0, 120),
                                      pen=pg.mkPen('#e65100', width=2))
         region.setZValue(10)
@@ -258,6 +301,49 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._disconnect_minimap_signals()
         main_plot.sigRangeChanged.connect(self._on_main_x_range_changed)
         self._minimap_connected_main_vb = main_plot
+
+    def _apply_minimap_static_ticks(self, axis, baseline):
+        """Pin the minimap's bottom axis to a fixed, human-readable set of date
+        ticks computed once from the draw/baseline window.
+
+        The minimap reuses the main NanosecondDateFormatter, whose label
+        precision is driven by the *main* view, so its ticks collapsed to a
+        repeated coarse field (e.g. "15"). Here we compute nice civil-time ticks
+        for the fixed baseline range and install them with setTicks(), which
+        bypasses the dynamic tickValues/tickStrings. The result: the minimap
+        labels describe the queried time range and do not change while the main
+        plot is panned or zoomed. setTicks persists across redraws, so the labels
+        stay put until the next Draw replaces the baseline.
+        """
+        try:
+            abs_lo, abs_hi = int(baseline[0]), int(baseline[1])
+        except (TypeError, ValueError, IndexError):
+            axis.setTicks(None)
+            return
+        if abs_hi <= abs_lo or not getattr(axis, 'is_date', True):
+            axis.setTicks(None)
+            return
+
+        offset = int(getattr(self, '_minimap_offset', 0))
+        n = getattr(axis, 'n_ticks', 7)
+        step_ns, kind = _pick_interval(abs_hi - abs_lo, n)
+        ticks_abs = _generate_ticks(abs_lo, abs_hi, step_ns, kind)
+        if not ticks_abs:
+            axis.setTicks(None)
+            return
+
+        cut = axis.lcp(abs_lo, abs_hi)
+        end_seg = max(cut + 1, _segments_for_interval(step_ns, kind))
+        major = [(t - offset, axis.date_fmt(t, cut + 1, end_seg)) for t in ticks_abs]
+
+        # Shared prefix (date) goes in the common label, like the main axis.
+        axis.cut_start = cut
+        axis.offset_str = 'UTC:' + axis.date_fmt(abs_lo, axis.YEAR, cut,
+                                                 postfix_end=axis.postfix_end,
+                                                 postfix_start=axis.postfix_start)
+        if getattr(axis, 'common_label', None) is not None:
+            axis.common_label.setText(axis.offset_str)
+        axis.setTicks([major, []])
 
     def _disconnect_minimap_signals(self):
         if self._minimap_connected_main_vb is not None:
@@ -282,7 +368,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             full_span = baseline[1] - baseline[0]
             shows_full = full_span > 0 and abs(x_lo - baseline[0]) < full_span * 1e-6 and abs(x_hi - baseline[1]) < full_span * 1e-6
             self._minimap_viewport_item.setVisible(not shows_full)
-        self._minimap_viewport_item.setRegion((x_lo, x_hi))
+        mm_off = getattr(self, '_minimap_offset', 0)
+        self._minimap_viewport_item.setRegion((x_lo - mm_off, x_hi - mm_off))
 
     def _sync_minimap_viewport(self):
         main_plot = self._get_main_plot_for_minimap()

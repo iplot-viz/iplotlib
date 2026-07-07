@@ -12,6 +12,7 @@ from pyqtgraph import PlotItem
 from iplotlib.core import PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter as MPLDateFormatter
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter as PGDateFormatter
+from iplotlib.impl.matplotlib.dateFormatter import _fmt_duration
 
 logger = Sl.get_logger(__name__)
 
@@ -171,11 +172,11 @@ class IplotQtStatistics(QWidget):
 
         return item
 
-    def _create_timestamp_item(self, timestamp, is_date, impl_plot):
+    def _create_timestamp_item(self, timestamp, x_type, impl_plot):
         """
         Creates NumericTableWidgetItem for timestamp with proper formatting
         """
-        if is_date:
+        if x_type == 1:
             # Use the appropriate formatter based on backend
             if isinstance(impl_plot, PlotItem):
                 formatter = PGDateFormatter(orientation='bottom')
@@ -185,14 +186,17 @@ class IplotQtStatistics(QWidget):
             # Format the timestamp
             formatted = formatter.date_fmt(int(timestamp), formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
             item = NumericTableWidgetItem(formatted)
-        else:
+        elif x_type == 2:
             # Relative time (pulse) - data is in seconds
-            item = NumericTableWidgetItem(f"{timestamp:.9f} s")
+            item = NumericTableWidgetItem(_fmt_duration(int(round(float(timestamp) * 1e9)), 1))
+        else:
+            # not a time axis (e.g. plot temp versus current)
+            item = NumericTableWidgetItem(timestamp)
 
         item.setData(Qt.ItemDataRole.UserRole, timestamp)
         return item
 
-    def _set_stats(self, idx, min_data, avg_data, max_data, first, last, samples, first_time, last_time, is_date,
+    def _set_stats(self, idx, min_data, avg_data, max_data, first, last, samples, first_time, last_time, x_type,
                    impl_plot):
         """
             Set statistics row
@@ -203,8 +207,8 @@ class IplotQtStatistics(QWidget):
         self.table.setItem(idx, 4, self._create_item(first))
         self.table.setItem(idx, 5, self._create_item(last))
         self.table.setItem(idx, 6, self._create_item(samples))
-        self.table.setItem(idx, 7, self._create_timestamp_item(first_time, is_date, impl_plot))
-        self.table.setItem(idx, 8, self._create_timestamp_item(last_time, is_date, impl_plot))
+        self.table.setItem(idx, 7, self._create_timestamp_item(first_time, x_type, impl_plot))
+        self.table.setItem(idx, 8, self._create_timestamp_item(last_time, x_type, impl_plot))
 
     def fill_table(self, info_stats: list):
         """
@@ -227,7 +231,8 @@ class IplotQtStatistics(QWidget):
             for line in lines:
                 # Insert new row
                 self.table.insertRow(idx)
-
+                x_type=1 #1 means date, 2 means rel time and 3 else
+                x_unit = signal.data_store[0].unit
                 # Add Statistics to the table
                 if has_envelope > 0:
                     line = line[0]
@@ -276,11 +281,25 @@ class IplotQtStatistics(QWidget):
                             init_val = plot.slider_last_min
                             end_val = plot.slider_last_val if plot.slider_last_val != 0 else plot.slider_last_max
                             is_date = bool(min(x_displayed) > (1 << 53) and max(x_displayed) < (1 << 62))
+                            if not is_date:
+                                if x_unit is not None and  "time" in x_unit.lower():
+                                    x_type = 2
+                                else:
+                                    x_type = 3
+                            else:
+                                x_type = 1
                         else:
                             x_displayed = x_data[mask]
                             init_val = 0
                             end_val = -1
                             is_date = plot.axes[0].is_date
+                            if not is_date:
+                                if x_unit is not None and "time" in x_unit.lower():
+                                    x_type = 2
+                                else:
+                                    x_type = 3
+                            else:
+                                x_type = 1
 
                         if len(x_displayed) > 0:
                             first_time_raw = x_displayed[init_val].item()
@@ -308,7 +327,7 @@ class IplotQtStatistics(QWidget):
 
                         # Set statistics
                         self._set_stats(idx, min_val, avg_val, max_val, first, last, samples, first_time, last_time,
-                                        is_date, impl_plot)
+                                        x_type, impl_plot)
                     else:
                         # Indicate that there is no data
                         self.table.setItem(idx, 6, self._create_item(samples))
@@ -358,11 +377,25 @@ class IplotQtStatistics(QWidget):
                             init_val = plot.slider_last_min
                             end_val = plot.slider_last_val if plot.slider_last_val != 0 else plot.slider_last_max
                             is_date = bool(min(x_displayed) > (1 << 53) and max(x_displayed) < (1 << 62))
+                            if not is_date:
+                                if x_unit is not None and "time" in x_unit.lower():
+                                    x_type = 2
+                                else:
+                                    x_type = 3
+                            else:
+                                x_type = 1
                         else:
                             x_displayed = x_data[mask]
                             init_val = 0
                             end_val = -1
                             is_date = plot.axes[0].is_date
+                            if not is_date:
+                                if x_unit is not None and "time" in x_unit.lower():
+                                    x_type = 2
+                                else:
+                                    x_type = 3
+                            else:
+                                x_type = 1
 
                         if len(x_displayed) > 0:
                             first_time_raw = x_displayed[init_val].item()
@@ -390,7 +423,7 @@ class IplotQtStatistics(QWidget):
 
                         # Set statistics
                         self._set_stats(idx, min_val, avg_val, max_val, first_val, last_val, samples, first_time,
-                                        last_time, is_date, impl_plot)
+                                        last_time, x_type, impl_plot)
                     else:
                         # Indicate that there is no data
                         self.table.setItem(idx, 6, self._create_item(samples))

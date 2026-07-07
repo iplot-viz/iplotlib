@@ -32,7 +32,7 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
-from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
+from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter, is_time_label
 
 logger = setupLogger.get_logger(__name__)
 
@@ -1224,6 +1224,14 @@ class PyQtGraphParser(BackendParserBase):
         if fs and fs > 0:
             label_props['font-size'] = f'{int(fs)}pt'
         axis_item.setLabel(text, **label_props)
+
+        # Authoritatively flag a relative-time bottom axis at the moment its
+        # 'Time' label is applied (here, during signal processing), rather than
+        # re-sniffing labelText at tick time, which proved unreliable.
+        if getattr(axis_item, 'orientation', None) == 'bottom' \
+                and isinstance(axis_item, NanosecondDateFormatter) \
+                and not getattr(axis_item, 'is_date', False):
+            axis_item._force_is_time = is_time_label(text)
 
         if axis_item.orientation == 'bottom' and text:
             if fs and fs > 0:

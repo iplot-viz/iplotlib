@@ -4,7 +4,7 @@ import pyqtgraph as pg
 from pyqtgraph import PlotItem, InfiniteLine, TextItem, PlotDataItem
 from pyqtgraph.Qt import QtGui
 from iplotlib.core.impl_base import ImplementationPlotCacheTable
-from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
+from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter, _fmt_duration
 from PySide6.QtCore import QPointF
 
 class pyQtCrosshair:
@@ -109,6 +109,8 @@ class pyQtCrosshair:
 
     @staticmethod
     def _format_left_axis_value(axis, value, vmin, vmax):
+        # Format the Y label with the left axis' own tick strings so it matches
+        # the axis (no scientific notation when the ticks show none, mint #94).
         try:
             size = axis.geometry().height()
             if size <= 0:
@@ -192,11 +194,17 @@ class pyQtCrosshair:
                     text_key = f"x{i}"
                     current_text = self._text_cache.get(text_key)
                     if isinstance(axis, NanosecondDateFormatter):
-                        if getattr(axis, '_numeric_offset', 0) != 0:
-                            new_text = f"{xi * axis.autoSIPrefixScale:g}"
+                        if getattr(axis, 'is_date', True):
+                            # Absolute date axis: full UTC timestamp
+                            # (year..nanosecond), not the truncated tick label.
+                            new_text = axis.format_full(xi)
+                        elif axis._is_rel_time():
+                            # Relative *time* axis (label 'Time'): human-readable
+                            # duration (e.g. 36ms250us452ns, -4ms500us).
+                            new_text = _fmt_duration(int(round(float(xi) * 1e9)), 1)
                         else:
-                            ts = axis.tickStrings([xi], 1.0, getattr(axis, '_tick_spacing', 1))
-                            new_text = ts[0]
+                            # Other relative quantity: plain numeric value.
+                            new_text = f"{xi:.6g}"
                     else:
                         new_text = f"{xi:.6g}"
                     if current_text != new_text:
