@@ -31,7 +31,8 @@ from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider, PlotC
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
-from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
+from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, NiceNanosecondLocator, \
+    ExponentScalarFormatter, RelativeTimeLocator, is_time_label
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
 import iplotLogging.setupLogger as Sl
@@ -211,6 +212,17 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             ax.set_facecolor('#f5f5f5')
             main_x_formatter = main_ax.xaxis.get_major_formatter()
             if isinstance(main_x_formatter, NanosecondDateFormatter):
+                # Give the minimap its OWN nice locator over the fixed baseline
+                # range, and link the formatter to it so the label precision
+                # tracks the minimap's span (e.g. HH:MM for a few minutes). The
+                # minimap xlim is pinned to the draw window, so these ticks are
+                # stable: they describe the queried time range and do not change
+                # when the main plot is panned/zoomed.
+                #
+                # Previously the minimap reused the main view's label_segments
+                # with matplotlib's default locator, so every tick collapsed to
+                # the hour field (e.g. "15").
+                mm_locator = NiceNanosecondLocator(ax_idx=0, offset_lut=None)
                 clone = NanosecondDateFormatter(
                     ax_idx=0,
                     label_segments=main_x_formatter.label_segments,
@@ -218,8 +230,20 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     postfix_start=main_x_formatter.postfix_start,
                     offset_lut=None,
                     roundh=main_x_formatter._round,
+                    nice_locator=mm_locator,
                 )
+                ax.xaxis.set_major_locator(mm_locator)
                 ax.xaxis.set_major_formatter(clone)
+            elif isinstance(main_x_formatter, ExponentScalarFormatter) and \
+                    is_time_label(main_ax.get_xlabel()):
+                # Relative-time axis (main x label is 'Time'): give the minimap
+                # its own RelativeTimeLocator + ExponentScalarFormatter over the
+                # pinned baseline so ticks read as human-readable durations (1d,
+                # 12h, 36ms250us, ...). The minimap axis doesn't carry the 'Time'
+                # label, so force the time behaviour explicitly. A non-time
+                # relative axis falls through to the default numeric formatter.
+                ax.xaxis.set_major_locator(RelativeTimeLocator(force_time=True))
+                ax.xaxis.set_major_formatter(ExponentScalarFormatter(is_time=True))
 
             rect = Rectangle((baseline[0], 0), baseline[1] - baseline[0], 1,
                              facecolor='#ffb300', edgecolor='#e65100',

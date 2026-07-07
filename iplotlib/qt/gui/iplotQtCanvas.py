@@ -52,6 +52,7 @@ class IplotQtCanvas(QWidget):
         self._marker_window.dropMarker.connect(self.draw_marker_label)
         self._marker_window.deleteMarker.connect(self.delete_marker_label)
 
+
         # Statistics
         self._stats_table = IplotQtStatistics()
 
@@ -247,6 +248,30 @@ class IplotQtCanvas(QWidget):
         """Gets current iplotlib canvas"""
         return self._parser.canvas
 
+    def _canvas_position_of(self, plot) -> Optional[Tuple[int, int]]:
+        """1-indexed (row, col) position of *plot* in the canvas grid, or None."""
+        canvas = self._parser.canvas if self._parser else None
+        if canvas is None:
+            return None
+        for col_idx, col in enumerate(canvas.plots):
+            for row_idx, p in enumerate(col):
+                if p is plot:
+                    return (row_idx + 1, col_idx + 1)
+        return None
+
+    def _plot_at_canvas_position(self, plot_id) -> Optional[object]:
+        """Plot at the 1-indexed (row, col) position, or None."""
+        canvas = self._parser.canvas if self._parser else None
+        if canvas is None or plot_id is None:
+            return None
+        target_row = plot_id[0] - 1
+        target_col = plot_id[1] - 1
+        if 0 <= target_col < len(canvas.plots):
+            col = canvas.plots[target_col]
+            if 0 <= target_row < len(col):
+                return col[target_row]
+        return None
+
     @abstractmethod
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         """"""
@@ -254,6 +279,7 @@ class IplotQtCanvas(QWidget):
     @abstractmethod
     def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
         """"""
+
 
     def get_signals(self, canvas: Canvas):
         signal_list = []
@@ -349,7 +375,9 @@ class IplotQtCanvas(QWidget):
                     impl_plot = self._parser._signal_impl_plot_lut.get(signal.uid)
                     if impl_plot is None:
                         continue
+                    plot_id = self._canvas_position_of(signal.parent()) or (1, 1)
                     info_stats.append((signal, impl_plot))
+            #self._stats_table.set_canvas_columns(len(canvas.plots))
             self._stats_table.fill_table(info_stats)
 
     @contextmanager

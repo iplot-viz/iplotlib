@@ -1,13 +1,288 @@
 import pyqtgraph as pg
 import pyqtgraph.functions as fn
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas
 from math import ceil, floor, log10
 import numpy as np
 
 import iplotLogging.setupLogger as Sl
+import re as _re
 
 logger = Sl.get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Engineering time-unit decomposition for the relative (non-date) seconds axis.
+# Factors the constant high part into a "common" string (e.g. "7ms690us") and
+# labels each tick with the finest changing group (e.g. 452 / 467) plus its unit
+# (axis reads "[ns]"). Mirrors the matplotlib backend so both look the same.
+# ---------------------------------------------------------------------------
+_DUR_UNITS = [('d', 86_400_000_000_000), ('h', 3_600_000_000_000),
+              ('min', 60_000_000_000), ('s', 1_000_000_000),
+              ('ms', 1_000_000), ('us', 1_000), ('ns', 1)]
+_DUR_UNAME = {scale: name for name, scale in _DUR_UNITS}
+
+
+def _fmt_duration(ns: int, min_scale: int) -> str:
+    """Concatenated duration groups from the largest non-zero unit down to
+    ``min_scale``, sign-prefixed. ``m`` is minutes, ``ms`` milliseconds.
+    36250000 ns @ us -> '36ms250us'; 452 ns @ ns -> '452ns'; 0 -> '0<unit>'."""
+    r = abs(int(ns))
+    sign = '-' if ns < 0 else ''
+    parts = []
+    for name, scale in _DUR_UNITS:
+        if scale < min_scale:
+            break
+        q = r // scale
+        r -= q * scale
+        if q:
+            parts.append(f"{q}{name}")
+    if not parts:
+        return f"0{_DUR_UNAME.get(min_scale, 'ns')}"
+    return sign + ''.join(parts)
+
+
+def eng_time_axis_labels(lo_s, hi_s, ticks_s):
+    """Decompose a relative-time view into (common_label, {ns_key: label},
+    base_ns, unit_scale). Granularity follows the tick spacing (up to days);
+    the common part is the deepest group the *view* shares, factored out so
+    only the changing groups remain on each (unit-suffixed) tick. Negative
+    views are never offset (no common), and units extend to days/hours/minutes
+    for long pulses."""
+    to_ns = lambda v: int(round(float(v) * 1e9))
+    ticks = [to_ns(t) for t in ticks_s]
+    if not ticks:
+        return '', {}, 0, 1
+    lo, hi = to_ns(lo_s), to_ns(hi_s)
+    if lo > hi:
+        lo, hi = hi, lo
+    span = hi - lo
+    st = sorted(ticks)
+    diffs = [b - a for a, b in zip(st, st[1:]) if b > a]
+    spacing = min(diffs) if diffs else (span if span > 0 else 1)
+    if spacing <= 0:
+        spacing = max(span, 1)
+    g_idx = len(_DUR_UNITS) - 1
+    for i, (_name, scale) in enumerate(_DUR_UNITS):
+        if scale <= spacing:
+            g_idx = i
+            break
+    g_scale = _DUR_UNITS[g_idx][1]
+    base = 0
+    common = ''
+    if lo >= 0:
+        cut_idx = -1
+        for i in range(0, g_idx):
+            scale = _DUR_UNITS[i][1]
+            if lo // scale == hi // scale:
+                cut_idx = i
+            else:
+                break
+        if cut_idx >= 0:
+            cut_scale = _DUR_UNITS[cut_idx][1]
+            base = (lo // cut_scale) * cut_scale
+            common = _fmt_duration(base, cut_scale) if base else ''
+    labels = {tn: _fmt_duration(tn - base, g_scale) for tn in ticks}
+    return common, labels, base, g_scale
+
+
+# Fixed-ns "nice" step ladder for a relative-time axis (see matplotlib twin).
+_REL_LADDER = [
+    1, 2, 5, 10, 20, 50, 100, 200, 500,
+    1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000,
+    1_000_000, 2_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000,
+    100_000_000, 200_000_000, 500_000_000,
+    1_000_000_000, 2_000_000_000, 5_000_000_000,
+    10_000_000_000, 15_000_000_000, 30_000_000_000,
+    60_000_000_000, 120_000_000_000, 300_000_000_000,
+    600_000_000_000, 900_000_000_000, 1_800_000_000_000,
+    3_600_000_000_000, 7_200_000_000_000, 10_800_000_000_000,
+    21_600_000_000_000, 43_200_000_000_000,
+    86_400_000_000_000, 172_800_000_000_000, 432_000_000_000_000,
+    864_000_000_000_000, 2_592_000_000_000_000, 8_640_000_000_000_000,
+]
+
+
+def _rel_time_ticks(lo_ns: int, hi_ns: int, n: int):
+    """Nice tick positions (integer ns, anchored at 0) for ~n ticks across the
+    relative-time view [lo, hi]."""
+    if hi_ns < lo_ns:
+        lo_ns, hi_ns = hi_ns, lo_ns
+    span = hi_ns - lo_ns
+    if span <= 0:
+        return [lo_ns]
+    target = span / max(n, 1)
+    step = _REL_LADDER[-1]
+    for s in _REL_LADDER:
+        if s >= target:
+            step = s
+            break
+    import math
+    first = math.ceil(lo_ns / step) * step
+    out = []
+    t = first
+    while t <= hi_ns + step * 1e-9:
+        out.append(int(round(t)))
+        t += step
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Grafana-style "nice" interval ladder, in integer nanoseconds (UTC).
+#
+# Used by NanosecondDateFormatter.tickValues to place ticks on round civil-time
+# boundaries (:00, :15, day, week, month, year) instead of on evenly spaced
+# range/n positions. Sub-day steps use a 1/2/5 ladder anchored to UTC midnight;
+# day/week/month/year steps are stepped on the actual calendar.
+# ---------------------------------------------------------------------------
+_NS = 1
+_US = 1_000
+_MS = 1_000_000
+_SEC = 1_000_000_000
+_MIN = 60 * _SEC
+_HOUR = 60 * _MIN
+_DAY = 24 * _HOUR
+_WEEK = 7 * _DAY
+
+# Segment indices (mirror NanosecondDateFormatter constants).
+_YEAR, _MONTH, _DAY_SEG, _HOUR_SEG, _MINUTE, _SECOND, _MILI, _MICRO, _NANO = range(9)
+
+_LADDER = [
+    (1 * _NS, "fixed"),   (2 * _NS, "fixed"),   (5 * _NS, "fixed"),
+    (10 * _NS, "fixed"),  (20 * _NS, "fixed"),  (50 * _NS, "fixed"),
+    (100 * _NS, "fixed"), (200 * _NS, "fixed"), (500 * _NS, "fixed"),
+    (1 * _US, "fixed"),   (2 * _US, "fixed"),   (5 * _US, "fixed"),
+    (10 * _US, "fixed"),  (20 * _US, "fixed"),  (50 * _US, "fixed"),
+    (100 * _US, "fixed"), (200 * _US, "fixed"), (500 * _US, "fixed"),
+    (1 * _MS, "fixed"),   (2 * _MS, "fixed"),   (5 * _MS, "fixed"),
+    (10 * _MS, "fixed"),  (20 * _MS, "fixed"),  (50 * _MS, "fixed"),
+    (100 * _MS, "fixed"), (200 * _MS, "fixed"), (500 * _MS, "fixed"),
+    (1 * _SEC, "fixed"),  (2 * _SEC, "fixed"),  (5 * _SEC, "fixed"),
+    (10 * _SEC, "fixed"), (15 * _SEC, "fixed"), (30 * _SEC, "fixed"),
+    (1 * _MIN, "fixed"),  (2 * _MIN, "fixed"),  (5 * _MIN, "fixed"),
+    (10 * _MIN, "fixed"), (15 * _MIN, "fixed"), (30 * _MIN, "fixed"),
+    (1 * _HOUR, "fixed"), (2 * _HOUR, "fixed"), (3 * _HOUR, "fixed"),
+    (6 * _HOUR, "fixed"), (12 * _HOUR, "fixed"),
+    (1 * _DAY, "day"),    (2 * _DAY, "day"),
+    (1 * _WEEK, "week"),
+    (1, "month"),         (3, "month"),         (6, "month"),
+    (1, "year"),          (2, "year"),          (5, "year"),
+    (10, "year"),         (20, "year"),         (50, "year"),
+    (100, "year"),
+]
+_APPROX = {"month": 30 * _DAY, "year": 365 * _DAY}
+_LADDER_APPROX_NS = [s * _APPROX[k] if k in _APPROX else s for s, k in _LADDER]
+_UTC = timezone.utc
+
+
+def _utc_dt(ns):
+    return datetime.fromtimestamp(int(ns) // _SEC, tz=_UTC)
+
+
+def _pick_interval(span_ns, target_ticks):
+    span_ns = max(int(span_ns), 1)
+    ideal = span_ns / max(int(target_ticks), 1)
+    for approx, (step, kind) in zip(_LADDER_APPROX_NS, _LADDER):
+        if approx >= ideal:
+            return step, kind
+    return _LADDER[-1]
+
+
+def _gen_fixed(lo, hi, step):
+    midnight = (int(lo) // _DAY) * _DAY
+    k = (lo - midnight + step - 1) // step
+    t = midnight + k * step
+    out = []
+    while t <= hi:
+        out.append(t)
+        t += step
+    return out
+
+
+def _gen_calendar_day(lo, hi, ndays, weekly):
+    anchor = (int(lo) // _DAY) * _DAY
+    if weekly:
+        anchor -= _utc_dt(anchor).weekday() * _DAY
+    step = (7 if weekly else ndays) * _DAY
+    out = []
+    t = anchor
+    while t < lo:
+        t += step
+    while t <= hi:
+        out.append(t)
+        t += step
+    return out
+
+
+def _gen_month(lo, hi, nmonths):
+    d = _utc_dt(lo)
+    y, m = d.year, ((d.month - 1) // nmonths) * nmonths + 1
+    out = []
+    while True:
+        ns = int(datetime(y, m, 1, tzinfo=_UTC).timestamp()) * _SEC
+        if ns > hi:
+            break
+        if ns >= lo:
+            out.append(ns)
+        m += nmonths
+        while m > 12:
+            m -= 12
+            y += 1
+    return out
+
+
+def _gen_year(lo, hi, nyears):
+    y = (_utc_dt(lo).year // nyears) * nyears
+    out = []
+    while True:
+        ns = int(datetime(y, 1, 1, tzinfo=_UTC).timestamp()) * _SEC
+        if ns > hi:
+            break
+        if ns >= lo:
+            out.append(ns)
+        y += nyears
+    return out
+
+
+def _generate_ticks(lo_ns, hi_ns, step, kind):
+    if hi_ns < lo_ns:
+        lo_ns, hi_ns = hi_ns, lo_ns
+    if kind == "fixed":
+        return _gen_fixed(lo_ns, hi_ns, step)
+    if kind == "day":
+        return _gen_calendar_day(lo_ns, hi_ns, step // _DAY, weekly=False)
+    if kind == "week":
+        return _gen_calendar_day(lo_ns, hi_ns, 7, weekly=True)
+    if kind == "month":
+        return _gen_month(lo_ns, hi_ns, step)
+    if kind == "year":
+        return _gen_year(lo_ns, hi_ns, step)
+    return []
+
+
+def _segments_for_interval(step, kind):
+    """Deepest date segment index needed to label this interval."""
+    if kind == "year":
+        return _YEAR
+    if kind == "month":
+        return _MONTH
+    if kind in ("day", "week"):
+        return _DAY_SEG
+    if step >= _MIN:        # hour & minute steps -> HH:MM
+        return _MINUTE
+    if step >= _SEC:
+        return _SECOND
+    if step >= _MS:
+        return _MILI
+    if step >= _US:
+        return _MICRO
+    return _NANO
+
+
+def is_time_label(label) -> bool:
+    """True when an axis label marks a relative-time axis (iplotlib labels such
+    an axis 'Time', optionally with a unit). Any other non-date X axis is a
+    different quantity and must not get duration formatting."""
+    return label is not None and 'time' in str(label).lower()
 
 
 class NanosecondDateFormatter(pg.AxisItem):
@@ -43,12 +318,33 @@ class NanosecondDateFormatter(pg.AxisItem):
         self.offset = 0
         self.is_date = is_date
         self._spacing = 0.0
+        self._date_label_end = self.NANOSECOND
+        # Engineering time decomposition state (relative non-date X axis)
+        self._eng_common = ''
+        self._eng_labels = None
+        self._eng_base = 0
+        self._eng_gscale = 1
+        # Optional explicit relative-time override (set by the minimap, which
+        # builds its own axis without copying the 'Time' label). None -> decide
+        # from the label text.
+        self._force_is_time = None
         if kwargs['orientation'] == 'bottom':
             self.common_label = pg.LabelItem(text='', justify='right')
         else:
             self.common_label = pg.LabelItem(text='', justify='left')
 
         self.enableAutoSIPrefix(False)
+
+    def _is_rel_time(self) -> bool:
+        """True only for a relative-*time* bottom axis. A non-date bottom axis
+        is treated as time when its label is 'Time' (iplotlib convention), or
+        when explicitly forced (minimap). Any other quantity keeps plain numeric
+        ticks."""
+        if self.is_date or self.orientation != 'bottom':
+            return False
+        if self._force_is_time is not None:
+            return bool(self._force_is_time)
+        return is_time_label(getattr(self, 'labelText', '') or '')
 
     def __call__(self, x, pos=None):
         if self.is_date:
@@ -176,6 +472,37 @@ class NanosecondDateFormatter(pg.AxisItem):
             label_w = fm.horizontalAdvance(sample) + 10
             n = max(2, min(n, int(size / label_w)))
 
+        if self.is_date:
+            # Place ticks on round UTC civil-time boundaries (Grafana-style)
+            # instead of evenly spaced range/n positions. All math is done in
+            # absolute nanoseconds; values are returned in axis coordinates.
+            abs_lo = self.get_real_value(minVal)
+            abs_hi = self.get_real_value(maxVal)
+            step_ns, kind = _pick_interval(abs(abs_hi - abs_lo), n)
+            # In 100 us-unit mode the axis cannot resolve below 100 us, so never
+            # pick a finer step (keeps back-conversion on exact integers).
+            if self.offset == 100_000 and kind == "fixed" and step_ns < 100_000:
+                step_ns, kind = 100_000, "fixed"
+            ticks_abs = _generate_ticks(abs_lo, abs_hi, step_ns, kind)
+            values = [self._abs_to_axis(t) for t in ticks_abs]
+
+            self.last_values = values
+            self.last_range = maxVal - minVal
+            self._spacing = step_ns  # nanoseconds, for the "/div" spacing label
+            self._date_label_end = _segments_for_interval(step_ns, kind)
+
+            if values:
+                a0 = self.get_real_value(int(values[0]))
+                a1 = self.get_real_value(int(values[-1]))
+                self.cut_start = self.lcp(a0, a1)
+                self.offset_str = 'UTC:' + self.date_fmt(self.get_real_value(values[0]), self.YEAR,
+                                                         self.cut_start, postfix_end=self.postfix_end,
+                                                         postfix_start=self.postfix_start)
+                tuple_spacing = abs(values[1] - values[0]) if len(values) >= 2 else (maxVal - minVal)
+            else:
+                tuple_spacing = maxVal - minVal
+            return [(tuple_spacing, values)]
+
         # Detect range change
         last_range = maxVal - minVal
 
@@ -226,36 +553,49 @@ class NanosecondDateFormatter(pg.AxisItem):
         else:
             spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
 
-            if self.orientation == 'bottom':
-                # X axis: custom exponent logic
-                val_range = maxVal - minVal
-                max_val = max(abs(minVal), abs(maxVal))
-
-                if max_val > 0 and val_range > 0 and val_range / max_val < 1e-3:
-                    oom = floor(log10(val_range))
-                    self._numeric_offset = round(minVal, -oom)
-                else:
-                    self._numeric_offset = 0.0
-
-                if self._numeric_offset != 0:
-                    ref_val = max(abs(minVal - self._numeric_offset),
-                                  abs(maxVal - self._numeric_offset))
-                    if ref_val == 0:
-                        ref_val = val_range
-                else:
-                    ref_val = max_val if max_val > 0 else abs(spacing)
-
-                oom = floor(log10(ref_val)) if ref_val > 0 else 0
-                if -2 <= oom <= 5 and self._numeric_offset == 0:
-                    scale = 1.0
-                else:
-                    scale = 10.0 ** (-oom)
-                prefix = ''
-
-                self.set_scale(scale, prefix)
+            if self.orientation == 'bottom' and self._is_rel_time():
+                # Relative time (seconds) X axis. Replace the generic 1/2/5
+                # decimal positions with round-duration ticks (1d, 12h, 5m, ...)
+                # anchored at 0, then factor the constant part into the corner
+                # (e.g. 36ms250us) and label each tick with the changing groups
+                # + unit (e.g. 150ns). Negative views are not offset; units
+                # extend to days for long pulses.
+                rel = _rel_time_ticks(int(round(minVal * 1e9)),
+                                      int(round(maxVal * 1e9)), n)
+                if rel:
+                    values = [t / 1e9 for t in rel]
+                common, labels, base, g_scale = eng_time_axis_labels(
+                    minVal, maxVal, list(values))
+                self._eng_common = common
+                self._eng_labels = labels
+                self._eng_base = base
+                self._eng_gscale = g_scale
+                self._numeric_offset = 0.0
+                self.autoSIPrefixScale = 1.0
+                self.labelUnit = ''
+                self.offset_str = common
+                if len(values) >= 2:
+                    spacing = values[1] - values[0]
+                self._tick_spacing = spacing
+            elif self.orientation == 'bottom':
+                # Non-time relative X axis (some other quantity): keep the plain
+                # evenly spaced positions and plain numeric labels. Crucially we
+                # do NOT apply fn.siScale/set_scale here (that path is for the
+                # vertical axis); doing so on the bottom axis suppressed the
+                # ticks entirely.
+                self._eng_labels = None
+                self._eng_common = ''
+                self._numeric_offset = 0.0
+                self.autoSIPrefixScale = 1.0
+                self.labelUnit = ''
+                self.offset_str = ''
+                if len(values) >= 2:
+                    spacing = values[1] - values[0]
                 self._tick_spacing = spacing
             else:
-                # Y axis with fn.siScale
+                # Y axis: fn.siScale formatting. Clear any stale duration state.
+                self._eng_labels = None
+                self._eng_common = ''
                 self._numeric_offset = 0.0
                 if self.logMode:
                     _range = 10 ** np.array(self.range)
@@ -268,22 +608,29 @@ class NanosecondDateFormatter(pg.AxisItem):
 
     def tickStrings(self, values, scale, spacing):
         if self.is_date:
+            end = max(self.cut_start + 1, getattr(self, '_date_label_end', self.NANOSECOND))
             values = list(
-                map(lambda v: self.date_fmt(self.get_real_value(int(v)), self.cut_start + 1, self.cut_start + 5),
+                map(lambda v: self.date_fmt(self.get_real_value(int(v)), self.cut_start + 1, end),
                     values))
             self.common_label.prepareGeometryChange()
             self.common_label.setText(self.offset_str)
         else:
             if self.orientation == 'bottom':
-                # X axis: custom exponent formatting
-                adjusted = [v - self._numeric_offset for v in values] if self._numeric_offset != 0 else values
-                scale_factor = self.autoSIPrefixScale
-                if scale_factor != 1.0:
-                    precision = int(-log10(abs(scale_factor))) + 10
-                    values = [f"{round(v * scale_factor, precision):g}" for v in adjusted]
+                # Relative time X axis: each tick is the finest changing group
+                # (keyed by integer ns so the lookup is exact); the constant part
+                # lives in the common (corner) label.
+                if self._eng_labels is not None:
+                    out = []
+                    for v in values:
+                        key = int(round(float(v) * 1e9))
+                        lbl = self._eng_labels.get(key)
+                        if lbl is None:
+                            lbl = _fmt_duration(key - self._eng_base, self._eng_gscale)
+                        out.append(lbl)
+                    values = out
                 else:
-                    values = [f"{v:g}" for v in adjusted]
-                self.common_label.setText("")
+                    values = [f"{v:g}" for v in values]
+                self.common_label.setText(self._eng_common)
                 self._updateLabel()
             elif self.logMode:
                 # Y axis in log mode: un-log so labels stay in data-space.
@@ -335,7 +682,27 @@ class NanosecondDateFormatter(pg.AxisItem):
         return f"<span style='{style}'>{s}</span>"
 
     def get_real_value(self, value):
+        # Integer arithmetic: the offset is ~1.8e18, whose float ULP is a few
+        # hundred ns, so a float add would quantise away nanoseconds and can
+        # collapse a narrow (ns) span. int(round(x)) + int(offset) keeps the
+        # difference between ticks exact (the constant offset cancels).
         if self.offset == 100_000:
-            return value * self.offset
+            return int(round(float(value))) * 100_000
+        return int(round(float(value))) + int(self.offset)
+
+    def _abs_to_axis(self, abs_ns):
+        """Inverse of get_real_value: absolute ns -> axis coordinate.
+
+        Uses int(offset) so the round-trip abs -> axis -> abs is exact. A float
+        subtraction here (offset ~1.8e18, ULP a few hundred ns) would jitter the
+        reconstructed tick value, e.g. labelling a 300 us tick as 294/299."""
+        if self.offset == 100_000:
+            return abs_ns / 100_000
         else:
-            return value + self.offset
+            return abs_ns - int(self.offset)
+
+    def format_full(self, value):
+        """Full absolute UTC timestamp (year..nanosecond) for the crosshair readout,
+        e.g. 2026-06-26T14:30:45.000000456. Unlike the tick labels, this is never
+        truncated to the segments that vary across the visible range."""
+        return self.date_fmt(self.get_real_value(value), self.YEAR, self.NANOSECOND)
