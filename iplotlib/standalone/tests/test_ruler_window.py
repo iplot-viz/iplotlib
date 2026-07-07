@@ -154,7 +154,49 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         self.window.table.selectRow(0)
         self.window._copy_table_selection(self.window.table)
         copied = QApplication.clipboard().text()
-        self.assertEqual(copied, 'A\t1\t2.5\t7.5\ttrue\tAll\t#FF0000\t#FFFFFF')
+        self.assertEqual(copied, 'A\t1\t2.5\t7.5\t\ttrue\tAll\t#FF0000\t#FFFFFF')
+
+    def test_signal_values_cell_shows_the_passed_text(self):
+        self.window.add_row('A', (1, 1), (2.5, 7.5), '#FFFFFF',
+                            signal_values='VAR1: 1.2, VAR2: 3.4')
+        item = self.window.table.item(0, IplotQtRuler.COL_SIGNAL_VALUES)
+        self.assertEqual(item.text(), 'VAR1: 1.2, VAR2: 3.4')
+        self.assertFalse(bool(item.flags() & Qt.ItemFlag.ItemIsEditable))
+
+    def test_update_row_xy_refreshes_signal_values(self):
+        self.window.add_row('A', (1, 1), (2.5, 7.5), '#FFFFFF', signal_values='VAR1: 1.0')
+        self.window.update_row_xy('A', (1, 1), (3.0, 8.0), signal_values='VAR1: 2.0')
+        self.assertEqual(self.window._rows[0]['signal_values'], 'VAR1: 2.0')
+        self.assertEqual(
+            self.window.table.item(0, IplotQtRuler.COL_SIGNAL_VALUES).text(), 'VAR1: 2.0')
+
+    def _export_to(self, suffix: str):
+        import csv
+        import tempfile
+        from unittest.mock import patch
+        delimiter = ',' if suffix == '.csv' else ';'
+        self.window.add_row('A', (1, 1), (2.5, 7.5), '#FF0000', signal_values='VAR1: 1.2')
+        fd, path = tempfile.mkstemp(suffix=suffix)
+        os.close(fd)
+        try:
+            with patch('iplotlib.qt.gui.iplotQtRuler.QFileDialog.getSaveFileName',
+                       return_value=(path, '')):
+                self.window._export_csv()
+            with open(path, newline='', encoding='utf-8') as fh:
+                return list(csv.reader(fh, delimiter=delimiter))
+        finally:
+            os.unlink(path)
+
+    def test_export_scsv_uses_semicolon_and_writes_every_column(self):
+        rows = self._export_to('.scsv')
+        self.assertEqual(rows[0], ['Ruler', 'Plot', 'X value', 'Y value', 'Signal values',
+                                   'Visible', 'Labels', 'Color', 'Font color'])
+        self.assertEqual(rows[1], ['A', '1', '2.5', '7.5', 'VAR1: 1.2',
+                                   'true', 'All', '#FF0000', '#FFFFFF'])
+
+    def test_export_csv_extension_uses_comma(self):
+        rows = self._export_to('.csv')
+        self.assertEqual(rows[1][:5], ['A', '1', '2.5', '7.5', 'VAR1: 1.2'])
 
 
 class IplotQtRulerViewModeTest(unittest.TestCase):
@@ -177,7 +219,7 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertEqual(self.window.view_mode, IplotQtRuler.VIEW_ROWS)
         self.assertTrue(self.window.rows_radio.isChecked())
         self.assertEqual(self.window.table.rowCount(), 2)
-        self.assertEqual(self.window.table.columnCount(), 8)
+        self.assertEqual(self.window.table.columnCount(), 9)
         self.assertIs(self.window.view_stack.currentWidget(), self.window.table)
 
     def test_switching_to_columns_swaps_the_view_stack(self):
@@ -190,7 +232,7 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertEqual(len(self.window.column_sections), 1)
         plot_id, table = self.window.column_sections[0]
         self.assertEqual(plot_id, (1, 1))
-        self.assertEqual(table.rowCount(), 2)
+        self.assertEqual(table.rowCount(), 3)
         self.assertEqual(table.columnCount(), 3)
         headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
         self.assertEqual(headers, ['A', IplotQtRuler._DELTA_HEADER, 'B'])
@@ -205,6 +247,15 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertEqual(table.item(1, 0).text(), '2')
         self.assertEqual(table.item(0, 2).text(), '3')
         self.assertEqual(table.item(1, 2).text(), '4')
+
+    def test_section_shows_signal_values_row(self):
+        self.window.clear_info()
+        self.window.add_row('A', (1, 1), (1.0, 2.0), '#FF0000', signal_values='S: 9')
+        self.window.columns_radio.setChecked(True)
+        _, table = self.window.column_sections[0]
+        # Third axis row is the signal values; column 0 is ruler A.
+        self.assertEqual(list(IplotQtRuler._COLUMNS_AXIS_LABELS)[2], 'Signal values')
+        self.assertEqual(table.item(2, 0).text(), 'S: 9')
 
     def test_delta_in_section_is_consecutive_difference(self):
         self.window.add_row('C', (1, 1), (8.0, 7.0), '#0000FF')
@@ -228,7 +279,8 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         table.selectAll()
         self.window._copy_table_selection(table)
         copied = QApplication.clipboard().text()
-        self.assertEqual(copied, '1\t2\t3\n2\t2\t4')
+        # Third row is the (here empty) signal values, with no delta between columns.
+        self.assertEqual(copied, '1\t2\t3\n2\t2\t4\n\t\t')
 
     def test_singleton_plot_section_has_no_delta_column(self):
         self.window.remove_row_by_name('B', (1, 1))
@@ -249,7 +301,7 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertTrue(self.window.remove_button.isEnabled())
         self.assertTrue(self.window.distance_button.isEnabled())
         self.assertEqual(self.window.table.rowCount(), 2)
-        self.assertEqual(self.window.table.columnCount(), 8)
+        self.assertEqual(self.window.table.columnCount(), 9)
         self.assertEqual(self.window.column_sections, [])
 
     def test_data_survives_mode_switch(self):

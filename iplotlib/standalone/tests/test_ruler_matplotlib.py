@@ -58,6 +58,17 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         self.assertIsInstance(parser_rulers[0], iplotMplRuler)
         self.assertEqual(self.widget._ruler_window.table.rowCount(), 1)
 
+    def test_add_ruler_populates_signal_values_in_window(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 2.5, 0.5)
+        text = self.widget._ruler_window._rows[0]['signal_values']
+        self.assertTrue(text.startswith('s: '), text)
+        self.assertAlmostEqual(float(text.split(': ')[1]), np.sin(2.5), delta=0.15)
+
+    def test_ruler_off_the_signal_has_empty_signal_values(self):
+        # X well beyond the data extent (0..10) -> no signal under the ruler.
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 100.0, 0.0)
+        self.assertEqual(self.widget._ruler_window._rows[0]['signal_values'], '')
+
     def test_add_rulers_picks_different_default_colors(self):
         self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
         self.widget._add_ruler_at(self.impl_plot, self.plot, 3.0, 0.3)

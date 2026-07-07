@@ -35,7 +35,7 @@ from iplotlib.core import (Axis,
                            SignalXY,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter
-from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
+from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor, get_values_from_line
 from iplotlib.impl.matplotlib.iplotMplRuler import iplotMplRuler
 
 logger = setupLogger.get_logger(__name__)
@@ -1309,6 +1309,32 @@ class MatplotlibParser(BackendParserBase):
                 for line in getattr(signal, 'lines', []):
                     groups.append(line if isinstance(line, Collection) else [line])
         return groups
+
+    def _ruler_signal_values_text(self, impl_plot: MPLAxes, x: float) -> str:
+        """Comma-joined "label: value" of each signal at the ruler X, matching the
+        ruler's green value labels. A signal is skipped (blank) when the ruler
+        falls off its data, so the cell agrees with what the plot shows."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if not ci or not getattr(ci, 'signals', None):
+            return ''
+        parts = []
+        for sig_ref in ci.signals:
+            signal = sig_ref()
+            if not signal or isinstance(signal, SignalContour):
+                continue
+            for line in getattr(signal, 'lines', []):
+                group = line if isinstance(line, Collection) else [line]
+                xdata = group[0].get_xdata() if group else []
+                if len(xdata) == 0:
+                    continue
+                x_sig, y_sig = get_values_from_line(group, x)
+                span = abs(xdata[-1] - xdata[0])
+                # Data-span tolerance (view-independent so the cell is stable on
+                # zoom); mirrors the 5% used by the value labels.
+                if span and abs(x - x_sig) <= span * 0.05:
+                    parts.append(f"{signal.label or 'signal'}: {y_sig:.6g}")
+                break
+        return ', '.join(parts)
 
     @BackendParserBase.run_in_one_thread
     def add_ruler(self, impl_plot: MPLAxes, name: str, x: float, y: float,

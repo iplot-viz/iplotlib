@@ -431,7 +431,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         plot_id = self._canvas_position_of(plot) or (1, 1)
         self._ruler_window.set_canvas_columns(len(self._parser.canvas.plots))
         self._ruler_window.add_row(name, plot_id, (x_abs, y_abs), ruler.color,
-                                    visible=True, is_date=is_date)
+                                    visible=True, is_date=is_date,
+                                    signal_values=self._parser._ruler_signal_values_text(impl_plot, x))
         if not self._ruler_window.isVisible():
             self._ruler_window.show()
         # Do not steal focus from the canvas.
@@ -564,7 +565,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if core is not None:
             core.xy = (x_abs, y_abs)
         plot_id = self._canvas_position_of(origin_plot) or (1, 1)
-        self._ruler_window.update_row_xy(origin.name, plot_id, (x_abs, y_abs))
+        self._ruler_window.update_row_xy(
+            origin.name, plot_id, (x_abs, y_abs),
+            signal_values=self._parser._ruler_signal_values_text(origin.ax, origin.xy[0]))
 
     def _find_ruler_near(self, impl_plot, event):
         rulers = self._parser.get_rulers(impl_plot)
@@ -626,7 +629,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self._ruler_window.add_row(ruler.name, plot_id, ruler.xy,
                                                 ruler.color, ruler.visible, is_date,
                                                 ruler.font_color, ruler.show_label,
-                                                ruler.show_val_label)
+                                                ruler.show_val_label,
+                                                self._parser._ruler_signal_values_text(impl_plot, x_view))
                     self._apply_ruler_state(ruler)
                     added = True
                 self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))

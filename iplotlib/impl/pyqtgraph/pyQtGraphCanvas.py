@@ -1784,6 +1784,38 @@ class PyQtGraphParser(BackendParserBase):
                         lines.append(item)
         return lines
 
+    def _ruler_signal_values_text(self, impl_plot: PlotItem, x: float) -> str:
+        """Comma-joined "label: value" of each signal at the ruler X, matching the
+        ruler's green value labels. A signal is skipped (blank) when the ruler
+        falls off its data, so the cell agrees with what the plot shows."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if not ci or not getattr(ci, 'signals', None):
+            return ''
+        parts = []
+        for sig_ref in ci.signals:
+            signal = sig_ref()
+            if not signal or isinstance(signal, SignalContour):
+                continue
+            for line in getattr(signal, 'lines', []):
+                item = line[0] if isinstance(line, list) else line
+                if not isinstance(item, PlotDataItem):
+                    continue
+                x_data, y_data = item.getData()
+                if x_data is None or len(x_data) == 0:
+                    continue
+                # Nearest sample (searchsorted+clamp, as the value labels do).
+                idx = np.searchsorted(x_data, x, side="left")
+                if 0 < idx < len(x_data) and abs(x - x_data[idx - 1]) < abs(x - x_data[idx]):
+                    idx -= 1
+                idx = min(idx, len(x_data) - 1)
+                span = abs(x_data[-1] - x_data[0])
+                # Data-span tolerance (view-independent so the cell is stable on
+                # zoom); mirrors the 5% used by the value labels.
+                if span and abs(x - x_data[idx]) <= span * 0.05:
+                    parts.append(f"{signal.label or 'signal'}: {y_data[idx]:.6g}")
+                break
+        return ', '.join(parts)
+
     @BackendParserBase.run_in_one_thread
     def add_ruler(self, impl_plot: PlotItem, name: str, x: float, y: float,
                   color: str = "#FFFFFF", is_echo: bool = False) -> pyQtRuler:

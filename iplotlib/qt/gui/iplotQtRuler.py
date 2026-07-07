@@ -1,3 +1,4 @@
+import csv
 from string import ascii_uppercase
 from typing import Dict, List, Tuple
 
@@ -5,8 +6,9 @@ import pandas as pd
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox,
-                                QFrame, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QRadioButton,
-                                QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                                QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton,
+                                QRadioButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem,
+                                QVBoxLayout, QWidget)
 
 import iplotLogging.setupLogger as Sl
 from iplotlib.core.plot import PlotXY
@@ -103,10 +105,11 @@ class IplotQtRuler(QWidget):
     COL_PLOT = 1
     COL_X = 2
     COL_Y = 3
-    COL_VISIBLE = 4
-    COL_LABEL = 5
-    COL_COLOR = 6
-    COL_FONT_COLOR = 7
+    COL_SIGNAL_VALUES = 4
+    COL_VISIBLE = 5
+    COL_LABEL = 6
+    COL_COLOR = 7
+    COL_FONT_COLOR = 8
 
     # Independent toggles shown in the Labels column, in check order.
     LABEL_TOGGLES = ['Ruler label', 'Val label']
@@ -117,7 +120,7 @@ class IplotQtRuler(QWidget):
     VIEW_ROWS = 'rows'
     VIEW_COLUMNS = 'columns'
 
-    _COLUMNS_AXIS_LABELS = ['X', 'Y']
+    _COLUMNS_AXIS_LABELS = ['X', 'Y', 'Signal values']
     _DELTA_HEADER = 'Δ'
 
     def __init__(self, *args, **kwargs):
@@ -174,8 +177,10 @@ class IplotQtRuler(QWidget):
 
         self.remove_button = QPushButton("Remove ruler")
         self.distance_button = QPushButton("Compute distance")
+        self.export_button = QPushButton("Export to CSV")
         self.remove_button.pressed.connect(self._remove_selected)
         self.distance_button.pressed.connect(self._compute_distance)
+        self.export_button.pressed.connect(self._export_csv)
 
         main_layout = QVBoxLayout()
         main_layout.addLayout(view_layout)
@@ -183,6 +188,7 @@ class IplotQtRuler(QWidget):
         buttons = QHBoxLayout()
         buttons.addWidget(self.remove_button)
         buttons.addWidget(self.distance_button)
+        buttons.addWidget(self.export_button)
         main_layout.addLayout(buttons)
         self.setLayout(main_layout)
 
@@ -209,7 +215,7 @@ class IplotQtRuler(QWidget):
     def add_row(self, name: str, plot_id, xy: Tuple[float, float], color: str,
                 visible: bool = True, is_date: bool = False,
                 font_color: str = Ruler.font_color, show_label: bool = True,
-                show_val_label: bool = True):
+                show_val_label: bool = True, signal_values: str = ''):
         self._rows.append({
             'name': name,
             'plot_id': tuple(plot_id),
@@ -220,6 +226,7 @@ class IplotQtRuler(QWidget):
             'font_color': font_color,
             'show_label': show_label,
             'show_val_label': show_val_label,
+            'signal_values': signal_values,
         })
         # Sorting must be off during insertion; re-render to handle both modes uniformly.
         self._render_table()
@@ -238,12 +245,16 @@ class IplotQtRuler(QWidget):
                     self._render_table()
                 return
 
-    def update_row_xy(self, name: str, plot_id, xy: Tuple[float, float]):
-        """Update a ruler row's (x, y) after it is dragged on the canvas."""
+    def update_row_xy(self, name: str, plot_id, xy: Tuple[float, float],
+                      signal_values: str = None):
+        """Update a ruler row's (x, y) -- and its signal values, which change with
+        x -- after it is dragged on the canvas."""
         target = tuple(plot_id)
         for row in self._rows:
             if row['name'] == name and row['plot_id'] == target:
                 row['xy'] = (xy[0], xy[1])
+                if signal_values is not None:
+                    row['signal_values'] = signal_values
                 self._render_table()
                 return
 
@@ -302,9 +313,9 @@ class IplotQtRuler(QWidget):
 
     def _render_rows(self):
         self.table.setSortingEnabled(False)
-        self.table.setColumnCount(8)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels(['Ruler', 'Plot', 'X value', 'Y value',
-                                              'Visible', 'Labels', 'Color', 'Font color'])
+                                              'Signal values', 'Visible', 'Labels', 'Color', 'Font color'])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
@@ -339,6 +350,10 @@ class IplotQtRuler(QWidget):
         y_item = _NumericTableItem(f"{y:.6g}")
         y_item.setData(Qt.ItemDataRole.UserRole, y)
         self.table.setItem(row_idx, self.COL_Y, y_item)
+
+        values_item = QTableWidgetItem(row.get('signal_values', ''))
+        values_item.setFlags(values_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(row_idx, self.COL_SIGNAL_VALUES, values_item)
 
         visible_cb = QCheckBox()
         visible_cb.setChecked(row['visible'])
@@ -440,9 +455,11 @@ class IplotQtRuler(QWidget):
                 self._set_plain_cell(table, 0, col_idx,
                                      self._format_consecutive_dx(prev['xy'][0], r['xy'][0], is_date))
                 self._set_plain_cell(table, 1, col_idx, f"{r['xy'][1] - prev['xy'][1]:.6g}")
+                self._set_plain_cell(table, 2, col_idx, '')  # no delta for signal values
                 col_idx += 1
             self._set_axis_cell(table, 0, col_idx, self._format_x(r), r['color'])
             self._set_axis_cell(table, 1, col_idx, f"{r['xy'][1]:.6g}", r['color'])
+            self._set_axis_cell(table, 2, col_idx, r.get('signal_values', ''), r['color'])
             col_idx += 1
 
         table.resizeColumnsToContents()
@@ -529,6 +546,49 @@ class IplotQtRuler(QWidget):
         if isinstance(widget, QPushButton):
             return widget.property('color') or ''
         return ''
+
+    def _export_csv(self):
+        """Write the per-ruler table (all rulers, every column) to a spreadsheet
+        file: a semicolon-separated ``.scsv`` by default (mint's convention, so it
+        opens cleanly where the comma is the decimal separator) or a comma
+        ``.csv``."""
+        if not self._rows:
+            QMessageBox.information(self, "Export rulers", "There are no rulers to export.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export rulers", "rulers.scsv",
+            "Semicolon-separated values (*.scsv);;CSV (*.csv)")
+        if not path:
+            return
+        if not path.lower().endswith(('.scsv', '.csv')):
+            path += '.scsv'
+        delimiter = ',' if path.lower().endswith('.csv') else ';'
+        headers = ['Ruler', 'Plot', 'X value', 'Y value', 'Signal values',
+                   'Visible', 'Labels', 'Color', 'Font color']
+        try:
+            with open(path, 'w', newline='', encoding='utf-8') as fh:
+                writer = csv.writer(fh, delimiter=delimiter)
+                writer.writerow(headers)
+                for r in sorted(self._rows, key=lambda row: row['name']):
+                    writer.writerow([
+                        r['name'], self._format_plot_id(r['plot_id']), self._format_x(r),
+                        f"{r['xy'][1]:.6g}", r.get('signal_values', ''),
+                        str(r['visible']).lower(), self._labels_summary(r),
+                        r['color'], r['font_color'],
+                    ])
+        except OSError as exc:
+            logger.error(f"Failed to export rulers to CSV: {exc}")
+            QMessageBox.warning(self, "Export to CSV", f"Could not write the file:\n{exc}")
+
+    def _labels_summary(self, row: Dict) -> str:
+        """Same summary the Labels combo shows, rebuilt from the model for export."""
+        checked = [toggle for toggle, on in
+                   zip(self.LABEL_TOGGLES, (row['show_label'], row['show_val_label'])) if on]
+        if not checked:
+            return "None"
+        if len(checked) == len(self.LABEL_TOGGLES):
+            return "All"
+        return ", ".join(checked)
 
     def _update_selection_history(self):
         selected = [idx.row() for idx in self.table.selectionModel().selectedRows()]
