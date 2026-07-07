@@ -4,12 +4,15 @@ import unittest
 
 import numpy as np
 from matplotlib.figure import Figure
-from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullFormatter
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.ticker import MaxNLocator, NullLocator
 
 from iplotDataAccess.dataAccess import DataAccess
 from iplotlib.core import PlotXY
 from iplotlib.core.axis import LinearAxis
-from iplotlib.impl.matplotlib.dateFormatter import ExponentScalarFormatter
+from iplotlib.impl.matplotlib.dateFormatter import (ExponentScalarFormatter,
+                                                    LogYLocator, LogYFormatter,
+                                                    log_axis_ticks)
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.impl.matplotlib.tests.QAppOffscreenTestAdapter import QAppOffscreenTestAdapter
 from iplotlib.interface import AccessHelper
@@ -148,32 +151,55 @@ class MatplotlibTesting(QAppOffscreenTestAdapter):
 
 
 class LogScaleAxisTests(QAppOffscreenTestAdapter):
-    """Log-scale Y axis behaviour mirroring the pyqtgraph backend: plain decade
-    tick labels, no labelled minors and non-positive bounds falling back to
-    autoscale."""
+    """Log-scale Y axis behaviour, consistent with the pyqtgraph backend: a
+    sub-decade view reads as round mantissas under a common power, a wider view
+    as decade powers, and non-positive bounds fall back to autoscale."""
 
     @staticmethod
     def _new_axes():
-        return Figure().add_subplot()
+        fig = Figure()
+        FigureCanvasAgg(fig)  # real renderer so draws update tick labels/offset
+        return fig.add_subplot()
 
-    def test_log_axis_uses_plain_decade_labels(self):
+    def test_log_axis_sets_log_scale_and_suppresses_minors(self):
         parser = MatplotlibParser()
         ax = self._new_axes()
         parser.process_ipl_log_axis(ax.get_yaxis(), PlotXY(log_scale=True))
-        y_axis = ax.get_yaxis()
         self.assertEqual(ax.get_yscale(), 'log')
-        self.assertIsInstance(y_axis.get_major_formatter(), FuncFormatter)
-        self.assertEqual(y_axis.get_major_formatter()(1000, 0), '1000')
-        self.assertIsInstance(y_axis.get_minor_formatter(), NullFormatter)
+        self.assertIsInstance(ax.get_yaxis().get_minor_locator(), NullLocator)
 
-    def test_axis_params_keep_log_locator_and_formatter(self):
+    def test_axis_params_attaches_adaptive_log_ticks(self):
         parser = MatplotlibParser()
         ax = self._new_axes()
         y_axis = ax.get_yaxis()
         parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
         parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
-        self.assertIsInstance(y_axis.get_major_locator(), LogLocator)
-        self.assertIsInstance(y_axis.get_major_formatter(), FuncFormatter)
+        self.assertIsInstance(y_axis.get_major_locator(), LogYLocator)
+        self.assertIsInstance(y_axis.get_major_formatter(), LogYFormatter)
+
+    def test_log_axis_ticks_subdecade_mantissas_and_factor(self):
+        values, exp = log_axis_ticks(1.12e-4, 2.08e-4, 6)
+        self.assertEqual(exp, -6)
+        self.assertEqual([round(v / 10.0 ** exp) for v in values],
+                         [120, 140, 160, 180, 200])
+
+    def test_log_axis_ticks_multidecade_are_decade_powers(self):
+        values, exp = log_axis_ticks(1e-4, 1e-1, 6)
+        self.assertIsNone(exp)
+        np.testing.assert_allclose(values, [1e-4, 1e-3, 1e-2, 1e-1])
+
+    def test_log_axis_subdecade_renders_mantissas_and_offset(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        y_axis = ax.get_yaxis()
+        parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
+        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
+        ax.set_ylim(1.12e-4, 2.08e-4)
+        ax.figure.canvas.draw()
+        labels = [t.get_text() for t in y_axis.get_majorticklabels() if t.get_text()]
+        self.assertIn('120', labels)
+        self.assertIn('200', labels)
+        self.assertEqual(y_axis.get_offset_text().get_text(), '1e-6')
 
     def test_axis_params_linear_get_exponent_formatter(self):
         parser = MatplotlibParser()

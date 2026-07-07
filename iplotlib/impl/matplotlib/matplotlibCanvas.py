@@ -14,7 +14,7 @@ from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator, LogLocator, FuncFormatter, NullFormatter
+from matplotlib.ticker import MaxNLocator, NullLocator
 from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -35,7 +35,7 @@ from iplotlib.core import (Axis,
                            SignalXY,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter, \
-    NiceNanosecondLocator, RelativeTimeLocator, is_time_label
+    NiceNanosecondLocator, RelativeTimeLocator, LogYLocator, LogYFormatter, is_time_label
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
 logger = setupLogger.get_logger(__name__)
@@ -980,13 +980,10 @@ class MatplotlibParser(BackendParserBase):
             log_scale = self._pm.get_value(plot, 'log_scale')
             if log_scale:
                 mpl_axis.axes.set_yscale('log')
-                # Format for minor ticks
-                y_minor = LogLocator(base=10, subs=(1.0,))
-                mpl_axis.set_minor_locator(y_minor)
-                # Match the pyqtgraph backend: decade ticks labelled with plain
-                # numbers and unlabelled minors, so no 10^n appears between ticks.
-                mpl_axis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
-                mpl_axis.set_minor_formatter(NullFormatter())
+                # Adaptive major locator/formatter are attached in
+                # process_ipl_axis_params; drop the default decade minors so the
+                # nice-mantissa majors are the only ticks (matches pyqtgraph).
+                mpl_axis.set_minor_locator(NullLocator())
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, mpl_axis: MPLAxis):
         label_props = dict(color=fc)
@@ -1006,9 +1003,17 @@ class MatplotlibParser(BackendParserBase):
         # Font size for UTC label
         mpl_axis.get_offset_text().set_fontsize(fs)
 
+        # A log-scaled Y axis (scale set in process_ipl_log_axis, which runs
+        # first) gets the adaptive log ticks; every other numeric axis keeps the
+        # engineering-exponent formatter.
+        is_log_y = getattr(mpl_axis, 'axis_name', None) == 'y' \
+            and mpl_axis.axes.get_yscale() == 'log'
         if not axis.is_date:
-            mpl_axis.set_major_formatter(
-                ExponentScalarFormatter(label_props=label_props))
+            if is_log_y:
+                mpl_axis.set_major_formatter(LogYFormatter(label_props=label_props))
+            else:
+                mpl_axis.set_major_formatter(
+                    ExponentScalarFormatter(label_props=label_props))
 
         mpl_axis.set_tick_params(**tick_props)
 
@@ -1022,11 +1027,14 @@ class MatplotlibParser(BackendParserBase):
         # 'Time' it lays ticks on round durations (1d, 12h, 5m, ...), otherwise
         # it falls back to MaxNLocator. (The 'Time' label is applied later, in
         # signal processing, so we can't decide here -- the locator and the
-        # ExponentScalarFormatter both read the label live at draw time.) The Y
-        # axis keeps the plain MaxNLocator.
+        # ExponentScalarFormatter both read the label live at draw time.) A log
+        # Y axis gets the adaptive LogYLocator; a linear Y axis the plain
+        # MaxNLocator.
         if not axis.is_date:
             if getattr(mpl_axis, 'axis_name', None) == 'x':
                 mpl_axis.set_major_locator(RelativeTimeLocator(tick_number))
+            elif is_log_y:
+                mpl_axis.set_major_locator(LogYLocator(tick_number))
             else:
                 mpl_axis.set_major_locator(MaxNLocator(tick_number))
 

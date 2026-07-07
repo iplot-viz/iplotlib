@@ -285,6 +285,56 @@ def is_time_label(label) -> bool:
     return label is not None and 'time' in str(label).lower()
 
 
+# ---------------------------------------------------------------------------
+# Log-scaled Y axis ticks. Mirrors the matplotlib backend so both look the
+# same: a sub-decade view reads as round mantissas under a single common power
+# of ten (e.g. 120..200 with the corner showing 1e-6); a wider view reads as
+# decade powers.
+# ---------------------------------------------------------------------------
+_LOG_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
+
+
+def _nice_ticks(lo, hi, n):
+    """Up to ``n`` evenly spaced 'nice' (1/2/2.5/5 x 10^k) values within
+    [lo, hi]."""
+    if not (hi > lo) or n < 2:
+        return [lo]
+    raw = (hi - lo) / n
+    mag = 10.0 ** floor(log10(raw))
+    step = _LOG_STEPS[-1] * mag
+    for s in _LOG_STEPS:
+        if s * mag >= raw:
+            step = s * mag
+            break
+    first = ceil(lo / step - 1e-9)
+    last = floor(hi / step + 1e-9)
+    return [(first + i) * step for i in range(last - first + 1)]
+
+
+def _common_exp(maxabs):
+    """Common power-of-ten factor, snapped to a multiple of 3 to match the
+    engineering exponent used on the linear axis."""
+    if maxabs <= 0:
+        return 0
+    return 3 * floor(log10(maxabs) / 3)
+
+
+def log_axis_ticks(lo, hi, n):
+    """Adaptive major ticks for a log Y axis. Returns ``(values, exp)``:
+    sub-decade -> nice mantissas labelled under the common factor ``10**exp``;
+    multi-decade -> decade powers (``exp`` is None, plain decimal labels)."""
+    if lo <= 0 or hi <= lo:
+        return [], None
+    if log10(hi) - log10(lo) < 1.0:
+        vals = _nice_ticks(lo, hi, n)
+        return vals, (_common_exp(max(abs(v) for v in vals)) if vals else 0)
+    e0, e1 = floor(log10(lo)), floor(log10(hi))
+    subs = (1, 2, 5) if (e1 - e0) < 3 else (1,)
+    vals = [s * 10.0 ** e for e in range(e0, e1 + 1) for s in subs
+            if lo <= s * 10.0 ** e <= hi]
+    return sorted(vals), None
+
+
 class NanosecondDateFormatter(pg.AxisItem):
     """Date axis formatter that takes into account ns offset if it is defined on this formatter axis
     Additionally it formats date as common_part + postfix and includes nanosecond precision if data is given as int64"""
@@ -324,6 +374,9 @@ class NanosecondDateFormatter(pg.AxisItem):
         self._eng_labels = None
         self._eng_base = 0
         self._eng_gscale = 1
+        # Common power-of-ten factor for a sub-decade log Y axis (None -> plain
+        # decade labels); set in tickValues, consumed in tickStrings.
+        self._log_exp = None
         # Optional explicit relative-time override (set by the minimap, which
         # builds its own axis without copying the 'Time' label). None -> decide
         # from the label text.
@@ -593,16 +646,32 @@ class NanosecondDateFormatter(pg.AxisItem):
                     spacing = values[1] - values[0]
                 self._tick_spacing = spacing
             else:
-                # Y axis: fn.siScale formatting. Clear any stale duration state.
+                # Y axis. Clear any stale duration state.
                 self._eng_labels = None
                 self._eng_common = ''
                 self._numeric_offset = 0.0
                 if self.logMode:
-                    _range = 10 ** np.array(self.range)
+                    # Adaptive log ticks (mirrors the matplotlib backend):
+                    # positions are log10 of the chosen data values, and a
+                    # sub-decade view carries a common factor in the corner. Use
+                    # the unclamped tick target so the tick set matches the
+                    # matplotlib LogYLocator exactly (which does not pixel-clamp).
+                    lo, hi = sorted((10.0 ** minVal, 10.0 ** maxVal))
+                    tick_vals, exp = log_axis_ticks(lo, hi, self.n_ticks)
+                    if tick_vals:
+                        values = [log10(v) for v in tick_vals]
+                        self.last_values = values
+                    self._log_exp = exp
+                    self.offset_str = f"1e{exp}" if exp else ''
+                    self.autoSIPrefixScale = 1.0
+                    self.labelUnit = ''
+                    if len(values) >= 2:
+                        spacing = values[1] - values[0]
                 else:
+                    # fn.siScale formatting.
                     _range = self.range
-                (scale, prefix) = fn.siScale(max(abs(_range[0] * self.scale), abs(_range[1] * self.scale)))
-                self.set_scale(scale, prefix)
+                    (scale, prefix) = fn.siScale(max(abs(_range[0] * self.scale), abs(_range[1] * self.scale)))
+                    self.set_scale(scale, prefix)
 
         return [(spacing, values)]  # major ticks
 
@@ -633,16 +702,16 @@ class NanosecondDateFormatter(pg.AxisItem):
                 self.common_label.setText(self._eng_common)
                 self._updateLabel()
             elif self.logMode:
-                # Y axis in log mode: un-log so labels stay in data-space.
-                values = [10 ** v for v in values]
-                if self.labelUnit in ['', 'k']:
-                    values = [f"{v:g}" for v in values]
-                    self.common_label.setText("")
+                # Y axis in log mode: un-log to data space, then either factor
+                # out the common power (sub-decade) or show plain decades.
+                data = [10.0 ** v for v in values]
+                if self._log_exp:
+                    factor = 10.0 ** self._log_exp
+                    values = [f"{d / factor:g}" for d in data]
+                    self.common_label.setText(self.offset_str)
                 else:
-                    scale_factor = self.autoSIPrefixScale
-                    values = [f"{v * scale_factor:g}" for v in values]
-                    if self.common_label.text != self.offset_str:
-                        self.common_label.setText(self.offset_str)
+                    values = [f"{d:g}" for d in data]
+                    self.common_label.setText("")
             else:
                 # Y axis: fn.siScale formatting
                 if self.labelUnit in ['', 'k']:
