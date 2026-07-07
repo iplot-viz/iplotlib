@@ -3,7 +3,13 @@ import tempfile
 import unittest
 
 import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullFormatter
+
 from iplotDataAccess.dataAccess import DataAccess
+from iplotlib.core import PlotXY
+from iplotlib.core.axis import LinearAxis
+from iplotlib.impl.matplotlib.dateFormatter import ExponentScalarFormatter
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.impl.matplotlib.tests.QAppOffscreenTestAdapter import QAppOffscreenTestAdapter
 from iplotlib.interface import AccessHelper
@@ -139,6 +145,70 @@ class MatplotlibTesting(QAppOffscreenTestAdapter):
             self.assertEqual(np.shape(dobj.ydata), expected_y_shape)
             self.assertIsInstance(dobj.xdata, (np.ndarray, list))
             self.assertIsInstance(dobj.ydata, (np.ndarray, list))
+
+
+class LogScaleAxisTests(QAppOffscreenTestAdapter):
+    """Log-scale Y axis behaviour mirroring the pyqtgraph backend: plain decade
+    tick labels, no labelled minors and non-positive bounds falling back to
+    autoscale."""
+
+    @staticmethod
+    def _new_axes():
+        return Figure().add_subplot()
+
+    def test_log_axis_uses_plain_decade_labels(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        parser.process_ipl_log_axis(ax.get_yaxis(), PlotXY(log_scale=True))
+        y_axis = ax.get_yaxis()
+        self.assertEqual(ax.get_yscale(), 'log')
+        self.assertIsInstance(y_axis.get_major_formatter(), FuncFormatter)
+        self.assertEqual(y_axis.get_major_formatter()(1000, 0), '1000')
+        self.assertIsInstance(y_axis.get_minor_formatter(), NullFormatter)
+
+    def test_axis_params_keep_log_locator_and_formatter(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        y_axis = ax.get_yaxis()
+        parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
+        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
+        self.assertIsInstance(y_axis.get_major_locator(), LogLocator)
+        self.assertIsInstance(y_axis.get_major_formatter(), FuncFormatter)
+
+    def test_axis_params_linear_get_exponent_formatter(self):
+        parser = MatplotlibParser()
+        y_axis = self._new_axes().get_yaxis()
+        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
+        self.assertIsInstance(y_axis.get_major_locator(), MaxNLocator)
+        self.assertIsInstance(y_axis.get_major_formatter(), ExponentScalarFormatter)
+
+    def test_linear_mode_passes_limits_through(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        parser.set_impl_y_axis_limits(ax, (1.0, 10.0))
+        lo, hi = ax.get_ylim()
+        self.assertAlmostEqual(lo, 1.0, places=5)
+        self.assertAlmostEqual(hi, 10.0, places=5)
+
+    def test_log_mode_applies_positive_limits(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        ax.set_yscale('log')
+        parser.set_impl_y_axis_limits(ax, (1e-4, 2e-4))
+        lo, hi = ax.get_ylim()
+        self.assertAlmostEqual(lo, 1e-4, places=10)
+        self.assertAlmostEqual(hi, 2e-4, places=10)
+
+    def test_log_mode_falls_back_to_autoscale_on_non_positive(self):
+        import warnings
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        ax.plot([0, 1, 2], [1, 10, 100])
+        ax.set_yscale('log')
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')  # the old code warned and ignored the limits
+            parser.set_impl_y_axis_limits(ax, (-1.0, 5.0))
+        self.assertTrue(ax.get_autoscaley_on())
 
 
 if __name__ == '__main__':

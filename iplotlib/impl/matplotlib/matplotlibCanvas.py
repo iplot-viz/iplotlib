@@ -14,7 +14,7 @@ from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator, LogLocator
+from matplotlib.ticker import MaxNLocator, LogLocator, FuncFormatter, NullFormatter
 from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -982,6 +982,10 @@ class MatplotlibParser(BackendParserBase):
                 # Format for minor ticks
                 y_minor = LogLocator(base=10, subs=(1.0,))
                 mpl_axis.set_minor_locator(y_minor)
+                # Match the pyqtgraph backend: decade ticks labelled with plain
+                # numbers and unlabelled minors, so no 10^n appears between ticks.
+                mpl_axis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+                mpl_axis.set_minor_formatter(NullFormatter())
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, mpl_axis: MPLAxis):
         label_props = dict(color=fc)
@@ -1001,13 +1005,19 @@ class MatplotlibParser(BackendParserBase):
         # Font size for UTC label
         mpl_axis.get_offset_text().set_fontsize(fs)
 
-        if not axis.is_date:
+        # A log Y axis keeps the locator/formatter set by process_ipl_log_axis:
+        # MaxNLocator spaces ticks linearly, which piles the labels up on a log
+        # scale, and ExponentScalarFormatter would reintroduce the 1e-offset.
+        is_log_y = isinstance(mpl_axis, YAxis) and mpl_axis.axes.get_yscale() == 'log'
+
+        if not axis.is_date and not is_log_y:
             mpl_axis.set_major_formatter(ExponentScalarFormatter(label_props=label_props))
 
         mpl_axis.set_tick_params(**tick_props)
 
         # Set number of ticks and labels
-        mpl_axis.set_major_locator(MaxNLocator(tick_number))
+        if not is_log_y:
+            mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
     def process_ipl_axis_formatter(self, impl_plot: MPLAxes, mpl_axis: MPLAxis, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
@@ -1334,10 +1344,17 @@ class MatplotlibParser(BackendParserBase):
             impl_plot.set_xlim(limits[0], limits[1])
 
     def set_impl_y_axis_limits(self, impl_plot: MPLAxes, limits: tuple):
-        if isinstance(impl_plot, MPLAxes):
-            impl_plot.set_ylim(limits[0], limits[1])
-        else:
+        if not isinstance(impl_plot, MPLAxes):
             return None
+        if impl_plot.get_yscale() == 'log':
+            lo, hi = limits[0], limits[1]
+            if lo is None or hi is None or lo <= 0 or hi <= 0:
+                # A log axis cannot show non-positive bounds (linear padding can
+                # push the bottom below zero) — fall back to autoscale, like the
+                # pyqtgraph backend.
+                impl_plot.autoscale(enable=True, axis='y')
+                return None
+        impl_plot.set_ylim(limits[0], limits[1])
 
     def set_impl_x_axis_label_text(self, impl_plot: MPLAxes, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
