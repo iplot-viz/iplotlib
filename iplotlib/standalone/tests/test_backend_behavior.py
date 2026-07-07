@@ -341,19 +341,22 @@ class SharedXAxisTest(unittest.TestCase):
                 shared = qt_canvas._parser._get_all_shared_axes(plots[0])
                 self.assertEqual(len(shared), 1)
 
-    def _build_time_and_xy_plots(self, backend: str):
+    def _build_time_and_xy_plots(self, backend: str, with_ech: bool = False):
         """Two time-vs-data plots plus one X-versus-Y plot whose X is data (not time),
-        with shared_x_axis enabled."""
-        canvas = Canvas(3, 1, title="shared_x_with_xy", shared_x_axis=True)
-        time = np.linspace(0, 1_000_000, 200)
+        with shared_x_axis enabled. With ``with_ech`` a fourth plot is added whose X
+        expression yields times inside the shared window (ECH-style)."""
+        canvas = Canvas(4 if with_ech else 3, 1, title="shared_x_with_xy", shared_x_axis=True)
+        ts_start = 1_754_463_600_000_000_000
+        ts_end = 1_754_503_200_000_000_000
+        time = np.linspace(ts_start, ts_end, 200).astype(np.int64)
         time_plots = []
         for i in range(2):
             plot = PlotXY()
             sig = SignalXY(label=f"t{i}")  # x_expr defaults to '${self}.time'
             # Matching ts groups the two time plots via the ts path (avoids max_diff=None fallback).
-            sig.ts_start = 0
-            sig.ts_end = 1_000_000
-            sig.set_data([time, np.sin(time * 1e-5 + i)])
+            sig.ts_start = ts_start
+            sig.ts_end = ts_end
+            sig.set_data([time, np.sin(np.linspace(0, 6, 200) + i)])
             plot.add_signal(sig)
             canvas.add_plot(plot, 0)
             time_plots.append(plot)
@@ -365,23 +368,35 @@ class SharedXAxisTest(unittest.TestCase):
         xy_plot.add_signal(xy_sig)
         canvas.add_plot(xy_plot, 0)
 
+        ech_plot = None
+        if with_ech:
+            # X expression whose samples are times: first sample inside the shared window.
+            ech_plot = PlotXY()
+            ech_sig = SignalXY(label="ech", x_expr="${T}.time")
+            ech_sig.processing_enabled = False
+            ech_x = np.linspace(ts_start + 600_000_000_000, ts_end - 600_000_000_000, 150).astype(np.int64)
+            ech_sig.set_data([ech_x, np.linspace(0, 50, 150)])
+            ech_plot.add_signal(ech_sig)
+            canvas.add_plot(ech_plot, 0)
+
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
         qt_canvas.set_canvas(canvas)
         qt_canvas.resize(600, 400)
         self.app.processEvents()
-        return canvas, qt_canvas, time_plots, xy_plot
+        return canvas, qt_canvas, time_plots, xy_plot, ech_plot
 
     def test_non_time_xy_plot_keeps_own_x_range_under_shared_time(self):
         """An X-versus-Y plot must keep its data-derived X range (~5..295) rather than be
         forced onto the shared time range (~1e6) when shared_x_axis is enabled."""
         for backend in BACKENDS:
             with self.subTest(backend=backend):
-                _, qt_canvas, _, xy_plot = self._build_time_and_xy_plots(backend)
+                _, qt_canvas, _, xy_plot, _ = self._build_time_and_xy_plots(backend)
                 limits = qt_canvas._parser.get_all_plot_limits()
                 xy_limits = next(lim for lim in limits if lim.plot_ref() is xy_plot)
                 x_begin = xy_limits.axes_ranges[0].begin
                 x_end = xy_limits.axes_ranges[0].end
-                # The time plots span 0..1e6; the XY plot's X must stay in temperature territory.
+                # The time plots span epoch timestamps; the XY plot's X must stay in
+                # temperature territory.
                 self.assertLess(x_begin, 10_000.0)
                 self.assertLess(x_end, 10_000.0)
 
@@ -390,7 +405,7 @@ class SharedXAxisTest(unittest.TestCase):
         plots still share their X axis."""
         for backend in BACKENDS:
             with self.subTest(backend=backend):
-                _, qt_canvas, _, xy_plot = self._build_time_and_xy_plots(backend)
+                _, qt_canvas, _, xy_plot, _ = self._build_time_and_xy_plots(backend)
                 parser = qt_canvas._parser
 
                 def logical(impl_plot):
@@ -405,6 +420,78 @@ class SharedXAxisTest(unittest.TestCase):
                                  len(parser._plot_impl_plot_lut.get(id(xy_plot))))
                 # The two time plots still group together; the XY plot is excluded.
                 self.assertEqual(len(parser._get_all_shared_axes(time_impl)), 2)
+
+    def test_ech_time_expression_plot_follows_shared_group(self):
+        """A plot whose X expression yields times with its first sample inside the
+        shared window joins the group led by a time plot, so it follows the
+        shared-time zoom. The plain X-versus-Y plot stays out."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                _, qt_canvas, _, _, ech_plot = self._build_time_and_xy_plots(backend, with_ech=True)
+                parser = qt_canvas._parser
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                time_impl = next(p for p in plots if parser._plot_x_is_time(logical(p)))
+                shared_logical = [logical(p) for p in parser._get_all_shared_axes(time_impl)]
+                self.assertTrue(any(p is ech_plot for p in shared_logical))
+                # Two time plots + the ECH plot; the data-valued XY plot is excluded.
+                self.assertEqual(len(shared_logical), 3)
+
+    def test_data_expression_plot_stays_out_even_with_time_like_samples(self):
+        """A '${T}.data' expression must never join the shared-time group, even when
+        its X samples numerically fall inside the shared window (GUI smoke test found
+        the first-point check alone pulled the X-versus-Y plot into the zoom)."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = Canvas(2, 1, title="shared_x_data_expr", shared_x_axis=True)
+                ts_start = 1_754_463_600_000_000_000
+                ts_end = 1_754_503_200_000_000_000
+                time = np.linspace(ts_start, ts_end, 100).astype(np.int64)
+                time_plot = PlotXY()
+                sig = SignalXY(label="t")
+                sig.ts_start = ts_start
+                sig.ts_end = ts_end
+                sig.set_data([time, np.sin(np.linspace(0, 6, 100))])
+                time_plot.add_signal(sig)
+                canvas.add_plot(time_plot, 0)
+                xy_plot = PlotXY()
+                xy_sig = SignalXY(label="xy", x_expr="${T}.data")
+                xy_sig.processing_enabled = False
+                # X samples collide numerically with the time window.
+                xy_sig.set_data([time.copy(), np.linspace(0, 50, 100)])
+                xy_plot.add_signal(xy_sig)
+                canvas.add_plot(xy_plot, 0)
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(600, 400)
+                self.app.processEvents()
+                parser = qt_canvas._parser
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                time_impl = next(p for p in plots if logical(p) is time_plot)
+                self.assertEqual(len(parser._get_all_shared_axes(time_impl)), 1)
+
+    def test_zoom_on_ech_plot_stays_local(self):
+        """Zooming on the ECH-style plot must not drive the shared group: it only
+        syncs its own stacked sub-plots."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                _, qt_canvas, _, _, ech_plot = self._build_time_and_xy_plots(backend, with_ech=True)
+                parser = qt_canvas._parser
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                ech_impl = next(p for p in plots if logical(p) is ech_plot)
+                self.assertEqual(len(parser._get_all_shared_axes(ech_impl)),
+                                 len(parser._plot_impl_plot_lut.get(id(ech_plot))))
 
 
 class CrosshairMouseMotionTest(unittest.TestCase):

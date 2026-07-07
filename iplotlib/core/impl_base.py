@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from functools import partial, wraps
 import numpy as np
 from queue import Empty, Queue
+import re
 import threading
 from typing import Any, Callable, Collection, Dict, List, Optional, Union
 import weakref
@@ -420,6 +421,55 @@ class BackendParserBase(ABC):
                     return False
         return True
 
+    #: An X expression that reads a time buffer of some alias, e.g. '${T}.time'.
+    _X_EXPR_TIME_ACCESSOR = re.compile(r'\$\{[^}]+\}\.time\b')
+
+    @classmethod
+    def _plot_x_expr_yields_time(cls, plot):
+        """Whether every X expression of ``plot`` reads a time buffer ('${...}.time').
+
+        A data-valued expression (e.g. '${T}.data') never yields times, no matter
+        where its samples happen to fall; a time-valued expression (e.g. '${T}.time',
+        the ECH case) is a shared-time candidate, to be confirmed against the shared
+        interval with :meth:`_plot_first_x_in_range`.
+        """
+        if plot is None or not plot.signals:
+            return False
+        for stack in plot.signals.values():
+            for signal in stack:
+                if signal is None:
+                    continue
+                x_expr = getattr(signal, 'x_expr', '${self}.time')
+                if cls._X_EXPR_TIME_ACCESSOR.search(x_expr) is None:
+                    return False
+        return True
+
+    @staticmethod
+    def _plot_first_x_in_range(plot, begin, end):
+        """Whether the first processed X sample of ``plot`` lies inside [begin, end].
+
+        Some X expressions yield time values (e.g. ECH workspaces); the first sample
+        falling inside the shared time interval is the agreed criterion to let such a
+        plot follow the shared-time zoom. The first signal with X data decides.
+        """
+        if plot is None or not plot.signals or begin is None or end is None:
+            return False
+        for stack in plot.signals.values():
+            for signal in stack:
+                if signal is None:
+                    continue
+                x_data = getattr(signal, 'x_data', None)
+                if x_data is None:
+                    continue
+                x_data = np.asarray(x_data)
+                if x_data.size == 0 or not np.issubdtype(x_data.dtype, np.number):
+                    continue
+                finite = x_data[np.isfinite(x_data)]
+                if finite.size == 0:
+                    continue
+                return bool(begin <= finite[0] <= end)
+        return False
+
     def _get_all_shared_axes(self, base_impl_plot: Any) -> List[Any]:
         cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
         base_plot = cache_item.plot()
@@ -455,8 +505,15 @@ class BackendParserBase(ABC):
                     shared.append(plot_item)
                 continue
 
-            # Never group an X-versus-Y plot together with the time plots.
+            # An X-versus-Y plot joins the shared-time group only when its X expression
+            # yields times (e.g. '${T}.time', the ECH case) AND its first sample falls
+            # inside the shared interval. Both are required: samples alone can collide
+            # numerically with the window while the expression is data-valued. It still
+            # never drives the group: zooming on it stays local (base-plot check above).
             if not self._plot_x_is_time(plot):
+                if self._plot_x_expr_yields_time(plot) and \
+                        self._plot_first_x_in_range(plot, base_begin, base_end):
+                    shared.append(plot_item)
                 continue
 
             # XY plots: compare requested ts to bypass axis-original drift from

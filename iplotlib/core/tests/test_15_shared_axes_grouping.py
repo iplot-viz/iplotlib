@@ -2,6 +2,8 @@
 
 import unittest
 
+import numpy as np
+
 from iplotlib.core.impl_base import BackendParserBase
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
@@ -80,6 +82,75 @@ class PlotXIsTimeTest(unittest.TestCase):
 
     def test_plot_without_signals_defaults_to_time(self):
         self.assertTrue(BackendParserBase._plot_x_is_time(PlotXY()))
+
+
+class PlotXExprYieldsTimeTest(unittest.TestCase):
+    @staticmethod
+    def _plot_with_x_expr(*x_exprs):
+        plot = PlotXY()
+        for i, x_expr in enumerate(x_exprs):
+            plot.add_signal(SignalXY(label=f"s{i}", x_expr=x_expr), stack=i + 1)
+        return plot
+
+    def test_time_buffer_expression_is_time(self):
+        plot = self._plot_with_x_expr("${T}.time")
+        self.assertTrue(BackendParserBase._plot_x_expr_yields_time(plot))
+
+    def test_data_buffer_expression_is_not_time(self):
+        plot = self._plot_with_x_expr("${T}.data")
+        self.assertFalse(BackendParserBase._plot_x_expr_yields_time(plot))
+
+    def test_any_data_expression_makes_plot_not_time(self):
+        plot = self._plot_with_x_expr("${T}.time", "${T_ssf}.data")
+        self.assertFalse(BackendParserBase._plot_x_expr_yields_time(plot))
+
+    def test_time_accessor_inside_larger_expression_is_time(self):
+        plot = self._plot_with_x_expr("${T}.time - 1000000")
+        self.assertTrue(BackendParserBase._plot_x_expr_yields_time(plot))
+
+    def test_lookalike_accessor_is_not_time(self):
+        # '.timestamp' must not match the '${...}.time' accessor.
+        plot = self._plot_with_x_expr("${T}.timestamp")
+        self.assertFalse(BackendParserBase._plot_x_expr_yields_time(plot))
+
+    def test_none_plot_or_empty_plot_is_not_time(self):
+        self.assertFalse(BackendParserBase._plot_x_expr_yields_time(None))
+        self.assertFalse(BackendParserBase._plot_x_expr_yields_time(PlotXY()))
+
+
+class PlotFirstXInRangeTest(unittest.TestCase):
+    @staticmethod
+    def _plot_with_x_data(x_data):
+        plot = PlotXY()
+        s = SignalXY(label="ech", x_expr="${T}.time")
+        x = np.asarray(x_data, dtype=float)
+        s.set_data([x, np.zeros_like(x)])
+        plot.add_signal(s)
+        return plot
+
+    def test_first_sample_inside_interval(self):
+        plot = self._plot_with_x_data([150.0, 250.0, 350.0])
+        self.assertTrue(BackendParserBase._plot_first_x_in_range(plot, 100, 400))
+
+    def test_first_sample_outside_interval(self):
+        # Only the first sample decides, even if later ones fall inside.
+        plot = self._plot_with_x_data([5.0, 150.0])
+        self.assertFalse(BackendParserBase._plot_first_x_in_range(plot, 100, 400))
+
+    def test_leading_nan_samples_are_skipped(self):
+        plot = self._plot_with_x_data([np.nan, 200.0])
+        self.assertTrue(BackendParserBase._plot_first_x_in_range(plot, 100, 400))
+
+    def test_plot_without_x_data_is_out(self):
+        plot = PlotXY()
+        plot.add_signal(SignalXY(label="empty", x_expr="${T}.data"))
+        self.assertFalse(BackendParserBase._plot_first_x_in_range(plot, 100, 400))
+
+    def test_none_plot_or_bounds_are_out(self):
+        plot = self._plot_with_x_data([150.0])
+        self.assertFalse(BackendParserBase._plot_first_x_in_range(None, 100, 400))
+        self.assertFalse(BackendParserBase._plot_first_x_in_range(plot, None, 400))
+        self.assertFalse(BackendParserBase._plot_first_x_in_range(plot, 100, None))
 
 
 if __name__ == '__main__':
