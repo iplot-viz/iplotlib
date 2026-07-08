@@ -58,6 +58,12 @@ class IplotQtCanvasToolbar(QToolBar):
         # Statistics
         self.statistics = QAction(create_icon('stats_icon'), 'Statistics', self)
         self.addAction(self.statistics)
+
+        self.minimapAction = QAction(create_icon('minimap', 'svg'), 'Mini-map', self)
+        self.minimapAction.setCheckable(True)
+        self.minimapAction.setEnabled(False)
+        self.minimapAction.setToolTip('Show mini-map (available when a single plot is visible)')
+        self.addAction(self.minimapAction)
         self.addSeparator()
 
         # Command-history management
