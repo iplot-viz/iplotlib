@@ -72,6 +72,11 @@ class IplotQtCanvasToolbar(QToolBar):
         self.addAction(self.undoAction)
         self.addAction(self.redoAction)
 
+        # Restore every plot to the range captured at draw time.
+        self.homeAction = QAction(create_icon('home', 'svg'), '&Home', self)
+        self.homeAction.setToolTip('Reset all plots to the draw-time range')
+        self.addAction(self.homeAction)
+
         # Saving, etc..
         self.importAction = QAction(create_icon('open_file'), '&Import Workspace', self)
         self.exportAction = QAction(create_icon('save_as'), '&Export Workspace', self)

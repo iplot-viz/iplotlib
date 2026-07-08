@@ -1418,6 +1418,71 @@ class BackendParserBase(ABC):
         if isinstance(plot, PlotXYWithSlider) and self._pm.get_value(self.canvas, 'shared_x_axis'):
             self.set_impl_plot_slider_limits(plot, *limits.sliders_ranges[0].get_limits())
 
+    def _draw_time_y_limits(self, plot, begin, end):
+        """
+        Return the Y range as Draw would show it: the original extent plus the 10%
+        margin, unless a canvas-level Y min/max override is set (then it wins, with
+        no margin). Contour and image plots get no margin. Mirrors the Y handling in
+        :meth:`process_ipl_axis`.
+        """
+        if begin is None or end is None or isinstance(plot, (PlotContour, PlotImage)):
+            return begin, end
+        canvas_begin = self.canvas.canvas_begin
+        canvas_end = self.canvas.canvas_end
+        height = end - begin
+        lo = canvas_begin if canvas_begin is not None else begin - 0.1 * height
+        hi = canvas_end if canvas_end is not None else end + 0.1 * height
+        return lo, hi
+
+    def set_plot_limits_to_original(self, impl_plot: Any):
+        """
+        Restore a single plot to the ranges captured at draw time (the ``original``
+        limits), leaving every other plot untouched. The X range is the exact window
+        requested at draw time; the Y range gets the same margin Draw applies.
+
+        Reuses the view-limit plumbing of undo/redo, so the redraw is served from
+        cached/in-memory data rather than triggering a fresh request.
+        """
+        target = self.get_plot_limits(impl_plot)
+        if not isinstance(target, IplPlotViewLimits):
+            return
+        plot = target.plot_ref()
+        if plot is None:
+            return
+
+        x_begin, x_end = plot.axes[0].get_limits('original')
+        stacked_plots = self._plot_impl_plot_lut.get(id(plot))
+        y_begin, y_end = plot.axes[1][stacked_plots.index(impl_plot)].get_limits('original')
+        y_begin, y_end = self._draw_time_y_limits(plot, y_begin, y_end)
+
+        target.axes_ranges[0].set_limits(x_begin, x_end)
+        target.axes_ranges[1].set_limits(y_begin, y_end)
+        # Signals inherit the plot's X range; realign them to the draw-time window
+        # so their cached samples are reused on redraw.
+        for signal_range in target.signals_ranges:
+            signal_range.set_limits(x_begin, x_end)
+
+        self.set_plot_limits(target)
+
+    def reset_all_plots_to_original(self):
+        """
+        Restore every visible plot to its draw-time ranges. Plots hidden by focus
+        mode are skipped, mirroring the iteration in :meth:`get_all_plot_limits`.
+        """
+        if not isinstance(self.canvas, Canvas):
+            return
+        for col in self.canvas.plots:
+            for plot in col:
+                if plot is None:
+                    continue
+                if self._focus_plot is not None and self._focus_plot != plot:
+                    continue
+                impl_list = self._plot_impl_plot_lut.get(id(plot))
+                if not impl_list:
+                    continue
+                for impl_plot in impl_list:
+                    self.set_plot_limits_to_original(impl_plot)
+
     @staticmethod
     def create_offset(vals: Union[List, BufferObject]) -> Union[int, np.int64, np.uint64, None]:
         """

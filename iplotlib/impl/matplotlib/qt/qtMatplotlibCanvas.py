@@ -446,6 +446,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def render(self):
         self._mpl_renderer.draw()
 
+    def _flush_view(self):
+        self.render()
+
     # custom event handlers
     def _mpl_draw_finish(self, event: DrawEvent):
         self._draw_call_counter += 1
@@ -808,6 +811,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         autoscale_menu = QMenu(self)
         autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
         autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+        autoscale_menu.addAction("Reset zoom/pan", lambda: self.reset_plot_view(event.inaxes))
         if self._parser.canvas.focus_plot is None:
             autoscale_menu.addAction("Focus on plot", lambda: self._full_screen_mode_on(event.inaxes))
         else:

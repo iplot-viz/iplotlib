@@ -66,6 +66,7 @@ class IplotQtMainWindow(QMainWindow):
     def wire_connections(self):
         self.toolBar.undoAction.triggered.connect(self.undo)
         self.toolBar.redoAction.triggered.connect(self.redo)
+        self.toolBar.homeAction.triggered.connect(self.home)
         self.toolBar.statistics.triggered.connect(self.show_stats)
         self.toolBar.minimapAction.toggled.connect(self.on_minimap_toggled)
         self.toolBar.toolActivated.connect(
@@ -102,6 +103,16 @@ class IplotQtMainWindow(QMainWindow):
         w.redo()
         # Computation of the statistics after redo operation
         w.stats(w.get_canvas())
+        QApplication.restoreOverrideCursor()
+        self.check_history(w)
+
+    def home(self):
+        """Restore every plot to the range captured at draw time."""
+        w = self.canvasStack.currentWidget()
+        if not w:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        w.reset_all_views()
         QApplication.restoreOverrideCursor()
         self.check_history(w)
 

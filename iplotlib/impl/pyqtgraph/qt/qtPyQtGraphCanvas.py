@@ -702,6 +702,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             autoscale_menu = QMenu(self)
             autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(impl_plot))
             autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+            autoscale_menu.addAction("Reset zoom/pan", lambda: self.reset_plot_view(impl_plot))
             if self._parser.canvas.focus_plot is None:
                 autoscale_menu.addAction("Focus on plot",
                                          lambda: self._full_screen_mode_on(impl_plot))
