@@ -19,10 +19,12 @@ from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.impl_base import BackendParserBase
 from iplotlib.core.ruler import Ruler
+from iplotlib.core.crosshair import Crosshair
 import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
+from iplotlib.qt.gui.iplotQtCrosshair import IplotQtCrosshair
 
 logger = Sl.get_logger(__name__)
 
@@ -61,6 +63,15 @@ class IplotQtCanvas(QWidget):
         self._ruler_window.colorRuler.connect(self.change_ruler_color)
         self._ruler_window.fontColorRuler.connect(self.change_ruler_font_color)
         self._ruler_window.labelVisibilityRuler.connect(self.toggle_ruler_label)
+
+        # Iplotlib frozen crosshairs (issue #130). The window reuses the ruler
+        # table's generic signals; route them to the crosshair-specific slots.
+        self._crosshair_window = IplotQtCrosshair()
+        self._crosshair_window.deleteRuler.connect(self.delete_crosshair)
+        self._crosshair_window.visibilityRuler.connect(self.toggle_crosshair_visibility)
+        self._crosshair_window.colorRuler.connect(self.change_crosshair_color)
+        self._crosshair_window.fontColorRuler.connect(self.change_crosshair_font_color)
+        self._crosshair_window.labelVisibilityRuler.connect(self.toggle_crosshair_label)
 
         # Statistics
         self._stats_table = IplotQtStatistics()
@@ -317,6 +328,40 @@ class IplotQtCanvas(QWidget):
             if not ruler.visible:
                 r.set_visible(False)
 
+    def _crosshair_owner_plot_id(self, name) -> Optional[Tuple[int, int]]:
+        """Position of the plot whose model owns frozen crosshair *name*
+        (crosshair names are canvas-global unique)."""
+        canvas = self._parser.canvas if self._parser else None
+        if canvas is None:
+            return None
+        for col in canvas.plots:
+            for plot in col:
+                if plot is not None and plot.get_crosshair(name) is not None:
+                    return self._canvas_position_of(plot)
+        return None
+
+    def _remove_crosshair_from_menu(self, name, plot_id):
+        # A context menu can target a shared-x echo whose model crosshair and
+        # window row belong to another plot; route the deletion to the owner.
+        plot_id = self._crosshair_owner_plot_id(name) or plot_id
+        self.delete_crosshair(name, plot_id, True)
+        self._crosshair_window.remove_row_by_name(name, plot_id)
+
+    def _apply_crosshair_state(self, crosshair):
+        """Push a model crosshair's non-default state onto its backend artists
+        (origin and shared-x echoes); re-added artists start with defaults."""
+        for c in self._parser.get_crosshairs():
+            if c.name != crosshair.name:
+                continue
+            if crosshair.font_color != Crosshair.font_color:
+                c.set_font_color(crosshair.font_color)
+            if not crosshair.show_label:
+                c.set_show_label(False)
+            if not crosshair.show_val_label:
+                c.set_show_val_label(False)
+            if not crosshair.visible:
+                c.set_visible(False)
+
     @abstractmethod
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         """"""
@@ -344,6 +389,30 @@ class IplotQtCanvas(QWidget):
     @abstractmethod
     def toggle_ruler_label(self, name, plot_id, show_label, show_val_label):
         """Toggle a ruler's name label and signal value labels on the backend."""
+
+    # Frozen-crosshair slots (issue #130). Concrete no-ops so a backend that does
+    # not support frozen crosshairs (e.g. VTK) stays functional; the matplotlib
+    # and pyqtgraph canvases override them.
+    def delete_crosshair(self, name, plot_id, persist):
+        """Remove a frozen crosshair from the backend (and from Plot.crosshairs
+        when persist=True)."""
+        logger.debug("delete_crosshair not supported by this backend")
+
+    def toggle_crosshair_visibility(self, name, plot_id, visible):
+        """Toggle a frozen crosshair's visibility on the backend."""
+        logger.debug("toggle_crosshair_visibility not supported by this backend")
+
+    def change_crosshair_color(self, name, plot_id, color):
+        """Update a frozen crosshair's color on the backend."""
+        logger.debug("change_crosshair_color not supported by this backend")
+
+    def change_crosshair_font_color(self, name, plot_id, color):
+        """Update a frozen crosshair's label font color on the backend."""
+        logger.debug("change_crosshair_font_color not supported by this backend")
+
+    def toggle_crosshair_label(self, name, plot_id, show_label, show_val_label):
+        """Toggle a frozen crosshair's name label and signal value labels."""
+        logger.debug("toggle_crosshair_label not supported by this backend")
 
     def get_signals(self, canvas: Canvas):
         signal_list = []

@@ -38,6 +38,7 @@ from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, Expo
     NiceNanosecondLocator, RelativeTimeLocator, is_time_label
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor, get_values_from_line
 from iplotlib.impl.matplotlib.iplotMplRuler import iplotMplRuler
+from iplotlib.impl.matplotlib.iplotMplCrosshair import iplotMplCrosshair
 
 logger = setupLogger.get_logger(__name__)
 
@@ -64,6 +65,7 @@ class MatplotlibParser(BackendParserBase):
         self.legend_size = 8
         self._cursors = []
         self._rulers = []  # type: List[iplotMplRuler]
+        self._crosshairs = []  # type: List[iplotMplCrosshair]
         self._grid_spacing_annotations = {}  # MPLAxes -> Text artist
         self._impl_plot_ranges_hash = dict()
 
@@ -534,6 +536,11 @@ class MatplotlibParser(BackendParserBase):
             r.remove()
         self._rulers.clear()
 
+        # remove any active frozen crosshairs (impl artists only — Plot.crosshairs preserved)
+        for c in self._crosshairs:
+            c.remove()
+        self._crosshairs.clear()
+
         # drop cache items and remove each Axes to release all artists and callbacks
         # for ax in list(self.figure.axes):
         #     self.figure.delaxes(ax)
@@ -983,10 +990,12 @@ class MatplotlibParser(BackendParserBase):
     def _x_axis_update_callback(self, current_plot: MPLAxes):
         super()._x_axis_update_callback(current_plot)
         self.refresh_rulers(current_plot)
+        self.refresh_crosshairs(current_plot)
 
     def _y_axis_update_callback(self, current_plot: MPLAxes):
         super()._y_axis_update_callback(current_plot)
         self.refresh_rulers(current_plot)
+        self.refresh_crosshairs(current_plot)
 
     def process_ipl_log_axis(self, mpl_axis: MPLAxis, plot: Plot):
         if isinstance(mpl_axis, YAxis):
@@ -1419,6 +1428,107 @@ class MatplotlibParser(BackendParserBase):
         if impl_plot is None:
             return list(self._rulers)
         return [r for r in self._rulers if r.ax is impl_plot]
+
+    def _crosshair_signal_values(self, impl_plot: MPLAxes, x: float) -> dict:
+        """Per-signal reading at the frozen crosshair X, keyed by the signal's
+        legend label. Each entry is ``{value, text, color}``: the raw value (for
+        deltas), the y-axis-formatted string (so the cell matches the on-plot
+        value label) and the signal's line colour (so the column can be tinted
+        like its curve). A signal is omitted when the crosshair falls off its
+        data; SignalContour has no per-time value and is skipped."""
+        from matplotlib.colors import to_hex
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        values = {}
+        if not ci or not getattr(ci, 'signals', None):
+            return values
+        for sig_ref in ci.signals:
+            signal = sig_ref()
+            if not signal or isinstance(signal, SignalContour):
+                continue
+            label = signal.label or signal.name or 'signal'
+            for line in getattr(signal, 'lines', []):
+                group = line if isinstance(line, Collection) else [line]
+                xdata = group[0].get_xdata() if group else []
+                if len(xdata) == 0:
+                    continue
+                x_sig, y_sig = get_values_from_line(group, x)
+                span = abs(xdata[-1] - xdata[0])
+                # Data-span tolerance (view-independent so the cell is stable on
+                # zoom); mirrors the 5% used by the value labels.
+                if span and abs(x - x_sig) <= span * 0.05:
+                    try:
+                        text = impl_plot.format_ydata(y_sig)
+                    except Exception:
+                        text = f"{y_sig:.6g}"
+                    try:
+                        color = to_hex(group[0].get_color())
+                    except Exception:
+                        color = None
+                    values[label] = {'value': float(y_sig), 'text': text, 'color': color}
+                break
+        return values
+
+    @BackendParserBase.run_in_one_thread
+    def add_crosshair(self, impl_plot: MPLAxes, name: str, x: float, y: float,
+                      color: str = "#FFFFFF", animated: bool = False,
+                      is_echo: bool = False) -> iplotMplCrosshair:
+        font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
+        crosshair = iplotMplCrosshair(ax=impl_plot, name=name, xy=(x, y), color=color,
+                                      font_size=font_size, animated=animated,
+                                      value_lines=self._ruler_value_lines(impl_plot))
+        crosshair.abs_x = self.transform_value(impl_plot, 0, x)
+        crosshair.abs_y = self.transform_value(impl_plot, 1, y)
+        crosshair.is_echo = is_echo
+        self._crosshairs.append(crosshair)
+        return crosshair
+
+    def create_crosshair_echoes(self, origin_impl_plot: MPLAxes, name: str,
+                                x_abs: float, y_abs: float, color: str):
+        """Mirror a frozen crosshair onto every plot sharing the time axis. Each
+        echo carries the same absolute X/Y and re-projects them to its own plot's
+        offsets."""
+        if not self._pm.get_value(self.canvas, 'shared_x_axis'):
+            return
+        for sibling in self._get_all_shared_axes(origin_impl_plot):
+            if sibling is origin_impl_plot:
+                continue
+            x_view = self.transform_value(sibling, 0, x_abs, inverse=True)
+            y_view = self.transform_value(sibling, 1, y_abs, inverse=True)
+            self.add_crosshair(sibling, name, x_view, y_view, color, is_echo=True)
+
+    @BackendParserBase.run_in_one_thread
+    def remove_crosshair(self, impl_plot: MPLAxes, name: str):
+        remaining = []
+        for c in self._crosshairs:
+            if c.ax is impl_plot and c.name == name:
+                c.remove()
+            else:
+                remaining.append(c)
+        self._crosshairs = remaining
+
+    @BackendParserBase.run_in_one_thread
+    def remove_crosshair_by_name(self, name: str):
+        """Remove a frozen crosshair and its shared-x echoes across every plot
+        (names are canvas-global unique)."""
+        remaining = []
+        for c in self._crosshairs:
+            if c.name == name:
+                c.remove()
+            else:
+                remaining.append(c)
+        self._crosshairs = remaining
+
+    def refresh_crosshairs(self, impl_plot: MPLAxes = None):
+        for c in self._crosshairs:
+            if impl_plot is None or c.ax is impl_plot:
+                c.xy = (self.transform_value(c.ax, 0, c.abs_x, inverse=True),
+                        self.transform_value(c.ax, 1, c.abs_y, inverse=True))
+                c.refresh_labels()
+
+    def get_crosshairs(self, impl_plot: MPLAxes = None) -> List[iplotMplCrosshair]:
+        if impl_plot is None:
+            return list(self._crosshairs)
+        return [c for c in self._crosshairs if c.ax is impl_plot]
 
     def get_signal_style(self, signal: SignalXY) -> dict:
         style = dict()

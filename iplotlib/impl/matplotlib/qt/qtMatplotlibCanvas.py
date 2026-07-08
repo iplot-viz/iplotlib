@@ -31,6 +31,7 @@ from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider, PlotC
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.core.ruler import Ruler
+from iplotlib.core.crosshair import Crosshair
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, NiceNanosecondLocator, \
     ExponentScalarFormatter, RelativeTimeLocator, is_time_label
@@ -61,6 +62,12 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._preview_ruler_identity = None
         self._preview_background = None
         self._preview_cid_draw = None
+        # Frozen crosshair grabbed for dragging, and its blit background captured
+        # on first motion. Crosshairs need no ghost preview: the live crosshair
+        # cursor already tracks the pointer.
+        self._crosshair_drag = None
+        self._crosshair_drag_bg = None
+        self._crosshair_drag_echoes = []
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
@@ -131,6 +138,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._update_minimap()
         super().set_canvas(canvas)
         self._repaint_rulers_from_canvas()
+        self._repaint_crosshairs_from_canvas()
 
     def _get_main_axes_for_minimap(self):
         canvas = self.get_canvas()
@@ -662,6 +670,237 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if added:
             self.render()
 
+    # ------------------------------------------------------------------
+    # Frozen crosshairs (issue #130) — mirror of the ruler flow, operating on
+    # Plot.crosshairs / parser._crosshairs, with per-signal value columns.
+    # ------------------------------------------------------------------
+    def delete_crosshair(self, name, plot_id, persist):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        impl_plot = self._get_impl_plot_for_plot(plot)
+        if impl_plot is not None:
+            # Removes the origin and its shared-x echoes across every plot.
+            self._parser.remove_crosshair_by_name(name)
+        if persist:
+            plot.remove_crosshair(name)
+        self.render()
+
+    def toggle_crosshair_visibility(self, name, plot_id, visible):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        crosshair = plot.get_crosshair(name)
+        if crosshair:
+            crosshair.visible = visible
+        # Apply to the origin and its echoes (names are canvas-global unique).
+        for c in self._parser.get_crosshairs():
+            if c.name == name:
+                c.set_visible(visible)
+        self.render()
+
+    def change_crosshair_color(self, name, plot_id, color):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        crosshair = plot.get_crosshair(name)
+        if crosshair:
+            crosshair.color = color
+        for c in self._parser.get_crosshairs():
+            if c.name == name:
+                c.set_color(color)
+        self.render()
+
+    def change_crosshair_font_color(self, name, plot_id, color):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        crosshair = plot.get_crosshair(name)
+        if crosshair:
+            crosshair.font_color = color
+        for c in self._parser.get_crosshairs():
+            if c.name == name:
+                c.set_font_color(color)
+        self.render()
+
+    def toggle_crosshair_label(self, name, plot_id, show_label, show_val_label):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        crosshair = plot.get_crosshair(name)
+        if crosshair:
+            crosshair.show_label = show_label
+            crosshair.show_val_label = show_val_label
+        for c in self._parser.get_crosshairs():
+            if c.name == name:
+                c.set_show_label(show_label)
+                c.set_show_val_label(show_val_label)
+        self.render()
+
+    def _add_crosshair_at(self, impl_plot, plot, x: float, y: float,
+                          name: str = None, color: str = None):
+        if name is None:
+            name = self._crosshair_window.next_name()
+        if color is None:
+            color = self._crosshair_window.next_color(name)
+        x_abs = self._parser.transform_value(impl_plot, 0, x)
+        y_abs = self._parser.transform_value(impl_plot, 1, y)
+        crosshair = Crosshair(name=name, xy=(x_abs, y_abs), color=color, visible=True)
+        plot.add_crosshair(crosshair)
+        self._parser.add_crosshair(impl_plot, name, x, y, crosshair.color)
+        self._parser.create_crosshair_echoes(impl_plot, name, x_abs, y_abs, crosshair.color)
+        is_date = bool(getattr(plot.axes[0], 'is_date', False))
+        plot_id = self._canvas_position_of(plot) or (1, 1)
+        self._crosshair_window.set_canvas_columns(len(self._parser.canvas.plots))
+        self._crosshair_window.add_row(name, plot_id, (x_abs, y_abs), crosshair.color,
+                                       visible=True, is_date=is_date,
+                                       signal_values=self._parser._crosshair_signal_values(impl_plot, x))
+        if not self._crosshair_window.isVisible():
+            self._crosshair_window.show()
+        # Do not steal focus from the canvas.
+        self.window().activateWindow()
+
+    def _begin_crosshair_drag(self, impl_plot, plot, crosshair):
+        """Grab a frozen crosshair for dragging. The live crosshair cursor is
+        suspended for the drag so its own blitting cannot erase the moving
+        artist; it is restored when the drag ends."""
+        self._parser.deactivate_cursor()
+        self._crosshair_drag = (impl_plot, plot, crosshair)
+        self._crosshair_drag_bg = None
+        # Shared-x echoes move in lockstep with the origin during the drag.
+        self._crosshair_drag_echoes = [c for c in self._parser.get_crosshairs()
+                                       if c.name == crosshair.name and c is not crosshair]
+
+    def _drag_crosshair_to(self, x: float, y: float):
+        """Move the grabbed crosshair (and its shared-x echoes) to (x, y) and blit."""
+        impl_plot, _, crosshair = self._crosshair_drag
+        echoes = self._crosshair_drag_echoes
+        if self._crosshair_drag_bg is None:
+            # First motion: capture a clean background without the moving artists.
+            crosshair.set_visible(False)
+            for echo in echoes:
+                echo.set_visible(False)
+            self._mpl_renderer.draw()
+            self._crosshair_drag_bg = self._mpl_renderer.copy_from_bbox(self._parser.figure.bbox)
+            crosshair.set_visible(True)
+            for echo in echoes:
+                echo.set_visible(True)
+        x_abs = self._parser.transform_value(impl_plot, 0, x)
+        y_abs = self._parser.transform_value(impl_plot, 1, y)
+        crosshair.abs_x = x_abs
+        crosshair.abs_y = y_abs
+        crosshair.xy = (x, y)
+        crosshair.refresh_labels()
+        for echo in echoes:
+            echo.abs_x = x_abs
+            echo.abs_y = y_abs
+            echo.xy = (self._parser.transform_value(echo.ax, 0, x_abs, inverse=True),
+                       self._parser.transform_value(echo.ax, 1, y_abs, inverse=True))
+            echo.refresh_labels()
+        self._mpl_renderer.restore_region(self._crosshair_drag_bg)
+        crosshair.draw_artists()
+        for echo in echoes:
+            echo.draw_artists()
+        self._mpl_renderer.blit(self._parser.figure.bbox)
+
+    def _end_crosshair_drag(self):
+        """Persist the dragged crosshair's position to the model and the window,
+        then restore the live cursor suspended at drag start. The model crosshair
+        and its window row live on the origin's plot, so route there even when a
+        shared-x echo was the artist being dragged."""
+        _, _, crosshair = self._crosshair_drag
+        echoes = self._crosshair_drag_echoes
+        moved = self._crosshair_drag_bg is not None
+        self._crosshair_drag = None
+        self._crosshair_drag_bg = None
+        self._crosshair_drag_echoes = []
+        if moved:
+            origin = next((c for c in [crosshair] + echoes if not c.is_echo), crosshair)
+            self._persist_crosshair_position(origin)
+        self._parser.activate_cursor()
+        self.render()
+
+    def _persist_crosshair_position(self, origin):
+        """Write an origin crosshair's current (abs_x, y) to its model crosshair
+        and its row in the crosshair window (its signal values move with X)."""
+        ci = self._parser._impl_plot_cache_table.get_cache_item(origin.ax)
+        origin_plot = ci.plot() if ci else None
+        if origin_plot is None:
+            return
+        x_abs, y_abs = origin.abs_x, origin.abs_y
+        core = origin_plot.get_crosshair(origin.name)
+        if core is not None:
+            core.xy = (x_abs, y_abs)
+        plot_id = self._canvas_position_of(origin_plot) or (1, 1)
+        self._crosshair_window.update_row_xy(
+            origin.name, plot_id, (x_abs, y_abs),
+            signal_values=self._parser._crosshair_signal_values(origin.ax, origin.xy[0]))
+
+    def _find_crosshair_near(self, impl_plot, event):
+        crosshairs = self._parser.get_crosshairs(impl_plot)
+        if not crosshairs or event.x is None or event.y is None:
+            return None
+        best = None
+        best_dist = float('inf')
+        renderer = self._mpl_renderer.get_renderer() if hasattr(self._mpl_renderer, 'get_renderer') else None
+        for c in crosshairs:
+            try:
+                cross_px = impl_plot.transData.transform((c.xy[0], c.xy[1]))
+            except (ValueError, TypeError):
+                continue
+            dx = abs(cross_px[0] - event.x)
+            dy = abs(cross_px[1] - event.y)
+            d = None
+            if dx <= self.PICK_RADIUS_PX and dy <= self.PICK_RADIUS_PX:
+                d = float(np.hypot(dx, dy))
+            else:
+                name_label = getattr(c, 'name_label', None)
+                if name_label is not None and name_label.get_visible():
+                    try:
+                        bbox = name_label.get_window_extent(renderer)
+                        if bbox.contains(event.x, event.y):
+                            d = 0.0
+                    except (RuntimeError, AttributeError):
+                        pass
+            if d is not None and d < best_dist:
+                best_dist = d
+                best = c
+        return best
+
+    def _repaint_crosshairs_from_canvas(self):
+        self._crosshair_window.clear_info()
+        canvas = self._parser.canvas
+        if not canvas:
+            return
+        self._crosshair_window.set_canvas_columns(len(canvas.plots))
+        added = False
+        for col_idx, col in enumerate(canvas.plots):
+            for row_idx, plot in enumerate(col):
+                if not plot or not getattr(plot, 'crosshairs', None):
+                    continue
+                impl_plot = self._get_impl_plot_for_plot(plot)
+                if impl_plot is None:
+                    continue
+                plot_id = (row_idx + 1, col_idx + 1)
+                is_date = bool(getattr(plot.axes[0], 'is_date', False))
+                for crosshair in plot.crosshairs:
+                    x_view = self._parser.transform_value(impl_plot, 0, crosshair.xy[0], inverse=True)
+                    y_view = self._parser.transform_value(impl_plot, 1, crosshair.xy[1], inverse=True)
+                    self._parser.add_crosshair(impl_plot, crosshair.name, x_view, y_view, crosshair.color)
+                    self._parser.create_crosshair_echoes(impl_plot, crosshair.name,
+                                                         crosshair.xy[0], crosshair.xy[1], crosshair.color)
+                    self._crosshair_window.add_row(crosshair.name, plot_id, crosshair.xy,
+                                                   crosshair.color, crosshair.visible, is_date,
+                                                   crosshair.font_color, crosshair.show_label,
+                                                   crosshair.show_val_label,
+                                                   self._parser._crosshair_signal_values(impl_plot, x_view))
+                    self._apply_crosshair_state(crosshair)
+                    added = True
+                self._crosshair_window.count = max(self._crosshair_window.count, len(plot.crosshairs))
+        # Only re-draw when crosshairs were actually restored.
+        if added:
+            self.render()
+
     def autoscale_y(self, impl_plot):
         """
             Autoscale the Y axis of a single PlotXY and store the action for undo/redo
@@ -741,6 +980,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         elif mode == Canvas.MOUSE_MODE_CROSSHAIR:
             self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
             self._parser.activate_cursor()
+            if not self._crosshair_window.isVisible():
+                self._crosshair_window.show()
+            elif self._crosshair_window.isMinimized():
+                self._crosshair_window.showNormal()
+            # Open behind the canvas.
+            self._crosshair_window.lower()
+            self.window().activateWindow()
+            self.window().raise_()
         elif mode == Canvas.MOUSE_MODE_PAN:
             self._mpl_toolbar.pan()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
@@ -922,6 +1169,12 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     and event.xdata is not None and event.ydata is not None):
                 self._drag_ruler_to(event.xdata, event.ydata)
             return
+        if self._crosshair_drag is not None:
+            impl_plot = self._crosshair_drag[0]
+            if (event.inaxes is impl_plot
+                    and event.xdata is not None and event.ydata is not None):
+                self._drag_crosshair_to(event.xdata, event.ydata)
+            return
         if self._mmode == Canvas.MOUSE_MODE_RULER:
             if event.inaxes is None or event.xdata is None or event.ydata is None:
                 if self._preview_ruler_ax is not None:
@@ -990,6 +1243,21 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 self._add_ruler_at(event.inaxes, plot, event.xdata, event.ydata)
                 self.render()
                 return
+            if (self._mmode == Canvas.MOUSE_MODE_CROSSHAIR
+                    and event.button == MouseButton.LEFT
+                    and event.inaxes is not None
+                    and event.xdata is not None and event.ydata is not None):
+                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+                plot = ci.plot() if hasattr(ci, 'plot') else None
+                if plot is None or isinstance(plot, (PlotContour, PlotContourWithSlider)):
+                    return
+                # Double-clicking on an existing crosshair must not stack a new one on top.
+                if self._find_crosshair_near(event.inaxes, event) is not None:
+                    return
+                # Double-click freezes a crosshair at the cursor (consistent with rulers).
+                self._add_crosshair_at(event.inaxes, plot, event.xdata, event.ydata)
+                self.render()
+                return
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN] and event.button == MouseButton.RIGHT:
                 mpl_axes = event.inaxes
                 if not isinstance(mpl_axes, MPLAxes):
@@ -1015,8 +1283,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self.push_view_lim_cmd()
 
                 self.render()
-            elif self._mmode in [Canvas.MOUSE_MODE_CROSSHAIR, Canvas.MOUSE_MODE_ZOOM,
-                                 Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER] and event.button == MouseButton.LEFT:
+            elif self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN,
+                                 Canvas.MOUSE_MODE_MARKER] and event.button == MouseButton.LEFT:
+                # Crosshair mode is excluded: a click there freezes a crosshair,
+                # so it must not also drop a marker on the double-click.
                 mpl_axes = event.inaxes
                 if not isinstance(mpl_axes, MPLAxes):
                     return
@@ -1074,6 +1344,18 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 hit = self._find_ruler_near(event.inaxes, event)
                 if hit is not None:
                     self._begin_ruler_drag(event.inaxes, plot, hit)
+                return
+            if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR and event.button == MouseButton.LEFT:
+                if isinstance(plot, (PlotContour, PlotContourWithSlider)):
+                    logger.warning(f"Frozen crosshairs are not supported for {type(plot).__name__}")
+                    return
+                if event.xdata is None or event.ydata is None:
+                    return
+                # Grab the nearest crosshair to drag; empty space is a no-op
+                # (freezing is a double-click, consistent with rulers).
+                hit = self._find_crosshair_near(event.inaxes, event)
+                if hit is not None:
+                    self._begin_crosshair_drag(event.inaxes, plot, hit)
                 return
             if event.button == MouseButton.RIGHT:
                 if getattr(self._mpl_toolbar, '_zoom_info', None) is not None:
@@ -1162,6 +1444,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if self._ruler_drag is not None:
             self._end_ruler_drag()
             return
+        if self._crosshair_drag is not None:
+            self._end_crosshair_drag()
+            return
         if event.dblclick:
             pass
         else:
@@ -1196,6 +1481,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 autoscale_menu.addAction(
                     f"Remove ruler {hit.name}",
                     lambda n=hit.name, p=plot_id: self._remove_ruler_from_menu(n, p))
+                autoscale_menu.addSeparator()
+        if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR and hasattr(ci, 'plot'):
+            hit = self._find_crosshair_near(event.inaxes, event)
+            if hit is not None:
+                plot_id = self._canvas_position_of(ci.plot()) or (1, 1)
+                autoscale_menu.addAction(
+                    f"Remove crosshair {hit.name}",
+                    lambda n=hit.name, p=plot_id: self._remove_crosshair_from_menu(n, p))
                 autoscale_menu.addSeparator()
         autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
         autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)

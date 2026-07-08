@@ -17,6 +17,7 @@ import weakref
 import pandas as pd
 
 from iplotlib.core.axis import Axis, LinearAxis
+from iplotlib.core.crosshair import Crosshair
 from iplotlib.core.ruler import Ruler
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 
@@ -61,6 +62,7 @@ class Plot(ABC):
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None
     rulers: List[Ruler] = None
+    crosshairs: List[Crosshair] = None
     legend: bool = None
     legend_position: str = None
     legend_layout: str = None
@@ -79,6 +81,8 @@ class Plot(ABC):
             self.signals = {}
         if self.rulers is None:
             self.rulers = []
+        if self.crosshairs is None:
+            self.crosshairs = []
         if self.axes is None:
             self.axes = [LinearAxis(), [LinearAxis()]]
 
@@ -102,6 +106,18 @@ class Plot(ABC):
         for r in self.rulers:
             if r.name == name:
                 return r
+        return None
+
+    def add_crosshair(self, crosshair: Crosshair):
+        self.crosshairs.append(crosshair)
+
+    def remove_crosshair(self, name: str):
+        self.crosshairs = [c for c in self.crosshairs if c.name != name]
+
+    def get_crosshair(self, name: str):
+        for c in self.crosshairs:
+            if c.name == name:
+                return c
         return None
 
     def reset_preferences(self):
@@ -156,6 +172,14 @@ class Plot(ABC):
                   visible=r.get('visible', True), show_label=r.get('show_label', Ruler.show_label),
                   show_val_label=r.get('show_val_label', Ruler.show_val_label))
             for r in old_plot.get('rulers') or []
+        ]
+
+        self.crosshairs = [
+            Crosshair(name=c.get('name'), xy=tuple(c['xy']) if c.get('xy') is not None else None,
+                      color=c.get('color', Crosshair.color), font_color=c.get('font_color', Crosshair.font_color),
+                      visible=c.get('visible', True), show_label=c.get('show_label', Crosshair.show_label),
+                      show_val_label=c.get('show_val_label', Crosshair.show_val_label))
+            for c in old_plot.get('crosshairs') or []
         ]
 
         # signals are merged at canvas level to handle move between plots

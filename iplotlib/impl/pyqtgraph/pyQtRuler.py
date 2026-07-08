@@ -27,7 +27,8 @@ class pyQtRuler:
                  font_color: str = "#FFFFFF",
                  lw: int = 1,
                  font_size: int = 8,
-                 value_lines: List = None):
+                 value_lines: List = None,
+                 line_style: QtCore.Qt.PenStyle = QtCore.Qt.PenStyle.DashLine):
         self.plot = plot
         self.name = name
         self.xy = xy
@@ -42,7 +43,7 @@ class pyQtRuler:
         self.show_label = True
         self.show_val_label = True
 
-        pen = pg.mkPen(color=color, width=lw, style=QtCore.Qt.PenStyle.DashLine, cosmetic=True)
+        pen = pg.mkPen(color=color, width=lw, style=line_style, cosmetic=True)
         font = QtGui.QFont()
         font.setPointSize(font_size)
         font.setBold(True)

@@ -31,6 +31,7 @@ from iplotlib.core import (Axis,
                            SignalXY,
                            SignalContour)
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
+from iplotlib.impl.pyqtgraph.pyQtCrosshairFrozen import pyQtCrosshairFrozen
 from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter, is_time_label
 
@@ -142,6 +143,7 @@ class PyQtGraphParser(BackendParserBase):
         self._cursors = []
         self._cursor_active = False
         self._rulers = []  # type: List[pyQtRuler]
+        self._crosshairs = []  # type: List[pyQtCrosshairFrozen]
         self._grid_spacing_labels = {}  # PlotItem -> TextItem
         self._cell_gl = {}
         self._layout_stacks = {}
@@ -1138,6 +1140,7 @@ class PyQtGraphParser(BackendParserBase):
                 break
         self.update_grid_spacing_label(current_plot)
         self.refresh_rulers(current_plot)
+        self.refresh_crosshairs(current_plot)
 
     def _x_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
@@ -1146,6 +1149,7 @@ class PyQtGraphParser(BackendParserBase):
         super()._x_axis_update_callback(current_plot)
         self.update_grid_spacing_label(current_plot)
         self.refresh_rulers(current_plot)
+        self.refresh_crosshairs(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':
@@ -1305,6 +1309,11 @@ class PyQtGraphParser(BackendParserBase):
         for r in self._rulers:
             r.remove()
         self._rulers.clear()
+
+        # remove any frozen crosshairs (impl items only — Plot.crosshairs preserved)
+        for c in self._crosshairs:
+            c.remove()
+        self._crosshairs.clear()
 
         self._cell_gl = {}
         self._layout_stacks = {}
@@ -1882,6 +1891,105 @@ class PyQtGraphParser(BackendParserBase):
         if impl_plot is None:
             return list(self._rulers)
         return [r for r in self._rulers if r.plot is impl_plot]
+
+    def _crosshair_signal_values(self, impl_plot: PlotItem, x: float) -> dict:
+        """Per-signal reading at the crosshair X, keyed by signal label. Each entry
+        is ``{value, color}``: the raw value (for deltas) and the signal's line
+        colour, so the crosshair table can expose one column per signal and tint
+        it like its curve. A signal is omitted when the crosshair falls off its
+        data. SignalContour has no per-sample value."""
+        import pyqtgraph as pg
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if not ci or not getattr(ci, 'signals', None):
+            return {}
+        values = {}
+        for sig_ref in ci.signals:
+            signal = sig_ref()
+            if not signal or isinstance(signal, SignalContour):
+                continue
+            for line in getattr(signal, 'lines', []):
+                item = line[0] if isinstance(line, list) else line
+                if not isinstance(item, PlotDataItem):
+                    continue
+                x_data, y_data = item.getData()
+                if x_data is None or len(x_data) == 0:
+                    continue
+                # Nearest sample (searchsorted+clamp, as the value labels do).
+                idx = np.searchsorted(x_data, x, side="left")
+                if 0 < idx < len(x_data) and abs(x - x_data[idx - 1]) < abs(x - x_data[idx]):
+                    idx -= 1
+                idx = min(idx, len(x_data) - 1)
+                span = abs(x_data[-1] - x_data[0])
+                # Data-span tolerance (view-independent so the cell is stable on
+                # zoom); mirrors the 5% used by the value labels.
+                if span and abs(x - x_data[idx]) <= span * 0.05:
+                    try:
+                        color = pg.mkPen(item.opts.get('pen')).color().name()
+                    except Exception:
+                        color = None
+                    values[signal.label or 'signal'] = {'value': float(y_data[idx]), 'color': color}
+                break
+        return values
+
+    @BackendParserBase.run_in_one_thread
+    def add_crosshair(self, impl_plot: PlotItem, name: str, x: float, y: float,
+                      color: str = "#FFFFFF", is_echo: bool = False) -> pyQtCrosshairFrozen:
+        font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
+        crosshair = pyQtCrosshairFrozen(plot=impl_plot, name=name, xy=(x, y), color=color,
+                                        font_size=font_size,
+                                        value_lines=self._ruler_value_lines(impl_plot))
+        crosshair.abs_x = self.transform_value(impl_plot, 0, x)
+        crosshair.abs_y = self.transform_value(impl_plot, 1, y)
+        crosshair.is_echo = is_echo
+        self._crosshairs.append(crosshair)
+        return crosshair
+
+    def create_crosshair_echoes(self, origin_impl_plot: PlotItem, name: str,
+                                x_abs: float, y_abs: float, color: str):
+        """Mirror a crosshair onto every plot sharing the time axis. Each echo
+        carries the same absolute X/Y and re-projects them to its own offsets."""
+        if not self._pm.get_value(self.canvas, 'shared_x_axis'):
+            return
+        for sibling in self._get_all_shared_axes(origin_impl_plot):
+            if sibling is origin_impl_plot:
+                continue
+            x_view = self.transform_value(sibling, 0, x_abs, inverse=True)
+            y_view = self.transform_value(sibling, 1, y_abs, inverse=True)
+            self.add_crosshair(sibling, name, x_view, y_view, color, is_echo=True)
+
+    @BackendParserBase.run_in_one_thread
+    def remove_crosshair(self, impl_plot: PlotItem, name: str):
+        remaining = []
+        for c in self._crosshairs:
+            if c.plot is impl_plot and c.name == name:
+                c.remove()
+            else:
+                remaining.append(c)
+        self._crosshairs = remaining
+
+    @BackendParserBase.run_in_one_thread
+    def remove_crosshair_by_name(self, name: str):
+        """Remove a crosshair and its shared-x echoes across every plot (names are
+        canvas-global unique)."""
+        remaining = []
+        for c in self._crosshairs:
+            if c.name == name:
+                c.remove()
+            else:
+                remaining.append(c)
+        self._crosshairs = remaining
+
+    def refresh_crosshairs(self, impl_plot: PlotItem = None):
+        for c in self._crosshairs:
+            if impl_plot is None or c.plot is impl_plot:
+                c.xy = (self.transform_value(c.plot, 0, c.abs_x, inverse=True),
+                        self.transform_value(c.plot, 1, c.abs_y, inverse=True))
+                c.refresh_labels()
+
+    def get_crosshairs(self, impl_plot: PlotItem = None) -> List[pyQtCrosshairFrozen]:
+        if impl_plot is None:
+            return list(self._crosshairs)
+        return [c for c in self._crosshairs if c.plot is impl_plot]
 
     def get_impl_x_axis(self, plot: PlotItem) -> AxisItem:
         return plot.getAxis('bottom')

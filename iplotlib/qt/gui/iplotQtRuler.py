@@ -123,10 +123,17 @@ class IplotQtRuler(QWidget):
     _COLUMNS_AXIS_LABELS = ['X', 'Y', 'Signal values']
     _DELTA_HEADER = 'Δ'
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, noun: str = 'ruler', **kwargs):
         super().__init__(*args, **kwargs)
+        # ``noun`` lets a subclass (the frozen-crosshair window) reuse this table
+        # verbatim while reading "crosshair" everywhere the user sees "ruler".
+        # The default reproduces the ruler strings byte-for-byte.
+        self._noun = noun
+        self._nouns = noun + 's'
+        self._Noun = noun.capitalize()
+        self._Nouns = self._Noun + 's'
         self.resize(850, 500)
-        self.setWindowTitle("Rulers window")
+        self.setWindowTitle(f"{self._Nouns} window")
         # Add minimize/maximize controls to the window.
         self.setWindowFlags(self.windowFlags()
                             | Qt.WindowMinimizeButtonHint
@@ -140,7 +147,7 @@ class IplotQtRuler(QWidget):
         self.column_sections: List[Tuple[Tuple[int, int], QTableWidget]] = []
 
         self.rows_radio = QRadioButton("Rows")
-        self.rows_radio.setToolTip("One row per ruler. Editable.")
+        self.rows_radio.setToolTip(f"One row per {self._noun}. Editable.")
         self.rows_radio.setChecked(True)
         self.columns_radio = QRadioButton("Columns")
         self.columns_radio.setToolTip("One section per plot with X / Y values and Δ. Read-only.")
@@ -175,7 +182,7 @@ class IplotQtRuler(QWidget):
         self.view_stack.addWidget(self.table)
         self.view_stack.addWidget(self.columns_scroll)
 
-        self.remove_button = QPushButton("Remove ruler")
+        self.remove_button = QPushButton(f"Remove {self._noun}")
         self.distance_button = QPushButton("Compute distance")
         self.export_button = QPushButton("Export to CSV")
         self.remove_button.pressed.connect(self._remove_selected)
@@ -185,11 +192,12 @@ class IplotQtRuler(QWidget):
         main_layout = QVBoxLayout()
         main_layout.addLayout(view_layout)
         main_layout.addWidget(self.view_stack)
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.remove_button)
-        buttons.addWidget(self.distance_button)
-        buttons.addWidget(self.export_button)
-        main_layout.addLayout(buttons)
+        # Kept as an attribute so subclasses can add extra buttons to this row.
+        self._buttons_layout = QHBoxLayout()
+        self._buttons_layout.addWidget(self.remove_button)
+        self._buttons_layout.addWidget(self.distance_button)
+        self._buttons_layout.addWidget(self.export_button)
+        main_layout.addLayout(self._buttons_layout)
         self.setLayout(main_layout)
 
         self._render_table()
@@ -714,7 +722,7 @@ class IplotQtRuler(QWidget):
     def _warn(self, msg: str):
         box = QMessageBox()
         box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("Rulers")
+        box.setWindowTitle(self._Nouns)
         box.setText(msg)
         logger.warning(msg)
         box.exec_()

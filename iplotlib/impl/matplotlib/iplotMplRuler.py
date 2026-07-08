@@ -25,7 +25,8 @@ class iplotMplRuler:
                  lw: int = 1,
                  font_size: int = 8,
                  animated: bool = False,
-                 value_lines: List = None):
+                 value_lines: List = None,
+                 linestyle: str = '--'):
         self.ax = ax
         self.name = name
         self.xy = xy
@@ -42,9 +43,9 @@ class iplotMplRuler:
         self.show_label = True
         self.show_val_label = True
 
-        self.v_line = ax.axvline(xy[0], color=color, linewidth=lw, linestyle='--',
+        self.v_line = ax.axvline(xy[0], color=color, linewidth=lw, linestyle=linestyle,
                                   animated=animated, zorder=20, label='_RulerLine')
-        self.h_line = ax.axhline(xy[1], color=color, linewidth=lw, linestyle='--',
+        self.h_line = ax.axhline(xy[1], color=color, linewidth=lw, linestyle=linestyle,
                                   animated=animated, zorder=20, label='_RulerLine')
 
         bbox = dict(boxstyle="round", pad=0.1, fill=True, color=color)
