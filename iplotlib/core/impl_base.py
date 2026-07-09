@@ -150,12 +150,27 @@ class BackendParserBase(ABC):
         self._layout = None
         self._axis_impl_plot_lut = weakref.WeakValueDictionary()  # type: Dict[int, Any] # key is id(Axis)
         self._plot_impl_plot_lut = defaultdict(list)  # type: Dict[int, List[Any]] # key is id(Plot)
-        self._signal_impl_plot_lut = weakref.WeakValueDictionary()  # type: Dict[str, Any] # key is (Signal.uid)
+        self._signal_impl_plot_lut = weakref.WeakValueDictionary()  # type: Dict[str, Any] # key: signal_lut_key(signal)
         self._signal_impl_shape_lut = dict()  # type: Dict[int, Any] # key is id(Signal)
         self._impl_plot_ranges_hash = defaultdict(
             lambda: defaultdict(dict))  # type: Dict[Any, int] # key is id(impl_plot)
         self._update = False
         self._streaming_impl_plot_lut = defaultdict(lambda: [None, None])
+
+    @staticmethod
+    def signal_lut_key(signal):
+        """Key for ``_signal_impl_plot_lut``.
+
+        Signals are keyed by their ``uid`` so that commands (shift, markers, ...)
+        can resolve them across rebuilds. Signals created without a uid must not
+        all collide on the shared ``None`` key — with several plots that made
+        every uid-less signal resolve to the *last* processed plot, so
+        ``process_ipl_signal`` drew into the wrong axes and the legend lookup
+        raised (aborting shared-x zoom propagation half-way). They fall back to
+        an identity-based key instead.
+        """
+        uid = getattr(signal, 'uid', None)
+        return uid if uid is not None else f"__signal_id__{id(signal)}"
 
     def run_in_one_thread(func):
         """
@@ -330,24 +345,26 @@ class BackendParserBase(ABC):
         else:
             shared_plots = self._plot_impl_plot_lut.get(id(plot))  # Stacked plots
 
-        for impl_plot in shared_plots:
-            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
-            stacked_plots = self._plot_impl_plot_lut.get(id(plot))
+        try:
+            for impl_plot in shared_plots:
+                plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+                stacked_plots = self._plot_impl_plot_lut.get(id(plot))
 
-            if self._pm.get_value(self.canvas, 'autoscale'):
-                self._update = True
-                self.autoscale_y_axis(impl_plot)
-            else:
-                if impl_plot != current_plot:
-                    continue
+                if self._pm.get_value(self.canvas, 'autoscale'):
+                    self._update = True
+                    self.autoscale_y_axis(impl_plot)
+                else:
+                    if impl_plot != current_plot:
+                        continue
 
-            # Set Y Axis limits
-            y_start, y_end = self.get_oaw_axis_limits(impl_plot, 1)
-            pos = stacked_plots.index(impl_plot)
-            y_sub_axis = plot.axes[1][pos]
-            y_sub_axis.set_limits(y_start, y_end, 'current')
-
-        self._update = False
+                # Set Y Axis limits
+                y_start, y_end = self.get_oaw_axis_limits(impl_plot, 1)
+                pos = stacked_plots.index(impl_plot)
+                y_sub_axis = plot.axes[1][pos]
+                y_sub_axis.set_limits(y_start, y_end, 'current')
+        finally:
+            # Never leave the re-entrancy guard set (see _x_axis_update_callback).
+            self._update = False
 
     @abstractmethod
     def _x_axis_update_callback(self, current_plot: Any):
@@ -360,35 +377,94 @@ class BackendParserBase(ABC):
         self._update = True
 
         if self._pm.get_value(self.canvas, 'shared_x_axis'):
+            use_shared = True
             shared_plots = self._get_all_shared_axes(current_plot)
         else:
+            use_shared = False
             plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
             shared_plots = self._plot_impl_plot_lut.get(id(plot))
 
         new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
+        current_ipl_plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
 
-        for impl_plot in shared_plots:
-            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+        try:
+            for impl_plot in shared_plots:
+                plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
 
-            if isinstance(plot, PlotXYWithSlider) and len(shared_plots) > 1:
-                self.update_slider_limits(plot, new_start, new_end)
+                if isinstance(plot, PlotXYWithSlider) and len(shared_plots) > 1:
+                    self.update_slider_limits(plot, new_start, new_end)
+                elif (use_shared and plot is not current_ipl_plot
+                        and not self._plot_x_is_time(plot)
+                        and not self._plot_x_expr_yields_time(plot)):
+                    # A shared-time zoom propagated to an X-versus-Y plot: (new_start,
+                    # new_end) is a time window while this plot's X axis draws a
+                    # processed data column. Setting the axis limits to the time window
+                    # would produce meaningless X values (mint#120); instead, reapply
+                    # the processing behind the X column over the new time window and
+                    # rescale the axis to the reprocessed data.
+                    self._follow_shared_time_window(impl_plot, plot, new_start, new_end)
+                else:
+                    # Set X Axis limits
+                    plot.axes[0].set_limits(new_start, new_end, 'current')
+
+                    self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
+
+                    if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
+                        self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
+
+                    signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+                    for signal_ref in signals:
+                        signal = signal_ref()
+                        if not isinstance(plot, PlotXYWithSlider):
+                            signal.set_limits((new_start, new_end))
+                        self.process_ipl_signal(signal)
+        finally:
+            # Never leave the re-entrancy guard set: a failure while propagating to
+            # one plot must not disable axis synchronization for the whole session.
+            self._update = False
+
+    def _follow_shared_time_window(self, impl_plot: Any, plot, begin, end):
+        """Propagate a shared-time zoom to a plot whose X axis is not time.
+
+        ``begin``/``end`` form a time window taken from the time plot that was
+        zoomed. The signals of ``impl_plot`` are refetched and reprocessed over
+        that window — reapplying the processing behind the X column — and the X
+        axis is then rescaled to the recomputed data rather than to the time
+        window itself (iplot-viz/mint#120).
+        """
+        signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+        for signal_ref in signals:
+            signal = signal_ref()
+            if signal is None:
+                continue
+            if hasattr(signal, 'set_time_window'):
+                signal.set_time_window(begin, end)
             else:
-                # Set X Axis limits
-                plot.axes[0].set_limits(new_start, new_end, 'current')
+                signal.set_xranges((begin, end))
+            self.process_ipl_signal(signal)
 
-                self.set_oaw_axis_limits(impl_plot, 0, (new_start, new_end))
+        # Rescale the X axis to the reprocessed X data.
+        x_begin, x_end = +np.inf, -np.inf
+        for signal_ref in signals:
+            signal = signal_ref()
+            if signal is None:
+                continue
+            x_data = np.asarray(getattr(signal, 'x_data', []))
+            if x_data.size == 0 or not np.issubdtype(x_data.dtype, np.number):
+                continue
+            finite = x_data[np.isfinite(x_data)]
+            if finite.size == 0:
+                continue
+            x_begin = min(x_begin, float(np.min(finite)))
+            x_end = max(x_end, float(np.max(finite)))
 
-                if self._impl_plot_cache_table.get_cache_item(impl_plot).plot().axes[0].is_date:
-                    self.process_ipl_axis_formatter(impl_plot, self.get_impl_axis(impl_plot, 0), 0)
+        if not (np.isfinite(x_begin) and np.isfinite(x_end)):
+            return
+        if x_begin == x_end:
+            x_begin, x_end = x_begin - 0.5, x_end + 0.5
 
-                signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
-                for signal_ref in signals:
-                    signal = signal_ref()
-                    if not isinstance(plot, PlotXYWithSlider):
-                        signal.set_limits((new_start, new_end))
-                    self.process_ipl_signal(signal)
-
-        self._update = False
+        plot.axes[0].set_limits(x_begin, x_end, 'current')
+        self.set_oaw_axis_limits(impl_plot, 0, (x_begin, x_end))
 
     @staticmethod
     def _plot_signal_ts_range(plot):
@@ -470,6 +546,29 @@ class BackendParserBase(ABC):
                 return bool(begin <= finite[0] <= end)
         return False
 
+    def _plot_shares_time_base(self, plot, base_ts):
+        """Whether a plot whose X axis is not time still shares the base plot's time base.
+
+        An X-versus-Y plot draws a processed data column on X, but its signals are
+        still fetched over a time range. When that requested range matches the base
+        plot's (within 'max_diff'), the plot can follow a shared-time zoom by
+        refetching and reprocessing its X column over the new time window
+        (iplot-viz/mint#120). With shared time ticked the user asserts that all
+        plots have time in common, so missing request information (no numeric
+        ts_start/ts_end on either side) does not exclude the plot.
+        """
+        plot_ts = self._plot_signal_ts_range(plot)
+        if base_ts is None or plot_ts is None:
+            return True
+        if plot_ts == base_ts:
+            return True
+        # ts values are nanoseconds when they encode absolute dates.
+        is_date = bool(min(base_ts) > (1 << 53) and max(base_ts) < (1 << 62))
+        max_diff = self._pm.get_value(self.canvas, 'max_diff')
+        max_diff = max_diff * 1e9 if is_date else max_diff
+        return (abs(plot_ts[0] - base_ts[0]) <= max_diff
+                and abs(plot_ts[1] - base_ts[1]) <= max_diff)
+
     def _get_all_shared_axes(self, base_impl_plot: Any) -> List[Any]:
         cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
         base_plot = cache_item.plot()
@@ -513,6 +612,12 @@ class BackendParserBase(ABC):
             if not self._plot_x_is_time(plot):
                 if self._plot_x_expr_yields_time(plot) and \
                         self._plot_first_x_in_range(plot, base_begin, base_end):
+                    shared.append(plot_item)
+                elif self._plot_shares_time_base(plot, base_ts):
+                    # Data-valued X: the plot cannot share axis limits with the time
+                    # plots, but its signals are still time-indexed, so it follows a
+                    # shared-time zoom by reprocessing its X column over the new time
+                    # window (see _x_axis_update_callback / _follow_shared_time_window).
                     shared.append(plot_item)
                 continue
 
@@ -1486,7 +1591,7 @@ class BackendParserBase(ABC):
             signal = signal_limit.signal_ref()
             signal.set_xranges(signal_limit.get_limits())
             if impl_plot is None:
-                impl_plot = self._signal_impl_plot_lut.get(signal.uid)
+                impl_plot = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))
 
         # Set X limits
         self.set_oaw_axis_limits(impl_plot, 0, (ax_limits[0].begin, ax_limits[0].end))

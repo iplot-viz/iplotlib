@@ -156,6 +156,9 @@ class IplotSignalAdapter(ProcessingSignal):
 
         # 3. Help keep track of data access parameters.
         self._access_md5sum = None
+        # One-shot marker: the current ts range is a genuine time window that was
+        # propagated from a shared-time zoom (see set_time_window()).
+        self._ts_is_time_window = False
 
         # 4. Parse name and prepare a hierarchy of objects if needed.
         self.status_info = StatusInfo()
@@ -328,6 +331,23 @@ class IplotSignalAdapter(ProcessingSignal):
 
         # self.ts_start = ranges[0].astype(target_type).item() if isinstance(ranges[0], np.generic) else ranges[0]
         # self.ts_end = ranges[1].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][1]
+
+    def set_time_window(self, begin, end):
+        """Set the requested data range from a trusted time window.
+
+        Used when a shared-time zoom is propagated to a plot whose X axis is not
+        time (X-versus-Y, iplot-viz/mint#120): ``begin``/``end`` come from the
+        time plot that was zoomed, so they are genuine times regardless of the
+        shape of this signal's processed X data. The range is marked so that
+        :meth:`_needs_refresh` allows a refetch/reprocess even when the X data is
+        not monotonically increasing (a zoom made on the X-versus-Y plot itself
+        keeps the conservative behaviour, since a non-bijective X cannot be
+        mapped back to a time interval).
+        """
+        self.set_xranges((begin, end))
+        self._ts_is_time_window = True
+        for child in self.children:
+            child._ts_is_time_window = True
 
     def set_da_success(self):
         self.status_info.reset()
@@ -709,6 +729,11 @@ class IplotSignalAdapter(ProcessingSignal):
         if not self.data_access_enabled:
             return False
 
+        # One-shot flag: consumed here so a later zoom made on the X-versus-Y plot
+        # itself falls back to the conservative monotonic-X criterion below.
+        ts_is_time_window = getattr(self, '_ts_is_time_window', False)
+        self._ts_is_time_window = False
+
         target_md5sum = self.calculate_data_hash()
         logger.debug(
             f"old={self._access_md5sum}, new={target_md5sum} downsampled={self.isDownsampled} and id={id(self)}")
@@ -721,6 +746,12 @@ class IplotSignalAdapter(ProcessingSignal):
             if AccessHelper.num_samples_override or self.isDownsampled:
                 return True
             elif self.x_expr != "${self}.time":
+                if ts_is_time_window:
+                    # The range was propagated from a shared-time zoom made on a
+                    # time plot (set_time_window); it is a valid time window no
+                    # matter what the processed X samples look like, so the X
+                    # column can safely be refetched and reprocessed over it.
+                    return True
                 x_data_incremental = all(self.x_data[i + 1] - self.x_data[i] > 0 for i in range(len(self.x_data) - 1))
                 return x_data_incremental
             elif len(self.children):

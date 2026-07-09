@@ -21,6 +21,7 @@ import numpy as np
 from PySide6.QtCore import Qt
 
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.impl_base import BackendParserBase
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
@@ -129,7 +130,8 @@ class StatsVerticalZoomTest(unittest.TestCase):
                 qt_canvas.resize(400, 300)
                 self.app.processEvents()
 
-                impl_plot = qt_canvas._parser._signal_impl_plot_lut.get(sig.uid)
+                impl_plot = qt_canvas._parser._signal_impl_plot_lut.get(
+                    qt_canvas._parser.signal_lut_key(sig))
                 self.assertIsNotNone(impl_plot)
 
                 # Y view that covers none of the samples (a deep vertical zoom
@@ -400,9 +402,10 @@ class SharedXAxisTest(unittest.TestCase):
                 self.assertLess(x_begin, 10_000.0)
                 self.assertLess(x_end, 10_000.0)
 
-    def test_non_time_xy_plot_is_isolated_from_shared_group(self):
-        """The X-versus-Y plot must not join the shared-time group, while the two time
-        plots still share their X axis."""
+    def test_non_time_xy_plot_joins_group_as_reprocess_follower(self):
+        """The X-versus-Y plot joins the group led by a time plot (it follows the
+        shared-time zoom by reprocessing, mint#120), but zooming on the XY plot
+        itself must not drive the group: it only syncs its own stacked sub-plots."""
         for backend in BACKENDS:
             with self.subTest(backend=backend):
                 _, qt_canvas, _, xy_plot, _ = self._build_time_and_xy_plots(backend)
@@ -418,8 +421,11 @@ class SharedXAxisTest(unittest.TestCase):
                 # XY plot syncs only its own stacked sub-plots (behaves as shared_x_axis off).
                 self.assertEqual(len(parser._get_all_shared_axes(xy_impl)),
                                  len(parser._plot_impl_plot_lut.get(id(xy_plot))))
-                # The two time plots still group together; the XY plot is excluded.
-                self.assertEqual(len(parser._get_all_shared_axes(time_impl)), 2)
+                # The group led by a time plot contains the two time plots and the
+                # X-versus-Y plot, which follows by reprocessing over the time window.
+                shared_logical = [logical(p) for p in parser._get_all_shared_axes(time_impl)]
+                self.assertEqual(len(shared_logical), 3)
+                self.assertTrue(any(p is xy_plot for p in shared_logical))
 
     def test_ech_time_expression_plot_follows_shared_group(self):
         """A plot whose X expression yields times with its first sample inside the
@@ -437,13 +443,15 @@ class SharedXAxisTest(unittest.TestCase):
                 time_impl = next(p for p in plots if parser._plot_x_is_time(logical(p)))
                 shared_logical = [logical(p) for p in parser._get_all_shared_axes(time_impl)]
                 self.assertTrue(any(p is ech_plot for p in shared_logical))
-                # Two time plots + the ECH plot; the data-valued XY plot is excluded.
-                self.assertEqual(len(shared_logical), 3)
+                # Two time plots + the ECH plot + the data-valued XY plot, which
+                # follows the zoom by reprocessing instead of sharing axis limits.
+                self.assertEqual(len(shared_logical), 4)
 
-    def test_data_expression_plot_stays_out_even_with_time_like_samples(self):
-        """A '${T}.data' expression must never join the shared-time group, even when
-        its X samples numerically fall inside the shared window (GUI smoke test found
-        the first-point check alone pulled the X-versus-Y plot into the zoom)."""
+    def test_data_expression_plot_never_takes_the_time_window_on_its_axis(self):
+        """A '${T}.data' plot may follow the shared-time zoom, but only by
+        reprocessing: its X axis must never be set to the time window itself, even
+        when its X samples numerically fall inside the shared window (GUI smoke test
+        found the first-point check alone stretched the X-versus-Y plot's axis)."""
         for backend in BACKENDS:
             with self.subTest(backend=backend):
                 canvas = Canvas(2, 1, title="shared_x_data_expr", shared_x_axis=True)
@@ -460,8 +468,97 @@ class SharedXAxisTest(unittest.TestCase):
                 xy_plot = PlotXY()
                 xy_sig = SignalXY(label="xy", x_expr="${T}.data")
                 xy_sig.processing_enabled = False
-                # X samples collide numerically with the time window.
-                xy_sig.set_data([time.copy(), np.linspace(0, 50, 100)])
+                # X samples in temperature territory, far below the time scale.
+                xy_x = np.linspace(5, 295, 100)
+                xy_sig.set_data([xy_x, np.linspace(0, 50, 100)])
+                xy_plot.add_signal(xy_sig)
+                canvas.add_plot(xy_plot, 0)
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(600, 400)
+                self.app.processEvents()
+                parser = qt_canvas._parser
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                time_impl = next(p for p in plots if logical(p) is time_plot)
+                xy_impl = next(p for p in plots if logical(p) is xy_plot)
+
+                # Simulate a zoom on the time plot and run the propagation.
+                new_start = ts_start + 4_000_000_000_000
+                new_end = ts_end - 4_000_000_000_000
+                parser.set_oaw_axis_limits(time_impl, 0, (new_start, new_end))
+                BackendParserBase._x_axis_update_callback(parser, time_impl)
+                self.app.processEvents()
+
+                # The XY plot's axis must stay in data territory, never the epoch window.
+                x_begin, x_end = parser.get_oaw_axis_limits(xy_impl, 0)
+                self.assertLess(x_begin, 10_000.0)
+                self.assertLess(x_end, 10_000.0)
+
+    def test_shared_time_zoom_reprocesses_xy_plot_over_time_window(self):
+        """Zooming a time plot propagates the *time window* to the X-versus-Y plot's
+        signals (so their X column is refetched/reprocessed over it) and rescales the
+        XY axis to the reprocessed data (mint#120)."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                _, qt_canvas, time_plots, xy_plot, _ = self._build_time_and_xy_plots(backend)
+                parser = qt_canvas._parser
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                time_impl = next(p for p in plots if logical(p) is time_plots[0])
+                xy_impl = next(p for p in plots if logical(p) is xy_plot)
+                xy_sig = xy_plot.signals[1][0]
+
+                ts_start = 1_754_463_600_000_000_000
+                ts_end = 1_754_503_200_000_000_000
+                new_start = ts_start + 4_000_000_000_000
+                new_end = ts_end - 4_000_000_000_000
+
+                parser.set_oaw_axis_limits(time_impl, 0, (new_start, new_end))
+                BackendParserBase._x_axis_update_callback(parser, time_impl)
+                self.app.processEvents()
+
+                # The time window was propagated to the XY signal's data request...
+                self.assertAlmostEqual(xy_sig.ts_start, new_start, delta=1e9)
+                self.assertAlmostEqual(xy_sig.ts_end, new_end, delta=1e9)
+                # ...and its axis follows the (re)processed X data, not the window.
+                x_begin, x_end = parser.get_oaw_axis_limits(xy_impl, 0)
+                self.assertLess(x_begin, 10_000.0)
+                self.assertLess(x_end, 10_000.0)
+                # The time plots did take the window on their axes.
+                t_begin, t_end = parser.get_oaw_axis_limits(time_impl, 0)
+                self.assertAlmostEqual(t_begin, new_start, delta=1e9)
+                self.assertAlmostEqual(t_end, new_end, delta=1e9)
+
+    def test_xy_plot_with_different_ts_stays_out_of_shared_group(self):
+        """An X-versus-Y plot requested over a *different* time range than the base
+        plot does not share its time base and must stay out of the group."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = Canvas(2, 1, title="shared_x_xy_other_ts", shared_x_axis=True)
+                ts_start = 1_754_463_600_000_000_000
+                ts_end = 1_754_503_200_000_000_000
+                time = np.linspace(ts_start, ts_end, 100).astype(np.int64)
+                time_plot = PlotXY()
+                sig = SignalXY(label="t")
+                sig.ts_start = ts_start
+                sig.ts_end = ts_end
+                sig.set_data([time, np.sin(np.linspace(0, 6, 100))])
+                time_plot.add_signal(sig)
+                canvas.add_plot(time_plot, 0)
+                xy_plot = PlotXY()
+                xy_sig = SignalXY(label="xy", x_expr="${T}.data")
+                xy_sig.processing_enabled = False
+                # Requested over a disjoint time range: no common time base.
+                xy_sig.ts_start = ts_start - 500_000_000_000_000
+                xy_sig.ts_end = ts_start - 400_000_000_000_000
+                xy_sig.set_data([np.linspace(5, 295, 100), np.linspace(0, 50, 100)])
                 xy_plot.add_signal(xy_sig)
                 canvas.add_plot(xy_plot, 0)
                 qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
