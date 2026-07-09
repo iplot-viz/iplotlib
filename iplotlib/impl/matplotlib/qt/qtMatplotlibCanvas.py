@@ -823,7 +823,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         extender = getattr(self._parser, 'context_menu_extender', None)
         if callable(extender):
             try:
-                extender(autoscale_menu)
+                extender(autoscale_menu, ci.plot() if ci else None)
             except Exception:
                 logger.exception("context_menu_extender failed")
         autoscale_menu.popup(event.guiEvent.globalPos())
