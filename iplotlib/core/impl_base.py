@@ -441,21 +441,28 @@ class BackendParserBase(ABC):
         window itself (iplot-viz/mint#120).
         """
         signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+
+        # 1. Refresh/reprocess all signals over the time window. No redraw yet:
+        # drawing transforms the data by the axis offset (transform_data), so the
+        # new limits — and with them the recomputed offset — must be applied first.
         for signal_ref in signals:
             signal = signal_ref()
             if signal is None:
                 continue
             if hasattr(signal, 'refresh_over_time_window'):
                 # Refresh the signal and its expression dependencies (e.g.
-                # x_expr='${A}.data') over the window, then redraw.
+                # x_expr='${A}.data') over the window.
                 signal.refresh_over_time_window(begin, end)
             elif hasattr(signal, 'set_time_window'):
                 signal.set_time_window(begin, end)
             else:
                 signal.set_xranges((begin, end))
-            self.process_ipl_signal(signal)
 
-        # Rescale the X axis to the reprocessed X data.
+        # 2. Rescale the X axis to the reprocessed X data. set_oaw_axis_limits
+        # recomputes the axis offset (create_offset) for the new range; doing this
+        # before the redraw keeps the drawn line and the view in the same offset
+        # frame — otherwise the curve lands outside the visible window for
+        # large-valued X columns (e.g. relative-time counters ~1e15).
         x_begin, x_end = +np.inf, -np.inf
         for signal_ref in signals:
             signal = signal_ref()
@@ -470,13 +477,18 @@ class BackendParserBase(ABC):
             x_begin = min(x_begin, float(np.min(finite)))
             x_end = max(x_end, float(np.max(finite)))
 
-        if not (np.isfinite(x_begin) and np.isfinite(x_end)):
-            return
-        if x_begin == x_end:
-            x_begin, x_end = x_begin - 0.5, x_end + 0.5
+        if np.isfinite(x_begin) and np.isfinite(x_end):
+            if x_begin == x_end:
+                x_begin, x_end = x_begin - 0.5, x_end + 0.5
+            plot.axes[0].set_limits(x_begin, x_end, 'current')
+            self.set_oaw_axis_limits(impl_plot, 0, (x_begin, x_end))
 
-        plot.axes[0].set_limits(x_begin, x_end, 'current')
-        self.set_oaw_axis_limits(impl_plot, 0, (x_begin, x_end))
+        # 3. Redraw with the freshly reprocessed buffers and up-to-date offset.
+        for signal_ref in signals:
+            signal = signal_ref()
+            if signal is None:
+                continue
+            self.process_ipl_signal(signal)
 
     @staticmethod
     def _plot_signal_ts_range(plot):
@@ -1598,16 +1610,26 @@ class BackendParserBase(ABC):
         signal_limits = limits.signals_ranges
         impl_plot = None
 
-        # Restore signal-level xrange values
+        # Resolve the implementation plot from the recorded signals.
         for signal_limit in signal_limits:
             signal = signal_limit.signal_ref()
-            signal.set_xranges(signal_limit.get_limits())
             if impl_plot is None:
                 impl_plot = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))
 
-        # Set X limits
+        # Set X limits first. Setting the implementation limits fires the shared-x
+        # propagation callback while every plot still holds its pre-restore ts
+        # range, so the shared group is computed consistently and the other plots
+        # (including X-versus-Y reprocess-followers, mint#120) are restored along
+        # with this one. Restoring the recorded signal ranges beforehand made the
+        # zoomed plot's ts diverge from the rest of the group, which then failed
+        # the grouping checks: undo only affected the plot the zoom was made on.
         self.set_oaw_axis_limits(impl_plot, 0, (ax_limits[0].begin, ax_limits[0].end))
         # isinstance(plot, PlotXYWithSlider): TODO: test with Slider
+
+        # Restore the exact recorded signal-level xrange values.
+        for signal_limit in signal_limits:
+            signal = signal_limit.signal_ref()
+            signal.set_xranges(signal_limit.get_limits())
 
         # Set Y limits
         self.set_oaw_axis_limits(impl_plot, 1, (ax_limits[1].begin, ax_limits[1].end))
