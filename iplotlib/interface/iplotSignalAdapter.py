@@ -349,6 +349,33 @@ class IplotSignalAdapter(ProcessingSignal):
         for child in self.children:
             child._ts_is_time_window = True
 
+    def refresh_over_time_window(self, begin, end, _visited=None):
+        """Refresh this signal and its expression dependencies over a trusted time window.
+
+        Used when a shared-time zoom is propagated to an X-versus-Y plot
+        (iplot-viz/mint#120). Expression signals (e.g. x_expr='${A}.data') are
+        evaluated against the *current* buffers of their alias dependencies, so
+        those dependencies are refreshed first — including aliases that are not
+        displayed on any plot of the shared group and therefore were not
+        refetched by the zoom itself. Dependencies already refetched over the
+        same window are left untouched (their data hash is unchanged).
+        """
+        if _visited is None:
+            _visited = set()
+        if id(self) in _visited:
+            return
+        _visited.add(id(self))
+
+        for alias in getattr(self, 'depends_on', None) or ():
+            if alias == 'self':
+                continue
+            dep = ParserHelper.env.get(alias)
+            if isinstance(dep, IplotSignalAdapter) and dep is not self:
+                dep.refresh_over_time_window(begin, end, _visited)
+
+        self.set_time_window(begin, end)
+        self.get_data()
+
     def set_da_success(self):
         self.status_info.reset()
         self.status_info.stage = Stage.DA
@@ -711,6 +738,16 @@ class IplotSignalAdapter(ProcessingSignal):
             # or 
             # 2.data_access_enabled = False. Assume that user called set_data(...), so, emulate a success DA
             if self.status_info.stage == Stage.INIT:
+                self.set_da_success()
+                return True
+            if getattr(self, '_ts_is_time_window', False):
+                # A shared-time zoom propagated a trusted time window to this
+                # dependent expression signal (empty name, e.g. x_expr='${A}.data',
+                # as produced by MINT for X-versus-Y rows). It has no data access of
+                # its own; its dependencies were refetched over the window by their
+                # own plots, so re-run processing to re-evaluate the X/Y expressions
+                # over their new buffers (iplot-viz/mint#120).
+                self._ts_is_time_window = False
                 self.set_da_success()
                 return True
             return False

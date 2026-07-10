@@ -263,5 +263,54 @@ class SetTimeWindowRefreshTest(unittest.TestCase):
         self.assertTrue(s._needs_refresh())
 
 
+class ExpressionSignalTimeWindowTest(unittest.TestCase):
+    """MINT X-versus-Y rows are expression-only signals (empty name,
+    x_expr='${A}.data', y_expr='${B}.data') whose buffers derive from alias
+    dependencies. A shared-time zoom must re-evaluate those expressions once
+    the dependencies were refreshed over the window (mint#120, Test34)."""
+
+    def _make_dep(self, alias, x, y):
+        dep = SignalXY(label=alias.upper(), alias=alias)
+        dep.data_access_enabled = False
+        dep.set_data([np.asarray(x, dtype=float), np.asarray(y, dtype=float)])
+        return dep
+
+    def test_reprocesses_expressions_after_dependencies_change(self):
+        a = self._make_dep("m120a", [0, 1, 2], [10.0, 20.0, 30.0])
+        b = self._make_dep("m120b", [0, 1, 2], [1.0, 2.0, 3.0])
+
+        tot = SignalXY(label="Tot", name="",
+                       x_expr="${m120a}.data", y_expr="${m120b}.data")
+        tot.get_data()  # initial processing
+        np.testing.assert_array_equal(tot.x_data, [10.0, 20.0, 30.0])
+        np.testing.assert_array_equal(tot.y_data, [1.0, 2.0, 3.0])
+
+        # Emulate the dependencies being refetched over a narrower time window
+        # (as the shared-time zoom does for the plots that display them).
+        a.set_data([np.array([1.0]), np.array([20.0])])
+        b.set_data([np.array([1.0]), np.array([2.0])])
+
+        # Without the trusted window, the expression signal stays as it is.
+        tot.get_data()
+        np.testing.assert_array_equal(tot.x_data, [10.0, 20.0, 30.0])
+
+        # With it, processing is re-run and the X column re-derived.
+        tot.refresh_over_time_window(100, 200)
+        np.testing.assert_array_equal(tot.x_data, [20.0])
+        np.testing.assert_array_equal(tot.y_data, [2.0])
+        self.assertEqual((tot.ts_start, tot.ts_end), (100, 200))
+        # One-shot: a plain get_data afterwards does not re-run processing.
+        self.assertFalse(tot._ts_is_time_window)
+
+    def test_dependency_walk_tolerates_missing_and_cyclic_aliases(self):
+        a = self._make_dep("m120c", [0, 1], [5.0, 6.0])
+        tot = SignalXY(label="Tot", name="",
+                       x_expr="${m120c}.data + ${m120missing}.data",
+                       y_expr="${m120c}.data")
+        # Missing alias must not raise during the dependency walk.
+        tot.refresh_over_time_window(0, 10)
+        self.assertEqual((tot.ts_start, tot.ts_end), (0, 10))
+
+
 if __name__ == '__main__':
     unittest.main()

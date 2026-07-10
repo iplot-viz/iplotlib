@@ -536,6 +536,82 @@ class SharedXAxisTest(unittest.TestCase):
                 self.assertAlmostEqual(t_begin, new_start, delta=1e9)
                 self.assertAlmostEqual(t_end, new_end, delta=1e9)
 
+    def test_expression_xy_plot_reprocesses_from_dependencies(self):
+        """MINT workspace shape (Test34): plots 1 and 2 display alias signals A and
+        B (time on X); plot 3 is an expression-only signal (empty name) with
+        x_expr='${A}.data', y_expr='${B}.data'. A shared-time zoom on a time plot
+        must re-evaluate plot 3's expressions against the dependencies' refreshed
+        buffers and rescale its axis to the re-derived data (mint#120)."""
+        ts_start = 1_754_463_600_000_000_000
+        ts_end = 1_754_503_200_000_000_000
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                alias_a, alias_b = f"m120_{backend}_a", f"m120_{backend}_b"
+                canvas = Canvas(3, 1, title="shared_x_expr_xy", shared_x_axis=True)
+                time = np.linspace(ts_start, ts_end, 100).astype(np.int64)
+                dep_sigs = []
+                for alias, scale in ((alias_a, 10.0), (alias_b, 1.0)):
+                    plot = PlotXY()
+                    sig = SignalXY(label=alias, alias=alias)
+                    sig.data_access_enabled = False
+                    sig.ts_start = ts_start
+                    sig.ts_end = ts_end
+                    sig.set_data([time, scale * np.linspace(0, 1, 100)])
+                    plot.add_signal(sig)
+                    canvas.add_plot(plot, 0)
+                    dep_sigs.append(sig)
+                tot_plot = PlotXY()
+                tot_sig = SignalXY(label="Tot", name="",
+                                   x_expr="${%s}.data" % alias_a,
+                                   y_expr="${%s}.data" % alias_b)
+                tot_sig.ts_start = ts_start
+                tot_sig.ts_end = ts_end
+                tot_plot.add_signal(tot_sig)
+                canvas.add_plot(tot_plot, 0)
+
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(600, 400)
+                self.app.processEvents()
+                parser = qt_canvas._parser
+
+                # Initial processing derived Tot's X from A's data (0..10).
+                np.testing.assert_allclose(np.asarray(tot_sig.x_data),
+                                           10.0 * np.linspace(0, 1, 100))
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                time_impl = next(p for p in plots
+                                 if logical(p).signals[1][0] is dep_sigs[0])
+                tot_impl = next(p for p in plots if logical(p) is tot_plot)
+
+                # Emulate what a refetch over the new window would give the
+                # dependencies (data access is stubbed out in this test).
+                narrowed = np.linspace(ts_start, ts_end, 25).astype(np.int64)
+                dep_sigs[0].set_data([narrowed, 10.0 * np.linspace(0.4, 0.6, 25)])
+                dep_sigs[1].set_data([narrowed, np.linspace(0.4, 0.6, 25)])
+
+                new_start = ts_start + 4_000_000_000_000
+                new_end = ts_end - 4_000_000_000_000
+                parser.set_oaw_axis_limits(time_impl, 0, (new_start, new_end))
+                BackendParserBase._x_axis_update_callback(parser, time_impl)
+                self.app.processEvents()
+
+                # Tot was reprocessed: expressions re-evaluated over the
+                # dependencies' new buffers, ts window propagated...
+                np.testing.assert_allclose(np.asarray(tot_sig.x_data),
+                                           10.0 * np.linspace(0.4, 0.6, 25))
+                np.testing.assert_allclose(np.asarray(tot_sig.y_data),
+                                           np.linspace(0.4, 0.6, 25))
+                self.assertAlmostEqual(tot_sig.ts_start, new_start, delta=1e9)
+                self.assertAlmostEqual(tot_sig.ts_end, new_end, delta=1e9)
+                # ...and its axis follows the re-derived data range (~4..6).
+                x_begin, x_end = parser.get_oaw_axis_limits(tot_impl, 0)
+                self.assertAlmostEqual(x_begin, 4.0, delta=0.2)
+                self.assertAlmostEqual(x_end, 6.0, delta=0.2)
+
     def test_xy_plot_with_different_ts_stays_out_of_shared_group(self):
         """An X-versus-Y plot requested over a *different* time range than the base
         plot does not share its time base and must stay out of the group."""

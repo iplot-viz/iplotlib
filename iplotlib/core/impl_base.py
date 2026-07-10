@@ -388,6 +388,11 @@ class BackendParserBase(ABC):
         current_ipl_plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
 
         try:
+            # Plots whose X is a processed data column are handled after the time
+            # plots: their expressions (e.g. x_expr='${A}.data') are re-evaluated
+            # from the other signals' buffers, so those must be refetched over the
+            # new time window first.
+            reprocess_followers = []
             for impl_plot in shared_plots:
                 plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
 
@@ -402,7 +407,7 @@ class BackendParserBase(ABC):
                     # would produce meaningless X values (mint#120); instead, reapply
                     # the processing behind the X column over the new time window and
                     # rescale the axis to the reprocessed data.
-                    self._follow_shared_time_window(impl_plot, plot, new_start, new_end)
+                    reprocess_followers.append((impl_plot, plot))
                 else:
                     # Set X Axis limits
                     plot.axes[0].set_limits(new_start, new_end, 'current')
@@ -418,6 +423,9 @@ class BackendParserBase(ABC):
                         if not isinstance(plot, PlotXYWithSlider):
                             signal.set_limits((new_start, new_end))
                         self.process_ipl_signal(signal)
+
+            for impl_plot, plot in reprocess_followers:
+                self._follow_shared_time_window(impl_plot, plot, new_start, new_end)
         finally:
             # Never leave the re-entrancy guard set: a failure while propagating to
             # one plot must not disable axis synchronization for the whole session.
@@ -437,7 +445,11 @@ class BackendParserBase(ABC):
             signal = signal_ref()
             if signal is None:
                 continue
-            if hasattr(signal, 'set_time_window'):
+            if hasattr(signal, 'refresh_over_time_window'):
+                # Refresh the signal and its expression dependencies (e.g.
+                # x_expr='${A}.data') over the window, then redraw.
+                signal.refresh_over_time_window(begin, end)
+            elif hasattr(signal, 'set_time_window'):
                 signal.set_time_window(begin, end)
             else:
                 signal.set_xranges((begin, end))
