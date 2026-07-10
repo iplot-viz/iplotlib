@@ -441,6 +441,7 @@ class BackendParserBase(ABC):
         window itself (iplot-viz/mint#120).
         """
         signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+        logger.info(f"mint#120: follow window [{begin}, {end}] for plot {getattr(plot, 'plot_title', None)}")
 
         # 1. Refresh/reprocess all signals over the time window. No redraw yet:
         # drawing transforms the data by the axis offset (transform_data), so the
@@ -457,6 +458,12 @@ class BackendParserBase(ABC):
                 signal.set_time_window(begin, end)
             else:
                 signal.set_xranges((begin, end))
+            x_dbg = np.asarray(getattr(signal, 'x_data', []))
+            logger.info(f"mint#120: refreshed '{getattr(signal, 'label', '?')}' "
+                        f"ts=({getattr(signal, 'ts_start', '?')}, {getattr(signal, 'ts_end', '?')}) "
+                        f"x: n={x_dbg.size} dtype={x_dbg.dtype} "
+                        f"unit={getattr(getattr(signal, 'x_data', None), 'unit', '?')} "
+                        f"min={x_dbg.min() if x_dbg.size else '-'} max={x_dbg.max() if x_dbg.size else '-'}")
 
         # 2. Rescale the X axis to the reprocessed X data. set_oaw_axis_limits
         # recomputes the axis offset (create_offset) for the new range; doing this
@@ -480,8 +487,17 @@ class BackendParserBase(ABC):
         if np.isfinite(x_begin) and np.isfinite(x_end):
             if x_begin == x_end:
                 x_begin, x_end = x_begin - 0.5, x_end + 0.5
+            ci_dbg = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            logger.info(f"mint#120: rescale x to [{x_begin}, {x_end}], "
+                        f"offset before={ci_dbg.offsets[0]}")
             plot.axes[0].set_limits(x_begin, x_end, 'current')
             self.set_oaw_axis_limits(impl_plot, 0, (x_begin, x_end))
+            logger.info(f"mint#120: offset after={ci_dbg.offsets[0]} "
+                        f"impl xlim={self.get_impl_x_axis_limits(impl_plot)} "
+                        f"oaw xlim={self.get_oaw_axis_limits(impl_plot, 0)}")
+        else:
+            logger.info(f"mint#120: no finite x range found (x_begin={x_begin}, x_end={x_end}); "
+                        f"axis left unchanged")
 
         # 3. Redraw with the freshly reprocessed buffers and up-to-date offset.
         for signal_ref in signals:

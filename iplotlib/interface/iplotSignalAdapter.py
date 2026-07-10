@@ -289,7 +289,14 @@ class IplotSignalAdapter(ProcessingSignal):
                     data_arrays.update({key: self.data_store[correspondance[key]]})
                 else:
                     logger.debug(f" in compute key={key} expr={expr}")
-                    data_arrays.update({key: ParserHelper.evaluate(self, expr)})
+                    result = ParserHelper.evaluate(self, expr)
+                    r_dbg = np.asarray(result)
+                    logger.info(f"mint#120: compute '{getattr(self, 'label', '?')}' {key}={expr} -> "
+                                f"n={r_dbg.size} dtype={r_dbg.dtype} "
+                                f"unit={getattr(result, 'unit', '?')} "
+                                f"min={r_dbg.min() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'} "
+                                f"max={r_dbg.max() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'}")
+                    data_arrays.update({key: result})
             except Exception as e:
                 logger.error(f"Error {e} in {expr}")
                 continue
@@ -749,6 +756,8 @@ class IplotSignalAdapter(ProcessingSignal):
                 # over their new buffers (iplot-viz/mint#120).
                 self._ts_is_time_window = False
                 self.set_da_success()
+                logger.info(f"mint#120: forced reprocess of expression signal "
+                            f"'{self.label}' over ts=({self.ts_start}, {self.ts_end})")
                 return True
             return False
 
@@ -1186,6 +1195,9 @@ class ParserHelper:
                 break
 
         if needs_realign and not ParserHelper.dict_result:
+            logger.info(f"mint#120: evaluate '{expression}': realigning "
+                        f"{[getattr(d, 'label', '?') for d in dependencies]} "
+                        f"(time bases: {[(len(d.data_store[0]), getattr(d.data_store[0], 'unit', '?')) for d in dependencies]})")
             ParserHelper.dict_result = align(dependencies, signal)
             signal.set_data(tmp_local_env['self'].data_store)
 
