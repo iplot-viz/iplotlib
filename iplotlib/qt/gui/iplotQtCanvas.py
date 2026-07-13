@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from typing import List, Tuple, Optional
 
 import numpy as np
-from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
+from PySide6.QtCore import QEventLoop, QMetaObject, QSize, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
 from iplotlib.core.signal import SignalXY
 from iplotlib.core.canvas import Canvas
@@ -409,7 +409,10 @@ class IplotQtCanvas(QWidget):
         # Check if any limit actually changed
         if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            QApplication.processEvents()
+            # Flush pending work without dispatching user input: this runs inside
+            # the mouse-release handler, and re-entering it mid-release corrupts
+            # the backends' drag state. Queued clicks are delivered afterwards.
+            QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
             QApplication.restoreOverrideCursor()
 
             # Update new limits after data refresh.
