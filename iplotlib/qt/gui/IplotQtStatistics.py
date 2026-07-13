@@ -18,12 +18,9 @@ logger = Sl.get_logger(__name__)
 
 
 def _line_source_data(line):
-    """Full source arrays of a backend line, in data units: log-scale plots
-    draw a filtered dataset and pyqtgraph display data is log10-mapped, so
-    statistics must not read the drawn dataset directly."""
-    full = getattr(line, '_ipl_full_data', None)
-    if full is not None:
-        return full
+    """Source arrays of a backend line, in data units. pyqtgraph's
+    ``getData()`` returns log10-mapped display data in log mode, so statistics
+    must read the original dataset instead."""
     getter = getattr(line, 'getOriginalDataset', None)  # pyqtgraph PlotDataItem
     if getter is not None:
         x_data, y_data = getter()

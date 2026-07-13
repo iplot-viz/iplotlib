@@ -231,15 +231,6 @@ class LogModeConsistencyTests(QAppOffscreenTestAdapter):
         np.testing.assert_allclose(np.asarray(_line_source_data(line)[1]),
                                    [10.0, 100.0, 1000.0])
 
-    def test_stats_source_data_prefers_full_unfiltered_arrays(self):
-        from iplotlib.qt.gui.IplotQtStatistics import _line_source_data
-        plot = self._plot_with_curve([10.0, 100.0])
-        line = plot.listDataItems()[0]
-        full = (np.array([0.0, 1.0, 2.0]), np.array([-5.0, 10.0, 100.0]))
-        line._ipl_full_data = full
-        x_data, y_data = _line_source_data(line)
-        np.testing.assert_allclose(y_data, [-5.0, 10.0, 100.0])
-
     def test_autoscale_log_mode_does_not_double_log(self):
         parser = PyQtGraphParser()
         plot = self._plot_with_curve([10.0, 100.0, 10000.0])
