@@ -262,9 +262,8 @@ class pyQtCrosshair:
                         annotation.setAnchor((ax, 0.5))
                         annotation._last_anchor = (ax, 0.5)
                     annotation.setPos(xp, yp)
-                    # getData() is display data: in log mode y is log10 of the
-                    # sample, but the readout must show the data value (the
-                    # matplotlib backend annotates data values).
+                    # getData() is log10-mapped in log mode; the readout shows
+                    # the data value.
                     y_val = y_data[idx]
                     if getattr(line, 'opts', {}).get('logMode', (False, False))[1]:
                         y_val = 10.0 ** y_val

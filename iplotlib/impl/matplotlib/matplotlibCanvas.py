@@ -980,9 +980,7 @@ class MatplotlibParser(BackendParserBase):
             log_scale = self._pm.get_value(plot, 'log_scale')
             if log_scale:
                 mpl_axis.axes.set_yscale('log')
-                # Adaptive major locator/formatter are attached in
-                # process_ipl_axis_params; drop the default decade minors so the
-                # nice-mantissa majors are the only ticks (matches pyqtgraph).
+                # Only the adaptive majors are shown, matching pyqtgraph.
                 mpl_axis.set_minor_locator(NullLocator())
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, mpl_axis: MPLAxis):
@@ -1003,9 +1001,7 @@ class MatplotlibParser(BackendParserBase):
         # Font size for UTC label
         mpl_axis.get_offset_text().set_fontsize(fs)
 
-        # A log-scaled Y axis (scale set in process_ipl_log_axis, which runs
-        # first) gets the adaptive log ticks; every other numeric axis keeps the
-        # engineering-exponent formatter.
+        # process_ipl_log_axis runs first, so the Y scale is already decided.
         is_log_y = getattr(mpl_axis, 'axis_name', None) == 'y' \
             and mpl_axis.axes.get_yscale() == 'log'
         if not axis.is_date:
@@ -1027,9 +1023,7 @@ class MatplotlibParser(BackendParserBase):
         # 'Time' it lays ticks on round durations (1d, 12h, 5m, ...), otherwise
         # it falls back to MaxNLocator. (The 'Time' label is applied later, in
         # signal processing, so we can't decide here -- the locator and the
-        # ExponentScalarFormatter both read the label live at draw time.) A log
-        # Y axis gets the adaptive LogYLocator; a linear Y axis the plain
-        # MaxNLocator.
+        # ExponentScalarFormatter both read the label live at draw time.)
         if not axis.is_date:
             if getattr(mpl_axis, 'axis_name', None) == 'x':
                 mpl_axis.set_major_locator(RelativeTimeLocator(tick_number))
@@ -1107,12 +1101,9 @@ class MatplotlibParser(BackendParserBase):
         bot, top = super().autoscale_y_axis(impl_plot)
 
         if impl_plot.get_yscale() == 'log':
-            # A linear margin below the data minimum goes non-positive for any
-            # span >= a decade and set_impl_y_axis_limits would then fall back
-            # to matplotlib's global autoscale: pad multiplicatively instead,
-            # from the smallest positive visible sample (negatives cannot sit
-            # on a log axis). (top/bot)**padding widens by the same fraction of
-            # the log-space span that pyqtgraph's setYRange padding uses.
+            # Pad multiplicatively from the smallest positive visible sample:
+            # a linear margin would go non-positive and silently degrade to
+            # matplotlib's global autoscale.
             pos_bot = self._min_positive_visible(impl_plot)
             if pos_bot is not None and top > 0:
                 factor = (top / pos_bot) ** padding if top > pos_bot else 2.0

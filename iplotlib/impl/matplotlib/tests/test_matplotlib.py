@@ -201,7 +201,7 @@ class LogScaleAxisTests(QAppOffscreenTestAdapter):
         self.assertIn('200', labels)
         self.assertEqual(y_axis.get_offset_text().get_text(), '1e-6')
 
-    def test_log_axis_multidecade_renders_exponents_and_pow_mark(self):
+    def test_log_axis_multidecade_renders_bare_exponents(self):
         parser = MatplotlibParser()
         ax = self._new_axes()
         y_axis = ax.get_yaxis()
@@ -211,7 +211,9 @@ class LogScaleAxisTests(QAppOffscreenTestAdapter):
         ax.figure.canvas.draw()
         labels = [t.get_text() for t in y_axis.get_majorticklabels() if t.get_text()]
         self.assertEqual(labels, ['-4', '-3', '-2', '-1', '0', '1'])
-        self.assertEqual(y_axis.get_offset_text().get_text(), '10^')
+        # No corner factor in multi-decade views: only the sub-decade common
+        # factor uses the offset slot.
+        self.assertEqual(y_axis.get_offset_text().get_text(), '')
 
     def test_log_formatter_readout_is_full_data_value(self):
         # Crosshair value labels go through Axes.format_ydata: they must show

@@ -222,14 +222,23 @@ class LogModeConsistencyTests(QAppOffscreenTestAdapter):
         return plot
 
     def test_stats_source_data_is_data_space_in_log_mode(self):
-        from iplotlib.qt.gui.IplotQtStatistics import _pg_source_data
+        from iplotlib.qt.gui.IplotQtStatistics import _line_source_data
         plot = self._plot_with_curve([10.0, 100.0, 1000.0])
         line = plot.listDataItems()[0]
         # display data is log10-mapped ...
         np.testing.assert_allclose(np.asarray(line.getData()[1]), [1.0, 2.0, 3.0])
         # ... but statistics must read data units
-        np.testing.assert_allclose(np.asarray(_pg_source_data(line)[1]),
+        np.testing.assert_allclose(np.asarray(_line_source_data(line)[1]),
                                    [10.0, 100.0, 1000.0])
+
+    def test_stats_source_data_prefers_full_unfiltered_arrays(self):
+        from iplotlib.qt.gui.IplotQtStatistics import _line_source_data
+        plot = self._plot_with_curve([10.0, 100.0])
+        line = plot.listDataItems()[0]
+        full = (np.array([0.0, 1.0, 2.0]), np.array([-5.0, 10.0, 100.0]))
+        line._ipl_full_data = full
+        x_data, y_data = _line_source_data(line)
+        np.testing.assert_allclose(y_data, [-5.0, 10.0, 100.0])
 
     def test_autoscale_log_mode_does_not_double_log(self):
         parser = PyQtGraphParser()
@@ -256,7 +265,9 @@ class LogModeConsistencyTests(QAppOffscreenTestAdapter):
         (spacing, positions), = axis.tickValues(np.log10(1e-4), np.log10(10.0), 400)
         labels = axis.tickStrings(positions, 1.0, spacing)
         self.assertEqual(labels, ['-4', '-3', '-2', '-1', '0', '1'])
-        self.assertEqual(axis.offset_str, '10^')
+        # No corner factor in multi-decade views: only the sub-decade common
+        # factor uses the corner label.
+        self.assertEqual(axis.offset_str, '')
 
 
 if __name__ == '__main__':

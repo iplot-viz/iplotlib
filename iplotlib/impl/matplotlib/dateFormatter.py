@@ -447,12 +447,9 @@ class ExponentScalarFormatter(ScalarFormatter):
         return super().get_offset()
 
 
-# ---------------------------------------------------------------------------
-# Log-scaled Y axis ticks. A sub-decade view (span < 1 decade) reads best as
-# evenly spaced round mantissas under a single common power of ten (e.g. ticks
-# 120..200 with the corner showing 1e-6); a wider view reads best as decade
-# powers. Both branches are pure so the pyqtgraph backend mirrors them exactly.
-# ---------------------------------------------------------------------------
+# Log-scaled Y axis ticks, shared verbatim with the pyqtgraph backend:
+# sub-decade views read as round mantissas under a common corner factor,
+# wider views as decade exponents.
 _LOG_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
 
 
@@ -483,10 +480,9 @@ def _common_exp(maxabs):
 
 def log_axis_ticks(lo, hi, n):
     """Adaptive major ticks for a log Y axis. Returns ``(values, exp)``:
-    sub-decade -> nice mantissas labelled under the common factor ``10**exp``;
-    multi-decade -> pure decade powers (``exp`` is None): ticks are labelled
-    with the bare exponent under a single ``10^`` corner mark, so only exact
-    powers of ten qualify."""
+    sub-decade -> nice mantissas under the common factor ``10**exp``;
+    multi-decade -> decade powers (``exp`` is None), labelled as bare
+    exponents."""
     if lo <= 0 or hi <= lo:
         return [], None
     if log10(hi) - log10(lo) < 1.0:
@@ -515,9 +511,8 @@ class LogYLocator(Locator):
 
 
 class LogYFormatter(Formatter):
-    """Companion to :class:`LogYLocator`: round mantissa under a common corner
-    factor (sub-decade) or bare decade exponents under a ``10^`` corner mark
-    (multi-decade), so the power notation is written once, not on every tick."""
+    """Companion to :class:`LogYLocator`: round mantissas under a common corner
+    factor (sub-decade) or bare decade exponents (multi-decade)."""
 
     def __init__(self, label_props: dict = None):
         self._label_props = label_props or {}
@@ -541,22 +536,17 @@ class LogYFormatter(Formatter):
         if self._exp:
             return f"{x / 10.0 ** self._exp:g}"
         if self._pow_mode:
-            # Bare exponent under the "10^" corner mark. Decade ticks come out
-            # whole ("4"); cursor readouts at arbitrary heights keep two
-            # decimals ("3.4") so the arrow stays honest between ticks.
+            # Bare exponent: whole on decade ticks ("4"), two decimals for
+            # cursor readouts between ticks ("3.4").
             return f"{log10(x):.2f}".rstrip('0').rstrip('.')
         return f"{x:g}"
 
     def format_data_short(self, value):
-        # Cursor/value readouts must show the full data value: the tick text
-        # alone is a mantissa or an exponent whose corner mark is not part of
-        # the annotation.
+        # Value readouts show the full data value, never the tick shorthand.
         return f"{value:g}"
 
     def get_offset(self):
-        if self._exp:
-            return f"1e{self._exp}"
-        return '10^' if self._pow_mode else ''
+        return f"1e{self._exp}" if self._exp else ''
 
 
 class NanosecondDateFormatter(ScalarFormatter):

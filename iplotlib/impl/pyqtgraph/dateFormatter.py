@@ -285,12 +285,9 @@ def is_time_label(label) -> bool:
     return label is not None and 'time' in str(label).lower()
 
 
-# ---------------------------------------------------------------------------
-# Log-scaled Y axis ticks. Mirrors the matplotlib backend so both look the
-# same: a sub-decade view reads as round mantissas under a single common power
-# of ten (e.g. 120..200 with the corner showing 1e-6); a wider view reads as
-# decade powers.
-# ---------------------------------------------------------------------------
+# Log-scaled Y axis ticks, shared verbatim with the matplotlib backend:
+# sub-decade views read as round mantissas under a common corner factor,
+# wider views as decade exponents.
 _LOG_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
 
 
@@ -321,10 +318,9 @@ def _common_exp(maxabs):
 
 def log_axis_ticks(lo, hi, n):
     """Adaptive major ticks for a log Y axis. Returns ``(values, exp)``:
-    sub-decade -> nice mantissas labelled under the common factor ``10**exp``;
-    multi-decade -> pure decade powers (``exp`` is None): ticks are labelled
-    with the bare exponent under a single ``10^`` corner mark, so only exact
-    powers of ten qualify."""
+    sub-decade -> nice mantissas under the common factor ``10**exp``;
+    multi-decade -> decade powers (``exp`` is None), labelled as bare
+    exponents."""
     if lo <= 0 or hi <= lo:
         return [], None
     if log10(hi) - log10(lo) < 1.0:
@@ -651,22 +647,17 @@ class NanosecondDateFormatter(pg.AxisItem):
                 self._eng_common = ''
                 self._numeric_offset = 0.0
                 if self.logMode:
-                    # Adaptive log ticks (mirrors the matplotlib backend):
-                    # positions are log10 of the chosen data values, and the
-                    # power notation lives once in the corner (common factor for
-                    # sub-decade, a "10^" mark for multi-decade exponents). Use
-                    # the unclamped tick target so the tick set matches the
-                    # matplotlib LogYLocator exactly (which does not pixel-clamp).
-                    lo, hi = sorted((10.0 ** minVal, 10.0 ** maxVal))
+                    # Adaptive log ticks mirroring the matplotlib backend:
+                    # positions are log10 of the chosen data values. The
+                    # unclamped tick target keeps the tick set identical to
+                    # LogYLocator, which does not pixel-clamp.
+                    lo, hi = sorted((10.0 ** min(minVal, 300.0), 10.0 ** min(maxVal, 300.0)))
                     tick_vals, exp = log_axis_ticks(lo, hi, self.n_ticks)
                     if tick_vals:
                         values = [log10(v) for v in tick_vals]
                         self.last_values = values
                     self._log_exp = exp
-                    if exp is None:
-                        self.offset_str = '10^'
-                    else:
-                        self.offset_str = f"1e{exp}" if exp else ''
+                    self.offset_str = f"1e{exp}" if exp else ''
                     self.autoSIPrefixScale = 1.0
                     self.labelUnit = ''
                     if len(values) >= 2:
@@ -706,14 +697,12 @@ class NanosecondDateFormatter(pg.AxisItem):
                 self.common_label.setText(self._eng_common)
                 self._updateLabel()
             elif self.logMode:
-                # Y axis in log mode: sub-decade views un-log to mantissas under
-                # the common corner factor; multi-decade views label the bare
-                # exponent (the tick position IS log10 of the value) under the
-                # "10^" corner mark.
+                # Sub-decade views un-log to mantissas under the common corner
+                # factor; multi-decade tick positions are already the exponent.
                 log_exp = getattr(self, '_log_exp', None)
                 if log_exp is None:
-                    # Decade ticks come out whole ("4"); crosshair readouts at
-                    # arbitrary heights keep two decimals ("3.4").
+                    # Whole on decade ticks ("4"), two decimals for crosshair
+                    # readouts between ticks ("3.4").
                     values = [f"{v:.2f}".rstrip('0').rstrip('.') for v in values]
                     self.common_label.setText(self.offset_str)
                 elif log_exp:

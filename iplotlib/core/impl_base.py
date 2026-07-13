@@ -200,9 +200,8 @@ class BackendParserBase(ABC):
         else:
             y_displayed = []
 
-        # Check if the visible Y data contains valid values. NaNs are dropped
-        # first: a window may be all-NaN (e.g. non-positive samples mapped by
-        # pyqtgraph's log mode) and np.min on an empty slice raises.
+        # Drop NaNs before the emptiness check: an all-NaN window (e.g.
+        # pyqtgraph log mode) would make np.min raise.
         if len(y_displayed) > 0 and np.isnan(y_displayed).any():
             y_displayed = y_displayed[~np.isnan(y_displayed)]
         if len(y_displayed) > 0:
@@ -555,9 +554,17 @@ class BackendParserBase(ABC):
 
                 # Adjust initial padding for Y axis
                 if ax_idx == 1 and not (isinstance(plot, PlotContour) or isinstance(plot, PlotImage)):
-                    h = end - begin
-                    begin = begin - 0.1 * h if padding_begin else begin
-                    end = end + 0.1 * h if padding_end else end
+                    if self._pm.get_value(plot, 'log_scale') and begin > 0 and end > begin:
+                        # Pad multiplicatively on a log axis: a linear margin
+                        # would go non-positive and degrade to the backend's
+                        # own autorange.
+                        factor = (end / begin) ** 0.1
+                        begin = begin / factor if padding_begin else begin
+                        end = end * factor if padding_end else end
+                    else:
+                        h = end - begin
+                        begin = begin - 0.1 * h if padding_begin else begin
+                        end = end + 0.1 * h if padding_end else end
             else:
                 begin, end = axis.begin, axis.end
 
@@ -793,6 +800,22 @@ class BackendParserBase(ABC):
 
         return plot_lines
 
+    def _log_positive_mask(self, plot, *y_arrays):
+        """Mask of samples drawable on a log-scale Y axis (every component
+        value > 0), or None when the plot is linear or nothing needs
+        dropping."""
+        if plot is None or not self._pm.get_value(plot, 'log_scale'):
+            return None
+        mask = None
+        for y in y_arrays:
+            if getattr(y, 'ndim', 0) != 1 or len(y) == 0:
+                return None
+            positive = y > 0
+            mask = positive if mask is None else (mask & positive)
+        if mask is None or mask.all():
+            return None
+        return mask
+
     def do_impl_line_plot_xy(self, signal: SignalXY, impl_plot: Any, plot: PlotXY, cache_item, x_data, y_data):
 
         plot_lines = self._signal_impl_shape_lut.get(id(signal))  # type: List[Any]
@@ -816,6 +839,16 @@ class BackendParserBase(ABC):
         if y_data.ndim == 2 and y_data.shape[1] == 1:
             y_data = y_data.ravel()
 
+        # Draw only the samples representable on a log-scale Y axis; the
+        # unfiltered arrays stay on the artist for statistics and readouts.
+        full_xy = None
+        x_draw, y_draw = x_data, y_data
+        if not self.canvas.streaming:
+            mask = self._log_positive_mask(plot, y_data)
+            if mask is not None:
+                full_xy = (x_data, y_data)
+                x_draw, y_draw = x_data[mask], y_data[mask]
+
         if plot_lines is not None:
             # Reflect downsampling in legend
             self.legend_downsampled_signal(signal, impl_plot, plot_lines[0])
@@ -825,8 +858,9 @@ class BackendParserBase(ABC):
                 if self.canvas.streaming and len(x_data) > 0:
                     plot_lines = self.update_plot_line_streaming(signal, impl_plot, plot_lines, x_data, y_data, style)
                 else:
-                    self.set_line_data(plot_lines[0], x_data, y_data)
-                    self._update_marker_by_point_count(plot_lines[0], x_data, style)
+                    self.set_line_data(plot_lines[0], x_draw, y_draw)
+                    plot_lines[0]._ipl_full_data = full_xy
+                    self._update_marker_by_point_count(plot_lines[0], x_draw, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):
                     if y_data.shape == (0, 0):  # Case: no data for 2 dim y_data
@@ -842,8 +876,9 @@ class BackendParserBase(ABC):
 
         else:
             if x_data.ndim == 1 and y_data.ndim == 1:
-                plot_lines = self.create_plot_lines_1D(draw_fn, x_data, y_data, style)
-                self._update_marker_by_point_count(plot_lines[0], x_data, style)
+                plot_lines = self.create_plot_lines_1D(draw_fn, x_draw, y_draw, style)
+                plot_lines[0]._ipl_full_data = full_xy
+                self._update_marker_by_point_count(plot_lines[0], x_draw, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 plot_lines = self.create_plot_lines_2D(draw_fn, signal, x_data, y_data, style)
 
@@ -1078,6 +1113,16 @@ class BackendParserBase(ABC):
         style2 = dict(style)
         style2.pop("name", None)
 
+        # A shared mask keeps the three curves and the filled band aligned on
+        # a log-scale Y axis.
+        full_xy = None
+        plot = signal.parent() if callable(signal.parent) else None
+        mask = self._log_positive_mask(plot, y1_data, y2_data, y3_data)
+        if mask is not None:
+            full_xy = (x_data, y1_data)
+            x_data, y1_data, y2_data, y3_data = (x_data[mask], y1_data[mask],
+                                                 y2_data[mask], y3_data[mask])
+
         if shapes is not None:
             # Reflect downsampling in legend
             self.legend_downsampled_signal(signal, impl_plot, shapes[0][0])
@@ -1086,6 +1131,7 @@ class BackendParserBase(ABC):
                 self.set_line_data(shapes[0][0], x_data, y1_data)
                 self.set_line_data(shapes[0][1], x_data, y2_data)
                 self.set_line_data(shapes[0][2], x_data, y3_data)
+                shapes[0][0]._ipl_full_data = full_xy
                 self.update_area_envelope_1D(shapes, impl_plot, x_data, y1_data, y2_data, style)
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
         else:
@@ -1093,6 +1139,7 @@ class BackendParserBase(ABC):
                 shapes = self.create_area_envelope_1D(draw_fn, impl_plot, signal, x_data, y1_data, y2_data, y3_data,
                                                       style, style2)
                 signal.lines = shapes
+                shapes[0][0]._ipl_full_data = full_xy
                 self._signal_impl_shape_lut.update({id(signal): shapes})
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
 

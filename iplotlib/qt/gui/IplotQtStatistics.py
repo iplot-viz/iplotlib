@@ -17,17 +17,20 @@ from iplotlib.impl.matplotlib.dateFormatter import _fmt_duration
 logger = Sl.get_logger(__name__)
 
 
-def _pg_source_data(line):
-    """Source-value arrays of a pyqtgraph PlotDataItem. ``getData()`` returns
-    the *display* dataset — log10-mapped in log mode and possibly reduced — so
-    statistics computed from it would be exponents; the original dataset keeps
-    the table in data units on every axis scale, like matplotlib's
-    ``get_xdata``/``get_ydata``."""
-    getter = getattr(line, 'getOriginalDataset', None)
+def _line_source_data(line):
+    """Full source arrays of a backend line, in data units: log-scale plots
+    draw a filtered dataset and pyqtgraph display data is log10-mapped, so
+    statistics must not read the drawn dataset directly."""
+    full = getattr(line, '_ipl_full_data', None)
+    if full is not None:
+        return full
+    getter = getattr(line, 'getOriginalDataset', None)  # pyqtgraph PlotDataItem
     if getter is not None:
         x_data, y_data = getter()
         if x_data is not None:
             return x_data, y_data
+    if hasattr(line, 'get_xdata'):  # matplotlib Line2D
+        return line.get_xdata(), line.get_ydata()
     return line.getData()
 
 
@@ -234,11 +237,11 @@ class IplotQtStatistics(QWidget):
 
                     # Differentiate methods
                     if isinstance(impl_plot, PlotItem):
-                        x_data = _pg_source_data(line)[0]
+                        x_data = _line_source_data(line)[0]
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
                         signal_name = f"{line.name()}, {stack}"
                     else:
-                        x_data = line.get_xdata()
+                        x_data = _line_source_data(line)[0]
                         lo, hi = impl_plot.get_xlim()
                         signal_name = f"{line.get_label()}, {stack}"
 
@@ -330,15 +333,13 @@ class IplotQtStatistics(QWidget):
                 else:
                     # Base case
                     # Differentiate methods
+                    src_x, src_y = _line_source_data(line)
+                    x_data = src_x if src_x is not None else []
+                    y_data = src_y if src_y is not None else []
                     if isinstance(impl_plot, PlotItem):
-                        src_x, src_y = _pg_source_data(line)
-                        x_data = src_x if src_x is not None else []
-                        y_data = src_y if src_y is not None else []
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
                         signal_name = f"{line.name()}, {stack}"
                     else:
-                        x_data = line.get_xdata()
-                        y_data = line.get_ydata()
                         lo, hi = impl_plot.get_xlim()
                         signal_name = f"{line.get_label()}, {stack}"
 
