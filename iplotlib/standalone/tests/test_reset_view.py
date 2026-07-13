@@ -193,6 +193,22 @@ class ResetViewTest(unittest.TestCase):
         signal = SignalXY(label="empty")
         self.assertIsNone(signal.restore_minimap_snapshot())
 
+    def test_restore_minimap_snapshot_restores_downsampled_state(self):
+        # A deep zoom can refetch raw data and clear the downsampled flag. The
+        # restore must bring back the draw-time state, so the next zoom fetches
+        # finer data again instead of serving the coarse full-range buffers.
+        x = np.linspace(0, 10, 200)
+        signal = SignalXY(label="s", isDownsampled=True)
+        signal.set_data([x, np.sin(x)])
+        signal.isDownsampled = False
+        signal.x_data = signal.x_data[:20]
+        signal.y_data = signal.y_data[:20]
+
+        signal.restore_minimap_snapshot()
+
+        self.assertTrue(signal.isDownsampled)
+        self.assertEqual(len(signal.x_data), 200)
+
     def test_home_action_always_enabled(self):
         # Home is always clickable; it is a no-op when there is nothing to reset.
         win = IplotQtMainWindow()

@@ -150,6 +150,7 @@ class IplotSignalAdapter(ProcessingSignal):
         self._minimap_y_data = None
         self._minimap_y_max_data = None
         self._minimap_y_avg_data = None
+        self._minimap_is_downsampled = False
 
         # 2. Post-initialize ArraySignal's properties and our name.
         self._init_label()
@@ -517,6 +518,7 @@ class IplotSignalAdapter(ProcessingSignal):
         if self._minimap_x_data is None and len(self.x_data) > 0:
             self._minimap_x_data = self.x_data.copy()
             self._minimap_y_data = self.y_data.copy()
+            self._minimap_is_downsampled = self.isDownsampled
             if (getattr(self, 'envelope', False) and len(self.data_store) >= 4
                     and len(self.z_data) == len(self.x_data)
                     and len(self.data_store[3]) == len(self.x_data)):
@@ -531,12 +533,13 @@ class IplotSignalAdapter(ProcessingSignal):
         self._minimap_y_data = None
         self._minimap_y_max_data = None
         self._minimap_y_avg_data = None
+        self._minimap_is_downsampled = False
 
     def restore_minimap_snapshot(self):
         """
-        Restore the buffers to the full-range data captured at draw time (the same
-        snapshot the minimap renders) and return it shaped like :meth:`get_data`,
-        or None when no snapshot is available.
+        Restore the buffers and the downsampled state to the full-range data
+        captured at draw time (the same snapshot the minimap renders) and return
+        it shaped like :meth:`get_data`, or None when no snapshot is available.
 
         The data hash is refreshed so the restored buffers count as up to date for
         the current time range: redisplaying them triggers no data access.
@@ -554,6 +557,9 @@ class IplotSignalAdapter(ProcessingSignal):
         if envelope:
             self.z_data = self._minimap_y_max_data.copy()
             self.data_store[3] = self._minimap_y_avg_data.copy()
+        # Restore the draw-time downsampled state too: it drives the legend
+        # marker and the decision to fetch finer data on the next zoom.
+        self.isDownsampled = self._minimap_is_downsampled
         self._access_md5sum = self.calculate_data_hash()
         self.set_da_success()
 
