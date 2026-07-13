@@ -1106,6 +1106,21 @@ class MatplotlibParser(BackendParserBase):
         """
         bot, top = super().autoscale_y_axis(impl_plot)
 
+        if impl_plot.get_yscale() == 'log':
+            # A linear margin below the data minimum goes non-positive for any
+            # span >= a decade and set_impl_y_axis_limits would then fall back
+            # to matplotlib's global autoscale: pad multiplicatively instead,
+            # from the smallest positive visible sample (negatives cannot sit
+            # on a log axis). (top/bot)**padding widens by the same fraction of
+            # the log-space span that pyqtgraph's setYRange padding uses.
+            pos_bot = self._min_positive_visible(impl_plot)
+            if pos_bot is not None and top > 0:
+                factor = (top / pos_bot) ** padding if top > pos_bot else 2.0
+                self.set_oaw_axis_limits(impl_plot, 1, (pos_bot / factor, top * factor))
+            else:
+                impl_plot.autoscale(enable=True, axis='y')
+            return
+
         # Compute final margin
         h = (top - bot)
         n_new_bot = bot - padding * h
@@ -1113,6 +1128,21 @@ class MatplotlibParser(BackendParserBase):
 
         # Set new Y axis limits
         self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
+
+    def _min_positive_visible(self, impl_plot: MPLAxes):
+        """Smallest strictly positive Y sample within the current X window, or
+        None when nothing positive is visible."""
+        lines, lo, hi = self.get_impl_lines(impl_plot)
+        best = None
+        for line in lines:
+            xd, yd = self.get_impl_data(line)
+            if xd is None or yd is None:
+                continue
+            yd = np.asarray(yd)[(np.asarray(xd) >= lo) & (np.asarray(xd) <= hi)]
+            yd = yd[np.isfinite(yd) & (yd > 0)]
+            if yd.size and (best is None or yd.min() < best):
+                best = float(yd.min())
+        return best
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
         """

@@ -201,6 +201,47 @@ class LogScaleAxisTests(QAppOffscreenTestAdapter):
         self.assertIn('200', labels)
         self.assertEqual(y_axis.get_offset_text().get_text(), '1e-6')
 
+    def test_log_axis_multidecade_renders_exponents_and_pow_mark(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        y_axis = ax.get_yaxis()
+        parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
+        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
+        ax.set_ylim(1e-4, 10.0)
+        ax.figure.canvas.draw()
+        labels = [t.get_text() for t in y_axis.get_majorticklabels() if t.get_text()]
+        self.assertEqual(labels, ['-4', '-3', '-2', '-1', '0', '1'])
+        self.assertEqual(y_axis.get_offset_text().get_text(), '10^')
+
+    def test_log_formatter_readout_is_full_data_value(self):
+        # Crosshair value labels go through Axes.format_ydata: they must show
+        # the data value, not the tick mantissa/exponent shorthand.
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        y_axis = ax.get_yaxis()
+        parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
+        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
+        ax.set_ylim(1.12e-4, 2.08e-4)
+        ax.figure.canvas.draw()
+        self.assertEqual(ax.format_ydata(1.5e-4), '0.00015')
+
+    def test_autoscale_log_pads_multiplicatively_and_skips_non_positive(self):
+        from iplotlib.core.impl_base import ImplementationPlotCacheItem
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        ax._ipl_cache_item = ImplementationPlotCacheItem()
+        ax.plot([0.0, 1.0, 2.0, 3.0], [-5.0, 10.0, 100.0, 10000.0])
+        ax.set_yscale('log')
+        ax.set_xlim(-0.5, 3.5)
+        parser.autoscale_y_axis(ax)
+        lo, hi = ax.get_ylim()
+        # padded below the smallest positive sample (negatives are not on a
+        # log axis) and above the maximum, never triggering global autoscale
+        self.assertGreater(lo, 0.0)
+        self.assertLess(lo, 10.0)
+        self.assertGreater(hi, 10000.0)
+        self.assertFalse(ax.get_autoscaley_on())
+
     def test_axis_params_linear_get_exponent_formatter(self):
         parser = MatplotlibParser()
         y_axis = self._new_axes().get_yaxis()

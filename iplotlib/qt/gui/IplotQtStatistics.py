@@ -17,6 +17,20 @@ from iplotlib.impl.matplotlib.dateFormatter import _fmt_duration
 logger = Sl.get_logger(__name__)
 
 
+def _pg_source_data(line):
+    """Source-value arrays of a pyqtgraph PlotDataItem. ``getData()`` returns
+    the *display* dataset — log10-mapped in log mode and possibly reduced — so
+    statistics computed from it would be exponents; the original dataset keeps
+    the table in data units on every axis scale, like matplotlib's
+    ``get_xdata``/``get_ydata``."""
+    getter = getattr(line, 'getOriginalDataset', None)
+    if getter is not None:
+        x_data, y_data = getter()
+        if x_data is not None:
+            return x_data, y_data
+    return line.getData()
+
+
 class NumericTableWidgetItem(QTableWidgetItem):
     """
     Custom QTableWidgetItem that sorts by numeric value stored in UserRole
@@ -220,7 +234,7 @@ class IplotQtStatistics(QWidget):
 
                     # Differentiate methods
                     if isinstance(impl_plot, PlotItem):
-                        x_data = line.getData()[0]
+                        x_data = _pg_source_data(line)[0]
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
                         signal_name = f"{line.name()}, {stack}"
                     else:
@@ -317,8 +331,9 @@ class IplotQtStatistics(QWidget):
                     # Base case
                     # Differentiate methods
                     if isinstance(impl_plot, PlotItem):
-                        x_data = line.getData()[0] if line.getData()[0] is not None else []
-                        y_data = line.getData()[1] if line.getData()[1] is not None else []
+                        src_x, src_y = _pg_source_data(line)
+                        x_data = src_x if src_x is not None else []
+                        y_data = src_y if src_y is not None else []
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
                         signal_name = f"{line.name()}, {stack}"
                     else:

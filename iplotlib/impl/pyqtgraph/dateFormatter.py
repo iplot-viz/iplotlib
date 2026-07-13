@@ -322,16 +322,16 @@ def _common_exp(maxabs):
 def log_axis_ticks(lo, hi, n):
     """Adaptive major ticks for a log Y axis. Returns ``(values, exp)``:
     sub-decade -> nice mantissas labelled under the common factor ``10**exp``;
-    multi-decade -> decade powers (``exp`` is None, plain decimal labels)."""
+    multi-decade -> pure decade powers (``exp`` is None): ticks are labelled
+    with the bare exponent under a single ``10^`` corner mark, so only exact
+    powers of ten qualify."""
     if lo <= 0 or hi <= lo:
         return [], None
     if log10(hi) - log10(lo) < 1.0:
         vals = _nice_ticks(lo, hi, n)
         return vals, (_common_exp(max(abs(v) for v in vals)) if vals else 0)
     e0, e1 = floor(log10(lo)), floor(log10(hi))
-    subs = (1, 2, 5) if (e1 - e0) < 3 else (1,)
-    vals = [s * 10.0 ** e for e in range(e0, e1 + 1) for s in subs
-            if lo <= s * 10.0 ** e <= hi]
+    vals = [10.0 ** e for e in range(e0, e1 + 1) if lo <= 10.0 ** e <= hi]
     return sorted(vals), None
 
 
@@ -652,8 +652,9 @@ class NanosecondDateFormatter(pg.AxisItem):
                 self._numeric_offset = 0.0
                 if self.logMode:
                     # Adaptive log ticks (mirrors the matplotlib backend):
-                    # positions are log10 of the chosen data values, and a
-                    # sub-decade view carries a common factor in the corner. Use
+                    # positions are log10 of the chosen data values, and the
+                    # power notation lives once in the corner (common factor for
+                    # sub-decade, a "10^" mark for multi-decade exponents). Use
                     # the unclamped tick target so the tick set matches the
                     # matplotlib LogYLocator exactly (which does not pixel-clamp).
                     lo, hi = sorted((10.0 ** minVal, 10.0 ** maxVal))
@@ -662,7 +663,10 @@ class NanosecondDateFormatter(pg.AxisItem):
                         values = [log10(v) for v in tick_vals]
                         self.last_values = values
                     self._log_exp = exp
-                    self.offset_str = f"1e{exp}" if exp else ''
+                    if exp is None:
+                        self.offset_str = '10^'
+                    else:
+                        self.offset_str = f"1e{exp}" if exp else ''
                     self.autoSIPrefixScale = 1.0
                     self.labelUnit = ''
                     if len(values) >= 2:
@@ -702,15 +706,22 @@ class NanosecondDateFormatter(pg.AxisItem):
                 self.common_label.setText(self._eng_common)
                 self._updateLabel()
             elif self.logMode:
-                # Y axis in log mode: un-log to data space, then either factor
-                # out the common power (sub-decade) or show plain decades.
-                data = [10.0 ** v for v in values]
-                if self._log_exp:
-                    factor = 10.0 ** self._log_exp
-                    values = [f"{d / factor:g}" for d in data]
+                # Y axis in log mode: sub-decade views un-log to mantissas under
+                # the common corner factor; multi-decade views label the bare
+                # exponent (the tick position IS log10 of the value) under the
+                # "10^" corner mark.
+                log_exp = getattr(self, '_log_exp', None)
+                if log_exp is None:
+                    # Decade ticks come out whole ("4"); crosshair readouts at
+                    # arbitrary heights keep two decimals ("3.4").
+                    values = [f"{v:.2f}".rstrip('0').rstrip('.') for v in values]
+                    self.common_label.setText(self.offset_str)
+                elif log_exp:
+                    factor = 10.0 ** log_exp
+                    values = [f"{10.0 ** v / factor:g}" for v in values]
                     self.common_label.setText(self.offset_str)
                 else:
-                    values = [f"{d:g}" for d in data]
+                    values = [f"{10.0 ** v:g}" for v in values]
                     self.common_label.setText("")
             else:
                 # Y axis: fn.siScale formatting

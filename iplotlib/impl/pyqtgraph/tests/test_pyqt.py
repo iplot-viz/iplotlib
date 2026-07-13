@@ -206,5 +206,58 @@ class SetYAxisLimitsLogModeTests(QAppOffscreenTestAdapter):
         self.assertFalse(np.isnan(hi2))
 
 
+class LogModeConsistencyTests(QAppOffscreenTestAdapter):
+    """Log-mode readouts must stay in data units and match the matplotlib
+    backend: statistics read source values, autoscale must not re-log the
+    already log-mapped display data, and multi-decade ticks label bare
+    exponents under a single '10^' corner mark."""
+
+    def _plot_with_curve(self, y_values, log=True):
+        import pyqtgraph as pg
+        plot = pg.PlotItem()
+        x = np.arange(len(y_values), dtype=float)
+        plot.plot(x, np.asarray(y_values, dtype=float))
+        if log:
+            plot.setLogMode(x=False, y=True)
+        return plot
+
+    def test_stats_source_data_is_data_space_in_log_mode(self):
+        from iplotlib.qt.gui.IplotQtStatistics import _pg_source_data
+        plot = self._plot_with_curve([10.0, 100.0, 1000.0])
+        line = plot.listDataItems()[0]
+        # display data is log10-mapped ...
+        np.testing.assert_allclose(np.asarray(line.getData()[1]), [1.0, 2.0, 3.0])
+        # ... but statistics must read data units
+        np.testing.assert_allclose(np.asarray(_pg_source_data(line)[1]),
+                                   [10.0, 100.0, 1000.0])
+
+    def test_autoscale_log_mode_does_not_double_log(self):
+        parser = PyQtGraphParser()
+        plot = self._plot_with_curve([10.0, 100.0, 10000.0])
+        plot.getViewBox().setXRange(-1.0, 3.0, padding=0)
+        parser.autoscale_y_axis(plot, padding=0.0)
+        lo, hi = parser.get_impl_y_axis_limits(plot)  # data space
+        self.assertAlmostEqual(lo, 10.0, places=4)
+        self.assertAlmostEqual(hi, 10000.0, places=4)
+
+    def test_autoscale_log_mode_skips_non_positive_samples(self):
+        parser = PyQtGraphParser()
+        plot = self._plot_with_curve([-5.0, 10.0, 1000.0])
+        plot.getViewBox().setXRange(-1.0, 3.0, padding=0)
+        parser.autoscale_y_axis(plot, padding=0.0)
+        lo, hi = parser.get_impl_y_axis_limits(plot)
+        self.assertAlmostEqual(lo, 10.0, places=4)
+        self.assertAlmostEqual(hi, 1000.0, places=4)
+
+    def test_multidecade_ticks_label_bare_exponents(self):
+        from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
+        axis = NanosecondDateFormatter(orientation='left', is_date=False)
+        axis.setLogMode(True)
+        (spacing, positions), = axis.tickValues(np.log10(1e-4), np.log10(10.0), 400)
+        labels = axis.tickStrings(positions, 1.0, spacing)
+        self.assertEqual(labels, ['-4', '-3', '-2', '-1', '0', '1'])
+        self.assertEqual(axis.offset_str, '10^')
+
+
 if __name__ == '__main__':
     unittest.main()

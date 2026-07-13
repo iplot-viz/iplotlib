@@ -200,11 +200,12 @@ class BackendParserBase(ABC):
         else:
             y_displayed = []
 
-        # Check if the visible Y data contains valid values
+        # Check if the visible Y data contains valid values. NaNs are dropped
+        # first: a window may be all-NaN (e.g. non-positive samples mapped by
+        # pyqtgraph's log mode) and np.min on an empty slice raises.
+        if len(y_displayed) > 0 and np.isnan(y_displayed).any():
+            y_displayed = y_displayed[~np.isnan(y_displayed)]
         if len(y_displayed) > 0:
-            # Check if there exist NaN values in the y_displayed array
-            if np.isnan(y_displayed).any():
-                y_displayed = y_displayed[~np.isnan(y_displayed)]
             min_bot = np.min(y_displayed)
             max_top = np.max(y_displayed)
         else:

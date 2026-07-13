@@ -1515,8 +1515,13 @@ class PyQtGraphParser(BackendParserBase):
         vb = impl_plot.getViewBox()
 
         if impl_plot.getAxis('left').logMode:
-            if bot is not None and top is not None and bot > 0 and top > 0:
-                vb.setYRange(np.log10(bot), np.log10(top), padding=padding)
+            # get_impl_data returns pyqtgraph's display data, which is already
+            # log10-mapped in log mode (non-positive samples become NaN and are
+            # dropped by get_bottom_top), so bot/top are exponents: pass them
+            # straight through. setYRange pads in view (= log) space, i.e.
+            # multiplicatively in data units.
+            if np.isfinite(bot) and np.isfinite(top):
+                vb.setYRange(bot, top, padding=padding)
             else:
                 vb.enableAutoRange(axis='y')
             return
