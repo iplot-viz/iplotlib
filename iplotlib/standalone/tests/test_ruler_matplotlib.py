@@ -60,14 +60,14 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
 
     def test_add_ruler_populates_signal_values_in_window(self):
         self.widget._add_ruler_at(self.impl_plot, self.plot, 2.5, 0.5)
-        text = self.widget._ruler_window._rows[0]['signal_values']
-        self.assertTrue(text.startswith('s: '), text)
-        self.assertAlmostEqual(float(text.split(': ')[1]), np.sin(2.5), delta=0.15)
+        values = self.widget._ruler_window._rows[0]['signal_values']
+        self.assertEqual(list(values), ['s'])
+        self.assertAlmostEqual(values['s'], np.sin(2.5), delta=0.15)
 
     def test_ruler_off_the_signal_has_empty_signal_values(self):
         # X well beyond the data extent (0..10) -> no signal under the ruler.
         self.widget._add_ruler_at(self.impl_plot, self.plot, 100.0, 0.0)
-        self.assertEqual(self.widget._ruler_window._rows[0]['signal_values'], '')
+        self.assertEqual(self.widget._ruler_window._rows[0]['signal_values'], {})
 
     def test_add_rulers_picks_different_default_colors(self):
         self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
@@ -136,7 +136,8 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         self.assertTrue(annotation.get_visible())
         x = np.linspace(0, 10, 50)
         nearest = int(np.argmin(np.abs(x - 2.5)))
-        self.assertEqual(annotation.get_text(), self.impl_plot.format_ydata(np.sin(x)[nearest]))
+        # Same text the pyqtgraph label and the ruler window cell render.
+        self.assertEqual(annotation.get_text(), f"{np.sin(x)[nearest]:.6g}")
 
     def test_toggle_val_label_hides_signal_value_labels(self):
         self.widget._add_ruler_at(self.impl_plot, self.plot, 2.5, 0.5)
@@ -198,6 +199,36 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         finally:
             widget._ruler_window.close()
             widget.deleteLater()
+
+    def test_shared_x_row_carries_signal_values_of_every_shared_plot(self):
+        """With a shared time axis the ruler's row must also carry the values of
+        the sibling plots' signals (what its echoes display), so cross-plot
+        deltas can be computed; without shared time only its own plot counts."""
+        for shared, expected_labels in ((True, {'s1', 's2'}), (False, {'s1'})):
+            c = Canvas(2, 1, title="shared_vals_mpl", shared_x_axis=shared)
+            x = np.linspace(0, 10, 50)
+            for i, y in enumerate((np.sin(x), np.cos(x))):
+                p = PlotXY()
+                s = SignalXY(label=f"s{i + 1}")
+                s.set_data([x, y])
+                p.add_signal(s)
+                c.add_plot(p, 0)
+            widget = QtMatplotlibCanvas(canvas=c)
+            try:
+                plot_one = c.plots[0][0]
+                impl_one = widget._get_impl_plot_for_plot(plot_one)
+                # 5.05 sits unambiguously nearest to one sample; 5.0 would
+                # tie between two and argmin breaks the tie unlike the backends.
+                widget._add_ruler_at(impl_one, plot_one, 5.05, 0.0)
+                values = widget._ruler_window._rows[0]['signal_values']
+                self.assertEqual(set(values), expected_labels, msg=f"shared={shared}")
+                nearest = int(np.argmin(np.abs(x - 5.05)))
+                self.assertAlmostEqual(values['s1'], np.sin(x)[nearest])
+                if shared:
+                    self.assertAlmostEqual(values['s2'], np.cos(x)[nearest])
+            finally:
+                widget._ruler_window.close()
+                widget.deleteLater()
 
     def test_repaint_applies_font_color_and_label_state(self):
         c2 = _build_canvas()

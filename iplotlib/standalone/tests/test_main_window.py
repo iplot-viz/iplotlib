@@ -116,6 +116,41 @@ class MainWindowActionsTest(unittest.TestCase):
         self.app.processEvents()
         return qt_canvas
 
+    def test_reclicking_ruler_tool_surfaces_the_ruler_window(self):
+        """The first RULER activation opens its window behind the canvas; only
+        re-clicking the already active tool must surface it."""
+        win = IplotQtMainWindow()
+        try:
+            qt_canvas = self._add_canvas(win)
+            surfaced = []
+            original = qt_canvas.show_ruler_window
+            qt_canvas.show_ruler_window = lambda: (surfaced.append(True), original())
+
+            win.on_tool_activated(Canvas.MOUSE_MODE_RULER)   # activation
+            self.assertEqual(surfaced, [])
+            self.assertTrue(qt_canvas._ruler_window.isVisible())
+
+            win.on_tool_activated(Canvas.MOUSE_MODE_RULER)   # re-click
+            self.assertEqual(surfaced, [True])
+
+            # Coming back from another tool is an activation, not a re-click.
+            win.on_tool_activated(Canvas.MOUSE_MODE_SELECT)
+            win.on_tool_activated(Canvas.MOUSE_MODE_RULER)
+            self.assertEqual(surfaced, [True])
+        finally:
+            win.close()
+
+    def test_show_ruler_window_restores_a_minimized_window(self):
+        win = IplotQtMainWindow()
+        try:
+            qt_canvas = self._add_canvas(win)
+            qt_canvas._ruler_window.showMinimized()
+            qt_canvas.show_ruler_window()
+            self.assertFalse(qt_canvas._ruler_window.isMinimized())
+            self.assertTrue(qt_canvas._ruler_window.isVisible())
+        finally:
+            win.close()
+
     def test_save_canvas_image_writes_png(self):
         """IplotQtCanvas.save_canvas_image writes a PNG file."""
         import tempfile

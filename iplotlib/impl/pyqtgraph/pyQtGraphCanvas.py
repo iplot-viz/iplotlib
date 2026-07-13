@@ -3,7 +3,7 @@
 import gc
 import os
 from datetime import datetime
-from typing import Any, Callable, Collection, List, Tuple
+from typing import Any, Callable, Collection, Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
@@ -1792,14 +1792,14 @@ class PyQtGraphParser(BackendParserBase):
                         lines.append(item)
         return lines
 
-    def _ruler_signal_values_text(self, impl_plot: PlotItem, x: float) -> str:
-        """Comma-joined "label: value" of each signal at the ruler X, matching the
-        ruler's green value labels. A signal is skipped (blank) when the ruler
-        falls off its data, so the cell agrees with what the plot shows."""
+    def _ruler_signal_values(self, impl_plot: PlotItem, x: float) -> Dict[str, float]:
+        """Value of each signal at the ruler X keyed by its label, matching the
+        ruler's green value labels. A signal is omitted when the ruler falls off
+        its data, so the table agrees with what the plot shows."""
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        values: Dict[str, float] = {}
         if not ci or not getattr(ci, 'signals', None):
-            return ''
-        parts = []
+            return values
         for sig_ref in ci.signals:
             signal = sig_ref()
             if not signal or isinstance(signal, SignalContour):
@@ -1820,9 +1820,9 @@ class PyQtGraphParser(BackendParserBase):
                 # Data-span tolerance (view-independent so the cell is stable on
                 # zoom); mirrors the 5% used by the value labels.
                 if span and abs(x - x_data[idx]) <= span * 0.05:
-                    parts.append(f"{signal.label or 'signal'}: {y_data[idx]:.6g}")
+                    values[signal.label or 'signal'] = float(y_data[idx])
                 break
-        return ', '.join(parts)
+        return values
 
     @BackendParserBase.run_in_one_thread
     def add_ruler(self, impl_plot: PlotItem, name: str, x: float, y: float,

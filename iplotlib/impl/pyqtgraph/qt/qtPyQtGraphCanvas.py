@@ -144,7 +144,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                                                 ruler.color, ruler.visible, is_date,
                                                 ruler.font_color, ruler.show_label,
                                                 ruler.show_val_label,
-                                                self._parser._ruler_signal_values_text(impl_plot, x_view))
+                                                self._parser.ruler_signal_values_shared(impl_plot, x_view),
+                                                x_is_time=self._plot_x_is_time(plot))
                     self._apply_ruler_state(ruler)
                 self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
 
@@ -573,7 +574,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._ruler_window.set_canvas_columns(len(self._parser.canvas.plots))
         self._ruler_window.add_row(name, plot_id, (x_abs, y_abs), ruler.color,
                                     visible=True, is_date=is_date,
-                                    signal_values=self._parser._ruler_signal_values_text(impl_plot, x))
+                                    signal_values=self._parser.ruler_signal_values_shared(impl_plot, x),
+                                    x_is_time=self._plot_x_is_time(plot))
         if not self._ruler_window.isVisible():
             self._ruler_window.show()
         # Do not steal focus from the canvas.
@@ -629,7 +631,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         plot_id = self._canvas_position_of(origin_plot) or (1, 1)
         self._ruler_window.update_row_xy(
             origin.name, plot_id, (x_abs, y_abs),
-            signal_values=self._parser._ruler_signal_values_text(origin.plot, origin.xy[0]))
+            signal_values=self._parser.ruler_signal_values_shared(origin.plot, origin.xy[0]))
 
     def _on_viewbox_resized(self, view_box):
         impl_plot = view_box.parentItem()

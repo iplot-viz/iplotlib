@@ -154,7 +154,9 @@ class iplotMplRuler:
                         and ymin <= y_sig <= ymax):
                     annotation.xy = (x_sig, y_sig)
                     annotation.set_position((x_sig, y_sig))
-                    annotation.set_text(self.ax.format_ydata(y_sig))
+                    # 6 significant digits, like the pyqtgraph labels and the ruler
+                    # window cells; format_ydata's precision follows the tick step.
+                    annotation.set_text(f"{y_sig:.6g}")
                     shown = True
             annotation.set_visible(shown)
 

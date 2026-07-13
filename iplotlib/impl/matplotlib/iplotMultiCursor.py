@@ -297,7 +297,8 @@ class IplotMultiCursor(Widget):
                         x_min, x_max = ax.get_xbound()
                         if dx < (x_max - x_min) * self.val_tolerance:
                             annotation.set_position(values)
-                            annotation.set_text(ax.format_ydata(values[1]))
+                            # 6 significant digits, like the pyqtgraph crosshair.
+                            annotation.set_text(f"{values[1]:.6g}")
                         else:
                             annotation.set_visible(False)
                     else:

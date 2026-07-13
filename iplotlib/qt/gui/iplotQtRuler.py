@@ -1,18 +1,22 @@
 import csv
+import re
 from string import ascii_uppercase
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 import pandas as pd
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox,
-                                QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton,
-                                QRadioButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem,
-                                QVBoxLayout, QWidget)
+                                QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QMenu, QMessageBox,
+                                QPushButton, QRadioButton, QScrollArea, QStackedWidget, QTableWidget,
+                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 import iplotLogging.setupLogger as Sl
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.ruler import Ruler, contrast_text_color
+# Same duration rendering the statistics table uses, so time deltas read alike.
+from iplotlib.impl.matplotlib.dateFormatter import _fmt_duration
+from iplotlib.qt.utils.icon_loader import create_icon
 
 logger = Sl.get_logger(__name__)
 
@@ -105,11 +109,9 @@ class IplotQtRuler(QWidget):
     COL_PLOT = 1
     COL_X = 2
     COL_Y = 3
-    COL_SIGNAL_VALUES = 4
-    COL_VISIBLE = 5
-    COL_LABEL = 6
-    COL_COLOR = 7
-    COL_FONT_COLOR = 8
+    # One column per signal starts here; the trailing control columns shift
+    # with the number of signals (see the COL_* properties below).
+    SIG_COL_BASE = 4
 
     # Independent toggles shown in the Labels column, in check order.
     LABEL_TOGGLES = ['Ruler label', 'Val label']
@@ -120,8 +122,28 @@ class IplotQtRuler(QWidget):
     VIEW_ROWS = 'rows'
     VIEW_COLUMNS = 'columns'
 
-    _COLUMNS_AXIS_LABELS = ['X', 'Y', 'Signal values']
+    _COLUMNS_AXIS_LABELS = ['X', 'Y']
     _DELTA_HEADER = 'Δ'
+
+    # Wrap point for signal-name headers: long names grow vertically instead
+    # of being truncated.
+    _WRAP_WIDTH = 18
+
+    @property
+    def COL_VISIBLE(self) -> int:
+        return self.SIG_COL_BASE + len(self._signal_labels)
+
+    @property
+    def COL_LABEL(self) -> int:
+        return self.COL_VISIBLE + 1
+
+    @property
+    def COL_COLOR(self) -> int:
+        return self.COL_VISIBLE + 2
+
+    @property
+    def COL_FONT_COLOR(self) -> int:
+        return self.COL_VISIBLE + 3
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -137,7 +159,11 @@ class IplotQtRuler(QWidget):
         self.view_mode = self.VIEW_ROWS
         self._rows: List[Dict] = []
         self.canvas_columns: int = 1
-        self.column_sections: List[Tuple[Tuple[int, int], QTableWidget]] = []
+        # (plot_id, table, {signal label -> table row}) per plot section.
+        self.column_sections: List[Tuple[Tuple[int, int], QTableWidget, Dict[str, int]]] = []
+        self._signal_labels: List[str] = []
+        self._hidden_signals: Set[str] = set()
+        self._distance_dialog: QDialog = None
 
         self.rows_radio = QRadioButton("Rows")
         self.rows_radio.setToolTip("One row per ruler. Editable.")
@@ -149,11 +175,17 @@ class IplotQtRuler(QWidget):
         view_group.addButton(self.columns_radio)
         self.rows_radio.toggled.connect(self._on_view_mode_changed)
 
+        self.signals_button = QPushButton("Hide/Show signals")
+        self.signals_button.setToolTip("Choose which signal value columns are shown.")
+        self.signals_menu = QMenu(self.signals_button)
+        self.signals_button.setMenu(self.signals_menu)
+
         view_layout = QHBoxLayout()
         view_layout.addWidget(QLabel("Layout:"))
         view_layout.addWidget(self.rows_radio)
         view_layout.addWidget(self.columns_radio)
         view_layout.addStretch()
+        view_layout.addWidget(self.signals_button)
 
         self.table = QTableWidget()
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -178,9 +210,12 @@ class IplotQtRuler(QWidget):
         self.remove_button = QPushButton("Remove ruler")
         self.distance_button = QPushButton("Compute distance")
         self.export_button = QPushButton("Export to CSV")
+        self.copy_button = QPushButton(create_icon('copy'), "Copy table")
+        self.copy_button.setToolTip("Copy the current table to the clipboard.")
         self.remove_button.pressed.connect(self._remove_selected)
         self.distance_button.pressed.connect(self._compute_distance)
         self.export_button.pressed.connect(self._export_csv)
+        self.copy_button.pressed.connect(self._copy_current_view)
 
         main_layout = QVBoxLayout()
         main_layout.addLayout(view_layout)
@@ -189,6 +224,7 @@ class IplotQtRuler(QWidget):
         buttons.addWidget(self.remove_button)
         buttons.addWidget(self.distance_button)
         buttons.addWidget(self.export_button)
+        buttons.addWidget(self.copy_button)
         main_layout.addLayout(buttons)
         self.setLayout(main_layout)
 
@@ -215,7 +251,8 @@ class IplotQtRuler(QWidget):
     def add_row(self, name: str, plot_id, xy: Tuple[float, float], color: str,
                 visible: bool = True, is_date: bool = False,
                 font_color: str = Ruler.font_color, show_label: bool = True,
-                show_val_label: bool = True, signal_values: str = ''):
+                show_val_label: bool = True, signal_values: Dict[str, float] = None,
+                x_is_time: bool = False):
         self._rows.append({
             'name': name,
             'plot_id': tuple(plot_id),
@@ -223,10 +260,12 @@ class IplotQtRuler(QWidget):
             'color': color,
             'visible': visible,
             'is_date': is_date,
+            # Dates are time too; x_is_time additionally covers relative-time axes.
+            'x_is_time': bool(x_is_time) or bool(is_date),
             'font_color': font_color,
             'show_label': show_label,
             'show_val_label': show_val_label,
-            'signal_values': signal_values,
+            'signal_values': dict(signal_values or {}),
         })
         # Sorting must be off during insertion; re-render to handle both modes uniformly.
         self._render_table()
@@ -236,17 +275,15 @@ class IplotQtRuler(QWidget):
         for i, row in enumerate(self._rows):
             if row['name'] == name and row['plot_id'] == target:
                 del self._rows[i]
-                if self.view_mode == self.VIEW_ROWS:
-                    self.table.removeRow(i)
-                    self.selection_history = [r if r < i else r - 1
-                                              for r in self.selection_history
-                                              if r != i]
-                else:
-                    self._render_table()
+                # A removed ruler can retire signal columns; re-render keeps the
+                # header set and the signals menu consistent. The rebuild drops
+                # the visual selection, so the history must go with it.
+                self.selection_history.clear()
+                self._render_table()
                 return
 
     def update_row_xy(self, name: str, plot_id, xy: Tuple[float, float],
-                      signal_values: str = None):
+                      signal_values: Dict[str, float] = None):
         """Update a ruler row's (x, y) -- and its signal values, which change with
         x -- after it is dragged on the canvas."""
         target = tuple(plot_id)
@@ -254,7 +291,7 @@ class IplotQtRuler(QWidget):
             if row['name'] == name and row['plot_id'] == target:
                 row['xy'] = (xy[0], xy[1])
                 if signal_values is not None:
-                    row['signal_values'] = signal_values
+                    row['signal_values'] = dict(signal_values)
                 self._render_table()
                 return
 
@@ -297,6 +334,10 @@ class IplotQtRuler(QWidget):
         self.table.verticalHeader().setVisible(False)
         self._clear_column_sections()
 
+        self._signal_labels = self._collect_signal_labels()
+        self._hidden_signals &= set(self._signal_labels)
+        self._rebuild_signals_menu()
+
         if self.view_mode == self.VIEW_ROWS:
             self.view_stack.setCurrentWidget(self.table)
             self._render_rows()
@@ -304,18 +345,92 @@ class IplotQtRuler(QWidget):
         else:
             self.view_stack.setCurrentWidget(self.columns_scroll)
             self._render_column_sections()
+            # Deferred so it runs after each section's own height fit-up.
+            QTimer.singleShot(0, self._fit_columns_view_height)
             edit_enabled = False
 
+        self._apply_signal_visibility()
         self.remove_button.setEnabled(edit_enabled)
         self.distance_button.setEnabled(edit_enabled)
 
         self.table.selectionModel().selectionChanged.connect(self._update_selection_history)
 
+    def _collect_signal_labels(self) -> List[str]:
+        """Union of the signal labels of every ruler, in first-appearance order."""
+        labels: List[str] = []
+        for row in self._rows:
+            for label in (row.get('signal_values') or {}):
+                if label not in labels:
+                    labels.append(label)
+        return labels
+
+    @classmethod
+    def _wrap_label(cls, label: str) -> str:
+        """Soft-wrap a long signal name at its natural separators so headers
+        grow vertically instead of truncating the name."""
+        width = cls._WRAP_WIDTH
+        # Keep each separator with the fragment it terminates.
+        parts = [p for p in re.split(r'(?<=[-_:.\s])', label) if p]
+        lines: List[str] = []
+        current = ''
+        for part in parts:
+            while len(part) > width:
+                if current:
+                    lines.append(current)
+                    current = ''
+                lines.append(part[:width])
+                part = part[width:]
+            if current and len(current) + len(part) > width:
+                lines.append(current)
+                current = part
+            else:
+                current += part
+        if current:
+            lines.append(current)
+        return '\n'.join(lines)
+
+    def _rebuild_signals_menu(self):
+        self.signals_menu.clear()
+        for label in self._signal_labels:
+            action = QAction(label, self.signals_menu)
+            action.setCheckable(True)
+            action.setChecked(label not in self._hidden_signals)
+            action.toggled.connect(
+                lambda checked, lbl=label: self._on_signal_toggled(lbl, checked))
+            self.signals_menu.addAction(action)
+        self.signals_button.setEnabled(bool(self._signal_labels))
+
+    def _on_signal_toggled(self, label: str, visible: bool):
+        if visible:
+            self._hidden_signals.discard(label)
+        else:
+            self._hidden_signals.add(label)
+        self._apply_signal_visibility()
+
+    def _apply_signal_visibility(self):
+        """Show/hide signal columns (rows view) or signal rows (columns view)
+        in place, so the open menu keeps its actions alive."""
+        if self.view_mode == self.VIEW_ROWS:
+            for i, label in enumerate(self._signal_labels):
+                self.table.setColumnHidden(self.SIG_COL_BASE + i,
+                                           label in self._hidden_signals)
+        else:
+            for _, table, sig_rows in self.column_sections:
+                for label, row_idx in sig_rows.items():
+                    table.setRowHidden(row_idx, label in self._hidden_signals)
+                # Hidden rows contribute zero height; re-fit the fixed height.
+                self._fit_section_height(table)
+
     def _render_rows(self):
         self.table.setSortingEnabled(False)
-        self.table.setColumnCount(9)
-        self.table.setHorizontalHeaderLabels(['Ruler', 'Plot', 'X value', 'Y value',
-                                              'Signal values', 'Visible', 'Labels', 'Color', 'Font color'])
+        self.table.setColumnCount(self.SIG_COL_BASE + len(self._signal_labels) + 4)
+        headers = (['Ruler', 'Plot', 'X value', 'Y value'] + list(self._signal_labels)
+                   + ['Visible', 'Labels', 'Color', 'Font color'])
+        self.table.setHorizontalHeaderLabels(headers)
+        for i, label in enumerate(self._signal_labels):
+            item = QTableWidgetItem(self._wrap_label(label))
+            item.setToolTip(label)
+            self.table.setHorizontalHeaderItem(self.SIG_COL_BASE + i, item)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
@@ -351,9 +466,13 @@ class IplotQtRuler(QWidget):
         y_item.setData(Qt.ItemDataRole.UserRole, y)
         self.table.setItem(row_idx, self.COL_Y, y_item)
 
-        values_item = QTableWidgetItem(row.get('signal_values', ''))
-        values_item.setFlags(values_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        self.table.setItem(row_idx, self.COL_SIGNAL_VALUES, values_item)
+        values = row.get('signal_values') or {}
+        for i, label in enumerate(self._signal_labels):
+            value = values.get(label)
+            values_item = _NumericTableItem('' if value is None else f"{value:.6g}")
+            values_item.setData(Qt.ItemDataRole.UserRole, value)
+            values_item.setFlags(values_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row_idx, self.SIG_COL_BASE + i, values_item)
 
         visible_cb = QCheckBox()
         visible_cb.setChecked(row['visible'])
@@ -412,13 +531,13 @@ class IplotQtRuler(QWidget):
         for plot_id in sorted(groups.keys()):
             # Columns read left-to-right by ascending X so the Δ between neighbours is meaningful.
             rulers = sorted(groups[plot_id], key=lambda r: r['xy'][0])
-            section, table = self._build_plot_section(plot_id, rulers)
+            section, table, sig_rows = self._build_plot_section(plot_id, rulers)
             self.columns_layout.insertWidget(stretch_idx, section)
             stretch_idx += 1
-            self.column_sections.append((plot_id, table))
+            self.column_sections.append((plot_id, table, sig_rows))
 
     def _build_plot_section(self, plot_id: Tuple[int, int],
-                             rulers: List[Dict]) -> Tuple[QWidget, QTableWidget]:
+                             rulers: List[Dict]) -> Tuple[QWidget, QTableWidget, Dict[str, int]]:
         section = QWidget()
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -431,10 +550,19 @@ class IplotQtRuler(QWidget):
         n_deltas = max(0, len(rulers) - 1)
         col_count = len(rulers) + n_deltas
 
-        table = QTableWidget(len(self._COLUMNS_AXIS_LABELS), col_count)
+        # One row per signal of this plot's rulers, in the global label order.
+        sig_labels = [label for label in self._signal_labels
+                      if any(label in (r.get('signal_values') or {}) for r in rulers)]
+        sig_rows = {label: len(self._COLUMNS_AXIS_LABELS) + i
+                    for i, label in enumerate(sig_labels)}
+
+        table = QTableWidget(len(self._COLUMNS_AXIS_LABELS) + len(sig_labels), col_count)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        table.setVerticalHeaderLabels(list(self._COLUMNS_AXIS_LABELS))
+        table.setVerticalHeaderLabels(list(self._COLUMNS_AXIS_LABELS)
+                                      + [self._wrap_label(label) for label in sig_labels])
+        for label, row_idx in sig_rows.items():
+            table.verticalHeaderItem(row_idx).setToolTip(label)
         self._install_copy_action(table)
 
         headers = []
@@ -449,27 +577,58 @@ class IplotQtRuler(QWidget):
 
         col_idx = 0
         for i, r in enumerate(rulers):
+            values = r.get('signal_values') or {}
             if i > 0:
                 prev = rulers[i - 1]
-                is_date = prev['is_date']
-                self._set_plain_cell(table, 0, col_idx,
-                                     self._format_consecutive_dx(prev['xy'][0], r['xy'][0], is_date))
+                prev_values = prev.get('signal_values') or {}
+                self._set_plain_cell(table, 0, col_idx, self._format_consecutive_dx(prev, r))
                 self._set_plain_cell(table, 1, col_idx, f"{r['xy'][1] - prev['xy'][1]:.6g}")
-                self._set_plain_cell(table, 2, col_idx, '')  # no delta for signal values
+                for label, row_idx in sig_rows.items():
+                    v1, v2 = prev_values.get(label), values.get(label)
+                    delta = f"{v2 - v1:.6g}" if v1 is not None and v2 is not None else ''
+                    self._set_plain_cell(table, row_idx, col_idx, delta)
                 col_idx += 1
             self._set_axis_cell(table, 0, col_idx, self._format_x(r), r['color'])
             self._set_axis_cell(table, 1, col_idx, f"{r['xy'][1]:.6g}", r['color'])
-            self._set_axis_cell(table, 2, col_idx, r.get('signal_values', ''), r['color'])
+            for label, row_idx in sig_rows.items():
+                value = values.get(label)
+                self._set_axis_cell(table, row_idx, col_idx,
+                                    '' if value is None else f"{value:.6g}", r['color'])
             col_idx += 1
 
         table.resizeColumnsToContents()
+        # Wrapped (multi-line) signal names need taller rows or the extra
+        # lines clip; the section height sums row heights, so it follows.
+        v_header = table.verticalHeader()
+        for row_idx in range(table.rowCount()):
+            table.setRowHeight(row_idx, max(table.rowHeight(row_idx),
+                                            v_header.sectionSizeHint(row_idx)))
         table.setFixedHeight(self._section_table_height(table))
         layout.addWidget(table)
         # A horizontal scrollbar (shown when a plot has many ruler columns) would
-        # overlap the Y row; grow the fixed height by it once the layout has
+        # overlap the last row; grow the fixed height by it once the layout has
         # settled and the scrollbar's visibility is known.
         QTimer.singleShot(0, lambda: self._fit_section_height(table))
-        return section, table
+        return section, table, sig_rows
+
+    def _fit_columns_view_height(self):
+        """Grow the window (never shrink it) until the Columns view shows every
+        plot section without a vertical scrollbar, capped to the screen's
+        available height."""
+        if self.view_mode != self.VIEW_COLUMNS:
+            return
+        inner = self.columns_scroll.widget()
+        if inner is None:
+            return
+        missing = inner.sizeHint().height() - self.columns_scroll.viewport().height()
+        if missing <= 0:
+            return
+        new_height = self.height() + missing
+        screen = self.screen()
+        if screen is not None:
+            new_height = min(new_height, screen.availableGeometry().height() - 60)
+        if new_height > self.height():
+            self.resize(self.width(), new_height)
 
     def _fit_section_height(self, table: QTableWidget):
         try:
@@ -484,7 +643,7 @@ class IplotQtRuler(QWidget):
         # would otherwise overlap the Y row; re-fit each section to its new width.
         super().resizeEvent(event)
         if self.view_mode == self.VIEW_COLUMNS:
-            for _, table in self.column_sections:
+            for _, table, _ in self.column_sections:
                 self._fit_section_height(table)
 
     @staticmethod
@@ -528,10 +687,47 @@ class IplotQtRuler(QWidget):
         indexes = table.selectedIndexes()
         if not indexes:
             return
-        rows = sorted({i.row() for i in indexes})
-        cols = sorted({i.column() for i in indexes})
+        rows = sorted({i.row() for i in indexes if not table.isRowHidden(i.row())})
+        cols = sorted({i.column() for i in indexes if not table.isColumnHidden(i.column())})
         lines = ['\t'.join(self._cell_text(table, r, c) for c in cols) for r in rows]
         QApplication.clipboard().setText('\n'.join(lines))
+
+    def _copy_current_view(self):
+        """Copy the visible table(s) of the active layout, headers included."""
+        if self.view_mode == self.VIEW_ROWS:
+            self._copy_whole_qtable(self.table)
+            return
+        blocks = []
+        for plot_id, table, _ in self.column_sections:
+            lines = [f"Plot {self._format_plot_id(plot_id)}"]
+            cols = [c for c in range(table.columnCount()) if not table.isColumnHidden(c)]
+            rows = [r for r in range(table.rowCount()) if not table.isRowHidden(r)]
+            lines.append('\t'.join([''] + [self._header_text(table.horizontalHeaderItem(c))
+                                           for c in cols]))
+            for r in rows:
+                row_label = self._header_text(table.verticalHeaderItem(r))
+                lines.append('\t'.join([row_label]
+                                       + [self._cell_text(table, r, c) for c in cols]))
+            blocks.append('\n'.join(lines))
+        QApplication.clipboard().setText('\n\n'.join(blocks))
+
+    def _copy_whole_qtable(self, table: QTableWidget):
+        cols = [c for c in range(table.columnCount()) if not table.isColumnHidden(c)]
+        rows = [r for r in range(table.rowCount()) if not table.isRowHidden(r)]
+        lines = ['\t'.join(self._header_text(table.horizontalHeaderItem(c)) for c in cols)]
+        for r in rows:
+            lines.append('\t'.join(self._cell_text(table, r, c) for c in cols))
+        QApplication.clipboard().setText('\n'.join(lines))
+
+    @staticmethod
+    def _header_text(item) -> str:
+        """Single-line header text; wrapped signal names copy as the full name
+        kept in their tooltip."""
+        if item is None:
+            return ''
+        if '\n' in item.text():
+            return item.toolTip() or item.text().replace('\n', '')
+        return item.text()
 
     @staticmethod
     def _cell_text(table: QTableWidget, row: int, col: int) -> str:
@@ -563,16 +759,19 @@ class IplotQtRuler(QWidget):
         if not path.lower().endswith(('.scsv', '.csv')):
             path += '.scsv'
         delimiter = ',' if path.lower().endswith('.csv') else ';'
-        headers = ['Ruler', 'Plot', 'X value', 'Y value', 'Signal values',
-                   'Visible', 'Labels', 'Color', 'Font color']
+        headers = (['Ruler', 'Plot', 'X value', 'Y value'] + list(self._signal_labels)
+                   + ['Visible', 'Labels', 'Color', 'Font color'])
         try:
             with open(path, 'w', newline='', encoding='utf-8') as fh:
                 writer = csv.writer(fh, delimiter=delimiter)
                 writer.writerow(headers)
                 for r in sorted(self._rows, key=lambda row: row['name']):
+                    values = r.get('signal_values') or {}
+                    value_cells = ['' if values.get(label) is None else f"{values[label]:.6g}"
+                                   for label in self._signal_labels]
                     writer.writerow([
                         r['name'], self._format_plot_id(r['plot_id']), self._format_x(r),
-                        f"{r['xy'][1]:.6g}", r.get('signal_values', ''),
+                        f"{r['xy'][1]:.6g}", *value_cells,
                         str(r['visible']).lower(), self._labels_summary(r),
                         r['color'], r['font_color'],
                     ])
@@ -663,53 +862,110 @@ class IplotQtRuler(QWidget):
 
         # Deltas span plots too (e.g. two stacked plots sharing the time axis):
         # dx is the time distance between rulers, dy the value difference.
-        rows = list(self.selection_history)
-        rows.sort(key=lambda r: self.table.item(r, self.COL_X).data(Qt.ItemDataRole.UserRole))
+        entries = []
+        for view_row in self.selection_history:
+            name, plot_id = self._row_metadata(view_row)
+            idx = self._find_row_index(name, plot_id)
+            if idx >= 0:
+                entries.append(self._rows[idx])
+        entries.sort(key=lambda r: r['xy'][0])
 
-        is_date = self.table.item(rows[0], self.COL_NAME).data(Qt.ItemDataRole.UserRole)
-        lines = []
-        for r1, r2 in zip(rows[:-1], rows[1:]):
-            n1 = self.table.item(r1, self.COL_NAME).text()
-            n2 = self.table.item(r2, self.COL_NAME).text()
-            x1 = self.table.item(r1, self.COL_X).data(Qt.ItemDataRole.UserRole)
-            x2 = self.table.item(r2, self.COL_X).data(Qt.ItemDataRole.UserRole)
-            y1 = self.table.item(r1, self.COL_Y).data(Qt.ItemDataRole.UserRole)
-            y2 = self.table.item(r2, self.COL_Y).data(Qt.ItemDataRole.UserRole)
-            dx_str = self._format_dx(x1, x2, is_date)
-            dy = abs(y2 - y1)
-            lines.append(f"{n1} -> {n2}: dx = {dx_str}, dy = {dy:.6g}")
+        sig_labels = [label for label in self._signal_labels
+                      if label not in self._hidden_signals
+                      and any(label in (e.get('signal_values') or {}) for e in entries)]
+        headers = ['Rulers', 'ΔX', 'ΔY'] + [f"Δ {label}" for label in sig_labels]
 
-        box = QMessageBox()
-        box.setIcon(QMessageBox.Icon.Information)
-        box.setWindowTitle("Ruler deltas")
-        box.setText("\n".join(lines))
-        logger.info("\n".join(lines))
-        box.exec_()
+        data_rows = []
+        for r1, r2 in zip(entries[:-1], entries[1:]):
+            cells = [f"{r1['name']} → {r2['name']}",
+                     self._format_dx(r1['xy'][0], r2['xy'][0], r1['is_date'],
+                                     r1.get('x_is_time', False)),
+                     f"{abs(r2['xy'][1] - r1['xy'][1]):.6g}"]
+            values1 = r1.get('signal_values') or {}
+            values2 = r2.get('signal_values') or {}
+            for label in sig_labels:
+                v1, v2 = values1.get(label), values2.get(label)
+                cells.append(f"{abs(v2 - v1):.6g}" if v1 is not None and v2 is not None else '')
+            data_rows.append(cells)
+
+        # ASCII-safe log line: cp1252 console handlers choke on Δ/→.
+        log_text = '\n'.join('\t'.join(cells) for cells in [headers] + data_rows)
+        logger.info(log_text.replace('Δ', 'd').replace('→', '->'))
+        self._show_distance_dialog(headers, data_rows)
+
+    def _show_distance_dialog(self, headers: List[str], data_rows: List[List[str]]):
+        """Non-modal deltas table the user can keep at hand, select from and
+        copy (button, context menu or Ctrl+C)."""
+        if self._distance_dialog is not None:
+            self._distance_dialog.close()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Ruler deltas")
+        layout = QVBoxLayout(dialog)
+
+        table = QTableWidget(len(data_rows), len(headers), dialog)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        table.verticalHeader().setVisible(False)
+        table.setHorizontalHeaderLabels(headers)
+        # Signal delta headers wrap like the signal columns do.
+        for col, header_text in enumerate(headers):
+            if col >= 3:
+                item = QTableWidgetItem(self._wrap_label(header_text))
+                item.setToolTip(header_text[len('Δ '):])
+                table.setHorizontalHeaderItem(col, item)
+        for row_idx, cells in enumerate(data_rows):
+            for col_idx, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                if col_idx:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                table.setItem(row_idx, col_idx, item)
+        table.resizeColumnsToContents()
+        self._install_copy_action(table)
+        layout.addWidget(table)
+
+        buttons = QHBoxLayout()
+        copy_button = QPushButton(create_icon('copy'), "Copy")
+        copy_button.setToolTip("Copy the whole table to the clipboard.")
+        copy_button.pressed.connect(lambda: self._copy_whole_qtable(table))
+        close_button = QPushButton("Close")
+        close_button.pressed.connect(dialog.close)
+        buttons.addStretch()
+        buttons.addWidget(copy_button)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)
+
+        width = min(900, table.horizontalHeader().length() + 60)
+        height = min(500, table.verticalHeader().length()
+                     + table.horizontalHeader().height() + 110)
+        dialog.resize(max(360, width), max(160, height))
+        dialog.show()
+        self._distance_dialog = dialog
+        self._distance_table = table
 
     @classmethod
-    def _format_consecutive_dx(cls, x_prev, x_curr, is_date: bool) -> str:
-        if not is_date:
-            return f"{x_curr - x_prev:.6g}"
-        sign = '-' if x_curr < x_prev else ''
-        return sign + cls._format_dx(x_prev, x_curr, is_date)
+    def _format_consecutive_dx(cls, prev_row: Dict, row: Dict) -> str:
+        sign = '-' if row['xy'][0] < prev_row['xy'][0] else ''
+        return sign + cls._format_dx(prev_row['xy'][0], row['xy'][0],
+                                     prev_row['is_date'],
+                                     prev_row.get('x_is_time', False))
+
+    @classmethod
+    def _format_dx(cls, x1, x2, is_date: bool, x_is_time: bool = False) -> str:
+        """|Δx| as plain text; time axes read ``<seconds> s (<duration>)`` with
+        the same duration format the statistics table uses."""
+        if is_date:
+            # Date axes carry nanoseconds since the epoch.
+            return cls._format_time_delta(abs(x2 - x1) / 1e9)
+        if x_is_time:
+            # Relative-time axes carry seconds.
+            return cls._format_time_delta(abs(x2 - x1))
+        return f"{abs(x2 - x1):.6g}"
 
     @staticmethod
-    def _format_dx(x1, x2, is_date: bool) -> str:
-        if not is_date:
-            return f"{abs(x2 - x1):.6g}"
-        dx = abs(pd.Timestamp(x2, unit='ns') - pd.Timestamp(x1, unit='ns'))
-        c = dx.components
-        sub_ns = c.milliseconds * 1_000_000 + c.microseconds * 1_000 + c.nanoseconds
-        parts = []
-        if c.days:
-            parts.append(f"{c.days}d")
-        if c.hours or parts:
-            parts.append(f"{c.hours:02d}h")
-        if c.minutes or parts:
-            parts.append(f"{c.minutes:02d}m")
-        seconds = c.seconds + sub_ns / 1_000_000_000
-        parts.append(f"{seconds:09.6f}s" if parts else f"{seconds:.6f}s")
-        return " ".join(parts)
+    def _format_time_delta(seconds: float) -> str:
+        return f"{seconds:.6g} s ({_fmt_duration(int(round(seconds * 1e9)), 1)})"
 
     def _warn(self, msg: str):
         box = QMessageBox()

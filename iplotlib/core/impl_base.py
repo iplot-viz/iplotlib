@@ -454,6 +454,27 @@ class BackendParserBase(ABC):
 
         return shared
 
+    def _ruler_signal_values(self, impl_plot: Any, x: float) -> Dict[str, float]:
+        """Value of each signal at the ruler X keyed by its label. Backends with
+        ruler support override this; the base has no per-signal resolution."""
+        return {}
+
+    def ruler_signal_values_shared(self, impl_plot: Any, x_view: float) -> Dict[str, float]:
+        """Signal values at the ruler X for *impl_plot* extended, when the canvas
+        shares the time axis, with the signals of every shared plot evaluated at
+        the same absolute X — the values the ruler echoes display. The owner
+        plot wins on a label clash."""
+        values: Dict[str, float] = {}
+        if self._pm.get_value(self.canvas, 'shared_x_axis'):
+            x_abs = self.transform_value(impl_plot, 0, x_view)
+            for sibling in self._get_all_shared_axes(impl_plot):
+                if sibling is impl_plot:
+                    continue
+                x_sibling = self.transform_value(sibling, 0, x_abs, inverse=True)
+                values.update(self._ruler_signal_values(sibling, x_sibling))
+        values.update(self._ruler_signal_values(impl_plot, x_view))
+        return values
+
     @abstractmethod
     def get_canvas_plots(self):
         pass

@@ -283,6 +283,32 @@ class IplotQtCanvas(QWidget):
                 return col[target_row]
         return None
 
+    def show_ruler_window(self):
+        """Bring the rulers window to the front, showing it if needed."""
+        if self._ruler_window.isMinimized():
+            self._ruler_window.showNormal()
+        else:
+            self._ruler_window.show()
+        self._ruler_window.raise_()
+        self._ruler_window.activateWindow()
+
+    @staticmethod
+    def _plot_x_is_time(plot) -> bool:
+        """Whether *plot*'s X axis carries time: absolute dates or a
+        relative-time unit (the same signal-unit test the statistics table
+        applies to pick its duration format)."""
+        if bool(getattr(plot.axes[0], 'is_date', False)):
+            return True
+        for signals in getattr(plot, 'signals', {}).values():
+            for signal in signals or []:
+                try:
+                    unit = signal.data_store[0].unit
+                except (AttributeError, IndexError, TypeError):
+                    continue
+                if unit and 'time' in str(unit).lower():
+                    return True
+        return False
+
     def _ruler_owner_plot_id(self, name) -> Optional[Tuple[int, int]]:
         """Position of the plot whose model owns ruler *name* (ruler names are
         canvas-global unique)."""
