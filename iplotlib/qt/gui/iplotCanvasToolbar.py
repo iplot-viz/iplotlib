@@ -74,7 +74,7 @@ class IplotQtCanvasToolbar(QToolBar):
 
         # Restore every plot to the range captured at draw time.
         self.homeAction = QAction(create_icon('home', 'svg'), '&Home', self)
-        self.homeAction.setToolTip('Reset all plots to the draw-time range')
+        self.homeAction.setToolTip('Resets all plots to the original view')
         self.addAction(self.homeAction)
 
         # Saving, etc..

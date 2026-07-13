@@ -532,6 +532,35 @@ class IplotSignalAdapter(ProcessingSignal):
         self._minimap_y_max_data = None
         self._minimap_y_avg_data = None
 
+    def restore_minimap_snapshot(self):
+        """
+        Restore the buffers to the full-range data captured at draw time (the same
+        snapshot the minimap renders) and return it shaped like :meth:`get_data`,
+        or None when no snapshot is available.
+
+        The data hash is refreshed so the restored buffers count as up to date for
+        the current time range: redisplaying them triggers no data access.
+        """
+        x_data = self._minimap_x_data
+        y_data = self._minimap_y_data
+        if x_data is None or y_data is None or len(x_data) == 0:
+            return None
+        envelope = getattr(self, 'envelope', False)
+        if envelope and (self._minimap_y_max_data is None or self._minimap_y_avg_data is None):
+            return None
+
+        self.x_data = x_data.copy()
+        self.y_data = y_data.copy()
+        if envelope:
+            self.z_data = self._minimap_y_max_data.copy()
+            self.data_store[3] = self._minimap_y_avg_data.copy()
+        self._access_md5sum = self.calculate_data_hash()
+        self.set_da_success()
+
+        if envelope:
+            return [self.x_data, self.y_data, self.z_data, self.data_store[3]]
+        return [self.x_data, self.y_data, self.z_data]
+
     def _process_data(self):
         # 1. Cannot process data when _fetch_data failed or did not occur
         if self.data_access_enabled and self.status_info.result != Result.SUCCESS:

@@ -2,7 +2,8 @@
 
 After a zoom, both actions must restore the axis range captured at draw time,
 reusing the same view-limit plumbing as undo/redo. Home is verified to be a
-single undoable command so one undo reverts the whole reset.
+single undoable command so one undo reverts the whole reset, and to redraw
+from the draw-time snapshot without issuing any data-access request.
 """
 
 import copy
@@ -138,6 +139,59 @@ class ResetViewTest(unittest.TestCase):
                 reset_y = self._y_range(qt_canvas)
                 self.assertAlmostEqual(reset_y[0], draw_y[0], places=3)
                 self.assertAlmostEqual(reset_y[1], draw_y[1], places=3)
+
+    def test_reset_redraws_from_snapshot_without_data_access(self):
+        # Home must serve the redraw from the draw-time snapshot: the signal's
+        # data-access path must not run while the view is being restored, and the
+        # curve must recover its full extent even if a zoom left partial buffers.
+        for backend in ('matplotlib', 'pyqt'):
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build(backend)
+                signal = next(iter(canvas.plots[0][0].signals.values()))[0]
+                full_len = len(signal.x_data)
+
+                calls = {'get_data': 0}
+                original_get_data = signal.get_data
+
+                def spied_get_data():
+                    calls['get_data'] += 1
+                    return original_get_data()
+
+                signal.get_data = spied_get_data
+                self._zoom_in(qt_canvas)
+
+                # Simulate the partial buffers left by a downsampled sub-range refetch.
+                signal.x_data = signal.x_data[:20]
+                signal.y_data = signal.y_data[:20]
+                calls['get_data'] = 0
+
+                qt_canvas.reset_all_views()
+                self.app.processEvents()
+
+                self.assertEqual(calls['get_data'], 0)
+                self.assertEqual(len(signal.x_data), full_len)
+                line = qt_canvas._parser._signal_impl_shape_lut[id(signal)][0]
+                line_x = line.get_xdata() if backend == 'matplotlib' else line.getData()[0]
+                self.assertEqual(len(line_x), full_len)
+
+    def test_restore_minimap_snapshot_roundtrip(self):
+        # The snapshot restore is the inverse of the capture done on first load.
+        x = np.linspace(0, 10, 200)
+        signal = SignalXY(label="s")
+        signal.set_data([x, np.sin(x)])
+        signal.x_data = signal.x_data[:20]
+        signal.y_data = signal.y_data[:20]
+
+        data = signal.restore_minimap_snapshot()
+
+        self.assertIsNotNone(data)
+        self.assertEqual(len(data[0]), 200)
+        self.assertEqual(len(signal.x_data), 200)
+        np.testing.assert_allclose(np.asarray(signal.y_data), np.sin(x))
+
+    def test_restore_minimap_snapshot_without_data(self):
+        signal = SignalXY(label="empty")
+        self.assertIsNone(signal.restore_minimap_snapshot())
 
     def test_home_action_always_enabled(self):
         # Home is always clickable; it is a no-op when there is nothing to reset.

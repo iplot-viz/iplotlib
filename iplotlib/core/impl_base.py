@@ -154,6 +154,7 @@ class BackendParserBase(ABC):
         self._impl_plot_ranges_hash = defaultdict(
             lambda: defaultdict(dict))  # type: Dict[Any, int] # key is id(impl_plot)
         self._update = False
+        self._restoring_view = False
         self._streaming_impl_plot_lut = defaultdict(lambda: [None, None])
 
     def run_in_one_thread(func):
@@ -638,6 +639,22 @@ class BackendParserBase(ABC):
         """
         """
 
+    def _draw_time_signal_data(self, signal: Signal, impl_plot: Any):
+        """
+        Data for redrawing `signal` while the view is being reset: the draw-time
+        snapshot (``restore_minimap_snapshot``), served without any data access.
+        Returns None when the snapshot cannot honour the plot (no snapshot yet,
+        or slider/contour/image data, which it does not capture).
+        """
+        if not isinstance(signal, SignalXY):
+            return None
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci else None
+        if plot is None or isinstance(plot, (PlotXYWithSlider, PlotContour, PlotImage)):
+            return None
+        restore = getattr(signal, 'restore_minimap_snapshot', None)
+        return restore() if restore is not None else None
+
     @run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
         """
@@ -657,8 +674,14 @@ class BackendParserBase(ABC):
         if impl_plot is None:
             return
 
-        # All good, make a data access request
-        signal_data = signal.get_data()
+        if self._restoring_view:
+            # View reset: redraw from the draw-time snapshot, never re-request data.
+            signal_data = self._draw_time_signal_data(signal, impl_plot)
+            if signal_data is None:
+                return
+        else:
+            # All good, make a data access request
+            signal_data = signal.get_data()
 
         # Apply shift offsets if present (persisted in signal metadata)
         # This ensures offset survives any rebuild/refresh cycle
@@ -1440,8 +1463,9 @@ class BackendParserBase(ABC):
         limits), leaving every other plot untouched. The X range is the exact window
         requested at draw time; the Y range gets the same margin Draw applies.
 
-        Reuses the view-limit plumbing of undo/redo, so the redraw is served from
-        cached/in-memory data rather than triggering a fresh request.
+        Reuses the view-limit plumbing of undo/redo, and the redraws it triggers are
+        served from the draw-time snapshots (:meth:`_draw_time_signal_data`), so no
+        data-access request is issued.
         """
         target = self.get_plot_limits(impl_plot)
         if not isinstance(target, IplPlotViewLimits):
@@ -1462,7 +1486,11 @@ class BackendParserBase(ABC):
         for signal_range in target.signals_ranges:
             signal_range.set_limits(x_begin, x_end)
 
-        self.set_plot_limits(target)
+        self._restoring_view = True
+        try:
+            self.set_plot_limits(target)
+        finally:
+            self._restoring_view = False
 
     def reset_all_plots_to_original(self):
         """
