@@ -713,8 +713,9 @@ class NanosecondDateFormatter(pg.AxisItem):
                     values = [f"{10.0 ** v:g}" for v in values]
                     self.common_label.setText("")
             else:
-                # Y axis: fn.siScale formatting
-                if self.labelUnit in ['', 'k']:
+                # Common 1eN corner factor as on the matplotlib backend; only
+                # bare units stay plain.
+                if self.labelUnit == '':
                     values = [f"{v:g}" for v in values]
                     self.common_label.setText("")
                 else:
