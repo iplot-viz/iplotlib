@@ -1210,6 +1210,32 @@ class ParserHelper:
         else:
             result = p.result
         p.clear_expr()
+
+        # Crop the result of a pure expression signal (empty name, e.g. MINT's
+        # X-versus-Y rows) to its requested time window. Dependencies may
+        # legitimately hold a superset of the window: once a zoom drops below the
+        # downsampling threshold their buffers contain raw data covering more than
+        # the requested range and are not refetched on deeper zooms. Time plots
+        # crop through the axis view, but an X-versus-Y signal derives its X from
+        # the dependency *values*, so without cropping its range stays that of the
+        # whole buffer and the axis no longer follows the zoom (mint#120).
+        if (getattr(signal, 'name', '') == ''
+                and isinstance(signal.ts_start, (int, float))
+                and isinstance(signal.ts_end, (int, float))
+                and hasattr(result, '__len__')):
+            base = None
+            if ParserHelper.dict_result:
+                base = next(iter(ParserHelper.dict_result.values())).get('time')
+            elif dependencies:
+                base = dependencies[0].data_store[0]
+            if base is not None and len(base) == len(result):
+                base_arr = np.asarray(base)
+                if np.issubdtype(base_arr.dtype, np.number):
+                    mask = (base_arr >= signal.ts_start) & (base_arr <= signal.ts_end)
+                    if mask.any() and not mask.all():
+                        logger.info(f"mint#120: cropping '{expression}' result to ts window: "
+                                    f"{int(mask.sum())}/{len(result)} samples kept")
+                        result = result[mask]
         return result
 
     @staticmethod

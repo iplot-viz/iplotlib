@@ -311,6 +311,63 @@ class ExpressionSignalTimeWindowTest(unittest.TestCase):
         tot.refresh_over_time_window(0, 10)
         self.assertEqual((tot.ts_start, tot.ts_end), (0, 10))
 
+    def test_result_cropped_to_window_when_dependencies_hold_superset(self):
+        """Once a zoom drops below the downsampling threshold, dependency buffers
+        hold raw data covering more than the requested window and are not
+        refetched on deeper zooms. The expression result must still be cropped to
+        the requested ts window, otherwise the X-versus-Y axis stops following
+        the zoom (mint#120, 'x axis not refreshed when zooming more than once')."""
+        t = np.arange(1000, 2001, 10, dtype=np.int64)  # superset time base
+        a = self._make_dep("m120e", t, np.linspace(100.0, 200.0, t.size))
+        b = self._make_dep("m120f", t, np.linspace(0.0, 1.0, t.size))
+        tot = SignalXY(label="Tot", name="",
+                       x_expr="${m120e}.data", y_expr="${m120f}.data")
+        tot.refresh_over_time_window(1000, 2000)
+        self.assertAlmostEqual(float(np.asarray(tot.x_data).min()), 100.0)
+        self.assertAlmostEqual(float(np.asarray(tot.x_data).max()), 200.0)
+
+        # Deeper window; dependency buffers unchanged (raw superset, no refetch).
+        tot.refresh_over_time_window(1400, 1600)
+        x = np.asarray(tot.x_data, dtype=float)
+        y = np.asarray(tot.y_data, dtype=float)
+        self.assertEqual(x.size, y.size)
+        self.assertGreaterEqual(x.min(), 139.9)
+        self.assertLessEqual(x.max(), 160.1)
+
+
+class _TransformDataHost:
+    """Minimal host exposing what ``transform_data`` needs from the parser."""
+
+    def __init__(self, offsets):
+        item = types.SimpleNamespace(offsets=offsets)
+        self._impl_plot_cache_table = types.SimpleNamespace(
+            get_cache_item=lambda impl: item)
+
+    transform_data = BackendParserBase.transform_data
+
+
+class TransformDataNaNTest(unittest.TestCase):
+    def test_nan_survives_offset_transform(self):
+        # Realigned expression signals can carry NaNs (left-edge extrapolation).
+        # Casting NaN to int64 yields INT64_MIN, which draws as a spurious line
+        # across the plot; NaNs must come out as NaNs (mint#120).
+        offset = 1_781_184_632_976_126
+        host = _TransformDataHost(offsets=[offset, 0])
+        x = np.array([np.nan, 1_781_184_469_510_126.0, 1_781_184_470_468_326.0, np.nan])
+        y = np.array([1.0, 2.0, 3.0, 4.0])
+        tx, ty = host.transform_data(None, [x, y])
+        self.assertTrue(np.isnan(tx[0]) and np.isnan(tx[3]))
+        self.assertAlmostEqual(float(tx[1]), 1_781_184_469_510_126 - offset)
+        self.assertAlmostEqual(float(tx[2]), 1_781_184_470_468_326 - offset)
+        self.assertGreater(float(np.nanmin(np.asarray(tx))), -1e12)  # no INT64_MIN garbage
+        np.testing.assert_array_equal(ty, y)
+
+    def test_all_finite_data_keeps_integer_path(self):
+        host = _TransformDataHost(offsets=[1000, None])
+        x = np.array([1500, 2500], dtype=np.int64)
+        tx, ty = host.transform_data(None, [x, np.array([1.0, 2.0])])
+        np.testing.assert_array_equal(np.asarray(tx), [500, 1500])
+
 
 if __name__ == '__main__':
     unittest.main()

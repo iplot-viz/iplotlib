@@ -610,15 +610,16 @@ class SharedXAxisTest(unittest.TestCase):
                 ci = parser._impl_plot_cache_table.get_cache_item(tot_impl)
                 offset_before = ci.offsets[0]
 
+                new_start = ts_start + 4_000_000_000_000
+                new_end = ts_end - 4_000_000_000_000
                 # Emulate what a refetch over the new window would give the
-                # dependencies (data access is stubbed out in this test).
-                narrowed = np.linspace(ts_start, ts_end, 25).astype(np.int64)
+                # dependencies (data access is stubbed out in this test): samples
+                # restricted to the window, like a real UDA fetch.
+                narrowed = np.linspace(new_start, new_end, 25).astype(np.int64)
                 new_reltime = np.linspace(1_781_184_500_000_126, 1_781_184_700_000_126, 25)
                 dep_sigs[0].set_data([narrowed, new_reltime])
                 dep_sigs[1].set_data([narrowed, np.linspace(0.0027, 0.0028, 25)])
 
-                new_start = ts_start + 4_000_000_000_000
-                new_end = ts_end - 4_000_000_000_000
                 parser.set_oaw_axis_limits(time_impl, 0, (new_start, new_end))
                 BackendParserBase._x_axis_update_callback(parser, time_impl)
                 self.app.processEvents()
@@ -696,6 +697,58 @@ class SharedXAxisTest(unittest.TestCase):
                 # ...and the X-versus-Y follower was reprocessed over the old window.
                 self.assertAlmostEqual(tot_sig.ts_start, ts_start, delta=1e9)
                 self.assertAlmostEqual(tot_sig.ts_end, ts_end, delta=1e9)
+
+    def test_deeper_zoom_follows_when_dependencies_are_not_refetched(self):
+        """Second, deeper zoom where the dependencies' buffers already cover the
+        window (raw data below the downsampling threshold is not refetched): the
+        X-versus-Y axis must follow the window-restricted data, not the whole
+        buffer (mint#120, 'x axis not refreshed when zooming more than once')."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                qt_canvas, _, dep_sigs, tot_sig, tot_plot, (ts_start, ts_end) = \
+                    self._build_test34_canvas(backend, tag="_deep")
+                parser = qt_canvas._parser
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                time_impl = next(p for p in plots
+                                 if logical(p).signals[1][0] is dep_sigs[0])
+                tot_impl = next(p for p in plots if logical(p) is tot_plot)
+
+                span = ts_end - ts_start
+                time = np.linspace(ts_start, ts_end, 100).astype(np.int64)
+                reltime = np.linspace(1_781_184_330_000_126, 1_781_184_935_952_126, 100)
+
+                def zoom(f0, f1, reslice):
+                    ns, ne = ts_start + int(f0 * span), ts_start + int(f1 * span)
+                    if reslice:  # emulate a refetch over the window
+                        m = (time >= ns) & (time <= ne)
+                        dep_sigs[0].set_data([time[m], reltime[m]])
+                        dep_sigs[1].set_data([time[m], np.linspace(0.0027, 0.0028, int(m.sum()))])
+                    parser.set_oaw_axis_limits(time_impl, 0, (ns, ne))
+                    BackendParserBase._x_axis_update_callback(parser, time_impl)
+                    self.app.processEvents()
+                    return ns, ne
+
+                # First zoom refetches the dependencies over [10%, 50%].
+                zoom(0.10, 0.50, reslice=True)
+                # Deeper zoom [20%, 30%]: buffers already cover it, no refetch.
+                zoom(0.20, 0.30, reslice=False)
+
+                lo = 1_781_184_330_000_126 + 0.20 * (1_781_184_935_952_126 - 1_781_184_330_000_126)
+                hi = 1_781_184_330_000_126 + 0.30 * (1_781_184_935_952_126 - 1_781_184_330_000_126)
+                # The reprocessed X data is restricted to the deeper window...
+                x = np.asarray(tot_sig.x_data, dtype=float)
+                self.assertGreaterEqual(x.min(), lo - 1e7)
+                self.assertLessEqual(x.max(), hi + 1e7)
+                # ...and the axis follows it instead of the whole superset buffer.
+                x_begin, x_end = parser.get_oaw_axis_limits(tot_impl, 0)
+                self.assertAlmostEqual(x_begin, x.min(), delta=1e6)
+                self.assertAlmostEqual(x_end, x.max(), delta=1e6)
+                self.assertLess(x_end - x_begin, 0.15 * (1_781_184_935_952_126
+                                                         - 1_781_184_330_000_126))
 
     def test_xy_plot_with_different_ts_stays_out_of_shared_group(self):
         """An X-versus-Y plot requested over a *different* time range than the base

@@ -1818,7 +1818,22 @@ class BackendParserBase(ABC):
             if offset == 0 or offset is None:
                 ret.append(d)
             else:
-                arr = np.asarray(d, dtype=np.int64)
+                arr = np.asarray(d)
+                if np.issubdtype(arr.dtype, np.floating) and not np.isfinite(arr).all():
+                    # NaNs (e.g. left-edge extrapolation of realigned expression
+                    # signals, mint#120) must survive as NaNs: casting them to
+                    # int64 produces INT64_MIN, i.e. a garbage point at -9.2e18
+                    # that draws as a spurious line across the plot. Subtract the
+                    # offset in integer space for the finite samples only.
+                    finite = np.isfinite(arr)
+                    out = np.full(arr.shape, np.nan)
+                    if offset == 100_000:
+                        out[finite] = arr[finite].astype(np.int64) / offset
+                    else:
+                        out[finite] = arr[finite].astype(np.int64) - offset
+                    ret.append(BufferObject(out))
+                    continue
+                arr = arr.astype(np.int64)
                 if offset == 100_000:
                     ret.append(BufferObject(arr / offset))
                 else:
