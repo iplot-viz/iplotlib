@@ -33,6 +33,7 @@ import typing
 
 from iplotlib.interface.utils import string_classifier
 from iplotProcessing.common.errors import InvalidExpression
+from iplotProcessing.common.interpolation import InterpolationKind
 from iplotProcessing.core import BufferObject
 from iplotProcessing.core import Signal as ProcessingSignal
 from iplotProcessing.math.pre_processing.grid_mixing import align
@@ -42,6 +43,15 @@ from iplotProcessing.tools import hash_code
 from iplotLogging import setupLogger
 
 logger = setupLogger.get_logger(__name__)
+
+#: Sentinel for IplotSignalAdapter.interpolation: choose the realignment
+#: interpolation automatically from the dependencies' sampling (mint#120).
+INTERPOLATION_AUTO = 'auto'
+
+#: Dependencies sampled faster than this are considered continuously sampled for
+#: the automatic realignment interpolation; slower ones are treated as
+#: event-driven (a new value is only published on change).
+CONTINUOUS_RATE_THRESHOLD_HZ = 100.0
 
 # Dedup key (source, target, len_src, len_tgt, case): same mismatch across signals warns once.
 _TRUNCATE_WARN_KEYS: typing.Set[tuple] = set()
@@ -127,6 +137,16 @@ class IplotSignalAdapter(ProcessingSignal):
     data_access_enabled: bool = True
     processing_enabled: bool = True
     time_out_value: float = 60  # Unimplemented  ---> REVIEW: purpose of this attribute?
+    #: Interpolation used when this signal's expressions realign dependencies with
+    #: different time bases (see ParserHelper.evaluate / align()). The default
+    #: 'auto' picks linear interpolation only when every dependency is raw (not
+    #: downsampled) and its observed rate is above CONTINUOUS_RATE_THRESHOLD_HZ;
+    #: otherwise sample-and-hold ('previous') is used, because slow, event-driven
+    #: signals only publish a new value on change — no new sample means the value
+    #: is constant, and interpolating between updates would invent values
+    #: (mint#120). Any InterpolationKind value can be set explicitly to force a
+    #: specific behaviour.
+    interpolation: str = INTERPOLATION_AUTO
 
     def __post_init__(self):
         super().__init__()
@@ -617,7 +637,9 @@ class IplotSignalAdapter(ProcessingSignal):
                     break
 
             if needs_realign and len(dependencies) > 1:
-                ParserHelper.dict_result = align(dependencies, curr_signal=self) or {}
+                ParserHelper.dict_result = align(
+                    dependencies, curr_signal=self,
+                    kind=ParserHelper.resolve_alignment_kind(self, dependencies)) or {}
 
             # 2.3 Evaluate 'self.name'. It is an expression combining multiple other signals
             try:
@@ -1195,10 +1217,12 @@ class ParserHelper:
                 break
 
         if needs_realign and not ParserHelper.dict_result:
+            kind = ParserHelper.resolve_alignment_kind(signal, dependencies)
             logger.info(f"mint#120: evaluate '{expression}': realigning "
                         f"{[getattr(d, 'label', '?') for d in dependencies]} "
-                        f"(time bases: {[(len(d.data_store[0]), getattr(d.data_store[0], 'unit', '?')) for d in dependencies]})")
-            ParserHelper.dict_result = align(dependencies, signal)
+                        f"(time bases: {[(len(d.data_store[0]), getattr(d.data_store[0], 'unit', '?')) for d in dependencies]}, "
+                        f"kind={kind})")
+            ParserHelper.dict_result = align(dependencies, signal, kind=kind)
             signal.set_data(tmp_local_env['self'].data_store)
 
         p.clear_expr()
@@ -1237,6 +1261,45 @@ class ParserHelper:
                                     f"{int(mask.sum())}/{len(result)} samples kept")
                         result = result[mask]
         return result
+
+    @staticmethod
+    def resolve_alignment_kind(signal, dependencies) -> str:
+        """Interpolation kind for realigning the dependencies of ``signal``.
+
+        An explicit InterpolationKind set on the signal wins. With the default
+        'auto', linear interpolation is chosen only when *every* dependency is
+        raw (not downsampled) and its observed sample rate is above
+        CONTINUOUS_RATE_THRESHOLD_HZ. Downsampled buffers keep sample-and-hold:
+        their grid is the downsampler's, not the signal's, so no assumption is
+        made from it. Any dependency below the threshold is treated as
+        event-driven — a new value is only published on change — and keeps
+        sample-and-hold ('previous') for the whole alignment, which never
+        invents values between updates (mint#120).
+        """
+        preference = getattr(signal, 'interpolation', None) or INTERPOLATION_AUTO
+        if preference != INTERPOLATION_AUTO:
+            return preference
+
+        for dep in dependencies:
+            if getattr(dep, 'isDownsampled', False):
+                # Downsampled buffers keep the conservative default: their grid
+                # is the downsampler's, not the signal's, so no assumption about
+                # the native sampling is made from it.
+                return InterpolationKind.PREVIOUS
+            base = dep.data_store[0]
+            n = len(base)
+            if n < 2:
+                return InterpolationKind.PREVIOUS
+            t0, t1 = float(base[0]), float(base[-1])
+            span = abs(t1 - t0)
+            if span <= 0:
+                return InterpolationKind.PREVIOUS
+            # Large values encode nanosecond timestamps (same heuristic as the
+            # date detection elsewhere in the code base).
+            span_s = span / 1e9 if max(abs(t0), abs(t1)) > (1 << 53) else span
+            if (n - 1) / span_s < CONTINUOUS_RATE_THRESHOLD_HZ:
+                return InterpolationKind.PREVIOUS
+        return InterpolationKind.LINEAR
 
     @staticmethod
     def get_dependencies(expr_list: list) -> set:

@@ -8,6 +8,8 @@ import numpy as np
 from iplotlib.core.impl_base import BackendParserBase
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
+from iplotlib.interface.iplotSignalAdapter import ParserHelper
+from iplotProcessing.common.interpolation import InterpolationKind
 
 
 def _signal_with_ts(label, ts_start, ts_end):
@@ -333,6 +335,58 @@ class ExpressionSignalTimeWindowTest(unittest.TestCase):
         self.assertEqual(x.size, y.size)
         self.assertGreaterEqual(x.min(), 139.9)
         self.assertLessEqual(x.max(), 160.1)
+
+    def test_realignment_interpolation_auto_and_explicit(self):
+        """The default 'auto' picks linear only when every dependency is raw
+        (not downsampled) and sampled above CONTINUOUS_RATE_THRESHOLD_HZ.
+        Downsampled buffers and event-driven (slow) dependencies keep
+        sample-and-hold — no new sample means the value is constant. An
+        explicit InterpolationKind on the signal always wins (mint#120)."""
+        resolve = ParserHelper.resolve_alignment_kind
+
+        def dep(rate_hz, seconds=2.0, downsampled=False):
+            n = max(int(rate_hz * seconds), 2)
+            t = (1_700_000_000_000_000_000
+                 + np.linspace(0, seconds * 1e9, n)).astype(np.int64)
+            return types.SimpleNamespace(isDownsampled=downsampled,
+                                         data_store=[t])
+
+        auto = SignalXY(label="auto_pref", name="")
+        # Every dependency raw and fast -> continuous -> linear.
+        self.assertEqual(resolve(auto, [dep(2500), dep(10000)]),
+                         InterpolationKind.LINEAR)
+        # One event-driven (slow) dependency keeps hold for the alignment.
+        self.assertEqual(resolve(auto, [dep(2500), dep(0.5)]),
+                         InterpolationKind.PREVIOUS)
+        # A downsampled dependency keeps hold: its grid is the downsampler's,
+        # not the signal's, so no assumption is made from it.
+        self.assertEqual(resolve(auto, [dep(2500), dep(10000, downsampled=True)]),
+                         InterpolationKind.PREVIOUS)
+
+        forced = SignalXY(label="forced_pref", name="")
+        forced.interpolation = InterpolationKind.LINEAR
+        self.assertEqual(resolve(forced, [dep(0.5, downsampled=True)]),
+                         InterpolationKind.LINEAR)
+        forced.interpolation = InterpolationKind.PREVIOUS
+        self.assertEqual(resolve(forced, [dep(10000)]),
+                         InterpolationKind.PREVIOUS)
+
+    def test_auto_linear_shape_through_the_pipeline(self):
+        """Raw, fast dependencies (e.g. a 2.5 kHz relative time X against a
+        1 MHz Y): the sparse X must advance smoothly on the union grid instead
+        of holding plateaus that render as a staircase of vertical strokes
+        (mint#120)."""
+        base = 1_700_000_000_000_000_000
+        t_sparse = (base + np.linspace(0, 1e9, 250)).astype(np.int64)   # 250 Hz
+        t_dense = (base + np.linspace(0, 1e9, 1001)).astype(np.int64)   # 1 kHz
+        self._make_dep("m120g", t_sparse, np.linspace(0.0, 500.0, 250))
+        self._make_dep("m120h", t_dense, np.sin(np.linspace(0, 20, 1001)))
+        tot = SignalXY(label="Tot", name="",
+                       x_expr="${m120g}.data", y_expr="${m120h}.data")
+        tot.refresh_over_time_window(base, base + 1_000_000_000)
+        x = np.asarray(tot.x_data, dtype=float)
+        dx = np.diff(x[np.isfinite(x)])
+        self.assertGreater(float(np.count_nonzero(dx > 0)) / dx.size, 0.99)
 
 
 class _TransformDataHost:
