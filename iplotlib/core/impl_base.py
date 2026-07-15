@@ -387,6 +387,20 @@ class BackendParserBase(ABC):
         new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
         current_ipl_plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
 
+        if use_shared:
+            member_dbg = []
+            for _ip in shared_plots:
+                _pl = self._impl_plot_cache_table.get_cache_item(_ip).plot()
+                if self._plot_x_is_time(_pl):
+                    _kind = 'time'
+                elif self._plot_x_expr_yields_time(_pl):
+                    _kind = 'time-expr'
+                else:
+                    _kind = 'follower'
+                member_dbg.append(f"{[s.label for st in _pl.signals.values() for s in st]}:{_kind}")
+            logger.info(f"mint#120: x-callback window [{new_start}, {new_end}] "
+                        f"group({len(shared_plots)})={member_dbg}")
+
         try:
             # Plots whose X is a processed data column are handled after the time
             # plots: their expressions (e.g. x_expr='${A}.data') are re-evaluated
