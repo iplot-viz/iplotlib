@@ -488,12 +488,23 @@ class BackendParserBase(ABC):
             if x_begin == x_end:
                 x_begin, x_end = x_begin - 0.5, x_end + 0.5
             ci_dbg = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            if ci_dbg.offsets[0] is None:
+                ci_dbg.offsets[0] = self.create_offset((x_begin, x_end))
             logger.info(f"mint#120: rescale x to [{x_begin}, {x_end}], "
-                        f"offset before={ci_dbg.offsets[0]}")
+                        f"keeping offset={ci_dbg.offsets[0]}")
+            # Keep the existing axis offset rather than recomputing it
+            # (set_oaw_axis_limits would). For non-date axes with large values
+            # (e.g. DI_RELTIME: epoch timestamps in microseconds, ~1.7e15) the
+            # tick labels show implementation coordinates (value - offset), so
+            # re-deriving the offset from the zoomed range would silently move
+            # the reference point to the window midpoint: the axis then reads
+            # +/- half-window around zero instead of staying comparable with the
+            # initial view and with other plots showing the same quantity.
             plot.axes[0].set_limits(x_begin, x_end, 'current')
-            self.set_oaw_axis_limits(impl_plot, 0, (x_begin, x_end))
-            logger.info(f"mint#120: offset after={ci_dbg.offsets[0]} "
-                        f"impl xlim={self.get_impl_x_axis_limits(impl_plot)} "
+            begin_impl = self.transform_value(impl_plot, 0, x_begin, inverse=True)
+            end_impl = self.transform_value(impl_plot, 0, x_end, inverse=True)
+            self.set_impl_x_axis_limits(impl_plot, (begin_impl, end_impl))
+            logger.info(f"mint#120: impl xlim={self.get_impl_x_axis_limits(impl_plot)} "
                         f"oaw xlim={self.get_oaw_axis_limits(impl_plot, 0)}")
         else:
             logger.info(f"mint#120: no finite x range found (x_begin={x_begin}, x_end={x_end}); "

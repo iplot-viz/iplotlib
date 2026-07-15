@@ -607,6 +607,8 @@ class SharedXAxisTest(unittest.TestCase):
                 time_impl = next(p for p in plots
                                  if logical(p).signals[1][0] is dep_sigs[0])
                 tot_impl = next(p for p in plots if logical(p) is tot_plot)
+                ci = parser._impl_plot_cache_table.get_cache_item(tot_impl)
+                offset_before = ci.offsets[0]
 
                 # Emulate what a refetch over the new window would give the
                 # dependencies (data access is stubbed out in this test).
@@ -629,9 +631,21 @@ class SharedXAxisTest(unittest.TestCase):
                 x_begin, x_end = parser.get_oaw_axis_limits(tot_impl, 0)
                 self.assertAlmostEqual(x_begin, new_reltime[0], delta=1e6)
                 self.assertAlmostEqual(x_end, new_reltime[-1], delta=1e6)
+                # The axis offset must be preserved across the zoom: DI_RELTIME
+                # values are epoch timestamps in microseconds (~1.7e15), so the
+                # ticks show implementation coordinates (value - offset).
+                # Recomputing the offset from the zoomed range would re-center
+                # the displayed numbers on the window midpoint (+/- half-window
+                # around zero) instead of keeping them comparable with the
+                # initial view (mint#120, 'the third plot X centered on zero').
+                self.assertEqual(ci.offsets[0], offset_before)
+                impl_begin, impl_end = parser.get_impl_x_axis_limits(tot_impl)
+                self.assertAlmostEqual(impl_begin, new_reltime[0] - offset_before, delta=1e6)
+                self.assertAlmostEqual(impl_end, new_reltime[-1] - offset_before, delta=1e6)
+                self.assertNotAlmostEqual(float(impl_begin) + float(impl_end), 0.0,
+                                          delta=1e6)
                 # The drawn line and the view live in the same offset frame: the
                 # line's implementation coordinates fall inside the visible window.
-                impl_begin, impl_end = parser.get_impl_x_axis_limits(tot_impl)
                 line_x = self._line_impl_xdata(backend, parser, tot_sig)
                 self.assertGreaterEqual(float(line_x.min()), impl_begin - 1e6)
                 self.assertLessEqual(float(line_x.max()), impl_end + 1e6)
