@@ -1,6 +1,7 @@
 import os
 
 from PySide6.QtCore import QMargins, Qt, Signal, QEvent, QTimer
+from PySide6.QtGui import QFont, QFontMetricsF
 from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox, QSplitter
 
 import numpy as np
@@ -118,6 +119,41 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 return plot
         return None
 
+    def _minimap_font_size(self, target_plot) -> int:
+        """Font size for the minimap tick labels: the same effective size as the
+        main plot it mirrors, so a font-size change propagates to both (#141).
+
+        Resolved through the usual property hierarchy (x-axis -> plot -> canvas
+        -> default) rather than a dedicated minimap control, keeping the setting
+        single-sourced.
+        """
+        axis = target_plot.axes[0] if (target_plot is not None and getattr(target_plot, 'axes', None)) else None
+        ref = axis if axis is not None else target_plot
+        fs = self._parser._pm.get_value(ref, 'font_size') if ref is not None else None
+        return int(fs) if fs else 8
+
+    def _apply_minimap_tick_font(self, fs: int):
+        """Apply the resolved font size to both minimap axes' tick labels (and the
+        bottom axis's UTC common label, matching the main axis).
+
+        The bottom axis height and the common-label height are grown from the
+        font metrics so larger labels are not clipped, mirroring what the main
+        axis does in pyQtGraphCanvas.process_ipl_axis_params.
+        """
+        font = QFont()
+        font.setPointSize(int(fs))
+        fm = QFontMetricsF(font)
+        for side in ('bottom', 'left'):
+            self._minimap_plot.getAxis(side).setStyle(tickFont=font)
+        bottom = self._minimap_plot.getAxis('bottom')
+        # tickLength default is 4; +2 padding, same formula as the main axis.
+        bottom.setHeight(int(fm.height() + 4 + 2))
+        common = getattr(bottom, 'common_label', None)
+        if common is not None:
+            common.setMaximumHeight(int(fm.height() + 2))
+            if getattr(bottom, 'offset_str', None):
+                common.setText(bottom.offset_str, size=f'{int(fs)}pt')
+
     def _update_minimap(self):
         canvas = self.get_canvas()
         show = canvas is not None and canvas.show_minimap and canvas.is_minimap_eligible()
@@ -156,7 +192,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         is_date_axis = bool(target_plot.axes and getattr(target_plot.axes[0], 'is_date', False))
         self._minimap_offset = int(baseline[0]) if (baseline is not None and is_date_axis) else 0
 
-        signature = (id(target_plot), baseline)
+        # Mirror the main plot's font size so the minimap ticks stay legible and
+        # track font-size changes (issue #141). Part of the signature so a change
+        # forces a rebuild that re-applies it.
+        fs = self._minimap_font_size(target_plot)
+        signature = (id(target_plot), baseline, fs)
         if self._minimap_signature == signature and self._minimap_viewport_item is not None:
             mm_off = getattr(self, '_minimap_offset', 0)
             self._minimap_viewport_item.setRegion((cur_min - mm_off, cur_max - mm_off))
@@ -235,6 +275,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         # panned/zoomed, instead of inheriting the main axis's dynamic precision
         # (which collapsed to a repeated hour field, e.g. "15").
         self._apply_minimap_static_ticks(self._minimap_plot.getAxis('bottom'), baseline)
+        self._apply_minimap_tick_font(fs)
 
         region = pg.LinearRegionItem(values=[cur_min - self._minimap_offset, cur_max - self._minimap_offset],
                                      movable=False,
