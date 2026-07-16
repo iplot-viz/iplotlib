@@ -100,11 +100,6 @@ class IplotQtCanvasToolbar(QToolBar):
         self.updatePulseAction.setVisible(False)
         self.addAction(self.updatePulseAction)
 
-        # Wired by the host application into the canvas context menu.
-        self.setTimeWindowAction = QAction('&Set as Time Window', self)
-        self.setTimeWindowAction.setStatusTip(
-            'Set the data range to match the currently visible time window')
-
         # Draw..
         self.redrawAction = QAction(create_icon('rotate180'), '&Redraw', self)
         # self.addAction(self.redrawAction)
