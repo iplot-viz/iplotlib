@@ -209,6 +209,16 @@ class LogScaleAxisTests(QAppOffscreenTestAdapter):
         ax.figure.canvas.draw()
         self.assertEqual(ax.format_ydata(1.5e-4), '0.00015')
 
+    def test_log_crosshair_reads_plain_value_between_decades(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        y_axis = self._log_axis(parser, ax)
+        ax.set_ylim(5e-2, 2e4)
+        ax.figure.canvas.draw()
+        # The tick formatter labels only decades over such a range.
+        self.assertEqual(y_axis.get_major_formatter()(4.39), '')
+        self.assertEqual(ax.format_ydata(4.39), '4.39')
+
     def test_autoscale_log_pads_multiplicatively_and_skips_non_positive(self):
         from iplotlib.core.impl_base import ImplementationPlotCacheItem
         parser = MatplotlibParser()

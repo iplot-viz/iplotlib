@@ -276,7 +276,12 @@ class IplotMultiCursor(Widget):
                 y_min, y_max = ax.get_ybound()
                 if y_min < event.ydata < y_max and ax.get_yaxis().get_visible():
                     arrow.set_position((arrow.get_position()[0], event.ydata))
-                    arrow.set_text(ax.yaxis.get_major_formatter()(event.ydata))
+                    # The tick formatter of a log axis labels only decades,
+                    # returning nothing in between; the cursor needs a value
+                    # at any position.
+                    fmt = ax.format_ydata if ax.get_yscale() == 'log' \
+                        else ax.yaxis.get_major_formatter()
+                    arrow.set_text(fmt(event.ydata))
                     arrow.set_visible(True)
                 else:
                     arrow.set_visible(False)

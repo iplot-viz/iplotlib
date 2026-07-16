@@ -209,8 +209,8 @@ class SetYAxisLimitsLogModeTests(QAppOffscreenTestAdapter):
 class LogModeConsistencyTests(QAppOffscreenTestAdapter):
     """Log-mode readouts must stay in data units and match the matplotlib
     backend: statistics read source values, autoscale must not re-log the
-    already log-mapped display data, and multi-decade ticks label bare
-    exponents under a single '10^' corner mark."""
+    already log-mapped display data, ticks read as powers of ten and the
+    crosshair reads the plain value."""
 
     def _plot_with_curve(self, y_values, log=True):
         import pyqtgraph as pg
@@ -273,6 +273,13 @@ class LogModeConsistencyTests(QAppOffscreenTestAdapter):
         self.assertGreater(len(positions), 1)
         self.assertEqual(axis.tickStrings(positions, 1.0, spacing),
                          ['1.2×10⁻⁴', '1.4×10⁻⁴', '1.6×10⁻⁴', '1.8×10⁻⁴', '2×10⁻⁴'])
+
+    def test_crosshair_reads_plain_value_between_decades(self):
+        from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
+        axis = self._log_axis()
+        readout = pyQtCrosshair._format_left_axis_value(
+            axis, np.log10(4.39), np.log10(5e-2), np.log10(2e4))
+        self.assertEqual(readout, '4.39')
 
 
 if __name__ == '__main__':

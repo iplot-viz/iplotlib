@@ -112,6 +112,9 @@ class pyQtCrosshair:
         # Format the Y label with the left axis' own tick strings so it matches
         # the axis (no scientific notation when the ticks show none, mint #94).
         try:
+            if getattr(axis, 'logMode', False):
+                # Log ticks are powers of ten; the cursor reads the plain value.
+                return f"{10.0 ** min(float(value), 300.0):g}"
             size = axis.geometry().height()
             if size <= 0:
                 size = 800
