@@ -1,8 +1,7 @@
 import datetime
 import re as _re
-from math import ceil, floor, log10
 
-from matplotlib.ticker import ScalarFormatter, Formatter, Locator, MaxNLocator
+from matplotlib.ticker import ScalarFormatter, Locator, MaxNLocator
 from matplotlib.axis import XAxis
 import pandas
 
@@ -445,108 +444,6 @@ class ExponentScalarFormatter(ScalarFormatter):
         if self.orderOfMagnitude and self.orderOfMagnitude != 0:
             return f'1e{self.orderOfMagnitude}'
         return super().get_offset()
-
-
-# Log-scaled Y axis ticks, shared verbatim with the pyqtgraph backend:
-# sub-decade views read as round mantissas under a common corner factor,
-# wider views as decade exponents.
-_LOG_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
-
-
-def _nice_ticks(lo, hi, n):
-    """Up to ``n`` evenly spaced 'nice' (1/2/2.5/5 x 10^k) values within
-    [lo, hi]."""
-    if not (hi > lo) or n < 2:
-        return [lo]
-    raw = (hi - lo) / n
-    mag = 10.0 ** floor(log10(raw))
-    step = _LOG_STEPS[-1] * mag
-    for s in _LOG_STEPS:
-        if s * mag >= raw:
-            step = s * mag
-            break
-    first = ceil(lo / step - 1e-9)
-    last = floor(hi / step + 1e-9)
-    return [(first + i) * step for i in range(last - first + 1)]
-
-
-def _common_exp(maxabs):
-    """Common power-of-ten factor, snapped to a multiple of 3 to match the
-    engineering exponent used on the linear axis."""
-    if maxabs <= 0:
-        return 0
-    return 3 * floor(log10(maxabs) / 3)
-
-
-def log_axis_ticks(lo, hi, n):
-    """Adaptive major ticks for a log Y axis. Returns ``(values, exp)``:
-    sub-decade -> nice mantissas under the common factor ``10**exp``;
-    multi-decade -> decade powers (``exp`` is None), labelled as bare
-    exponents."""
-    if lo <= 0 or hi <= lo:
-        return [], None
-    if log10(hi) - log10(lo) < 1.0:
-        vals = _nice_ticks(lo, hi, n)
-        return vals, (_common_exp(max(abs(v) for v in vals)) if vals else 0)
-    e0, e1 = floor(log10(lo)), floor(log10(hi))
-    vals = [10.0 ** e for e in range(e0, e1 + 1) if lo <= 10.0 ** e <= hi]
-    return sorted(vals), None
-
-
-class LogYLocator(Locator):
-    """Adaptive major-tick locator for a log-scaled Y axis (see
-    :func:`log_axis_ticks`). The range is read live at draw time so the first
-    render and every zoom pick the right style."""
-
-    def __init__(self, nbins: int = 6):
-        self.nbins = max(int(nbins), 2)
-
-    def __call__(self):
-        vmin, vmax = self.axis.get_view_interval()
-        return self.tick_values(vmin, vmax)
-
-    def tick_values(self, vmin, vmax):
-        vals, _ = log_axis_ticks(min(vmin, vmax), max(vmin, vmax), self.nbins)
-        return self.raise_if_exceeds(vals) if vals else [min(vmin, vmax)]
-
-
-class LogYFormatter(Formatter):
-    """Companion to :class:`LogYLocator`: round mantissas under a common corner
-    factor (sub-decade) or bare decade exponents (multi-decade)."""
-
-    def __init__(self, label_props: dict = None):
-        self._label_props = label_props or {}
-        self._locs = []
-        self._exp = None
-        self._pow_mode = False
-
-    def set_locs(self, locs):
-        self._locs = [l for l in (locs or []) if l > 0]
-        lo, hi = sorted(self.axis.get_view_interval())
-        if lo > 0 and hi > lo and (log10(hi) - log10(lo)) < 1.0 and self._locs:
-            self._exp = _common_exp(max(self._locs))
-            self._pow_mode = False
-        else:
-            self._exp = None
-            self._pow_mode = bool(self._locs)
-
-    def __call__(self, x, pos=None):
-        if x <= 0:
-            return ''
-        if self._exp:
-            return f"{x / 10.0 ** self._exp:g}"
-        if self._pow_mode:
-            # Bare exponent: whole on decade ticks ("4"), two decimals for
-            # cursor readouts between ticks ("3.4").
-            return f"{log10(x):.2f}".rstrip('0').rstrip('.')
-        return f"{x:g}"
-
-    def format_data_short(self, value):
-        # Value readouts show the full data value, never the tick shorthand.
-        return f"{value:g}"
-
-    def get_offset(self):
-        return f"1e{self._exp}" if self._exp else ''
 
 
 class NanosecondDateFormatter(ScalarFormatter):

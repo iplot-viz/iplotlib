@@ -5,14 +5,12 @@ import unittest
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.ticker import MaxNLocator, NullLocator
+from matplotlib.ticker import MaxNLocator, LogLocator, LogFormatterSciNotation
 
 from iplotDataAccess.dataAccess import DataAccess
 from iplotlib.core import PlotXY
 from iplotlib.core.axis import LinearAxis
-from iplotlib.impl.matplotlib.dateFormatter import (ExponentScalarFormatter,
-                                                    LogYLocator, LogYFormatter,
-                                                    log_axis_ticks)
+from iplotlib.impl.matplotlib.dateFormatter import ExponentScalarFormatter
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.impl.matplotlib.tests.QAppOffscreenTestAdapter import QAppOffscreenTestAdapter
 from iplotlib.interface import AccessHelper
@@ -151,9 +149,9 @@ class MatplotlibTesting(QAppOffscreenTestAdapter):
 
 
 class LogScaleAxisTests(QAppOffscreenTestAdapter):
-    """Log-scale Y axis behaviour, consistent with the pyqtgraph backend: a
-    sub-decade view reads as round mantissas under a common power, a wider view
-    as decade powers, and non-positive bounds fall back to autoscale."""
+    """Log-scale Y axis behaviour: the scale keeps its own locators, so ticks
+    read as powers of ten with the minor ticks that give the log spacing, and
+    non-positive bounds fall back to autoscale."""
 
     @staticmethod
     def _new_axes():
@@ -161,68 +159,52 @@ class LogScaleAxisTests(QAppOffscreenTestAdapter):
         FigureCanvasAgg(fig)  # real renderer so draws update tick labels/offset
         return fig.add_subplot()
 
-    def test_log_axis_sets_log_scale_and_suppresses_minors(self):
+    @staticmethod
+    def _log_axis(parser, ax):
+        y_axis = ax.get_yaxis()
+        parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
+        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
+        return y_axis
+
+    def test_log_axis_keeps_scale_locators(self):
         parser = MatplotlibParser()
         ax = self._new_axes()
-        parser.process_ipl_log_axis(ax.get_yaxis(), PlotXY(log_scale=True))
+        y_axis = self._log_axis(parser, ax)
         self.assertEqual(ax.get_yscale(), 'log')
-        self.assertIsInstance(ax.get_yaxis().get_minor_locator(), NullLocator)
+        # The linear axis locator/formatter must not overwrite the log ones.
+        self.assertIsInstance(y_axis.get_major_locator(), LogLocator)
+        self.assertIsInstance(y_axis.get_major_formatter(), LogFormatterSciNotation)
 
-    def test_axis_params_attaches_adaptive_log_ticks(self):
+    def test_log_axis_multidecade_ticks_are_powers_of_ten(self):
         parser = MatplotlibParser()
         ax = self._new_axes()
-        y_axis = ax.get_yaxis()
-        parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
-        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
-        self.assertIsInstance(y_axis.get_major_locator(), LogYLocator)
-        self.assertIsInstance(y_axis.get_major_formatter(), LogYFormatter)
+        y_axis = self._log_axis(parser, ax)
+        ax.set_ylim(1e-2, 1e4)
+        ax.figure.canvas.draw()
+        self.assertEqual([t.get_text() for t in y_axis.get_majorticklabels()
+                          if t.get_text()][:3],
+                         ['$\\mathdefault{10^{-3}}$', '$\\mathdefault{10^{-2}}$',
+                          '$\\mathdefault{10^{-1}}$'])
+        # Minor ticks are what make the log spacing visible.
+        self.assertGreater(len(y_axis.get_minorticklocs()), 10)
 
-    def test_log_axis_ticks_subdecade_mantissas_and_factor(self):
-        values, exp = log_axis_ticks(1.12e-4, 2.08e-4, 6)
-        self.assertEqual(exp, -6)
-        self.assertEqual([round(v / 10.0 ** exp) for v in values],
-                         [120, 140, 160, 180, 200])
-
-    def test_log_axis_ticks_multidecade_are_decade_powers(self):
-        values, exp = log_axis_ticks(1e-4, 1e-1, 6)
-        self.assertIsNone(exp)
-        np.testing.assert_allclose(values, [1e-4, 1e-3, 1e-2, 1e-1])
-
-    def test_log_axis_subdecade_renders_mantissas_and_offset(self):
+    def test_log_axis_subdecade_labels_intermediate_ticks(self):
+        # A view narrower than a decade contains no power of ten, so the
+        # intermediate ticks carry the labels.
         parser = MatplotlibParser()
         ax = self._new_axes()
-        y_axis = ax.get_yaxis()
-        parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
-        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
+        y_axis = self._log_axis(parser, ax)
         ax.set_ylim(1.12e-4, 2.08e-4)
         ax.figure.canvas.draw()
-        labels = [t.get_text() for t in y_axis.get_majorticklabels() if t.get_text()]
-        self.assertIn('120', labels)
-        self.assertIn('200', labels)
-        self.assertEqual(y_axis.get_offset_text().get_text(), '1e-6')
-
-    def test_log_axis_multidecade_renders_bare_exponents(self):
-        parser = MatplotlibParser()
-        ax = self._new_axes()
-        y_axis = ax.get_yaxis()
-        parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
-        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
-        ax.set_ylim(1e-4, 10.0)
-        ax.figure.canvas.draw()
-        labels = [t.get_text() for t in y_axis.get_majorticklabels() if t.get_text()]
-        self.assertEqual(labels, ['-4', '-3', '-2', '-1', '0', '1'])
-        # No corner factor in multi-decade views: only the sub-decade common
-        # factor uses the offset slot.
-        self.assertEqual(y_axis.get_offset_text().get_text(), '')
+        labels = [t.get_text() for t in y_axis.get_minorticklabels() if t.get_text()]
+        self.assertIn('$\\mathdefault{1.2\\times10^{-4}}$', labels)
+        self.assertIn('$\\mathdefault{2\\times10^{-4}}$', labels)
 
     def test_log_formatter_readout_is_full_data_value(self):
-        # Crosshair value labels go through Axes.format_ydata: they must show
-        # the data value, not the tick mantissa/exponent shorthand.
+        # Crosshair value labels go through Axes.format_ydata.
         parser = MatplotlibParser()
         ax = self._new_axes()
-        y_axis = ax.get_yaxis()
-        parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
-        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
+        self._log_axis(parser, ax)
         ax.set_ylim(1.12e-4, 2.08e-4)
         ax.figure.canvas.draw()
         self.assertEqual(ax.format_ydata(1.5e-4), '0.00015')

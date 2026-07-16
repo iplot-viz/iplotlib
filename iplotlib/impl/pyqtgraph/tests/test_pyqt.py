@@ -249,16 +249,30 @@ class LogModeConsistencyTests(QAppOffscreenTestAdapter):
         self.assertAlmostEqual(lo, 10.0, places=4)
         self.assertAlmostEqual(hi, 1000.0, places=4)
 
-    def test_multidecade_ticks_label_bare_exponents(self):
+    def _log_axis(self):
         from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
         axis = NanosecondDateFormatter(orientation='left', is_date=False)
         axis.setLogMode(True)
-        (spacing, positions), = axis.tickValues(np.log10(1e-4), np.log10(10.0), 400)
-        labels = axis.tickStrings(positions, 1.0, spacing)
-        self.assertEqual(labels, ['-4', '-3', '-2', '-1', '0', '1'])
-        # No corner factor in multi-decade views: only the sub-decade common
-        # factor uses the corner label.
-        self.assertEqual(axis.offset_str, '')
+        return axis
+
+    def test_multidecade_ticks_are_powers_of_ten(self):
+        axis = self._log_axis()
+        levels = axis.tickValues(np.log10(1e-2), np.log10(1e4), 400)
+        labelled = [axis.tickStrings(v, 1.0, sp) for sp, v in levels[:2]]
+        self.assertEqual(labelled[0], ['10⁻²', '10⁰', '10²', '10⁴'])
+        self.assertEqual(labelled[1], ['10⁻¹', '10¹', '10³'])
+        # Minor ticks are what make the log spacing visible.
+        self.assertGreater(len(levels[-1][1]), 10)
+
+    def test_subdecade_view_labels_intermediate_ticks(self):
+        # A view narrower than a decade contains no power of ten; pyqtgraph
+        # alone yields a single tick there.
+        axis = self._log_axis()
+        levels = axis.tickValues(np.log10(1.12e-4), np.log10(2.08e-4), 400)
+        spacing, positions = levels[0]
+        self.assertGreater(len(positions), 1)
+        self.assertEqual(axis.tickStrings(positions, 1.0, spacing),
+                         ['1.2×10⁻⁴', '1.4×10⁻⁴', '1.6×10⁻⁴', '1.8×10⁻⁴', '2×10⁻⁴'])
 
 
 if __name__ == '__main__':

@@ -285,10 +285,13 @@ def is_time_label(label) -> bool:
     return label is not None and 'time' in str(label).lower()
 
 
-# Log-scaled Y axis ticks, shared verbatim with the matplotlib backend:
-# sub-decade views read as round mantissas under a common corner factor,
-# wider views as decade exponents.
+# Linear "nice" (1/2/2.5/5 x 10^k) steps, matching the fallback matplotlib's
+# LogLocator uses when a log view is too narrow to hold decade ticks.
 _LOG_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
+
+# Tick labels are plain text here, so powers of ten need superscript glyphs
+# rather than the mathtext the matplotlib backend renders.
+_SUPERSCRIPT = str.maketrans('-0123456789', '⁻⁰¹²³⁴⁵⁶⁷⁸⁹')
 
 
 def _nice_ticks(lo, hi, n):
@@ -306,29 +309,6 @@ def _nice_ticks(lo, hi, n):
     first = ceil(lo / step - 1e-9)
     last = floor(hi / step + 1e-9)
     return [(first + i) * step for i in range(last - first + 1)]
-
-
-def _common_exp(maxabs):
-    """Common power-of-ten factor, snapped to a multiple of 3 to match the
-    engineering exponent used on the linear axis."""
-    if maxabs <= 0:
-        return 0
-    return 3 * floor(log10(maxabs) / 3)
-
-
-def log_axis_ticks(lo, hi, n):
-    """Adaptive major ticks for a log Y axis. Returns ``(values, exp)``:
-    sub-decade -> nice mantissas under the common factor ``10**exp``;
-    multi-decade -> decade powers (``exp`` is None), labelled as bare
-    exponents."""
-    if lo <= 0 or hi <= lo:
-        return [], None
-    if log10(hi) - log10(lo) < 1.0:
-        vals = _nice_ticks(lo, hi, n)
-        return vals, (_common_exp(max(abs(v) for v in vals)) if vals else 0)
-    e0, e1 = floor(log10(lo)), floor(log10(hi))
-    vals = [10.0 ** e for e in range(e0, e1 + 1) if lo <= 10.0 ** e <= hi]
-    return sorted(vals), None
 
 
 class NanosecondDateFormatter(pg.AxisItem):
@@ -370,9 +350,6 @@ class NanosecondDateFormatter(pg.AxisItem):
         self._eng_labels = None
         self._eng_base = 0
         self._eng_gscale = 1
-        # Common power-of-ten factor for a sub-decade log Y axis (None -> plain
-        # decade labels); set in tickValues, consumed in tickStrings.
-        self._log_exp = None
         # Optional explicit relative-time override (set by the minimap, which
         # builds its own axis without copying the 'Time' label). None -> decide
         # from the label text.
@@ -647,21 +624,12 @@ class NanosecondDateFormatter(pg.AxisItem):
                 self._eng_common = ''
                 self._numeric_offset = 0.0
                 if self.logMode:
-                    # Adaptive log ticks mirroring the matplotlib backend:
-                    # positions are log10 of the chosen data values. The
-                    # unclamped tick target keeps the tick set identical to
-                    # LogYLocator, which does not pixel-clamp.
-                    lo, hi = sorted((10.0 ** min(minVal, 300.0), 10.0 ** min(maxVal, 300.0)))
-                    tick_vals, exp = log_axis_ticks(lo, hi, self.n_ticks)
-                    if tick_vals:
-                        values = [log10(v) for v in tick_vals]
-                        self.last_values = values
-                    self._log_exp = exp
-                    self.offset_str = f"1e{exp}" if exp else ''
+                    # Decade ticks plus the minor ticks that give the log its
+                    # spacing; no SI prefix or corner factor (see logTickValues).
                     self.autoSIPrefixScale = 1.0
                     self.labelUnit = ''
-                    if len(values) >= 2:
-                        spacing = values[1] - values[0]
+                    self.offset_str = ''
+                    return super().tickValues(minVal, maxVal, size)
                 else:
                     # fn.siScale formatting.
                     _range = self.range
@@ -697,21 +665,10 @@ class NanosecondDateFormatter(pg.AxisItem):
                 self.common_label.setText(self._eng_common)
                 self._updateLabel()
             elif self.logMode:
-                # Sub-decade views un-log to mantissas under the common corner
-                # factor; multi-decade tick positions are already the exponent.
-                log_exp = getattr(self, '_log_exp', None)
-                if log_exp is None:
-                    # Whole on decade ticks ("4"), two decimals for crosshair
-                    # readouts between ticks ("3.4").
-                    values = [f"{v:.2f}".rstrip('0').rstrip('.') for v in values]
-                    self.common_label.setText(self.offset_str)
-                elif log_exp:
-                    factor = 10.0 ** log_exp
-                    values = [f"{10.0 ** v / factor:g}" for v in values]
-                    self.common_label.setText(self.offset_str)
-                else:
-                    values = [f"{10.0 ** v:g}" for v in values]
-                    self.common_label.setText("")
+                # Powers of ten, labelled by logTickStrings; the value carries
+                # its own exponent, so the corner factor stays empty.
+                values = super().tickStrings(values, scale, spacing)
+                self.common_label.setText('')
             else:
                 # Common 1eN corner factor as on the matplotlib backend; only
                 # bare units stay plain.
@@ -724,6 +681,34 @@ class NanosecondDateFormatter(pg.AxisItem):
                         self.common_label.setText(self.offset_str)
 
         return values
+
+    def logTickValues(self, minVal, maxVal, size, stdTicks):
+        ticks = super().logTickValues(minVal, maxVal, size, stdTicks)
+        visible = [v for _, level in ticks for v in level if minVal <= v <= maxVal]
+        if len(visible) > 1:
+            return ticks
+        # Too narrow to hold decade ticks: pyqtgraph leaves a single tick, so
+        # fall back to nice linear values the way matplotlib's LogLocator does.
+        lo, hi = sorted((10.0 ** min(minVal, 300.0), 10.0 ** min(maxVal, 300.0)))
+        vals = [log10(v) for v in _nice_ticks(lo, hi, self.n_ticks) if v > 0]
+        if len(vals) < 2:
+            return ticks
+        return [(vals[1] - vals[0], vals)]
+
+    def logTickStrings(self, values, scale, spacing):
+        # pyqtgraph's own version rounds to one significant digit, which
+        # collapses the intermediate ticks of a narrow view onto one label.
+        strings = []
+        for v in values:
+            value = 10.0 ** min(float(v), 300.0) * scale
+            if value <= 0:
+                strings.append('')
+                continue
+            mantissa, exponent = f"{value:.3e}".split('e')
+            mantissa = float(mantissa)
+            factor = '' if abs(mantissa - 1.0) < 1e-9 else f"{mantissa:g}×"
+            strings.append(f"{factor}10{str(int(exponent)).translate(_SUPERSCRIPT)}")
+        return strings
 
     def set_scale(self, scale, prefix):
         exponent = int(round(-np.log10(scale)))

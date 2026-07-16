@@ -1158,7 +1158,12 @@ class PyQtGraphParser(BackendParserBase):
             plot_item.getViewBox().enableAutoRange(x=False)
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, axis_item: AxisItem):
-        tick_props = dict(maxTickLevel=0)
+        if axis_item.logMode:
+            # Draw the minor decade ticks, which is what gives a log axis its
+            # spacing, but label only the decades as matplotlib does.
+            tick_props = dict(maxTickLevel=2, maxTextLevel=1)
+        else:
+            tick_props = dict(maxTickLevel=0)
         show_all_ticks = self._pm.get_value(self.canvas, 'ticks_position')
 
         # Set ticks on the top and right axis

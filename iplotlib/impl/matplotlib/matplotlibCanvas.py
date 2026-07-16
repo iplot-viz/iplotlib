@@ -14,7 +14,7 @@ from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator, NullLocator
+from matplotlib.ticker import MaxNLocator
 from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -35,7 +35,7 @@ from iplotlib.core import (Axis,
                            SignalXY,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter, \
-    NiceNanosecondLocator, RelativeTimeLocator, LogYLocator, LogYFormatter, is_time_label
+    NiceNanosecondLocator, RelativeTimeLocator, is_time_label
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
 
 logger = setupLogger.get_logger(__name__)
@@ -817,10 +817,11 @@ class MatplotlibParser(BackendParserBase):
                 log_scale = self._pm.get_value(plot, 'log_scale')
 
                 if show_grid:
+                    mpl_axes.grid(show_grid, which='major')
                     if log_scale:
-                        mpl_axes.grid(show_grid, which='both')
-                    else:
-                        mpl_axes.grid(show_grid, which='major')
+                        # The minor decade lines are what show the log spacing;
+                        # keep them faint so the decades stay readable.
+                        mpl_axes.grid(show_grid, which='minor', alpha=0.3)
                 else:
                     mpl_axes.grid(show_grid, which='both')
 
@@ -979,9 +980,10 @@ class MatplotlibParser(BackendParserBase):
         if isinstance(mpl_axis, YAxis):
             log_scale = self._pm.get_value(plot, 'log_scale')
             if log_scale:
+                # The scale's own locators cover every range: decade powers,
+                # the minor ticks that give the log spacing, and intermediate
+                # values below one decade.
                 mpl_axis.axes.set_yscale('log')
-                # Only the adaptive majors are shown, matching pyqtgraph.
-                mpl_axis.set_minor_locator(NullLocator())
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, mpl_axis: MPLAxis):
         label_props = dict(color=fc)
@@ -1004,12 +1006,9 @@ class MatplotlibParser(BackendParserBase):
         # process_ipl_log_axis runs first, so the Y scale is already decided.
         is_log_y = getattr(mpl_axis, 'axis_name', None) == 'y' \
             and mpl_axis.axes.get_yscale() == 'log'
-        if not axis.is_date:
-            if is_log_y:
-                mpl_axis.set_major_formatter(LogYFormatter(label_props=label_props))
-            else:
-                mpl_axis.set_major_formatter(
-                    ExponentScalarFormatter(label_props=label_props))
+        if not axis.is_date and not is_log_y:
+            mpl_axis.set_major_formatter(
+                ExponentScalarFormatter(label_props=label_props))
 
         mpl_axis.set_tick_params(**tick_props)
 
@@ -1024,11 +1023,9 @@ class MatplotlibParser(BackendParserBase):
         # it falls back to MaxNLocator. (The 'Time' label is applied later, in
         # signal processing, so we can't decide here -- the locator and the
         # ExponentScalarFormatter both read the label live at draw time.)
-        if not axis.is_date:
+        if not axis.is_date and not is_log_y:
             if getattr(mpl_axis, 'axis_name', None) == 'x':
                 mpl_axis.set_major_locator(RelativeTimeLocator(tick_number))
-            elif is_log_y:
-                mpl_axis.set_major_locator(LogYLocator(tick_number))
             else:
                 mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
