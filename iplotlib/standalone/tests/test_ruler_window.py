@@ -489,6 +489,50 @@ class RulerLeftToRightDeltaTest(unittest.TestCase):
             window.close()
 
 
+class RulerSortPersistenceTest(unittest.TestCase):
+    """The table is rebuilt on every ruler update, so the column the user sorted
+    by must survive the rebuild, indicator included."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def setUp(self):
+        self.window = IplotQtRuler()
+        # Rulers sit on different plots: X must order across plots, not within.
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.window.add_row('B', (2, 1), (9.0, 0.0), '#FFFFFF')
+        self.window.add_row('C', (1, 1), (5.0, 0.0), '#FFFFFF')
+
+    def tearDown(self):
+        self.window.close()
+
+    def _names(self):
+        return [self.window.table.item(r, IplotQtRuler.COL_NAME).text()
+                for r in range(self.window.table.rowCount())]
+
+    def test_sort_by_x_survives_a_row_update(self):
+        self.window.table.sortByColumn(IplotQtRuler.COL_X, Qt.SortOrder.AscendingOrder)
+        self.assertEqual(self._names(), ['A', 'C', 'B'])
+
+        self.window.update_row_xy('B', (2, 1), (9.0, 1.0))
+
+        self.assertEqual(self._names(), ['A', 'C', 'B'])
+        header = self.window.table.horizontalHeader()
+        self.assertEqual(header.sortIndicatorSection(), IplotQtRuler.COL_X)
+        self.assertEqual(header.sortIndicatorOrder(), Qt.SortOrder.AscendingOrder)
+
+    def test_sort_by_x_survives_a_new_ruler(self):
+        self.window.table.sortByColumn(IplotQtRuler.COL_X, Qt.SortOrder.DescendingOrder)
+
+        self.window.add_row('D', (1, 1), (7.0, 0.0), '#FFFFFF')
+
+        self.assertEqual(self._names(), ['B', 'D', 'C', 'A'])
+
+    def test_default_sort_is_by_ruler_name(self):
+        self.assertEqual(self._names(), ['A', 'B', 'C'])
+
+
 class RulerComputeDistanceDialogTest(unittest.TestCase):
     """Compute distance opens a copyable table with ΔX / ΔY and one Δ column
     per signal; time-axis ΔX carries the statistics-table duration format."""

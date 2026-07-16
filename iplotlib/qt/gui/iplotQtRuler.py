@@ -164,6 +164,11 @@ class IplotQtRuler(QWidget):
         self._signal_labels: List[str] = []
         self._hidden_signals: Set[str] = set()
         self._distance_dialog: QDialog = None
+        # Sort criterion chosen by the user. The table is rebuilt on every ruler
+        # update, so it must be restored afterwards or the view snaps back.
+        self._sort_column = self.COL_NAME
+        self._sort_order = Qt.SortOrder.AscendingOrder
+        self._rendering = False
 
         self.rows_radio = QRadioButton("Rows")
         self.rows_radio.setToolTip("One row per ruler. Editable.")
@@ -191,6 +196,7 @@ class IplotQtRuler(QWidget):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.selectionModel().selectionChanged.connect(self._update_selection_history)
+        self.table.horizontalHeader().sortIndicatorChanged.connect(self._on_sort_indicator_changed)
         self._install_copy_action(self.table)
 
         self.columns_scroll = QScrollArea()
@@ -320,8 +326,24 @@ class IplotQtRuler(QWidget):
         self.selection_history.clear()
         self._render_table()
 
+    def _on_sort_indicator_changed(self, column: int, order):
+        """Remember the column the user sorted by so rebuilds can restore it."""
+        if self._rendering:
+            return
+        self._sort_column = column
+        self._sort_order = order
+
     def _render_table(self):
         """Rebuild the active view from ``self._rows``."""
+        # Rebuilding moves the sort indicator around; those moves are not the
+        # user's choice and must not overwrite the remembered criterion.
+        self._rendering = True
+        try:
+            self._rebuild_view()
+        finally:
+            self._rendering = False
+
+    def _rebuild_view(self):
         # selectionChanged would fire spuriously during rebuild; disconnect briefly.
         try:
             self.table.selectionModel().selectionChanged.disconnect(self._update_selection_history)
@@ -445,7 +467,9 @@ class IplotQtRuler(QWidget):
         for col in range(self.table.columnCount()):
             self.table.setColumnWidth(col, self.table.columnWidth(col) + sort_arrow_pad)
         self.table.setSortingEnabled(True)
-        self.table.sortItems(self.COL_NAME, Qt.SortOrder.AscendingOrder)
+        column = self._sort_column if self._sort_column < self.table.columnCount() else self.COL_NAME
+        self.table.sortItems(column, self._sort_order)
+        self.table.horizontalHeader().setSortIndicator(column, self._sort_order)
 
     def _populate_row_cells(self, row_idx: int, row: Dict):
         name_item = QTableWidgetItem(row['name'])
