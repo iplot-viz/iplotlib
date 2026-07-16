@@ -179,6 +179,9 @@ class IplotSignalAdapter(ProcessingSignal):
         # One-shot marker: the current ts range is a genuine time window that was
         # propagated from a shared-time zoom (see set_time_window()).
         self._ts_is_time_window = False
+        # Time base the expressions were last evaluated over (pure expression
+        # signals only); enables the reverse X-to-time mapping (mint#120).
+        self._expr_time_base = None
 
         # 4. Parse name and prepare a hierarchy of objects if needed.
         self.status_info = StatusInfo()
@@ -1260,6 +1263,13 @@ class ParserHelper:
                         logger.info(f"mint#120: cropping '{expression}' result to ts window: "
                                     f"{int(mask.sum())}/{len(result)} samples kept")
                         result = result[mask]
+                        base_arr = base_arr[mask]
+                    # Retain the time base the expression was evaluated over: it
+                    # is what allows a zoom made on the X-versus-Y plot to be
+                    # mapped back to a time window when the X column is strictly
+                    # monotonic (mint#120 reverse direction). Kept consistent
+                    # with any cropping applied to the result above.
+                    signal._expr_time_base = base_arr
         return result
 
     @staticmethod

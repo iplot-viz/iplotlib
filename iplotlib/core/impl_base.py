@@ -387,6 +387,36 @@ class BackendParserBase(ABC):
         new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
         current_ipl_plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
 
+        # Reverse direction (mint#120): a zoom made ON an X-versus-Y plot can
+        # drive the shared-time group when the X column is invertible — it
+        # derives from data (e.g. '${A}.data') and increases strictly
+        # monotonically, so the selected X range maps back to a time window.
+        # Otherwise (non-monotonic X, or a data-independent expression such as
+        # 'np.ones(10)') the zoom stays local and the other plots are untouched.
+        if (use_shared
+                and not self._plot_x_is_time(current_ipl_plot)
+                and not self._plot_x_expr_yields_time(current_ipl_plot)):
+            t_window = self._invert_xy_zoom_to_time(current_plot, new_start, new_end)
+            base_impl = None
+            if t_window is not None:
+                base_impl = self._find_shared_time_base_impl(current_ipl_plot)
+            if t_window is not None and base_impl is not None:
+                logger.info(f"mint#120: reverse zoom x=[{new_start}, {new_end}] -> "
+                            f"time window [{t_window[0]}, {t_window[1]}]")
+                # Re-drive the update as a time-window zoom led by a time plot:
+                # the group re-forms around it and the whole propagation —
+                # including reprocessing this X-versus-Y plot over the mapped
+                # window — reuses the forward path below.
+                new_start, new_end = t_window
+                self.set_oaw_axis_limits(base_impl, 0, t_window)
+                current_plot = base_impl
+                current_ipl_plot = self._impl_plot_cache_table.get_cache_item(base_impl).plot()
+                shared_plots = self._get_all_shared_axes(base_impl)
+            else:
+                logger.info(f"mint#120: zoom on X-versus-Y plot is not invertible "
+                            f"(t_window={t_window is not None}, time base plot="
+                            f"{base_impl is not None}); keeping it local")
+
         if use_shared:
             member_dbg = []
             for _ip in shared_plots:
@@ -444,6 +474,68 @@ class BackendParserBase(ABC):
             # Never leave the re-entrancy guard set: a failure while propagating to
             # one plot must not disable axis synchronization for the whole session.
             self._update = False
+
+    def _invert_xy_zoom_to_time(self, impl_plot: Any, x_begin, x_end):
+        """Map an X range selected on an X-versus-Y plot back to a time window.
+
+        Possible only when the X column is invertible: it was evaluated over a
+        known time base (pure expression signals retain it, see
+        ``_expr_time_base``) and is strictly monotonically increasing, so each X
+        value corresponds to exactly one time. Returns ``(t_begin, t_end)`` or
+        ``None`` when no signal of the plot provides an invertible mapping
+        (non-monotonic X, or a data-independent expression such as
+        'np.ones(10)', which has no time base at all). Ranges reaching beyond
+        the current data are linearly extrapolated from the edge slopes so that
+        zooming back out (and undo) can widen the window (mint#120).
+        """
+        signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+        for signal_ref in signals:
+            signal = signal_ref()
+            if signal is None:
+                continue
+            time_base = getattr(signal, '_expr_time_base', None)
+            if time_base is None:
+                continue
+            x_data = np.asarray(getattr(signal, 'x_data', []), dtype=float)
+            t_data = np.asarray(time_base, dtype=float)
+            if x_data.size != t_data.size or x_data.size < 2:
+                continue
+            finite = np.isfinite(x_data) & np.isfinite(t_data)
+            xf, tf = x_data[finite], t_data[finite]
+            if xf.size < 2 or not np.all(np.diff(xf) > 0):
+                # Not a bijection: no unique time for a given X.
+                continue
+
+            def x_to_t(x):
+                if x <= xf[0]:
+                    slope = (tf[1] - tf[0]) / (xf[1] - xf[0])
+                    return tf[0] + (x - xf[0]) * slope
+                if x >= xf[-1]:
+                    slope = (tf[-1] - tf[-2]) / (xf[-1] - xf[-2])
+                    return tf[-1] + (x - xf[-1]) * slope
+                return float(np.interp(x, xf, tf))
+
+            t0, t1 = x_to_t(float(x_begin)), x_to_t(float(x_end))
+            if not (np.isfinite(t0) and np.isfinite(t1)) or t0 == t1:
+                continue
+            if t0 > t1:
+                t0, t1 = t1, t0
+            return t0, t1
+        return None
+
+    def _find_shared_time_base_impl(self, xy_plot):
+        """First implementation plot drawing time on X that shares ``xy_plot``'s
+        time base; it leads the propagation of a reverse (X-versus-Y) zoom."""
+        for impl_plot in self.get_canvas_plots():
+            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+            if plot is None or plot is xy_plot:
+                continue
+            if not self._plot_x_is_time(plot):
+                continue
+            base_ts = self._plot_signal_ts_range(plot)
+            if self._plot_shares_time_base(xy_plot, base_ts):
+                return impl_plot
+        return None
 
     def _follow_shared_time_window(self, impl_plot: Any, plot, begin, end):
         """Propagate a shared-time zoom to a plot whose X axis is not time.

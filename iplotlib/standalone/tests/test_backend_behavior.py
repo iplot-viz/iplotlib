@@ -750,6 +750,100 @@ class SharedXAxisTest(unittest.TestCase):
                 self.assertLess(x_end - x_begin, 0.15 * (1_781_184_935_952_126
                                                          - 1_781_184_330_000_126))
 
+    def test_reverse_zoom_on_xy_plot_drives_the_group_when_invertible(self):
+        """Zooming ON the X-versus-Y plot with a strictly increasing X derived
+        from data maps the selected X range back to a time window and drives the
+        shared group: the time plots take the mapped window and the X-versus-Y
+        plot itself is reprocessed over it (mint#120 reverse direction)."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                qt_canvas, _, dep_sigs, tot_sig, tot_plot, (ts_start, ts_end) = \
+                    self._build_test34_canvas(backend, tag="_rev")
+                parser = qt_canvas._parser
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                time_impl = next(p for p in plots
+                                 if logical(p).signals[1][0] is dep_sigs[0])
+                tot_impl = next(p for p in plots if logical(p) is tot_plot)
+
+                # Select the middle fifth of the (strictly increasing) X column.
+                x = np.asarray(tot_sig.x_data, dtype=float)
+                x0 = float(np.quantile(x, 0.40))
+                x1 = float(np.quantile(x, 0.60))
+                parser.set_oaw_axis_limits(tot_impl, 0, (x0, x1))
+                BackendParserBase._x_axis_update_callback(parser, tot_impl)
+                self.app.processEvents()
+
+                span = ts_end - ts_start
+                t_begin, t_end = parser.get_oaw_axis_limits(time_impl, 0)
+                # The time plot took (approximately) the mapped window.
+                self.assertAlmostEqual(t_begin, ts_start + 0.40 * span, delta=0.02 * span)
+                self.assertAlmostEqual(t_end, ts_start + 0.60 * span, delta=0.02 * span)
+                # The X-versus-Y plot itself was reprocessed over it.
+                self.assertAlmostEqual(tot_sig.ts_start, ts_start + 0.40 * span,
+                                       delta=0.02 * span)
+                self.assertAlmostEqual(tot_sig.ts_end, ts_start + 0.60 * span,
+                                       delta=0.02 * span)
+
+    def test_reverse_zoom_stays_local_when_x_is_not_invertible(self):
+        """Zooming ON an X-versus-Y plot whose X column is not a bijection (here
+        a sine of time) must stay local: the time plots keep their window."""
+        ts_start = 1_754_463_600_000_000_000
+        ts_end = 1_754_503_200_000_000_000
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                alias = f"m120_{backend}_nm"
+                canvas = Canvas(2, 1, title="reverse_nonmono", shared_x_axis=True)
+                time = np.linspace(ts_start, ts_end, 200).astype(np.int64)
+                time_plot = PlotXY()
+                sig = SignalXY(label=alias, alias=alias)
+                sig.data_access_enabled = False
+                sig.ts_start = ts_start
+                sig.ts_end = ts_end
+                sig.set_data([time, np.sin(np.linspace(0, 12, 200))])  # non-monotonic
+                time_plot.add_signal(sig)
+                canvas.add_plot(time_plot, 0)
+                xy_plot = PlotXY()
+                xy_sig = SignalXY(label="Tot", name="",
+                                  x_expr="${%s}.data" % alias,
+                                  y_expr="${%s}.data" % alias)
+                xy_sig.ts_start = ts_start
+                xy_sig.ts_end = ts_end
+                xy_plot.add_signal(xy_sig)
+                canvas.add_plot(xy_plot, 0)
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(600, 400)
+                self.app.processEvents()
+                parser = qt_canvas._parser
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                time_impl = next(p for p in plots if logical(p) is time_plot)
+                xy_impl = next(p for p in plots if logical(p) is xy_plot)
+
+                parser.set_oaw_axis_limits(xy_impl, 0, (-0.5, 0.5))
+                BackendParserBase._x_axis_update_callback(parser, xy_impl)
+                self.app.processEvents()
+
+                # Time plot untouched...
+                t_begin, t_end = parser.get_oaw_axis_limits(time_impl, 0)
+                self.assertAlmostEqual(t_begin, ts_start, delta=1e9)
+                self.assertAlmostEqual(t_end, ts_end, delta=1e9)
+                # ...and the zoom stayed local on the X-versus-Y plot: its axis
+                # holds the selected X range, and no time window was derived
+                # (the legacy local path stores the raw X values in ts, which is
+                # pre-existing behaviour outside the scope of the reverse zoom).
+                x_begin, x_end = parser.get_oaw_axis_limits(xy_impl, 0)
+                self.assertAlmostEqual(x_begin, -0.5, delta=0.01)
+                self.assertAlmostEqual(x_end, 0.5, delta=0.01)
+                self.assertLess(abs(xy_sig.ts_start), 1e15)  # not an epoch window
+
     def test_xy_plot_with_different_ts_stays_out_of_shared_group(self):
         """An X-versus-Y plot requested over a *different* time range than the base
         plot does not share its time base and must stay out of the group."""

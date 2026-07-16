@@ -389,6 +389,57 @@ class ExpressionSignalTimeWindowTest(unittest.TestCase):
         self.assertGreater(float(np.count_nonzero(dx > 0)) / dx.size, 0.99)
 
 
+class _InvertHost:
+    """Minimal host exposing what ``_invert_xy_zoom_to_time`` needs."""
+
+    def __init__(self, signals):
+        import weakref
+        item = types.SimpleNamespace(signals=[weakref.ref(s) for s in signals])
+        self._impl_plot_cache_table = types.SimpleNamespace(
+            get_cache_item=lambda impl: item)
+
+    _invert_xy_zoom_to_time = BackendParserBase._invert_xy_zoom_to_time
+
+
+class InvertXyZoomToTimeTest(unittest.TestCase):
+    """A zoom on an X-versus-Y plot maps back to a time window only when the X
+    column is invertible: evaluated over a known time base and strictly
+    monotonically increasing (mint#120 reverse direction)."""
+
+    @staticmethod
+    def _signal(x, time_base):
+        s = SignalXY(label="xy", name="", x_expr="${T}.data")
+        s.data_access_enabled = False
+        s.set_data([np.asarray(x, dtype=float), np.zeros(len(x))])
+        s._expr_time_base = None if time_base is None else np.asarray(time_base)
+        return s
+
+    def test_strictly_increasing_x_maps_to_time_window(self):
+        t = np.linspace(1_000_000, 2_000_000, 11)
+        x = np.linspace(100.0, 200.0, 11)  # x = 100 + (t-1e6)/1e4
+        sig = self._signal(x, t)
+        host = _InvertHost([sig])
+        window = host._invert_xy_zoom_to_time(None, 120.0, 150.0)
+        self.assertIsNotNone(window)
+        self.assertAlmostEqual(window[0], 1_200_000, delta=1)
+        self.assertAlmostEqual(window[1], 1_500_000, delta=1)
+        # Beyond the data: linear edge extrapolation (zoom out / undo).
+        window = host._invert_xy_zoom_to_time(None, 50.0, 250.0)
+        self.assertAlmostEqual(window[0], 500_000, delta=1)
+        self.assertAlmostEqual(window[1], 2_500_000, delta=1)
+
+    def test_non_monotonic_x_is_not_invertible(self):
+        t = np.linspace(0, 100, 50)
+        x = np.sin(np.linspace(0, 10, 50))
+        host = _InvertHost([self._signal(x, t)])
+        self.assertIsNone(host._invert_xy_zoom_to_time(None, -0.5, 0.5))
+
+    def test_data_independent_x_is_not_invertible(self):
+        # e.g. x_expr='np.ones(10)': no dependency, hence no time base retained.
+        host = _InvertHost([self._signal(np.ones(10), None)])
+        self.assertIsNone(host._invert_xy_zoom_to_time(None, 0.5, 1.5))
+
+
 class _TransformDataHost:
     """Minimal host exposing what ``transform_data`` needs from the parser."""
 
