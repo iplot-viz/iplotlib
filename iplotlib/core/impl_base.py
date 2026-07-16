@@ -404,6 +404,13 @@ class BackendParserBase(ABC):
                     return (ts_start, ts_end)
         return None
 
+    @staticmethod
+    def get_xy_slider_values(signal: SignalXY):
+        """Return the configured slider coordinate, with 1D compatibility."""
+        if signal.z_data is not None and np.asarray(signal.z_data).size:
+            return signal.z_data
+        return signal.time
+
     def _get_all_shared_axes(self, base_impl_plot: Any) -> List[Any]:
         cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
         base_plot = cache_item.plot()
@@ -424,10 +431,10 @@ class BackendParserBase(ABC):
             except AttributeError:
                 continue
 
-            # Slider plots: X axis follows z_data, not signal ts. Keep axis-original check.
+            # Prefer z_data; 1D signals fall back to their primary coordinate.
             if isinstance(plot, PlotXYWithSlider):
                 begin, end = plot.axes[0].get_limits('original')
-                slider_values = plot.signals[1][0].z_data
+                slider_values = self.get_xy_slider_values(plot.signals[1][0])
                 is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
                 max_diff = self._pm.get_value(self.canvas, 'max_diff')
                 max_diff_ns = max_diff * 1e9 if is_date else max_diff
@@ -762,6 +769,15 @@ class BackendParserBase(ABC):
         return x_displayed, y_displayed
 
     @staticmethod
+    def _orient_xy_data(x_data, y_data):
+        """Orient 2D y data so its first dimension follows the x axis."""
+        if (x_data.ndim == 1 and y_data.ndim == 2
+                and y_data.shape[0] != len(x_data)
+                and y_data.shape[1] == len(x_data)):
+            return y_data.T
+        return y_data
+
+    @staticmethod
     @abstractmethod
     def _update_marker_by_point_count(marker_line: Any, signal_x_data, signal_style: dict):
         pass
@@ -802,6 +818,8 @@ class BackendParserBase(ABC):
         if signal.color is None:
             # It means that the color has been reset but must keep the original color
             signal.color = signal.original_color
+
+        y_data = self._orient_xy_data(x_data, y_data)
 
         # Visible data is adjusted based on extremities, but only for unprocessed signals.
         # Processed signals already use the visible range.
@@ -1003,7 +1021,7 @@ class BackendParserBase(ABC):
         style = self.get_signal_style(signal)
         draw_fn = impl_plot.plot
 
-        ysub_data = self.get_ysub_data(plot, y_data)
+        ysub_data = np.asarray(self.get_ysub_data(plot, y_data))
 
         # Review to implement directly in PlotXY class
         if signal.color is None:
@@ -1215,7 +1233,7 @@ class BackendParserBase(ABC):
                 # Check if it is date and the max difference is 1 second
                 # Need to differentiate if it is absolute or relative
                 if isinstance(plot, PlotXYWithSlider):
-                    slider_values = plot.signals[1][0].z_data
+                    slider_values = self.get_xy_slider_values(plot.signals[1][0])
                     is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
                 elif isinstance(plot, PlotContourWithSlider):
                     slider_values = plot.signals[1][0].time
@@ -1300,11 +1318,12 @@ class BackendParserBase(ABC):
                         self.set_plot_limits(plot_lims)
                     else:
                         # In the case of a PlotXYWithSlider, what should be updated are the sliders_ranges
-                        slider_min = np.searchsorted(plot.signals[1][0].z_data, axes_limits[0].begin)
-                        slider_max = np.searchsorted(plot.signals[1][0].z_data, axes_limits[0].end)
+                        slider_values = self.get_xy_slider_values(plot.signals[1][0])
+                        slider_min = np.searchsorted(slider_values, axes_limits[0].begin)
+                        slider_max = np.searchsorted(slider_values, axes_limits[0].end)
 
-                        # Ensure indices are within the valid range of the signal's time data
-                        max_len = len(plot.signals[1][0].z_data) - 1
+                          # Ensure indices are within the valid slider coordinate range.
+                        max_len = len(slider_values) - 1
                         slider_min = max(0, min(slider_min, max_len))
                         slider_max = max(0, min(slider_max, max_len))
 

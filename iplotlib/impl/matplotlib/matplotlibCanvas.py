@@ -644,7 +644,7 @@ class MatplotlibParser(BackendParserBase):
         # Case for PlotXYWithSlider
         else:
             # Get data for the slider
-            slider_values = plot_with_slider.signals[1][0].time
+            slider_values = self.get_xy_slider_values(plot_with_slider.signals[1][0])
             formatter = NanosecondDateFormatter(ax_idx=0)
             is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
             if is_date:
@@ -679,7 +679,8 @@ class MatplotlibParser(BackendParserBase):
 
             # Check if there was a previous plot_with_slider with a value
             if plot_with_slider.slider_last_val is not None:
-                value = plot_with_slider.slider_last_val
+                value = min(int(plot_with_slider.slider_last_val), len(slider_values) - 1)
+                plot_with_slider.slider_last_val = value
                 # Update current value label
                 if is_date:
                     current_value = pandas.Timestamp(slider_values[int(value)]).value
@@ -1125,7 +1126,7 @@ class MatplotlibParser(BackendParserBase):
         # Update the annotations labels for the slider limits
         annotations = [label for label in plot.slider.ax.get_children() if isinstance(label, plt.Annotation)]
         min_annotation, current_annotation, max_annotation = annotations[:3]
-        slider_values = plot.signals[1][0].z_data
+        slider_values = self.get_xy_slider_values(plot.signals[1][0])
         is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
         if is_date:
             formatter = NanosecondDateFormatter(ax_idx=0)
@@ -1159,12 +1160,13 @@ class MatplotlibParser(BackendParserBase):
             Highlight the selected area in the slider.
         """
 
-        # Convert time-based 'begin' and 'end' values to corresponding indices in z_data
-        new_start = np.searchsorted(plot.signals[1][0].z_data, begin)
-        new_end = np.searchsorted(plot.signals[1][0].z_data, end)
+        # Convert coordinate bounds to corresponding slider indices.
+        slider_values = self.get_xy_slider_values(plot.signals[1][0])
+        new_start = np.searchsorted(slider_values, begin)
+        new_end = np.searchsorted(slider_values, end)
 
-        # Ensure indices are within the valid range of the signal's time data
-        max_len = len(plot.signals[1][0].z_data) - 1
+        # Ensure indices are within the valid slider coordinate range.
+        max_len = len(slider_values) - 1
         new_start = max(0, min(new_start, max_len))
         new_end = max(0, min(new_end, max_len))
 
@@ -1186,7 +1188,6 @@ class MatplotlibParser(BackendParserBase):
         annotations = [label for label in plot.slider.ax.get_children() if isinstance(label, plt.Annotation)]
         min_annotation, current_annotation, max_annotation = annotations[:3]
 
-        slider_values = plot.signals[1][0].z_data
         is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
         if is_date:
             formatter = NanosecondDateFormatter(ax_idx=0)

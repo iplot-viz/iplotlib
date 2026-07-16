@@ -710,7 +710,10 @@ class PyQtGraphParser(BackendParserBase):
             cell_gl = self.process_ipl_plot_contour_colorbar(i_plot, visible_stack_ids, cell_gl)
 
         # Get data for the slider
-        slider_values = i_plot.signals[1][0].time
+        if isinstance(i_plot, PlotXYWithSlider):
+            slider_values = self.get_xy_slider_values(i_plot.signals[1][0])
+        else:
+            slider_values = i_plot.signals[1][0].time
         formatter = NanosecondDateFormatter(orientation='bottom')
         is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
 
@@ -751,7 +754,8 @@ class PyQtGraphParser(BackendParserBase):
 
         # Check if there was a previous plot_with_slider with a value
         if i_plot.slider_last_val is not None:
-            value = i_plot.slider_last_val
+            value = min(int(i_plot.slider_last_val), len(slider_values) - 1)
+            i_plot.slider_last_val = value
             # Update current value label
             if is_date:
                 current_value = pd.Timestamp(slider_values[int(value)]).value
@@ -1544,7 +1548,7 @@ class PyQtGraphParser(BackendParserBase):
         annotations = self._slider_placeholders[(row, col)].widget().findChildren(QLabel)
         min_annotation, current_annotation, max_annotation = annotations[:3]
 
-        slider_values = plot.signals[1][0].z_data
+        slider_values = self.get_xy_slider_values(plot.signals[1][0])
         is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
         if is_date:
             formatter = NanosecondDateFormatter(orientation='bottom')
@@ -1564,12 +1568,13 @@ class PyQtGraphParser(BackendParserBase):
             max_annotation.setText(f'{slider_values[end]}')
 
     def update_slider_limits(self, plot: PlotXYWithSlider, begin, end):
-        # Convert time-based 'begin' and 'end' values to corresponding indices in z_data
-        new_start = np.searchsorted(plot.signals[1][0].z_data, begin)
-        new_end = np.searchsorted(plot.signals[1][0].z_data, end)
+        # Convert coordinate bounds to corresponding slider indices.
+        slider_values = self.get_xy_slider_values(plot.signals[1][0])
+        new_start = np.searchsorted(slider_values, begin)
+        new_end = np.searchsorted(slider_values, end)
 
-        # Ensure indices are within the valid range of the signal's time data
-        max_len = len(plot.signals[1][0].z_data) - 1
+        # Ensure indices are within the valid slider coordinate range.
+        max_len = len(slider_values) - 1
         new_start = max(0, min(new_start, max_len))
         new_end = max(0, min(new_end, max_len))
 
@@ -1593,7 +1598,6 @@ class PyQtGraphParser(BackendParserBase):
         annotations = self._slider_placeholders[(row, col)].widget().findChildren(QLabel)
         min_annotation, current_annotation, max_annotation = annotations[:3]
 
-        slider_values = plot.signals[1][0].z_data
         is_date = bool(min(slider_values) > (1 << 53) and max(slider_values) < (1 << 62))
         if is_date:
             formatter = NanosecondDateFormatter(orientation='bottom')
