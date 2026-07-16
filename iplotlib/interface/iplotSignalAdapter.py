@@ -987,11 +987,11 @@ class AccessHelper:
                                        }
                 result['d0'] = xdata
                 result['d1'] = np_nvl(raw.ydata)
-                result['d2'] = np.empty(0).astype('double')
+                result['d2'] = np_nvl(getattr(raw, 'secondary_xdata', None)).astype('double')
                 result['d3'] = np.empty(0).astype('double')
                 result['d0_unit'] = raw.xunit if raw.xunit else ''
                 result['d1_unit'] = raw.yunit if raw.yunit else ''
-                result['d2_unit'] = ''
+                result['d2_unit'] = getattr(raw, 'secondary_xunit', '') or ''
                 result['d3_unit'] = ''
                 result['isds'] = ds
                 if raw.resolved_pulse:
