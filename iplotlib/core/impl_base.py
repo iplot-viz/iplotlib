@@ -243,6 +243,27 @@ class BackendParserBase(ABC):
     def export_image(self, filename: str, **kwargs):
         pass
 
+    def autoscale_all_plots(self):
+        """
+        Autoscale the Y axis of every PlotXY of the current canvas.
+
+        This is the headless equivalent of the interactive 'Autoscale All' action:
+        it reuses the same per-plot :meth:`autoscale_y_axis` logic but without any
+        undo/redo bookkeeping. It is meant to be used by the image export path
+        (e.g. ``export_image(..., autoscale=True)``) and does not alter the
+        behavior of the interactive autoscale in any way.
+        """
+        if self.canvas is None:
+            return
+        for column in self.canvas.plots:
+            for plot in column:
+                if not isinstance(plot, PlotXY):
+                    continue
+                for impl_plot in self._plot_impl_plot_lut.get(id(plot), []):
+                    if impl_plot is None:
+                        continue
+                    self.autoscale_y_axis(impl_plot)
+
     @abstractmethod
     def clear(self):
         """
