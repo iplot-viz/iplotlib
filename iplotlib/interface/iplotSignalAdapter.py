@@ -556,9 +556,12 @@ class IplotSignalAdapter(ProcessingSignal):
         self.y_data = y_data.copy()
         if envelope:
             self.z_data = self._minimap_y_max_data.copy()
+            # Realign the raw envelope store: statistics index min/max/avg by the displayed data.
+            self.data_store[0] = self.x_data
+            self.data_store[1] = self.y_data
+            self.data_store[2] = self.z_data
             self.data_store[3] = self._minimap_y_avg_data.copy()
-        # Restore the draw-time downsampled state too: it drives the legend
-        # marker and the decision to fetch finer data on the next zoom.
+        # The downsampled state drives the legend marker and the next-zoom refetch.
         self.isDownsampled = self._minimap_is_downsampled
         self._access_md5sum = self.calculate_data_hash()
         self.set_da_success()

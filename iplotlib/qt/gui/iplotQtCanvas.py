@@ -409,9 +409,8 @@ class IplotQtCanvas(QWidget):
         # Check if any limit actually changed
         if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            # Flush pending work without dispatching user input: this runs inside
-            # the mouse-release handler, and re-entering it mid-release corrupts
-            # the backends' drag state. Queued clicks are delivered afterwards.
+            # Exclude user input: this runs inside the mouse-release handler and
+            # re-entering it corrupts the backends' drag state.
             QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
             QApplication.restoreOverrideCursor()
 

@@ -10,6 +10,7 @@ import copy
 import unittest
 
 import numpy as np
+from iplotProcessing.core import BufferObject
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
@@ -192,6 +193,30 @@ class ResetViewTest(unittest.TestCase):
     def test_restore_minimap_snapshot_without_data(self):
         signal = SignalXY(label="empty")
         self.assertIsNone(signal.restore_minimap_snapshot())
+
+    def test_restore_minimap_snapshot_realigns_envelope_store(self):
+        # A zoom refetch of another size must not leave the raw envelope store
+        # misaligned with the displayed data (statistics index it by mask).
+        x = np.linspace(0, 10, 200)
+        signal = SignalXY(label="e", envelope=True)
+        # The avg slot only exists after an envelope fetch; emulate its layout.
+        while len(signal.data_store) < 4:
+            signal.data_store.append(BufferObject())
+        signal.data_store[3] = BufferObject(np.sin(x))
+        signal.set_data([x, np.sin(x) - 1, np.sin(x) + 1])
+
+        signal.x_data = signal.x_data[:50]
+        signal.y_data = signal.y_data[:50]
+        signal.z_data = signal.z_data[:50]
+        for i in range(4):
+            signal.data_store[i] = signal.data_store[i][:53]
+
+        data = signal.restore_minimap_snapshot()
+
+        self.assertEqual(len(data), 4)
+        self.assertEqual(len(signal.x_data), 200)
+        for i in range(4):
+            self.assertEqual(len(signal.data_store[i]), 200)
 
     def test_restore_minimap_snapshot_restores_downsampled_state(self):
         # A deep zoom can refetch raw data and clear the downsampled flag. The
