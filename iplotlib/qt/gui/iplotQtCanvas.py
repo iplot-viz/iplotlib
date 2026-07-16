@@ -9,11 +9,11 @@ from contextlib import contextmanager
 from typing import List, Tuple, Optional
 
 import numpy as np
-from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
+from PySide6.QtCore import QEventLoop, QMetaObject, QSize, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
 from iplotlib.core.signal import SignalXY
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.plot import PlotXYWithSlider, PlotContourWithSlider
+from iplotlib.core.plot import PlotXY, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.command import IplotCommand
 from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
@@ -390,12 +390,13 @@ class IplotQtCanvas(QWidget):
         finally:
             self._parser._hm.undo()
 
-    def stage_view_lim_cmd(self, impl_plot):
-        """stage a view command"""
+    def stage_view_lim_cmd(self, impl_plot, name: str = None):
+        """stage a view command. `name` labels the command; defaults to the active mouse mode."""
 
-        name = self._mmode[3:]
+        if name is None:
+            name = self._mmode[3:].capitalize()
         old_limits = [self._parser.get_plot_limits(impl_plot)]
-        cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
+        cmd = IplotAxesRangeCmd(name, old_limits, parser=self._parser)
         self._staging_cmds.append(cmd)
         logger.debug(f"Staged {cmd}")
 
@@ -408,7 +409,9 @@ class IplotQtCanvas(QWidget):
         # Check if any limit actually changed
         if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            QApplication.processEvents()
+            # Exclude user input: this runs inside the mouse-release handler and
+            # re-entering it corrupts the backends' drag state.
+            QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
             QApplication.restoreOverrideCursor()
 
             # Update new limits after data refresh.
@@ -433,6 +436,49 @@ class IplotQtCanvas(QWidget):
             self.cmdDone.emit(cmd)
         except IndexError:
             return
+
+    def _flush_view(self):
+        """
+        Redraw after a view-limit change. Backends that repaint eagerly on range
+        changes (pyqtgraph) need nothing here; matplotlib overrides this.
+        """
+
+    def reset_plot_view(self, impl_plot):
+        """
+        Restore a single plot to its draw-time view (the "Reset zoom/pan" action),
+        leaving every other plot untouched. Recorded as one undoable command,
+        mirroring the autoscale flow.
+        """
+        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        if not hasattr(ci, 'plot') or not isinstance(ci.plot(), PlotXY):
+            return
+        self.stage_view_lim_cmd(impl_plot, name='Reset zoom/pan')
+        self._parser.set_plot_limits_to_original(impl_plot)
+        while len(self._staging_cmds):
+            self.commit_view_lim_cmd(impl_plot)
+        while len(self._commitd_cmds):
+            self.push_view_lim_cmd()
+        self._flush_view()
+        self.stats(self.get_canvas())
+
+    def reset_all_views(self):
+        """
+        Restore every plot to its draw-time view (the toolbar "Home" action).
+        Captured as a single undoable command so one undo reverts the whole reset.
+        """
+        if self._parser is None or self.get_canvas() is None:
+            return
+        old_limits = self._parser.get_all_plot_limits()
+        if not old_limits:
+            return
+        cmd = IplotAxesRangeCmd('Home', old_limits, parser=self._parser)
+        self._parser.reset_all_plots_to_original()
+        cmd.new_lim = self._parser.get_all_plot_limits()
+        if any(old != new for old, new in zip(cmd.old_lim, cmd.new_lim)):
+            self._parser._hm.done(cmd)
+            self.cmdDone.emit(cmd)
+        self._flush_view()
+        self.stats(self.get_canvas())
 
     def clean_canvas(self):
         """
