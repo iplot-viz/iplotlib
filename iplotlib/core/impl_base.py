@@ -408,8 +408,21 @@ class BackendParserBase(ABC):
     def get_xy_slider_values(signal: SignalXY):
         """Return the configured slider coordinate, with 1D compatibility."""
         if signal.z_data is not None and np.asarray(signal.z_data).size:
-            return signal.z_data
-        return signal.time
+            slider_values = signal.z_data
+        else:
+            slider_values = signal.time
+
+        slider_values_array = np.asarray(slider_values)
+        if slider_values_array.size == 0:
+            raise ValueError("PlotXYWithSlider requires a non-empty slider coordinate")
+
+        y_data = np.asarray(signal.y_data)
+        if y_data.ndim >= 2 and len(slider_values_array) != y_data.shape[0]:
+            raise ValueError(
+                "PlotXYWithSlider slider/data shape mismatch: "
+                f"slider has {len(slider_values_array)} values, y has {y_data.shape[0]} slices"
+            )
+        return slider_values
 
     def _get_all_shared_axes(self, base_impl_plot: Any) -> List[Any]:
         cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
@@ -1322,7 +1335,7 @@ class BackendParserBase(ABC):
                         slider_min = np.searchsorted(slider_values, axes_limits[0].begin)
                         slider_max = np.searchsorted(slider_values, axes_limits[0].end)
 
-                          # Ensure indices are within the valid slider coordinate range.
+                        # Ensure indices are within the valid slider coordinate range.
                         max_len = len(slider_values) - 1
                         slider_min = max(0, min(slider_min, max_len))
                         slider_max = max(0, min(slider_max, max_len))

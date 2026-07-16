@@ -679,7 +679,7 @@ class MatplotlibParser(BackendParserBase):
 
             # Check if there was a previous plot_with_slider with a value
             if plot_with_slider.slider_last_val is not None:
-                value = min(int(plot_with_slider.slider_last_val), len(slider_values) - 1)
+                value = max(0, min(int(plot_with_slider.slider_last_val), len(slider_values) - 1))
                 plot_with_slider.slider_last_val = value
                 # Update current value label
                 if is_date:
