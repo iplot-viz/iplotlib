@@ -487,27 +487,90 @@ class BackendParserBase(ABC):
             # one plot must not disable axis synchronization for the whole session.
             self._update = False
 
+    def _find_canvas_signal_by_alias(self, alias: str):
+        """Signal registered in the canvas under the given alias, if any."""
+        canvas = getattr(self, 'canvas', None)
+        if canvas is None or not alias:
+            return None
+        for column in getattr(canvas, 'plots', []) or []:
+            for plot in column or []:
+                if plot is None:
+                    continue
+                for stack in getattr(plot, 'signals', {}).values():
+                    for candidate in stack:
+                        if getattr(candidate, 'alias', None) == alias:
+                            return candidate
+        return None
+
     def _invert_xy_zoom_to_time(self, impl_plot: Any, x_begin, x_end):
         """Map an X range selected on an X-versus-Y plot back to a time window.
 
-        Possible only when the X column is invertible: it was evaluated over a
-        known time base (pure expression signals retain it, see
-        ``_expr_time_base``) and increases monotonically. Plateaus introduced by
-        sample-and-hold realignment of a strictly increasing dependency are
-        tolerated (deduplicated to the first point of each hold run). Returns
-        ``(t_begin, t_end)`` or ``None`` when no signal of the plot provides an
-        invertible mapping — X decreasing somewhere (no unique time for a given
-        X), constant, or a data-independent expression such as 'np.ones(10)',
-        which has no time base at all. Ranges reaching beyond the current data
-        are linearly extrapolated from the edge slopes so that zooming back out
-        (and undo) can widen the window; the caller clamps the result to the
-        originally requested range (mint#120).
+        Monotonicity is tested on the data BEFORE time alignment: when the X
+        column is a plain accessor (x_expr='${A}.data'), the dependency's
+        original samples decide — if they increase strictly, the time indexes
+        are retrieved through the original (data, time) pairs, exactly and
+        unaffected by plateaus or invented values that realignment introduces.
+        For compound expressions, where no single original buffer exists, the
+        evaluated X over its retained time base (``_expr_time_base``) is used
+        instead, tolerating sample-and-hold plateaus (deduplicated to the first
+        point of each run). Returns ``(t_begin, t_end)`` or ``None`` when no
+        signal of the plot provides an invertible mapping — X decreasing
+        somewhere, constant, or data-independent (e.g. 'np.ones(10)').
+        Ranges reaching beyond the data are linearly extrapolated from the edge
+        slopes so zooming back out (and undo) can widen the window; the caller
+        clamps the result to the originally requested range (mint#120).
         """
+
+        def map_range(xf, tf):
+            if xf.size < 2:
+                return None
+
+            def x_to_t(x):
+                if x <= xf[0]:
+                    slope = (tf[1] - tf[0]) / (xf[1] - xf[0])
+                    return tf[0] + (x - xf[0]) * slope
+                if x >= xf[-1]:
+                    slope = (tf[-1] - tf[-2]) / (xf[-1] - xf[-2])
+                    return tf[-1] + (x - xf[-1]) * slope
+                return float(np.interp(x, xf, tf))
+
+            t0, t1 = x_to_t(float(x_begin)), x_to_t(float(x_end))
+            if not (np.isfinite(t0) and np.isfinite(t1)) or t0 == t1:
+                return None
+            return (t0, t1) if t0 <= t1 else (t1, t0)
+
         signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
         for signal_ref in signals:
             signal = signal_ref()
             if signal is None:
                 continue
+
+            # Primary: plain data accessor -> the dependency's original samples.
+            x_expr = getattr(signal, 'x_expr', '') or ''
+            accessor = re.fullmatch(r"\s*\$\{([^}]+)\}\.data\s*", x_expr)
+            if accessor:
+                dep = self._find_canvas_signal_by_alias(accessor.group(1))
+                if dep is not None and len(getattr(dep, 'data_store', [])) >= 2:
+                    alias_map = getattr(dep, 'alias_map', None) or {}
+                    t_idx = alias_map.get('time', 0)
+                    d_idx = alias_map.get('data', 1)
+                    t_idx = t_idx if isinstance(t_idx, int) else 0
+                    d_idx = d_idx if isinstance(d_idx, int) else 1
+                    t_raw = np.asarray(dep.data_store[t_idx], dtype=float)
+                    x_raw = np.asarray(dep.data_store[d_idx], dtype=float)
+                    if x_raw.size == t_raw.size and x_raw.size >= 2:
+                        finite = np.isfinite(x_raw) & np.isfinite(t_raw)
+                        xf, tf = x_raw[finite], t_raw[finite]
+                        if xf.size >= 2 and np.all(np.diff(xf) > 0):
+                            window = map_range(xf, tf)
+                            if window is not None:
+                                return window
+                        # The original data itself is not strictly increasing:
+                        # genuinely not a bijection, do not fall back.
+                        continue
+
+            # Fallback (compound expressions): the evaluated X over its
+            # retained time base, tolerating sample-and-hold plateaus.
             time_base = getattr(signal, '_expr_time_base', None)
             if time_base is None:
                 continue
@@ -522,33 +585,12 @@ class BackendParserBase(ABC):
             dx = np.diff(xf)
             if np.any(dx < 0) or not np.any(dx > 0):
                 # Not invertible: decreasing somewhere (no unique time for a
-                # given X) or constant everywhere (e.g. 'np.ones(10)').
+                # given X) or constant everywhere.
                 continue
-            # Monotonic but with plateaus: sample-and-hold realignment repeats
-            # the low-rate X value on the fine union grid even when the
-            # underlying data is strictly increasing. Keep the first point of
-            # each hold run — the residual time ambiguity within a plateau is at
-            # most one hold interval, the best resolution available.
             keep = np.concatenate(([True], dx > 0))
-            xf, tf = xf[keep], tf[keep]
-            if xf.size < 2:
-                continue
-
-            def x_to_t(x):
-                if x <= xf[0]:
-                    slope = (tf[1] - tf[0]) / (xf[1] - xf[0])
-                    return tf[0] + (x - xf[0]) * slope
-                if x >= xf[-1]:
-                    slope = (tf[-1] - tf[-2]) / (xf[-1] - xf[-2])
-                    return tf[-1] + (x - xf[-1]) * slope
-                return float(np.interp(x, xf, tf))
-
-            t0, t1 = x_to_t(float(x_begin)), x_to_t(float(x_end))
-            if not (np.isfinite(t0) and np.isfinite(t1)) or t0 == t1:
-                continue
-            if t0 > t1:
-                t0, t1 = t1, t0
-            return t0, t1
+            window = map_range(xf[keep], tf[keep])
+            if window is not None:
+                return window
         return None
 
     def _find_shared_time_base_impl(self, xy_plot):

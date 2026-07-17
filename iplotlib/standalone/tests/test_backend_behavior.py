@@ -855,7 +855,10 @@ class SharedXAxisTest(unittest.TestCase):
                 x_begin, x_end = parser.get_oaw_axis_limits(xy_impl, 0)
                 self.assertAlmostEqual(x_begin, -0.5, delta=0.01)
                 self.assertAlmostEqual(x_end, 0.5, delta=0.01)
-                self.assertLess(abs(xy_sig.ts_start), 1e15)  # not an epoch window
+                # No time window was derived: ts is not a strict sub-interval
+                # of the originally requested range.
+                self.assertFalse(xy_sig.ts_start > ts_start
+                                 and xy_sig.ts_end < ts_end)
 
     def test_xy_plot_with_different_ts_stays_out_of_shared_group(self):
         """An X-versus-Y plot requested over a *different* time range than the base

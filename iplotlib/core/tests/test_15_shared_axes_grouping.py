@@ -392,14 +392,16 @@ class ExpressionSignalTimeWindowTest(unittest.TestCase):
 class _InvertHost:
     """Minimal host exposing what ``_invert_xy_zoom_to_time`` needs."""
 
-    def __init__(self, signals):
+    def __init__(self, signals, canvas=None):
         import weakref
         self._signals = list(signals)  # keep the test signals alive
+        self.canvas = canvas
         item = types.SimpleNamespace(signals=[weakref.ref(s) for s in self._signals])
         self._impl_plot_cache_table = types.SimpleNamespace(
             get_cache_item=lambda impl: item)
 
     _invert_xy_zoom_to_time = BackendParserBase._invert_xy_zoom_to_time
+    _find_canvas_signal_by_alias = BackendParserBase._find_canvas_signal_by_alias
 
 
 class InvertXyZoomToTimeTest(unittest.TestCase):
@@ -434,6 +436,39 @@ class InvertXyZoomToTimeTest(unittest.TestCase):
         x = np.sin(np.linspace(0, 10, 50))
         host = _InvertHost([self._signal(x, t)])
         self.assertIsNone(host._invert_xy_zoom_to_time(None, -0.5, 0.5))
+
+    @staticmethod
+    def _canvas_with_dep(t_raw, x_raw, alias="T"):
+        dep = types.SimpleNamespace(alias=alias, alias_map={'time': 0, 'data': 1},
+                                    data_store=[np.asarray(t_raw), np.asarray(x_raw)])
+        return types.SimpleNamespace(
+            plots=[[types.SimpleNamespace(signals={1: [dep]})]])
+
+    def test_primary_path_uses_original_dependency_data(self):
+        """Monotonicity is decided on the dependency's ORIGINAL samples, before
+        time alignment: hold plateaus in the aligned result are irrelevant and
+        the time indexes are retrieved through the original (data, time) pairs,
+        exactly (mint#120)."""
+        t_raw = np.linspace(1_000_000, 2_000_000, 11)
+        x_raw = np.linspace(100.0, 200.0, 11)  # strictly increasing raw data
+        canvas = self._canvas_with_dep(t_raw, x_raw)
+        # Aligned X full of hold plateaus: must not degrade the mapping.
+        t_grid = np.linspace(1_000_000, 2_000_000, 101)
+        x_aligned = np.repeat(x_raw, 10)[:101]
+        host = _InvertHost([self._signal(x_aligned, t_grid)], canvas=canvas)
+        window = host._invert_xy_zoom_to_time(None, 120.0, 150.0)
+        self.assertIsNotNone(window)
+        self.assertAlmostEqual(window[0], 1_200_000, delta=1)
+        self.assertAlmostEqual(window[1], 1_500_000, delta=1)
+
+    def test_primary_path_rejects_non_monotonic_original_data(self):
+        """If the ORIGINAL data is not strictly increasing there is genuinely no
+        bijection; a (contrived) monotonic aligned X must not rescue it."""
+        t_raw = np.linspace(0, 100, 50)
+        canvas = self._canvas_with_dep(t_raw, np.sin(np.linspace(0, 10, 50)))
+        host = _InvertHost([self._signal(np.linspace(0.0, 1.0, 50), t_raw)],
+                           canvas=canvas)
+        self.assertIsNone(host._invert_xy_zoom_to_time(None, 0.2, 0.5))
 
     def test_sample_and_hold_plateaus_are_invertible(self):
         """Sample-and-hold realignment of a strictly increasing dependency
