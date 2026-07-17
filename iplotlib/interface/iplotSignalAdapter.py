@@ -314,7 +314,7 @@ class IplotSignalAdapter(ProcessingSignal):
                     logger.debug(f" in compute key={key} expr={expr}")
                     result = ParserHelper.evaluate(self, expr)
                     r_dbg = np.asarray(result)
-                    logger.info(f"mint#120: compute '{getattr(self, 'label', '?')}' {key}={expr} -> "
+                    logger.debug(f"mint#120: compute '{getattr(self, 'label', '?')}' {key}={expr} -> "
                                 f"n={r_dbg.size} dtype={r_dbg.dtype} "
                                 f"unit={getattr(result, 'unit', '?')} "
                                 f"min={r_dbg.min() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'} "
@@ -781,7 +781,7 @@ class IplotSignalAdapter(ProcessingSignal):
                 # over their new buffers (iplot-viz/mint#120).
                 self._ts_is_time_window = False
                 self.set_da_success()
-                logger.info(f"mint#120: forced reprocess of expression signal "
+                logger.debug(f"mint#120: forced reprocess of expression signal "
                             f"'{self.label}' over ts=({self.ts_start}, {self.ts_end})")
                 return True
             return False
@@ -1221,7 +1221,7 @@ class ParserHelper:
 
         if needs_realign and not ParserHelper.dict_result:
             kind = ParserHelper.resolve_alignment_kind(signal, dependencies)
-            logger.info(f"mint#120: evaluate '{expression}': realigning "
+            logger.debug(f"mint#120: evaluate '{expression}': realigning "
                         f"{[getattr(d, 'label', '?') for d in dependencies]} "
                         f"(time bases: {[(len(d.data_store[0]), getattr(d.data_store[0], 'unit', '?')) for d in dependencies]}, "
                         f"kind={kind})")
@@ -1260,7 +1260,7 @@ class ParserHelper:
                 if np.issubdtype(base_arr.dtype, np.number):
                     mask = (base_arr >= signal.ts_start) & (base_arr <= signal.ts_end)
                     if mask.any() and not mask.all():
-                        logger.info(f"mint#120: cropping '{expression}' result to ts window: "
+                        logger.debug(f"mint#120: cropping '{expression}' result to ts window: "
                                     f"{int(mask.sum())}/{len(result)} samples kept")
                         result = result[mask]
                         base_arr = base_arr[mask]

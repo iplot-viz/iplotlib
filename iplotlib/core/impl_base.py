@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import partial, wraps
+import logging
 import numpy as np
 from queue import Empty, Queue
 import re
@@ -413,7 +414,7 @@ class BackendParserBase(ABC):
                 if t_window[0] >= t_window[1]:
                     t_window = None
             if t_window is not None:
-                logger.info(f"mint#120: reverse zoom x=[{new_start}, {new_end}] -> "
+                logger.debug(f"mint#120: reverse zoom x=[{new_start}, {new_end}] -> "
                             f"time window [{t_window[0]}, {t_window[1]}]")
                 # Re-drive the update as a time-window zoom led by a time plot:
                 # the group re-forms around it and the whole propagation —
@@ -425,11 +426,11 @@ class BackendParserBase(ABC):
                 current_ipl_plot = self._impl_plot_cache_table.get_cache_item(base_impl).plot()
                 shared_plots = self._get_all_shared_axes(base_impl)
             else:
-                logger.info(f"mint#120: zoom on X-versus-Y plot kept local "
+                logger.debug(f"mint#120: zoom on X-versus-Y plot kept local "
                             f"(time base plot found={base_impl is not None}, "
                             f"invertible X-to-time mapping={t_window is not None})")
 
-        if use_shared:
+        if use_shared and logger.isEnabledFor(logging.DEBUG):
             member_dbg = []
             for _ip in shared_plots:
                 _pl = self._impl_plot_cache_table.get_cache_item(_ip).plot()
@@ -440,7 +441,7 @@ class BackendParserBase(ABC):
                 else:
                     _kind = 'follower'
                 member_dbg.append(f"{[s.label for st in _pl.signals.values() for s in st]}:{_kind}")
-            logger.info(f"mint#120: x-callback window [{new_start}, {new_end}] "
+            logger.debug(f"mint#120: x-callback window [{new_start}, {new_end}] "
                         f"group({len(shared_plots)})={member_dbg}")
 
         try:
@@ -617,7 +618,7 @@ class BackendParserBase(ABC):
         window itself (iplot-viz/mint#120).
         """
         signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
-        logger.info(f"mint#120: follow window [{begin}, {end}] for plot {getattr(plot, 'plot_title', None)}")
+        logger.debug(f"mint#120: follow window [{begin}, {end}] for plot {getattr(plot, 'plot_title', None)}")
 
         # 1. Refresh/reprocess all signals over the time window. No redraw yet:
         # drawing transforms the data by the axis offset (transform_data), so the
@@ -635,7 +636,7 @@ class BackendParserBase(ABC):
             else:
                 signal.set_xranges((begin, end))
             x_dbg = np.asarray(getattr(signal, 'x_data', []))
-            logger.info(f"mint#120: refreshed '{getattr(signal, 'label', '?')}' "
+            logger.debug(f"mint#120: refreshed '{getattr(signal, 'label', '?')}' "
                         f"ts=({getattr(signal, 'ts_start', '?')}, {getattr(signal, 'ts_end', '?')}) "
                         f"x: n={x_dbg.size} dtype={x_dbg.dtype} "
                         f"unit={getattr(getattr(signal, 'x_data', None), 'unit', '?')} "
@@ -666,7 +667,7 @@ class BackendParserBase(ABC):
             ci_dbg = self._impl_plot_cache_table.get_cache_item(impl_plot)
             if ci_dbg.offsets[0] is None:
                 ci_dbg.offsets[0] = self.create_offset((x_begin, x_end))
-            logger.info(f"mint#120: rescale x to [{x_begin}, {x_end}], "
+            logger.debug(f"mint#120: rescale x to [{x_begin}, {x_end}], "
                         f"keeping offset={ci_dbg.offsets[0]}")
             # Keep the existing axis offset rather than recomputing it
             # (set_oaw_axis_limits would). For non-date axes with large values
@@ -680,10 +681,10 @@ class BackendParserBase(ABC):
             begin_impl = self.transform_value(impl_plot, 0, x_begin, inverse=True)
             end_impl = self.transform_value(impl_plot, 0, x_end, inverse=True)
             self.set_impl_x_axis_limits(impl_plot, (begin_impl, end_impl))
-            logger.info(f"mint#120: impl xlim={self.get_impl_x_axis_limits(impl_plot)} "
+            logger.debug(f"mint#120: impl xlim={self.get_impl_x_axis_limits(impl_plot)} "
                         f"oaw xlim={self.get_oaw_axis_limits(impl_plot, 0)}")
         else:
-            logger.info(f"mint#120: no finite x range found (x_begin={x_begin}, x_end={x_end}); "
+            logger.debug(f"mint#120: no finite x range found (x_begin={x_begin}, x_end={x_end}); "
                         f"axis left unchanged")
 
         # 3. Redraw with the freshly reprocessed buffers and up-to-date offset.
