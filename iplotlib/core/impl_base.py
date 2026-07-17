@@ -1620,13 +1620,27 @@ class BackendParserBase(ABC):
         Implementations should set the y range
         """
 
+    def axis_uses_offset(self, impl_plot: Any, ax_idx: int) -> bool:
+        """
+        An offset may only be applied to an axis whose formatter knows how to add it back,
+        which is the date axis handled by `process_ipl_axis_formatter`. On any other axis the
+        subtraction would reach the view unanswered and the values would read as ~0, so a
+        signal that merely carries large numbers (e.g. nanosecond timestamps as its samples)
+        must be left untouched.
+        """
+        if ax_idx != 0:
+            return False
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci is not None else None
+        return bool(plot is not None and plot.axes and plot.axes[0].is_date)
+
     def set_oaw_axis_limits(self, impl_plot: Any, ax_idx: int, limits):
         """
         Offset-aware version of implementation's `set_impl_x_axis_limits`, `set_impl_y_axis_limits`
         The `oaw` in the function name stands for OffsetAWare.
         """
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        ci.offsets[ax_idx] = self.create_offset(limits)
+        ci.offsets[ax_idx] = self.create_offset(limits) if self.axis_uses_offset(impl_plot, ax_idx) else 0
 
         begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
         end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)

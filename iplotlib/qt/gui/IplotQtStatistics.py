@@ -176,8 +176,9 @@ class IplotQtStatistics(QWidget):
             # Relative time (pulse) - data is in seconds
             item = NumericTableWidgetItem(_fmt_duration(int(round(float(timestamp) * 1e9)), 1))
         else:
-            # not a time axis (e.g. plot temp versus current)
-            item = NumericTableWidgetItem(timestamp)
+            # not a time axis (e.g. plot temp versus current). Reuse the numeric formatting:
+            # the QTableWidgetItem constructor takes a C++ int, which overflows past 2^31.
+            return self._create_item(timestamp)
 
         item.setData(Qt.ItemDataRole.UserRole, timestamp)
         return item
