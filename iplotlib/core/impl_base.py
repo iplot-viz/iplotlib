@@ -389,18 +389,30 @@ class BackendParserBase(ABC):
 
         # Reverse direction (mint#120): a zoom made ON an X-versus-Y plot can
         # drive the shared-time group when the X column is invertible — it
-        # derives from data (e.g. '${A}.data') and increases strictly
-        # monotonically, so the selected X range maps back to a time window.
-        # Otherwise (non-monotonic X, or a data-independent expression such as
+        # derives from data (e.g. '${A}.data') and increases monotonically, so
+        # the selected X range maps back to a time window. Otherwise
+        # (non-monotonic X, or a data-independent expression such as
         # 'np.ones(10)') the zoom stays local and the other plots are untouched.
         if (use_shared
                 and not self._plot_x_is_time(current_ipl_plot)
                 and not self._plot_x_expr_yields_time(current_ipl_plot)):
-            t_window = self._invert_xy_zoom_to_time(current_plot, new_start, new_end)
-            base_impl = None
+            base_impl = self._find_shared_time_base_impl(current_ipl_plot)
+            t_window = None
+            if base_impl is not None:
+                t_window = self._invert_xy_zoom_to_time(current_plot, new_start, new_end)
             if t_window is not None:
-                base_impl = self._find_shared_time_base_impl(current_ipl_plot)
-            if t_window is not None and base_impl is not None:
+                # Clamp to the originally requested time range: the edge
+                # extrapolation of the mapping must never make the propagation
+                # request data beyond it — a shallow edge slope can otherwise
+                # blow the window up and hit the data server's reply limits
+                # ('Number of samples in reply exceeds available limit').
+                base_plot = self._impl_plot_cache_table.get_cache_item(base_impl).plot()
+                orig_begin, orig_end = base_plot.axes[0].get_limits('original')
+                if orig_begin is not None and orig_end is not None:
+                    t_window = (max(t_window[0], orig_begin), min(t_window[1], orig_end))
+                if t_window[0] >= t_window[1]:
+                    t_window = None
+            if t_window is not None:
                 logger.info(f"mint#120: reverse zoom x=[{new_start}, {new_end}] -> "
                             f"time window [{t_window[0]}, {t_window[1]}]")
                 # Re-drive the update as a time-window zoom led by a time plot:
@@ -413,9 +425,9 @@ class BackendParserBase(ABC):
                 current_ipl_plot = self._impl_plot_cache_table.get_cache_item(base_impl).plot()
                 shared_plots = self._get_all_shared_axes(base_impl)
             else:
-                logger.info(f"mint#120: zoom on X-versus-Y plot is not invertible "
-                            f"(t_window={t_window is not None}, time base plot="
-                            f"{base_impl is not None}); keeping it local")
+                logger.info(f"mint#120: zoom on X-versus-Y plot kept local "
+                            f"(time base plot found={base_impl is not None}, "
+                            f"invertible X-to-time mapping={t_window is not None})")
 
         if use_shared:
             member_dbg = []
@@ -480,13 +492,16 @@ class BackendParserBase(ABC):
 
         Possible only when the X column is invertible: it was evaluated over a
         known time base (pure expression signals retain it, see
-        ``_expr_time_base``) and is strictly monotonically increasing, so each X
-        value corresponds to exactly one time. Returns ``(t_begin, t_end)`` or
-        ``None`` when no signal of the plot provides an invertible mapping
-        (non-monotonic X, or a data-independent expression such as
-        'np.ones(10)', which has no time base at all). Ranges reaching beyond
-        the current data are linearly extrapolated from the edge slopes so that
-        zooming back out (and undo) can widen the window (mint#120).
+        ``_expr_time_base``) and increases monotonically. Plateaus introduced by
+        sample-and-hold realignment of a strictly increasing dependency are
+        tolerated (deduplicated to the first point of each hold run). Returns
+        ``(t_begin, t_end)`` or ``None`` when no signal of the plot provides an
+        invertible mapping — X decreasing somewhere (no unique time for a given
+        X), constant, or a data-independent expression such as 'np.ones(10)',
+        which has no time base at all. Ranges reaching beyond the current data
+        are linearly extrapolated from the edge slopes so that zooming back out
+        (and undo) can widen the window; the caller clamps the result to the
+        originally requested range (mint#120).
         """
         signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
         for signal_ref in signals:
@@ -502,8 +517,21 @@ class BackendParserBase(ABC):
                 continue
             finite = np.isfinite(x_data) & np.isfinite(t_data)
             xf, tf = x_data[finite], t_data[finite]
-            if xf.size < 2 or not np.all(np.diff(xf) > 0):
-                # Not a bijection: no unique time for a given X.
+            if xf.size < 2:
+                continue
+            dx = np.diff(xf)
+            if np.any(dx < 0) or not np.any(dx > 0):
+                # Not invertible: decreasing somewhere (no unique time for a
+                # given X) or constant everywhere (e.g. 'np.ones(10)').
+                continue
+            # Monotonic but with plateaus: sample-and-hold realignment repeats
+            # the low-rate X value on the fine union grid even when the
+            # underlying data is strictly increasing. Keep the first point of
+            # each hold run — the residual time ambiguity within a plateau is at
+            # most one hold interval, the best resolution available.
+            keep = np.concatenate(([True], dx > 0))
+            xf, tf = xf[keep], tf[keep]
+            if xf.size < 2:
                 continue
 
             def x_to_t(x):

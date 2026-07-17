@@ -394,7 +394,8 @@ class _InvertHost:
 
     def __init__(self, signals):
         import weakref
-        item = types.SimpleNamespace(signals=[weakref.ref(s) for s in signals])
+        self._signals = list(signals)  # keep the test signals alive
+        item = types.SimpleNamespace(signals=[weakref.ref(s) for s in self._signals])
         self._impl_plot_cache_table = types.SimpleNamespace(
             get_cache_item=lambda impl: item)
 
@@ -433,6 +434,22 @@ class InvertXyZoomToTimeTest(unittest.TestCase):
         x = np.sin(np.linspace(0, 10, 50))
         host = _InvertHost([self._signal(x, t)])
         self.assertIsNone(host._invert_xy_zoom_to_time(None, -0.5, 0.5))
+
+    def test_sample_and_hold_plateaus_are_invertible(self):
+        """Sample-and-hold realignment of a strictly increasing dependency
+        repeats X values on the fine union grid; the mapping must tolerate
+        those plateaus (mint#120: '${A}.data incremented monotonically was
+        reported not invertible' after a kind=previous realign)."""
+        t = np.linspace(1_000_000, 2_000_000, 101)  # fine union grid
+        x = np.repeat(np.linspace(100.0, 200.0, 11), 10)[:101]  # 10-sample holds
+        x[-1] = 200.0
+        host = _InvertHost([self._signal(x, t)])
+        window = host._invert_xy_zoom_to_time(None, 120.0, 150.0)
+        self.assertIsNotNone(window)
+        # First point of each hold run: within one hold interval of the ideal.
+        self.assertAlmostEqual(window[0], 1_200_000, delta=110_000)
+        self.assertAlmostEqual(window[1], 1_500_000, delta=110_000)
+        self.assertLess(window[0], window[1])
 
     def test_data_independent_x_is_not_invertible(self):
         # e.g. x_expr='np.ones(10)': no dependency, hence no time base retained.

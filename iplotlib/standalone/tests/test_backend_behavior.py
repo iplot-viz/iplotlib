@@ -788,6 +788,19 @@ class SharedXAxisTest(unittest.TestCase):
                 self.assertAlmostEqual(tot_sig.ts_end, ts_start + 0.60 * span,
                                        delta=0.02 * span)
 
+                # Zooming far out on the XY plot: the edge-extrapolated window
+                # must be clamped to the originally requested time range so the
+                # propagation never requests data beyond it (UDA reply limits).
+                x_span = float(x.max() - x.min())
+                parser.set_oaw_axis_limits(
+                    tot_impl, 0, (float(x.min()) - 10 * x_span,
+                                  float(x.max()) + 10 * x_span))
+                BackendParserBase._x_axis_update_callback(parser, tot_impl)
+                self.app.processEvents()
+                t_begin, t_end = parser.get_oaw_axis_limits(time_impl, 0)
+                self.assertGreaterEqual(t_begin, ts_start - 1e9)
+                self.assertLessEqual(t_end, ts_end + 1e9)
+
     def test_reverse_zoom_stays_local_when_x_is_not_invertible(self):
         """Zooming ON an X-versus-Y plot whose X column is not a bijection (here
         a sine of time) must stay local: the time plots keep their window."""
