@@ -1846,7 +1846,10 @@ class PyQtGraphParser(BackendParserBase):
                 continue
 
             spacing, values = tv[0]
-            labels = ax.tickStrings(values, scale=1.0, spacing=spacing)
+            # Measure with the same scale generateDrawSpecs will draw with (tickValues
+            # above just refreshed autoSIPrefixScale); a narrower width would make the
+            # AxisItem bounding-rect check cull every label.
+            labels = ax.tickStrings(values, scale=ax.autoSIPrefixScale * ax.scale, spacing=spacing)
 
             # Measure tick label text width
             fm = QFontMetricsF(ax.style.get('tickFont') or QtWidgets.QApplication.font())
