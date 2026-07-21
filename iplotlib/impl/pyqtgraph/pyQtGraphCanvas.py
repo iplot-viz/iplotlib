@@ -180,6 +180,10 @@ class PyQtGraphParser(BackendParserBase):
         if canvas:
             self.process_ipl_canvas(canvas)
 
+        if kwargs.get('autoscale', False):
+            # Force an 'Autoscale All' on the exported image only (CLI export option).
+            self.autoscale_all_plots()
+
         ext = os.path.splitext(filename)[1].lower() if '.' in filename else '.png'
         if ext == '.svg':
             from pyqtgraph.exporters import SVGExporter

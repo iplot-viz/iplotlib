@@ -402,5 +402,59 @@ class LogScaleInvalidationTest(unittest.TestCase):
         self.assertEqual([id(p) for p in changed], [id(canvas.plots[0][1])])
 
 
+class MinimapFontSizeTest(unittest.TestCase):
+    """The minimap must reuse the main plot's font size (issue #141), for both
+    backends, so its ticks stay legible on high-DPI screens and follow the
+    single font-size setting instead of a hard-coded value."""
+
+    BACKENDS = ('matplotlib', 'pyqt')
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def _qt_canvas(self, backend, core):
+        qt_canvas = IplotQtCanvasFactory.new(backend, canvas=core)
+        qt_canvas.set_canvas(qt_canvas.get_canvas())
+        self.app.processEvents()
+        return qt_canvas
+
+    def test_minimap_inherits_canvas_font_size(self):
+        for backend in self.BACKENDS:
+            with self.subTest(backend=backend):
+                core = _canvas_with_signal()
+                core.font_size = 14
+                qt_canvas = self._qt_canvas(backend, core)
+                try:
+                    target = core.get_minimap_target_plot()
+                    self.assertEqual(qt_canvas._minimap_font_size(target), 14)
+                finally:
+                    qt_canvas.deleteLater()
+
+    def test_minimap_plot_font_size_overrides_canvas(self):
+        for backend in self.BACKENDS:
+            with self.subTest(backend=backend):
+                core = _canvas_with_signal()
+                core.font_size = 10
+                target = core.get_minimap_target_plot()
+                target.font_size = 22
+                qt_canvas = self._qt_canvas(backend, core)
+                try:
+                    self.assertEqual(qt_canvas._minimap_font_size(target), 22)
+                finally:
+                    qt_canvas.deleteLater()
+
+    def test_minimap_font_size_falls_back_to_default(self):
+        for backend in self.BACKENDS:
+            with self.subTest(backend=backend):
+                core = _canvas_with_signal()  # no font_size set anywhere
+                qt_canvas = self._qt_canvas(backend, core)
+                try:
+                    target = core.get_minimap_target_plot()
+                    self.assertEqual(qt_canvas._minimap_font_size(target), 8)
+                finally:
+                    qt_canvas.deleteLater()
+
+
 if __name__ == '__main__':
     unittest.main()
