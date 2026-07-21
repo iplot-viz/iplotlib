@@ -14,6 +14,7 @@ from PySide6.QtCore import QMargins, Qt, Signal
 from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QWidget
 
 from PySide6.QtGui import QCloseEvent, QShowEvent
+from iplotlib.core.canvas import Canvas
 from iplotlib.core.command import IplotCommand
 from iplotlib.core.signal import Signal as IplotSignal
 
@@ -69,9 +70,7 @@ class IplotQtMainWindow(QMainWindow):
         self.toolBar.homeAction.triggered.connect(self.home)
         self.toolBar.statistics.triggered.connect(self.show_stats)
         self.toolBar.minimapAction.toggled.connect(self.on_minimap_toggled)
-        self.toolBar.toolActivated.connect(
-            lambda tool_name:
-            [self.canvasStack.widget(i).set_mouse_mode(tool_name) for i in range(self.canvasStack.count())])
+        self.toolBar.toolActivated.connect(self.on_tool_activated)
         self.canvasStack.canvasAdded.connect(self.on_canvas_add)
         self.canvasStack.currentChanged.connect(lambda idx: self.check_history(self.canvasStack.widget(idx)))
         self.canvasStack.currentChanged.connect(lambda _: self.refresh_minimap_availability())
@@ -83,6 +82,18 @@ class IplotQtMainWindow(QMainWindow):
             [self.prefWindow.show(),
              self.prefWindow.raise_(),
              self.prefWindow.activateWindow()])
+
+    def on_tool_activated(self, tool_name: str):
+        """Apply the selected tool to every canvas; re-clicking the active
+        RULER tool surfaces its window (the activation opens it behind the
+        canvas). Detected here rather than in set_mouse_mode, which canvas
+        reloads re-invoke with the current mode."""
+        current = self.canvasStack.currentWidget()
+        re_clicked = current is not None and getattr(current, '_mmode', None) == tool_name
+        for i in range(self.canvasStack.count()):
+            self.canvasStack.widget(i).set_mouse_mode(tool_name)
+        if re_clicked and tool_name == Canvas.MOUSE_MODE_RULER:
+            current.show_ruler_window()
 
     def undo(self):
         w = self.canvasStack.currentWidget()

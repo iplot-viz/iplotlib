@@ -121,5 +121,29 @@ class FormatterSpacingLabelTest(unittest.TestCase):
         self.assertEqual(fmt.get_spacing_label(), '')
 
 
+class FormatterTickValuesTest(unittest.TestCase):
+    """tickValues reuses the previous ticks when only the range shifts (panning).
+    If a shift leaves a single surviving tick, the step must not be read from a
+    second, non-existent tick — otherwise pan/undo raises IndexError mid-paint."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def test_pan_leaving_one_surviving_tick_does_not_raise(self):
+        fmt = _formatter()
+        fmt.n_ticks = 7
+        fmt.tickValues(0.0, 100.0, 500.0)          # seed ticks across [0, 100]
+        fmt.tickValues(90.0, 190.0, 500.0)         # same span shifted: one survivor
+
+    def test_pan_still_produces_ticks_after_one_survivor(self):
+        fmt = _formatter()
+        fmt.n_ticks = 7
+        fmt.tickValues(0.0, 100.0, 500.0)
+        levels = fmt.tickValues(90.0, 190.0, 500.0)
+        ticks = [v for _, group in levels for v in group]
+        self.assertGreater(len(ticks), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

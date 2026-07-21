@@ -14,6 +14,22 @@ from iplotLogging import setupLogger
 logger = setupLogger.get_logger(__name__)
 
 
+def get_values_from_line(lines, x_value):
+    """Nearest (x, y) sample of a signal line (or envelope pair, averaged) to *x_value*."""
+    if len(lines) == 1:
+        x, y = lines[0].get_xdata(), lines[0].get_ydata()
+    else:
+        x = lines[0].get_xdata()
+        y = (lines[0].get_ydata() + lines[1].get_ydata()) / 2
+    ix = np.searchsorted(x, x_value)
+    if ix == len(x):
+        ix = len(x) - 1
+    # Either return values at index or values at index-1
+    if ix > 0 and abs(x[ix - 1] - x_value) < abs(x[ix] - x_value):
+        ix = ix - 1
+    return x[ix], y[ix]
+
+
 class IplotMultiCursor(Widget):
     """
     Provide a vertical (default) and/or horizontal line cursor shared between
@@ -196,21 +212,6 @@ class IplotMultiCursor(Widget):
         self.disconnect()
 
     def on_move(self, event):
-        def get_values_from_line(lines, x_value):
-            if len(lines) == 1:
-                x, y = lines[0].get_xdata(), lines[0].get_ydata()
-            else:
-                x = lines[0].get_xdata()
-                y = (lines[0].get_ydata() + lines[1].get_ydata()) / 2
-            ix = np.searchsorted(x, x_value)
-            if ix == len(x):
-                ix = len(x) - 1
-
-            # Either return values at index or values at index-1
-            if ix > 0 and abs(x[ix - 1] - x_value) < abs(x[ix] - x_value):
-                ix = ix - 1
-            return x[ix], y[ix]
-
         if self.ignore(event):
             return
         if event.inaxes is None:
@@ -296,7 +297,8 @@ class IplotMultiCursor(Widget):
                         x_min, x_max = ax.get_xbound()
                         if dx < (x_max - x_min) * self.val_tolerance:
                             annotation.set_position(values)
-                            annotation.set_text(ax.format_ydata(values[1]))
+                            # 6 significant digits, like the pyqtgraph crosshair.
+                            annotation.set_text(f"{values[1]:.6g}")
                         else:
                             annotation.set_visible(False)
                     else:

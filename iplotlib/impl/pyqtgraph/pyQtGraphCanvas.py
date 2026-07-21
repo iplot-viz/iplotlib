@@ -3,7 +3,7 @@
 import gc
 import os
 from datetime import datetime
-from typing import Any, Callable, Collection, List, Tuple
+from typing import Any, Callable, Collection, Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
@@ -31,6 +31,7 @@ from iplotlib.core import (Axis,
                            SignalXY,
                            SignalContour)
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
+from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter, is_time_label
 
 logger = setupLogger.get_logger(__name__)
@@ -99,6 +100,11 @@ class QtViewBox(pg.ViewBox):
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
 
+    def mouseDoubleClickEvent(self, ev):
+        # Skip super(): its default re-invokes mousePressEvent, emitting `pressed`
+        # twice and duplicating the action. Emit once here.
+        self.pressed.emit(self, ev)
+
     def mouseMoveEvent(self, ev):
         super().mouseMoveEvent(ev)
         # Emit dragged signal when mouse moves (for drag preview)
@@ -135,6 +141,7 @@ class PyQtGraphParser(BackendParserBase):
         self.legend_size = 8
         self._cursors = []
         self._cursor_active = False
+        self._rulers = []  # type: List[pyQtRuler]
         self._grid_spacing_labels = {}  # PlotItem -> TextItem
         self._cell_gl = {}
         self._layout_stacks = {}
@@ -1134,6 +1141,7 @@ class PyQtGraphParser(BackendParserBase):
                 self.align_y_axis(c)
                 break
         self.update_grid_spacing_label(current_plot)
+        self.refresh_rulers(current_plot)
 
     def _x_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
@@ -1141,6 +1149,7 @@ class PyQtGraphParser(BackendParserBase):
         current_plot = view_box.parentItem()  # type: PlotItem
         super()._x_axis_update_callback(current_plot)
         self.update_grid_spacing_label(current_plot)
+        self.refresh_rulers(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':
@@ -1295,6 +1304,11 @@ class PyQtGraphParser(BackendParserBase):
         for c in self._cursors:
             c.remove()
         self._cursors.clear()
+
+        # remove any active rulers (impl items only — Plot.rulers data is preserved)
+        for r in self._rulers:
+            r.remove()
+        self._rulers.clear()
 
         self._cell_gl = {}
         self._layout_stacks = {}
@@ -1765,6 +1779,113 @@ class PyQtGraphParser(BackendParserBase):
 
         self._cursors.clear()
         self._cursor_active = False
+
+    def _ruler_value_lines(self, impl_plot: PlotItem) -> list:
+        """Signal PlotDataItems of *impl_plot*, one per ruler value label
+        (mirrors the crosshair's value annotations)."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        lines = []
+        if ci and hasattr(ci, 'signals') and ci.signals:
+            for sig_ref in ci.signals:
+                signal = sig_ref()
+                if not signal or isinstance(signal, SignalContour):
+                    continue
+                for line in getattr(signal, 'lines', []):
+                    item = line[0] if isinstance(line, list) else line
+                    if isinstance(item, PlotDataItem):
+                        lines.append(item)
+        return lines
+
+    def _ruler_signal_values(self, impl_plot: PlotItem, x: float) -> Dict[str, float]:
+        """Value of each signal at the ruler X keyed by its label, matching the
+        ruler's green value labels. A signal is omitted when the ruler falls off
+        its data, so the table agrees with what the plot shows."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        values: Dict[str, float] = {}
+        if not ci or not getattr(ci, 'signals', None):
+            return values
+        for sig_ref in ci.signals:
+            signal = sig_ref()
+            if not signal or isinstance(signal, SignalContour):
+                continue
+            for line in getattr(signal, 'lines', []):
+                item = line[0] if isinstance(line, list) else line
+                if not isinstance(item, PlotDataItem):
+                    continue
+                x_data, y_data = item.getData()
+                if x_data is None or len(x_data) == 0:
+                    continue
+                # Nearest sample (searchsorted+clamp, as the value labels do).
+                idx = np.searchsorted(x_data, x, side="left")
+                if 0 < idx < len(x_data) and abs(x - x_data[idx - 1]) < abs(x - x_data[idx]):
+                    idx -= 1
+                idx = min(idx, len(x_data) - 1)
+                span = abs(x_data[-1] - x_data[0])
+                # Data-span tolerance (view-independent so the cell is stable on
+                # zoom); mirrors the 5% used by the value labels.
+                if span and abs(x - x_data[idx]) <= span * 0.05:
+                    values[signal.label or 'signal'] = float(y_data[idx])
+                break
+        return values
+
+    @BackendParserBase.run_in_one_thread
+    def add_ruler(self, impl_plot: PlotItem, name: str, x: float, y: float,
+                  color: str = "#FFFFFF", is_echo: bool = False) -> pyQtRuler:
+        font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
+        ruler = pyQtRuler(plot=impl_plot, name=name, xy=(x, y), color=color, font_size=font_size,
+                          value_lines=self._ruler_value_lines(impl_plot))
+        ruler.abs_x = self.transform_value(impl_plot, 0, x)
+        ruler.abs_y = self.transform_value(impl_plot, 1, y)
+        ruler.is_echo = is_echo
+        self._rulers.append(ruler)
+        return ruler
+
+    def create_ruler_echoes(self, origin_impl_plot: PlotItem, name: str,
+                            x_abs: float, y_abs: float, color: str):
+        """Mirror a ruler onto every plot sharing the time axis. Each echo carries
+        the same absolute X/Y and re-projects them to its own plot's offsets."""
+        if not self._pm.get_value(self.canvas, 'shared_x_axis'):
+            return
+        for sibling in self._get_all_shared_axes(origin_impl_plot):
+            if sibling is origin_impl_plot:
+                continue
+            x_view = self.transform_value(sibling, 0, x_abs, inverse=True)
+            y_view = self.transform_value(sibling, 1, y_abs, inverse=True)
+            self.add_ruler(sibling, name, x_view, y_view, color, is_echo=True)
+
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler(self, impl_plot: PlotItem, name: str):
+        remaining = []
+        for r in self._rulers:
+            if r.plot is impl_plot and r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler_by_name(self, name: str):
+        """Remove a ruler and its shared-x echoes across every plot (names are
+        canvas-global unique)."""
+        remaining = []
+        for r in self._rulers:
+            if r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
+    def refresh_rulers(self, impl_plot: PlotItem = None):
+        for r in self._rulers:
+            if impl_plot is None or r.plot is impl_plot:
+                r.xy = (self.transform_value(r.plot, 0, r.abs_x, inverse=True),
+                        self.transform_value(r.plot, 1, r.abs_y, inverse=True))
+                r.refresh_labels()
+
+    def get_rulers(self, impl_plot: PlotItem = None) -> List[pyQtRuler]:
+        if impl_plot is None:
+            return list(self._rulers)
+        return [r for r in self._rulers if r.plot is impl_plot]
 
     def get_impl_x_axis(self, plot: PlotItem) -> AxisItem:
         return plot.getAxis('bottom')
