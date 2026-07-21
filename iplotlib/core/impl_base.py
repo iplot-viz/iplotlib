@@ -201,11 +201,11 @@ class BackendParserBase(ABC):
         else:
             y_displayed = []
 
-        # Check if the visible Y data contains valid values
+        # Drop NaNs before the emptiness check: an all-NaN window (e.g.
+        # pyqtgraph log mode) would make np.min raise.
+        if len(y_displayed) > 0 and np.isnan(y_displayed).any():
+            y_displayed = y_displayed[~np.isnan(y_displayed)]
         if len(y_displayed) > 0:
-            # Check if there exist NaN values in the y_displayed array
-            if np.isnan(y_displayed).any():
-                y_displayed = y_displayed[~np.isnan(y_displayed)]
             min_bot = np.min(y_displayed)
             max_top = np.max(y_displayed)
         else:
@@ -600,9 +600,17 @@ class BackendParserBase(ABC):
 
                 # Adjust initial padding for Y axis
                 if ax_idx == 1 and not (isinstance(plot, PlotContour) or isinstance(plot, PlotImage)):
-                    h = end - begin
-                    begin = begin - 0.1 * h if padding_begin else begin
-                    end = end + 0.1 * h if padding_end else end
+                    if self._pm.get_value(plot, 'log_scale') and begin > 0 and end > begin:
+                        # Pad multiplicatively on a log axis: a linear margin
+                        # would go non-positive and degrade to the backend's
+                        # own autorange.
+                        factor = (end / begin) ** 0.1
+                        begin = begin / factor if padding_begin else begin
+                        end = end * factor if padding_end else end
+                    else:
+                        h = end - begin
+                        begin = begin - 0.1 * h if padding_begin else begin
+                        end = end + 0.1 * h if padding_end else end
             else:
                 begin, end = axis.begin, axis.end
 

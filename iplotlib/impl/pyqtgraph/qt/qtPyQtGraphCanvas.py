@@ -446,6 +446,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 # Create and draw marker
                 x = self._parser.transform_value(ax, 0, xy[0], inverse=True)
                 y = xy[1]
+                # Marker coordinates are data-space; the log-mode view is log10.
+                if ax.getAxis('left').logMode and y > 0:
+                    y = np.log10(y)
 
                 marker_text = TextItem(anchor=(0.5, 0.5),
                                        html=f"""<div style="
@@ -961,7 +964,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
                     system_coord = view_box.mapSceneToView(event.scenePos())
                     x_value = system_coord.x()
-                    y_value = system_coord.y()
+                    y_value = self._view_to_data_y(impl_plot, system_coord.y())
 
                     new_marker, marker_signal, label_line = self._parser.add_marker_scaled(impl_plot, plot, x_value,
                                                                                            y_value)
@@ -1005,7 +1008,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                             is_datetime = False
                         system_coord = view_box.mapSceneToView(event.scenePos())
                         x_coord = system_coord.x()
-                        self._start_drag_shift(impl_plot, signal, y_coord, is_datetime, start_x=x_coord)
+                        self._start_drag_shift(impl_plot, signal, self._view_to_data_y(impl_plot, y_coord),
+                                               is_datetime, start_x=x_coord)
                         event.accept()
                     elif ci and hasattr(ci, 'signals') and ci.signals:
                         # Hit-test doesn't find envelope signals (no standard lines).
@@ -1032,7 +1036,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
                 system_coord = view_box.mapSceneToView(event.scenePos())
                 x_value = system_coord.x()
-                y_value = system_coord.y()
+                y_value = self._view_to_data_y(impl_plot, system_coord.y())
 
                 if self._dist_calculator.plot1 is not None:
                     try:
@@ -1082,7 +1086,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             if event is not None:
                 system_coord = view_box.mapSceneToView(event.scenePos())
                 x_value = system_coord.x()
-                y_value = system_coord.y()
+                y_value = self._view_to_data_y(impl_plot, system_coord.y())
                 self._end_drag_shift(y_value, x_value)
             else:
                 self._cancel_drag_shift()
@@ -1161,6 +1165,14 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def mouse_moved(self, pos):
         pass
 
+    @staticmethod
+    def _view_to_data_y(impl_plot, y_value):
+        """ViewBox Y coordinates are log10 of the data when the axis is in log
+        mode; interaction values (markers, distances, shifts) are data-space."""
+        if impl_plot.getAxis('left').logMode:
+            return 10.0 ** min(y_value, 300.0)
+        return y_value
+
     def _impl_mouse_drag_handler(self, view_box, event):
         """Handle mouse drag events for ruler drag and drag-shift preview."""
         if self._ruler_drag is not None:
@@ -1181,7 +1193,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         x_value = system_coord.x()
         y_value = system_coord.y()
         if y_value is not None:
-            self._update_drag_shift(y_value, x_value)
+            self._update_drag_shift(self._view_to_data_y(impl_plot, y_value), x_value)
 
     def _on_legend_right_click(self, signal, screen_pos):
         """Handle right-click on a legend item to open signal preferences."""
@@ -1250,7 +1262,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             return
 
         original_line = signal.lines[0]
-        x_data, y_data = original_line.getData()
+        # The shift is a data-space offset: read source data and let the plot
+        # call below re-apply any log mapping.
+        from iplotlib.qt.gui.IplotQtStatistics import _line_source_data
+        x_data, y_data = _line_source_data(original_line)
         if x_data is None or y_data is None:
             return
 

@@ -598,11 +598,17 @@ class PyQtGraphParser(BackendParserBase):
                 curves.append(iso_curve)
         return curves
 
+    def _mesh_y(self, impl_plot: PlotItem, y_data):
+        # PColorMeshItem has no setLogMode: map into log-space view by hand.
+        if impl_plot.getAxis('left').logMode:
+            return np.log10(y_data)
+        return y_data
+
     def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
         area = shapes[0][3]
-        if isinstance(area, _AlphaColorMeshItem):
+        if isinstance(area, _AlphaColorMeshItem) and len(x_data) >= 2:
             x_mesh = np.vstack([x_data, x_data])
-            y_mesh = np.vstack([y2_data, y1_data])
+            y_mesh = np.vstack([self._mesh_y(impl_plot, y2_data), self._mesh_y(impl_plot, y1_data)])
             z_mesh = np.ones((1, len(x_data) - 1))
             area.setData(x_mesh, y_mesh, z_mesh)
 
@@ -620,14 +626,16 @@ class PyQtGraphParser(BackendParserBase):
         rgba = np.array([[qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255)]])
         cmap = pg.ColorMap([0.0, 1.0], np.vstack([rgba, rgba]))
 
-        # Build mesh grids
-        x_mesh = np.vstack([x_data, x_data])
-        y_mesh = np.vstack([y2_data, y1_data])
-        z_mesh = np.ones((1, len(x_data) - 1))
+        area = None
+        if len(x_data) >= 2:
+            # Build mesh grids
+            x_mesh = np.vstack([x_data, x_data])
+            y_mesh = np.vstack([self._mesh_y(impl_plot, y2_data), self._mesh_y(impl_plot, y1_data)])
+            z_mesh = np.ones((1, len(x_data) - 1))
 
-        area = _AlphaColorMeshItem(x_mesh, y_mesh, z_mesh, colorMap=cmap, edgecolors=None)
-        area.setZValue(-1)
-        impl_plot.addItem(area)
+            area = _AlphaColorMeshItem(x_mesh, y_mesh, z_mesh, colorMap=cmap, edgecolors=None)
+            area.setZValue(-1)
+            impl_plot.addItem(area)
 
         plot_lines = [curve_1 + curve_2 + curve_3 + [area]]
 
@@ -1158,9 +1166,17 @@ class PyQtGraphParser(BackendParserBase):
         if log_scale:
             plot_item = axis_item.parentItem()
             plot_item.setLogMode(x=False, y=True)
+            # updateLogMode enables auto-range on both axes; X limits were
+            # already applied, so freeze X again to keep the requested window.
+            plot_item.getViewBox().enableAutoRange(x=False)
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, axis_item: AxisItem):
-        tick_props = dict(maxTickLevel=0)
+        if axis_item.logMode:
+            # Draw the minor decade ticks, which is what gives a log axis its
+            # spacing, but label only the decades as matplotlib does.
+            tick_props = dict(maxTickLevel=2, maxTextLevel=1)
+        else:
+            tick_props = dict(maxTickLevel=0)
         show_all_ticks = self._pm.get_value(self.canvas, 'ticks_position')
 
         # Set ticks on the top and right axis
@@ -1273,6 +1289,9 @@ class PyQtGraphParser(BackendParserBase):
                     # Draw marker with correct offset to right display
                     x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
                     y = marker.xy[1]
+                    # Marker coordinates are data-space; the log-mode view is log10.
+                    if impl_plot.getAxis('left').logMode and y > 0:
+                        y = np.log10(y)
 
                     # Create annotation if not present (import case)
                     if marker.name not in annotations_names:
@@ -1532,7 +1551,14 @@ class PyQtGraphParser(BackendParserBase):
         bot, top = super().autoscale_y_axis(impl_plot)
         vb = impl_plot.getViewBox()
 
-        # Set new Y axis limits
+        if impl_plot.getAxis('left').logMode:
+            # get_impl_data returns display data, already log10-mapped in log
+            # mode: bot/top are exponents, and setYRange pads in log space.
+            if np.isfinite(bot) and np.isfinite(top):
+                vb.setYRange(bot, top, padding=padding)
+            else:
+                vb.enableAutoRange(axis='y')
+            return
         vb.setYRange(bot, top, padding=padding)
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
@@ -1896,8 +1922,12 @@ class PyQtGraphParser(BackendParserBase):
     def get_impl_y_axis(self, plot: PlotItem) -> AxisItem:
         return plot.getAxis('left')
 
-    def get_impl_y_axis_limits(self, plot: PlotItem) -> AxisItem:
-        return plot.getViewBox().viewRange()[1]
+    def get_impl_y_axis_limits(self, plot: PlotItem) -> Tuple[float, float]:
+        lo, hi = plot.getViewBox().viewRange()[1]
+        if plot.getAxis('left').logMode:
+            # Clamped so float ** cannot raise OverflowError.
+            return 10 ** min(lo, 300.0), 10 ** min(hi, 300.0)
+        return lo, hi
 
     def set_impl_x_axis_label_text(self, plot: PlotItem, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(plot)
@@ -1931,9 +1961,17 @@ class PyQtGraphParser(BackendParserBase):
         self.process_ipl_axis_params_label(self.get_impl_y_axis(plot), text, fc, fs)
 
     def set_impl_y_axis_limits(self, plot: PlotItem, limits: tuple):
-        if isinstance(plot, PlotItem):
-            vb = plot.getViewBox()
-            vb.setYRange(limits[0], limits[1], padding=0)
+        if not isinstance(plot, PlotItem):
+            return
+        vb = plot.getViewBox()
+        if plot.getAxis('left').logMode:
+            lo, hi = limits
+            if lo is not None and hi is not None and lo > 0 and hi > 0:
+                vb.setYRange(np.log10(lo), np.log10(hi), padding=0)
+            else:
+                vb.enableAutoRange(axis='y')
+            return
+        vb.setYRange(limits[0], limits[1], padding=0)
 
     def align_y_axis(self, col: int) -> None:
         """

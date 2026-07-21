@@ -3,7 +3,14 @@ import tempfile
 import unittest
 
 import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.ticker import MaxNLocator, LogLocator, LogFormatterSciNotation
+
 from iplotDataAccess.dataAccess import DataAccess
+from iplotlib.core import PlotXY
+from iplotlib.core.axis import LinearAxis
+from iplotlib.impl.matplotlib.dateFormatter import ExponentScalarFormatter
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.impl.matplotlib.tests.QAppOffscreenTestAdapter import QAppOffscreenTestAdapter
 from iplotlib.interface import AccessHelper
@@ -139,6 +146,130 @@ class MatplotlibTesting(QAppOffscreenTestAdapter):
             self.assertEqual(np.shape(dobj.ydata), expected_y_shape)
             self.assertIsInstance(dobj.xdata, (np.ndarray, list))
             self.assertIsInstance(dobj.ydata, (np.ndarray, list))
+
+
+class LogScaleAxisTests(QAppOffscreenTestAdapter):
+    """Log-scale Y axis behaviour: the scale keeps its own locators, so ticks
+    read as powers of ten with the minor ticks that give the log spacing, and
+    non-positive bounds fall back to autoscale."""
+
+    @staticmethod
+    def _new_axes():
+        fig = Figure()
+        FigureCanvasAgg(fig)  # real renderer so draws update tick labels/offset
+        return fig.add_subplot()
+
+    @staticmethod
+    def _log_axis(parser, ax):
+        y_axis = ax.get_yaxis()
+        parser.process_ipl_log_axis(y_axis, PlotXY(log_scale=True))
+        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
+        return y_axis
+
+    def test_log_axis_keeps_scale_locators(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        y_axis = self._log_axis(parser, ax)
+        self.assertEqual(ax.get_yscale(), 'log')
+        # The linear axis locator/formatter must not overwrite the log ones.
+        self.assertIsInstance(y_axis.get_major_locator(), LogLocator)
+        self.assertIsInstance(y_axis.get_major_formatter(), LogFormatterSciNotation)
+
+    def test_log_axis_multidecade_ticks_are_powers_of_ten(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        y_axis = self._log_axis(parser, ax)
+        ax.set_ylim(1e-2, 1e4)
+        ax.figure.canvas.draw()
+        self.assertEqual([t.get_text() for t in y_axis.get_majorticklabels()
+                          if t.get_text()][:3],
+                         ['$\\mathdefault{10^{-3}}$', '$\\mathdefault{10^{-2}}$',
+                          '$\\mathdefault{10^{-1}}$'])
+        # Minor ticks are what make the log spacing visible.
+        self.assertGreater(len(y_axis.get_minorticklocs()), 10)
+
+    def test_log_axis_subdecade_labels_intermediate_ticks(self):
+        # A view narrower than a decade contains no power of ten, so the
+        # intermediate ticks carry the labels.
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        y_axis = self._log_axis(parser, ax)
+        ax.set_ylim(1.12e-4, 2.08e-4)
+        ax.figure.canvas.draw()
+        labels = [t.get_text() for t in y_axis.get_minorticklabels() if t.get_text()]
+        self.assertIn('$\\mathdefault{1.2\\times10^{-4}}$', labels)
+        self.assertIn('$\\mathdefault{2\\times10^{-4}}$', labels)
+
+    def test_log_formatter_readout_is_full_data_value(self):
+        # Crosshair value labels go through Axes.format_ydata.
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        self._log_axis(parser, ax)
+        ax.set_ylim(1.12e-4, 2.08e-4)
+        ax.figure.canvas.draw()
+        self.assertEqual(ax.format_ydata(1.5e-4), '0.00015')
+
+    def test_log_crosshair_reads_plain_value_between_decades(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        y_axis = self._log_axis(parser, ax)
+        ax.set_ylim(5e-2, 2e4)
+        ax.figure.canvas.draw()
+        # The tick formatter labels only decades over such a range.
+        self.assertEqual(y_axis.get_major_formatter()(4.39), '')
+        self.assertEqual(ax.format_ydata(4.39), '4.39')
+
+    def test_autoscale_log_pads_multiplicatively_and_skips_non_positive(self):
+        from iplotlib.core.impl_base import ImplementationPlotCacheItem
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        ax._ipl_cache_item = ImplementationPlotCacheItem()
+        ax.plot([0.0, 1.0, 2.0, 3.0], [-5.0, 10.0, 100.0, 10000.0])
+        ax.set_yscale('log')
+        ax.set_xlim(-0.5, 3.5)
+        parser.autoscale_y_axis(ax)
+        lo, hi = ax.get_ylim()
+        # padded below the smallest positive sample (negatives are not on a
+        # log axis) and above the maximum, never triggering global autoscale
+        self.assertGreater(lo, 0.0)
+        self.assertLess(lo, 10.0)
+        self.assertGreater(hi, 10000.0)
+        self.assertFalse(ax.get_autoscaley_on())
+
+    def test_axis_params_linear_get_exponent_formatter(self):
+        parser = MatplotlibParser()
+        y_axis = self._new_axes().get_yaxis()
+        parser.process_ipl_axis_params('black', 10, 5, LinearAxis(), y_axis)
+        self.assertIsInstance(y_axis.get_major_locator(), MaxNLocator)
+        self.assertIsInstance(y_axis.get_major_formatter(), ExponentScalarFormatter)
+
+    def test_linear_mode_passes_limits_through(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        parser.set_impl_y_axis_limits(ax, (1.0, 10.0))
+        lo, hi = ax.get_ylim()
+        self.assertAlmostEqual(lo, 1.0, places=5)
+        self.assertAlmostEqual(hi, 10.0, places=5)
+
+    def test_log_mode_applies_positive_limits(self):
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        ax.set_yscale('log')
+        parser.set_impl_y_axis_limits(ax, (1e-4, 2e-4))
+        lo, hi = ax.get_ylim()
+        self.assertAlmostEqual(lo, 1e-4, places=10)
+        self.assertAlmostEqual(hi, 2e-4, places=10)
+
+    def test_log_mode_falls_back_to_autoscale_on_non_positive(self):
+        import warnings
+        parser = MatplotlibParser()
+        ax = self._new_axes()
+        ax.plot([0, 1, 2], [1, 10, 100])
+        ax.set_yscale('log')
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')  # the old code warned and ignored the limits
+            parser.set_impl_y_axis_limits(ax, (-1.0, 5.0))
+        self.assertTrue(ax.get_autoscaley_on())
 
 
 if __name__ == '__main__':
