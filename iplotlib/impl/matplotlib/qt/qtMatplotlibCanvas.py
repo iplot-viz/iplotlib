@@ -144,6 +144,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             return None
         return impl_list[-1]
 
+    def _minimap_font_size(self, target_plot) -> int:
+        """Font size for the minimap tick labels: the same effective size as the
+        main plot it mirrors, so a font-size change propagates to both (#141).
+
+        Resolved through the usual property hierarchy (x-axis -> plot -> canvas
+        -> default) rather than a dedicated minimap control, keeping the setting
+        single-sourced.
+        """
+        axis = target_plot.axes[0] if (target_plot is not None and getattr(target_plot, 'axes', None)) else None
+        ref = axis if axis is not None else target_plot
+        fs = self._parser._pm.get_value(ref, 'font_size') if ref is not None else None
+        return int(fs) if fs else 8
+
     def _disconnect_minimap_xlim(self):
         if self._minimap_connected_main_ax is not None:
             for cid in (self._minimap_xlim_cid, self._minimap_ylim_cid):
@@ -185,7 +198,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             canvas.snapshot_minimap_baseline(x_min, x_max)
             baseline = canvas.get_minimap_baseline()
 
-        signature = (id(target_plot), baseline)
+        # Mirror the main plot's font size so the minimap ticks stay legible and
+        # track font-size changes (issue #141). Part of the signature so a change
+        # forces a rebuild that re-applies it.
+        fs = self._minimap_font_size(target_plot)
+        signature = (id(target_plot), baseline, fs)
         if self._minimap_signature != signature or self._minimap_axes is None:
             self._disconnect_minimap_xlim()
             self._minimap_figure.clear()
@@ -219,8 +236,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             ax.autoscale_view(scalex=False, scaley=True)
             ax.set_xlim(baseline[0], baseline[1], auto=False)
             ax.set_autoscalex_on(False)
-            ax.tick_params(axis='x', labelsize=7)
-            ax.tick_params(axis='y', labelsize=7)
+            ax.tick_params(axis='x', labelsize=fs)
+            ax.tick_params(axis='y', labelsize=fs)
             ax.set_facecolor('#f5f5f5')
             main_x_formatter = main_ax.xaxis.get_major_formatter()
             if isinstance(main_x_formatter, NanosecondDateFormatter):
@@ -256,6 +273,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # relative axis falls through to the default numeric formatter.
                 ax.xaxis.set_major_locator(RelativeTimeLocator(force_time=True))
                 ax.xaxis.set_major_formatter(ExponentScalarFormatter(is_time=True))
+
+            # The UTC prefix is rendered as the x-axis offset text; size it too
+            # (after the formatter is set), like the main axis does
+            # (matplotlibCanvas.process_ipl_axis_params).
+            ax.xaxis.get_offset_text().set_fontsize(fs)
 
             rect = Rectangle((baseline[0], 0), baseline[1] - baseline[0], 1,
                              facecolor='#ffb300', edgecolor='#e65100',
@@ -777,6 +799,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def render(self):
         self._mpl_renderer.draw()
 
+    def _flush_view(self):
+        self.render()
+
     # custom event handlers
     def _mpl_draw_finish(self, event: DrawEvent):
         self._draw_call_counter += 1
@@ -1201,6 +1226,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 autoscale_menu.addSeparator()
         autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
         autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+        autoscale_menu.addAction("Reset zoom/pan", lambda: self.reset_plot_view(event.inaxes))
         if self._parser.canvas.focus_plot is None:
             autoscale_menu.addAction("Focus on plot", lambda: self._full_screen_mode_on(event.inaxes))
         else:

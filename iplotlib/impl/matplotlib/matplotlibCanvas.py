@@ -86,6 +86,9 @@ class MatplotlibParser(BackendParserBase):
 
         self.figure.set_size_inches(width / dpi, height / dpi)
         self.process_ipl_canvas(kwargs.get('canvas'))
+        if kwargs.get('autoscale', False):
+            # Force an 'Autoscale All' on the exported image only (CLI export option).
+            self.autoscale_all_plots()
         self.figure.savefig(filename)
 
     def legend_downsampled_signal(self, signal, mpl_axes: MPLAxes, plot_lines: Line2D):

@@ -161,7 +161,7 @@ class Plot(ABC):
         # signals are merged at canvas level to handle move between plots
 
     @abstractmethod
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         """"""
 
     def set_x_axes_limits(self, limits, which='current'):
@@ -209,10 +209,12 @@ class PlotContour(Plot):
         self.color_map = old_plot['color_map']
         self.contour_levels = old_plot['contour_levels']
 
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         x = pd.DataFrame()
         for p, plot in enumerate(self.signals.values()):
             for s, pl_signal in enumerate(plot):
+                if progress_callback is not None:
+                    progress_callback(pl_signal.alias or pl_signal.name)
                 col_name = f"plot{row + 1}.{col + 1}"
                 if len(self.signals) > 1:
                     col_name += f".{p + 1}"
@@ -302,10 +304,12 @@ class PlotXY(Plot):
         self.marker_size = old_plot['marker_size']
         self.step = old_plot['step']
 
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         x = pd.DataFrame()
         for p, plot in enumerate(self.signals.values()):
             for s, pl_signal in enumerate(plot):
+                if progress_callback is not None:
+                    progress_callback(pl_signal.alias or pl_signal.name)
                 col_name = f"plot{row + 1}.{col + 1}"
                 if len(self.signals) > 1:
                     col_name += f".{p + 1}"
@@ -362,7 +366,7 @@ class PlotSurface(Plot):
     def merge(self, old_plot: dict):
         super().merge(old_plot)
 
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         """"""
 
 
@@ -380,7 +384,7 @@ class PlotImage(Plot):
     def merge(self, old_plot: dict):
         super().merge(old_plot)
 
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         """"""
 
 
@@ -422,10 +426,12 @@ class PlotXYWithSlider(PlotXY):
     def clean_slider(self):
         self.slider = None
 
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         x = pd.DataFrame()
         for p, plot in enumerate(self.signals.values()):
             for s, pl_signal in enumerate(plot):
+                if progress_callback is not None:
+                    progress_callback(pl_signal.alias or pl_signal.name)
                 col_name = f"plot{row + 1}.{col + 1}"
                 if len(self.signals) > 1:
                     col_name += f".{p + 1}"
