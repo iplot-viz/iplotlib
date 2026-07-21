@@ -206,6 +206,31 @@ class BackfillSignalTests(unittest.TestCase):
         self.callback.assert_not_called()
 
 
+class HandlerEmptyPayloadTests(unittest.TestCase):
+    """An empty poll must not inject data, but still requests a redraw so
+    the visible window keeps sliding."""
+
+    def test_empty_payload_skips_injection_but_requests_redraw(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        signal = _FakeSignal(name='var')
+        streamer.signals = {'var': [signal]}
+        callback = MagicMock()
+        dobj = MagicMock(xdata=[], ydata=[])
+        streamer.handler(callback, 'var', dobj)
+        signal.inject_external.assert_not_called()
+        callback.assert_called_once_with(signal)
+
+    def test_non_empty_payload_still_injects(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        signal = _FakeSignal(name='var')
+        streamer.signals = {'var': [signal]}
+        callback = MagicMock()
+        dobj = MagicMock(xdata=[1, 2], ydata=[3.0, 4.0], xunit='ns', yunit='V')
+        streamer.handler(callback, 'var', dobj)
+        signal.inject_external.assert_called_once()
+        callback.assert_called_once_with(signal)
+
+
 class SpawnLifecycleTests(unittest.TestCase):
     """Streaming workers run on QThreads (worker/moveToThread pattern)
     and stop() joins finished threads without leaking them."""

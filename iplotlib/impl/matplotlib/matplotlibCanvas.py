@@ -65,6 +65,7 @@ class MatplotlibParser(BackendParserBase):
         """Initialize underlying matplotlib classes.
         """
         # Initialize before super().__init__() because it calls clear() via process_ipl_canvas
+        self._tight_layout_requested = tight_layout
         self.map_legend_to_ax = {}
         self._legend_signal_lut = {}  # legend_line -> Signal
         self.legend_size = 8
@@ -291,6 +292,14 @@ class MatplotlibParser(BackendParserBase):
         """
         Updates the X and Y view ranges of the Axes based on the most recent data received from the Streaming
         """
+        if self.figure.get_tight_layout():
+            # Per-flush tight layout dominates draw cost: fit margins once and freeze them.
+            try:
+                self.figure.tight_layout()
+            except Exception:
+                logger.debug("tight_layout failed; freezing current margins")
+            self.disable_tight_layout()
+
         ax_window = impl_plot.get_xlim()[1] - impl_plot.get_xlim()[0]
 
         # Time window
@@ -619,6 +628,11 @@ class MatplotlibParser(BackendParserBase):
 
     def clear(self):
         super().clear()
+
+        # Undo the streaming-time layout freeze on rebuild.
+        if getattr(self, 'figure', None) is not None and self._tight_layout_requested \
+                and not self.figure.get_tight_layout():
+            self.enable_tight_layout()
 
         # remove any active multi‑cursors
         for c in self._cursors:

@@ -267,6 +267,10 @@ class CanvasStreamer:
                 continue
             x_data = dobj.xdata
             y_data = dobj.ydata
+            if len(x_data) == 0:
+                # No new samples: skip injection but keep the window sliding.
+                callback(signal)
+                continue
             if signal.uid in self._first_live_pending:
                 cur_x = signal.x_data
                 cur_y = signal.y_data

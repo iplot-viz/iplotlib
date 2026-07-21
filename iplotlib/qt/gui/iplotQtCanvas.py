@@ -3,13 +3,14 @@ This module has a base class defined for all Qt canvas implementations.
 """
 
 import os
+import time
 from collections import defaultdict
 from abc import abstractmethod
 from contextlib import contextmanager
 from typing import List, Tuple, Optional
 
 import numpy as np
-from PySide6.QtCore import QEventLoop, QMetaObject, QSize, Qt, Signal, Slot
+from PySide6.QtCore import QEventLoop, QMetaObject, QSize, Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
 from iplotlib.core.signal import SignalXY
 from iplotlib.core.canvas import Canvas
@@ -76,6 +77,13 @@ class IplotQtCanvas(QWidget):
         self._drag_shift_is_datetime = False
         self._drag_shift_preview_line = None
 
+        # Streaming redraws are capped to one signal flush per interval.
+        self._signal_flush_interval_ms = 500
+        self._signal_flush_last = 0.0
+        self._signal_flush_timer = QTimer(self)
+        self._signal_flush_timer.setSingleShot(True)
+        self._signal_flush_timer.timeout.connect(self._flush_pending_signals_now)
+
     @abstractmethod
     def undo(self):
         """history: undo"""
@@ -140,6 +148,19 @@ class IplotQtCanvas(QWidget):
     def flush_draw_queue(self):
         if self._parser:
             self._parser.process_work_queue()
+            self._throttled_signal_flush()
+
+    def _throttled_signal_flush(self):
+        elapsed_ms = (time.monotonic() - self._signal_flush_last) * 1000.0
+        if elapsed_ms >= self._signal_flush_interval_ms:
+            self._flush_pending_signals_now()
+        elif not self._signal_flush_timer.isActive():
+            self._signal_flush_timer.start(
+                max(1, int(self._signal_flush_interval_ms - elapsed_ms)))
+
+    def _flush_pending_signals_now(self):
+        if self._parser:
+            self._signal_flush_last = time.monotonic()
             self._parser.flush_pending_signals()
 
     @abstractmethod
