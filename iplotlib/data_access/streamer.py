@@ -1,8 +1,10 @@
 import time
 from functools import partial
-from threading import Thread, Lock
+from threading import Lock
 
 import numpy as np
+
+from PySide6.QtCore import QObject, QThread, Slot
 
 import iplotLogging.setupLogger as Sl
 
@@ -13,6 +15,43 @@ _FIRST_LIVE_WAIT_S = 2.0
 
 # Sliding-window refresh cadence. Skipped for windows shorter than this period.
 _TOPUP_PERIOD_S = 3600
+
+# QThread wait budget on stop(). Loops poll stop_flag frequently, so most
+# workers exit well within this; stragglers (e.g. a receiver blocked on the
+# SSE socket) are parked in _lingering_threads instead of blocking the UI.
+_STOP_WAIT_MS = 200
+
+# Keep Python references to QThreads that outlive their CanvasStreamer:
+# unlike daemon threads, a QThread whose wrapper is garbage-collected while
+# still running brings the process down.
+_lingering_threads = []
+
+
+def _prune_lingering():
+    _lingering_threads[:] = [(t, w) for (t, w) in _lingering_threads
+                             if not t.isFinished()]
+
+
+class _StreamJob(QObject):
+    """Runs a blocking callable inside its own QThread.
+
+    Mirrors the worker/moveToThread pattern: the thread's started signal
+    invokes run(), and run() quits the thread's event loop when the target
+    returns so the QThread can finish and be joined.
+    """
+
+    def __init__(self, target):
+        super().__init__()
+        self._target = target
+
+    @Slot()
+    def run(self):
+        try:
+            self._target()
+        except Exception:
+            logger.exception("Streaming worker crashed")
+        finally:
+            QThread.currentThread().quit()
 
 
 # CWS-SCSU-0000:CU510{1,2,3,4}-TT-XI, CTRL-SYSM-CUB-4505-61:CU000{1,2,3}-HTH-TT,BUIL-B36-VA-RT-RT1:CL0001-TT02-STATE
@@ -32,6 +71,19 @@ class CanvasStreamer:
         self._ds_to_signals = {}
         self._callback = None
         self._first_live_pending = set()
+        self._qt_threads = []
+
+    def _spawn(self, name: str, target):
+        """Start ``target`` on a dedicated QThread and keep it referenced."""
+        _prune_lingering()
+        thread = QThread()
+        thread.setObjectName(name)
+        job = _StreamJob(target)
+        job.moveToThread(thread)
+        thread.started.connect(job.run)
+        self._qt_threads.append((thread, job))
+        thread.start()
+        return thread
 
     def _signal_lock(self, signal):
         lock = self._inject_locks.get(signal.uid)
@@ -175,29 +227,25 @@ class CanvasStreamer:
             self.start_stream(ds, signals_by_ds[ds], partial(self.handler, callback))
 
         if self._window_ns > 0:
-            Thread(name="archive-backfill",
-                   target=self._archive_backfill,
-                   args=(self._ds_to_signals, self._window_ns, callback),
-                   daemon=True).start()
+            self._spawn("archive-backfill",
+                        partial(self._archive_backfill,
+                                self._ds_to_signals, self._window_ns, callback))
 
             if self._window_ns > _TOPUP_PERIOD_S * int(1e9):
-                Thread(name="archive-topup",
-                       target=self._hourly_topup,
-                       daemon=True).start()
+                self._spawn("archive-topup", self._hourly_topup)
 
     def start_stream(self, ds, varnames, callback):
-        collect_thread = Thread(name="collector", target=self.stream_thread, args=(ds, varnames, callback), daemon=True)
+        logger.info(F"STREAM START vars={varnames} ds={ds} startSubscription={self.da.start_subscription}")
+        # Receiver: blocking SSE subscription loop feeding per-variable queues.
+        receive_thread = self._spawn(
+            "receiver", partial(self.da.start_subscription, ds, params=varnames))
+        self.streamers.append(receive_thread)
 
-        collect_thread.start()
+        collect_thread = self._spawn(
+            "collector", partial(self.stream_thread, ds, varnames, callback))
         self.collectors.append(collect_thread)
 
     def stream_thread(self, ds, varnames, callback):
-        logger.info(F"STREAM START vars={varnames} ds={ds} startSubscription={self.da.start_subscription}")
-        streaming_thread = Thread(name="receiver", target=self.da.start_subscription, args=(ds,),
-                                  kwargs={'params': varnames}, daemon=True)
-        streaming_thread.start()
-        self.streamers.append(streaming_thread)
-
         while not self.stop_flag:
             for varname in varnames:
                 dobj = self.da.get_next_data(ds, varname)
@@ -206,10 +254,8 @@ class CanvasStreamer:
             time.sleep(0.1)  # 100 ms
 
         logger.info("Issuing stop subscription...")
-
-        # self.da.stopSubscription(ds)
-        stopping_thread = Thread(name="stopper", target=self.da.stop_subscription, args=(ds,))
-        stopping_thread.start()
+        # Already off the UI thread; safe to call synchronously on the way out.
+        self.da.stop_subscription(ds)
 
     def handler(self, callback, varname, dobj):
         signals_by_name = self.signals.get(varname)
@@ -380,10 +426,8 @@ class CanvasStreamer:
         old_window_ns = self._window_ns
         self._window_ns = int(new_window_ns)
         if new_window_ns > old_window_ns and self._ds_to_signals:
-            Thread(name="archive-gap-fill",
-                   target=self._gap_fill,
-                   args=(old_window_ns, new_window_ns),
-                   daemon=True).start()
+            self._spawn("archive-gap-fill",
+                        partial(self._gap_fill, old_window_ns, new_window_ns))
 
     def _gap_fill(self, old_window_ns: int, new_window_ns: int):
         now_ns = int(time.time() * 1e9)
@@ -443,6 +487,14 @@ class CanvasStreamer:
 
     def stop(self):
         self.stop_flag = True
+        # Give workers a short grace period; they all poll stop_flag. Anything
+        # still running (e.g. a receiver blocked on the SSE socket) is parked
+        # in the module registry so its QThread stays referenced until it ends.
+        for thread, job in self._qt_threads:
+            thread.quit()
+            if not thread.wait(_STOP_WAIT_MS):
+                _lingering_threads.append((thread, job))
+        self._qt_threads.clear()
         self.collectors.clear()
         self.streamers.clear()
         self._first_live_pending.clear()

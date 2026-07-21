@@ -3,6 +3,7 @@
 and the _streaming_has_live flag set during backfill."""
 
 import unittest
+from threading import Event
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -203,6 +204,35 @@ class BackfillSignalTests(unittest.TestCase):
         self.assertFalse(self.signal._streaming_has_live)
         self.signal.inject_external.assert_not_called()
         self.callback.assert_not_called()
+
+
+class SpawnLifecycleTests(unittest.TestCase):
+    """Streaming workers run on QThreads (worker/moveToThread pattern)
+    and stop() joins finished threads without leaking them."""
+
+    def test_spawn_runs_target_on_qthread_and_finishes(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        ran = Event()
+        thread = streamer._spawn("test-job", ran.set)
+        self.assertTrue(ran.wait(5))
+        self.assertTrue(thread.wait(5000))
+
+    def test_worker_exception_is_contained_and_thread_finishes(self):
+        streamer = CanvasStreamer(da=MagicMock())
+
+        def boom():
+            raise RuntimeError("boom")
+
+        thread = streamer._spawn("boom-job", boom)
+        self.assertTrue(thread.wait(5000))
+
+    def test_stop_clears_thread_registry(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        thread = streamer._spawn("quick-job", lambda: None)
+        self.assertTrue(thread.wait(5000))
+        streamer.stop()
+        self.assertEqual(streamer._qt_threads, [])
+        self.assertTrue(streamer.stop_flag)
 
 
 if __name__ == '__main__':
