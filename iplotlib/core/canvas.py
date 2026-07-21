@@ -81,6 +81,8 @@ class Canvas(ABC):
         only one of the subplots
     auto_refresh : int
         Auto redraw canvas every X seconds
+    show_minimap : bool
+        Show a mini-map below the main plot. Only valid with a single visible plot.
     _type : str
         type of the canvas
     max_diff: int
@@ -95,6 +97,7 @@ class Canvas(ABC):
     MOUSE_MODE_ZOOM = 'MM_ZOOM'
     MOUSE_MODE_DIST = 'MM_DIST'
     MOUSE_MODE_MARKER = 'MM_MARKER'
+    MOUSE_MODE_RULER = 'MM_RULER'
     rows: int = 1
     cols: int = 1
     title: str = None
@@ -115,6 +118,7 @@ class Canvas(ABC):
     shared_x_axis: bool = None
     full_mode_all_stack: bool = None
     auto_refresh: int = 0
+    show_minimap: bool = False
     undo_redo: bool = False
     max_diff: int = None
     _type: str = None
@@ -147,6 +151,7 @@ class Canvas(ABC):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.plots is None:
             self.plots = [[] for _ in range(self.cols)]
+        self._minimap_baseline_x_range = None
 
     def add_plot(self, plot, col=0):
         """
@@ -238,6 +243,7 @@ class Canvas(ABC):
         self.full_mode_all_stack = Canvas.full_mode_all_stack
         self.focus_plot = Canvas.focus_plot
         self.max_diff = Canvas.max_diff
+        self.show_minimap = Canvas.show_minimap
 
         for _, col in enumerate(self.plots):
             for _, plot in enumerate(col):
@@ -289,6 +295,7 @@ class Canvas(ABC):
         self.full_mode_all_stack = old_canvas['full_mode_all_stack']
         self.focus_plot = old_canvas['focus_plot']
         self.max_diff = old_canvas['max_diff']
+        self.show_minimap = old_canvas.get('show_minimap', False)
 
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
@@ -336,14 +343,66 @@ class Canvas(ABC):
                             if key in map_old_signals:
                                 signal.merge(map_old_signals[key])
 
-    def get_signals_as_csv(self):
+    def is_minimap_eligible(self) -> bool:
+        target = self.get_minimap_target_plot()
+        if target is None:
+            return False
+        return isinstance(target, PlotXY) and not isinstance(target, PlotXYWithSlider)
+
+    def get_minimap_target_plot(self):
+        if self.focus_plot is not None:
+            return self.focus_plot
+        visible = [p for col in self.plots for p in col if p is not None]
+        if len(visible) != 1:
+            return None
+        return visible[0]
+
+    def snapshot_minimap_baseline(self, x_min, x_max) -> None:
+        if x_min is None or x_max is None:
+            self._minimap_baseline_x_range = None
+            return
+        self._minimap_baseline_x_range = (x_min, x_max)
+
+    def get_minimap_baseline(self):
+        return self._minimap_baseline_x_range
+
+    def invalidate_minimap_snapshots(self) -> None:
+        for columns in self.plots:
+            for plot in columns:
+                if not plot:
+                    continue
+                for signals in plot.signals.values():
+                    for signal in signals:
+                        clear = getattr(signal, 'clear_minimap_snapshot', None)
+                        if clear is not None:
+                            clear()
+
+    def get_signals_as_csv(self, progress_callback=None):
+        """
+        Serialize the signals of the exported plots to CSV.
+
+        If given, `progress_callback` is invoked as each signal starts being
+        processed with (index, total, signal name), index being 1-based.
+        """
         x = pd.DataFrame()
         focus_plot = self.focus_plot
-        for c, column in enumerate(self.plots):
-            for r, row in enumerate(column):
-                if not row or (focus_plot and row != focus_plot):
-                    continue
-                df = row.get_signals_as_df(r, c)
-                x = pd.concat([x, df], axis=1)
+        exported_plots = [(r, c, row)
+                          for c, column in enumerate(self.plots)
+                          for r, row in enumerate(column)
+                          if row and not (focus_plot and row != focus_plot)]
+
+        per_signal = None
+        if progress_callback is not None:
+            total = sum(len(signals) for _, _, plot in exported_plots for signals in plot.signals.values())
+            counter = 0
+
+            def per_signal(name):
+                nonlocal counter
+                counter += 1
+                progress_callback(counter, total, name)
+
+        for r, c, row in exported_plots:
+            df = row.get_signals_as_df(r, c, progress_callback=per_signal)
+            x = pd.concat([x, df], axis=1)
 
         return x.to_csv(index=False)

@@ -1,7 +1,7 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 from datetime import datetime
-from typing import Any, Callable, Collection, List
+from typing import Any, Callable, Collection, Dict, List
 import pandas
 import gc
 import numpy as np
@@ -15,7 +15,7 @@ from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator, LogLocator
+from matplotlib.ticker import MaxNLocator
 from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -35,8 +35,10 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
-from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter
-from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
+from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter, \
+    NiceNanosecondLocator, RelativeTimeLocator, is_time_label
+from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor, get_values_from_line
+from iplotlib.impl.matplotlib.iplotMplRuler import iplotMplRuler
 
 logger = setupLogger.get_logger(__name__)
 
@@ -67,6 +69,7 @@ class MatplotlibParser(BackendParserBase):
         self._legend_signal_lut = {}  # legend_line -> Signal
         self.legend_size = 8
         self._cursors = []
+        self._rulers = []  # type: List[iplotMplRuler]
         self._grid_spacing_annotations = {}  # MPLAxes -> Text artist
         self._impl_plot_ranges_hash = dict()
 
@@ -89,6 +92,9 @@ class MatplotlibParser(BackendParserBase):
 
         self.figure.set_size_inches(width / dpi, height / dpi)
         self.process_ipl_canvas(kwargs.get('canvas'))
+        if kwargs.get('autoscale', False):
+            # Force an 'Autoscale All' on the exported image only (CLI export option).
+            self.autoscale_all_plots()
         self.figure.savefig(filename)
 
     def legend_downsampled_signal(self, signal, mpl_axes: MPLAxes, plot_lines: Line2D):
@@ -99,9 +105,13 @@ class MatplotlibParser(BackendParserBase):
         if legend is None:
             return
 
-        # Filter out '_child' lines from mpl_axes, which are added in envelope plots
-        # These lines should not be considered when matching lines to legend entries
-        valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
+        # Only signal lines map to legend entries. Exclude envelope ('_child') and
+        # ruler ('_RulerLine') helper lines, which would shift the index; a freshly
+        # re-plotted line may be briefly absent, so guard the lookup.
+        valid_lines = [line for line in mpl_axes.get_lines()
+                       if not line.get_label().startswith(("_child", "_RulerLine"))]
+        if plot_lines not in valid_lines:
+            return
         pos = valid_lines.index(plot_lines)
         legend_label = legend.get_texts()[pos]
         legend_text = legend.get_texts()[pos].get_text()
@@ -264,7 +274,7 @@ class MatplotlibParser(BackendParserBase):
     def _update_marker_by_point_count(marker_line: Line2D, signal_x_data, signal_style: dict):
         if len(signal_x_data) == 1:
             marker_line.set_marker('x')
-            marker_line.set_markersize(5)
+            marker_line.set_markersize(signal_style.get('markersize') or 5)
         else:
             marker_line.set_marker(signal_style.get('marker') or "")
             marker_line.set_markersize(signal_style.get('markersize'))
@@ -479,7 +489,8 @@ class MatplotlibParser(BackendParserBase):
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+            if (x_data.ndim == y_data.ndim == z_data.ndim == 2
+                    and x_data.size and y_data.size and z_data.size):
                 plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'in_lines':
                     if not contour_filled:
@@ -492,7 +503,8 @@ class MatplotlibParser(BackendParserBase):
                 draw_fn = mpl_axes.contourf
             else:
                 draw_fn = mpl_axes.contour
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
+            if (x_data.ndim == y_data.ndim == z_data.ndim == 2
+                    and x_data.size and y_data.size and z_data.size):
                 plot_lines = draw_fn(x_data, y_data, z_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'color_bar':
                     color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
@@ -538,7 +550,8 @@ class MatplotlibParser(BackendParserBase):
             else:
                 draw_fn = mpl_axes.contour
 
-            if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
+            if (xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2
+                    and xsub_data.size and ysub_data.size and zsub_data.size):
                 plot_lines = draw_fn(xsub_data, ysub_data, zsub_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'in_lines':
                     if not contour_filled:
@@ -557,7 +570,8 @@ class MatplotlibParser(BackendParserBase):
             else:
                 draw_fn = mpl_axes.contour
 
-            if xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2:
+            if (xsub_data.ndim == ysub_data.ndim == zsub_data.ndim == 2
+                    and xsub_data.size and ysub_data.size and zsub_data.size):
                 plot_lines = draw_fn(xsub_data, ysub_data, zsub_data, levels=contour_levels, cmap=color_map)
                 if legend_format == 'color_bar':
                     color_bar = self.figure.colorbar(plot_lines, ax=mpl_axes, location='right')
@@ -610,6 +624,11 @@ class MatplotlibParser(BackendParserBase):
         for c in self._cursors:
             c.remove()
         self._cursors.clear()
+
+        # remove any active rulers (impl artists only — Plot.rulers data is preserved)
+        for r in self._rulers:
+            r.remove()
+        self._rulers.clear()
 
         # drop cache items and remove each Axes to release all artists and callbacks
         # for ax in list(self.figure.axes):
@@ -905,10 +924,11 @@ class MatplotlibParser(BackendParserBase):
                 log_scale = self._pm.get_value(plot, 'log_scale')
 
                 if show_grid:
+                    mpl_axes.grid(show_grid, which='major')
                     if log_scale:
-                        mpl_axes.grid(show_grid, which='both')
-                    else:
-                        mpl_axes.grid(show_grid, which='major')
+                        # The minor decade lines are what show the log spacing;
+                        # keep them faint so the decades stay readable.
+                        mpl_axes.grid(show_grid, which='minor', alpha=0.3)
                 else:
                     mpl_axes.grid(show_grid, which='both')
 
@@ -1059,18 +1079,20 @@ class MatplotlibParser(BackendParserBase):
 
     def _x_axis_update_callback(self, current_plot: MPLAxes):
         super()._x_axis_update_callback(current_plot)
+        self.refresh_rulers(current_plot)
 
     def _y_axis_update_callback(self, current_plot: MPLAxes):
         super()._y_axis_update_callback(current_plot)
+        self.refresh_rulers(current_plot)
 
     def process_ipl_log_axis(self, mpl_axis: MPLAxis, plot: Plot):
         if isinstance(mpl_axis, YAxis):
             log_scale = self._pm.get_value(plot, 'log_scale')
             if log_scale:
+                # The scale's own locators cover every range: decade powers,
+                # the minor ticks that give the log spacing, and intermediate
+                # values below one decade.
                 mpl_axis.axes.set_yscale('log')
-                # Format for minor ticks
-                y_minor = LogLocator(base=10, subs=(1.0,))
-                mpl_axis.set_minor_locator(y_minor)
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, mpl_axis: MPLAxis):
         label_props = dict(color=fc)
@@ -1090,19 +1112,43 @@ class MatplotlibParser(BackendParserBase):
         # Font size for UTC label
         mpl_axis.get_offset_text().set_fontsize(fs)
 
-        if not axis.is_date:
-            mpl_axis.set_major_formatter(ExponentScalarFormatter(label_props=label_props))
+        # process_ipl_log_axis runs first, so the Y scale is already decided.
+        is_log_y = getattr(mpl_axis, 'axis_name', None) == 'y' \
+            and mpl_axis.axes.get_yscale() == 'log'
+        if not axis.is_date and not is_log_y:
+            mpl_axis.set_major_formatter(
+                ExponentScalarFormatter(label_props=label_props))
 
         mpl_axis.set_tick_params(**tick_props)
 
-        # Set number of ticks and labels
-        mpl_axis.set_major_locator(MaxNLocator(tick_number))
+        # Stash the requested tick count so the date locator built later in
+        # process_ipl_axis_formatter can use it as its target.
+        mpl_axis._ipl_tick_number = tick_number
+
+        # Numeric axes: a date axis gets the time-aware NiceNanosecondLocator
+        # (set in process_ipl_axis_formatter). For a non-date X axis we always
+        # attach the RelativeTimeLocator, which self-gates: if the axis label is
+        # 'Time' it lays ticks on round durations (1d, 12h, 5m, ...), otherwise
+        # it falls back to MaxNLocator. (The 'Time' label is applied later, in
+        # signal processing, so we can't decide here -- the locator and the
+        # ExponentScalarFormatter both read the label live at draw time.)
+        if not axis.is_date and not is_log_y:
+            if getattr(mpl_axis, 'axis_name', None) == 'x':
+                mpl_axis.set_major_locator(RelativeTimeLocator(tick_number))
+            else:
+                mpl_axis.set_major_locator(MaxNLocator(tick_number))
 
     def process_ipl_axis_formatter(self, impl_plot: MPLAxes, mpl_axis: MPLAxis, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        # Time-aware locator that shares the per-axis offset table with the
+        # formatter, so tick positions and labels always agree (UTC).
+        target_ticks = getattr(mpl_axis, '_ipl_tick_number', 6)
+        locator = NiceNanosecondLocator(ax_idx, offset_lut=ci.offsets, target_ticks=target_ticks)
+        mpl_axis.set_major_locator(locator)
         mpl_axis.set_major_formatter(NanosecondDateFormatter(ax_idx,
                                                              offset_lut=ci.offsets,
-                                                             roundh=self._pm.get_value(self.canvas, 'round_hour')))
+                                                             roundh=self._pm.get_value(self.canvas, 'round_hour'),
+                                                             nice_locator=locator))
 
     def process_ipl_signal_impl_plot(self, signal: Signal):
         mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
@@ -1148,7 +1194,7 @@ class MatplotlibParser(BackendParserBase):
 
     def get_impl_lines(self, impl_plot: MPLAxes):
         lines = impl_plot.get_lines()
-        lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY"]]
+        lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY", "_RulerLine"]]
         lo, hi = impl_plot.get_xlim()
         return lines, lo, hi
 
@@ -1160,6 +1206,18 @@ class MatplotlibParser(BackendParserBase):
         """
         bot, top = super().autoscale_y_axis(impl_plot)
 
+        if impl_plot.get_yscale() == 'log':
+            # Pad multiplicatively from the smallest positive visible sample:
+            # a linear margin would go non-positive and silently degrade to
+            # matplotlib's global autoscale.
+            pos_bot = self._min_positive_visible(impl_plot)
+            if pos_bot is not None and top > 0:
+                factor = (top / pos_bot) ** padding if top > pos_bot else 2.0
+                self.set_oaw_axis_limits(impl_plot, 1, (pos_bot / factor, top * factor))
+            else:
+                impl_plot.autoscale(enable=True, axis='y')
+            return
+
         # Compute final margin
         h = (top - bot)
         n_new_bot = bot - padding * h
@@ -1167,6 +1225,21 @@ class MatplotlibParser(BackendParserBase):
 
         # Set new Y axis limits
         self.set_oaw_axis_limits(impl_plot, 1, (n_new_bot, n_new_top))
+
+    def _min_positive_visible(self, impl_plot: MPLAxes):
+        """Smallest strictly positive Y sample within the current X window, or
+        None when nothing positive is visible."""
+        lines, lo, hi = self.get_impl_lines(impl_plot)
+        best = None
+        for line in lines:
+            xd, yd = self.get_impl_data(line)
+            if xd is None or yd is None:
+                continue
+            yd = np.asarray(yd)[(np.asarray(xd) >= lo) & (np.asarray(xd) <= hi)]
+            yd = yd[np.isfinite(yd) & (yd > 0)]
+            if yd.size and (best is None or yd.min() < best):
+                best = float(yd.min())
+        return best
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
         """
@@ -1372,6 +1445,107 @@ class MatplotlibParser(BackendParserBase):
             cursor.remove()
         self._cursors.clear()
 
+    def _ruler_value_lines(self, impl_plot: MPLAxes) -> list:
+        """Signal line groups of *impl_plot*, one per ruler value label
+        (mirrors the crosshair's value annotations)."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        groups = []
+        if ci and hasattr(ci, 'signals') and ci.signals:
+            for sig_ref in ci.signals:
+                signal = sig_ref()
+                if not signal or isinstance(signal, SignalContour):
+                    continue
+                for line in getattr(signal, 'lines', []):
+                    groups.append(line if isinstance(line, Collection) else [line])
+        return groups
+
+    def _ruler_signal_values(self, impl_plot: MPLAxes, x: float) -> Dict[str, float]:
+        """Value of each signal at the ruler X keyed by its label, matching the
+        ruler's green value labels. A signal is omitted when the ruler falls off
+        its data, so the table agrees with what the plot shows."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        values: Dict[str, float] = {}
+        if not ci or not getattr(ci, 'signals', None):
+            return values
+        for sig_ref in ci.signals:
+            signal = sig_ref()
+            if not signal or isinstance(signal, SignalContour):
+                continue
+            for line in getattr(signal, 'lines', []):
+                group = line if isinstance(line, Collection) else [line]
+                xdata = group[0].get_xdata() if group else []
+                if len(xdata) == 0:
+                    continue
+                x_sig, y_sig = get_values_from_line(group, x)
+                span = abs(xdata[-1] - xdata[0])
+                # Data-span tolerance (view-independent so the cell is stable on
+                # zoom); mirrors the 5% used by the value labels.
+                if span and abs(x - x_sig) <= span * 0.05:
+                    values[signal.label or 'signal'] = float(y_sig)
+                break
+        return values
+
+    @BackendParserBase.run_in_one_thread
+    def add_ruler(self, impl_plot: MPLAxes, name: str, x: float, y: float,
+                  color: str = "#FFFFFF", animated: bool = False,
+                  is_echo: bool = False) -> iplotMplRuler:
+        font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
+        ruler = iplotMplRuler(ax=impl_plot, name=name, xy=(x, y), color=color,
+                              font_size=font_size, animated=animated,
+                              value_lines=self._ruler_value_lines(impl_plot))
+        ruler.abs_x = self.transform_value(impl_plot, 0, x)
+        ruler.abs_y = self.transform_value(impl_plot, 1, y)
+        ruler.is_echo = is_echo
+        self._rulers.append(ruler)
+        return ruler
+
+    def create_ruler_echoes(self, origin_impl_plot: MPLAxes, name: str,
+                            x_abs: float, y_abs: float, color: str):
+        """Mirror a ruler onto every plot sharing the time axis. Each echo carries
+        the same absolute X/Y and re-projects them to its own plot's offsets."""
+        if not self._pm.get_value(self.canvas, 'shared_x_axis'):
+            return
+        for sibling in self._get_all_shared_axes(origin_impl_plot):
+            if sibling is origin_impl_plot:
+                continue
+            x_view = self.transform_value(sibling, 0, x_abs, inverse=True)
+            y_view = self.transform_value(sibling, 1, y_abs, inverse=True)
+            self.add_ruler(sibling, name, x_view, y_view, color, is_echo=True)
+
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler(self, impl_plot: MPLAxes, name: str):
+        remaining = []
+        for r in self._rulers:
+            if r.ax is impl_plot and r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler_by_name(self, name: str):
+        """Remove a ruler and its shared-x echoes across every plot (names are
+        canvas-global unique)."""
+        remaining = []
+        for r in self._rulers:
+            if r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
+    def refresh_rulers(self, impl_plot: MPLAxes = None):
+        for r in self._rulers:
+            if impl_plot is None or r.ax is impl_plot:
+                r.xy = (self.transform_value(r.ax, 0, r.abs_x, inverse=True),
+                        self.transform_value(r.ax, 1, r.abs_y, inverse=True))
+                r.refresh_labels()
+
+    def get_rulers(self, impl_plot: MPLAxes = None) -> List[iplotMplRuler]:
+        if impl_plot is None:
+            return list(self._rulers)
+        return [r for r in self._rulers if r.ax is impl_plot]
+
     def get_signal_style(self, signal: SignalXY) -> dict:
         style = dict()
         if signal.label:
@@ -1423,10 +1597,17 @@ class MatplotlibParser(BackendParserBase):
             impl_plot.set_xlim(limits[0], limits[1])
 
     def set_impl_y_axis_limits(self, impl_plot: MPLAxes, limits: tuple):
-        if isinstance(impl_plot, MPLAxes):
-            impl_plot.set_ylim(limits[0], limits[1])
-        else:
+        if not isinstance(impl_plot, MPLAxes):
             return None
+        if impl_plot.get_yscale() == 'log':
+            lo, hi = limits[0], limits[1]
+            if lo is None or hi is None or lo <= 0 or hi <= 0:
+                # A log axis cannot show non-positive bounds (linear padding can
+                # push the bottom below zero) — fall back to autoscale, like the
+                # pyqtgraph backend.
+                impl_plot.autoscale(enable=True, axis='y')
+                return None
+        impl_plot.set_ylim(limits[0], limits[1])
 
     def set_impl_x_axis_label_text(self, impl_plot: MPLAxes, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
@@ -1438,7 +1619,21 @@ class MatplotlibParser(BackendParserBase):
             label_props['color'] = fc
         if fs and fs > 0:
             label_props['fontsize'] = fs
-        self.get_impl_x_axis(impl_plot).set_label_text(text, **label_props)
+        x_axis = self.get_impl_x_axis(impl_plot)
+        x_axis.set_label_text(text, **label_props)
+
+        # The 'Time' label is applied here, during signal processing, which is
+        # the authoritative moment to decide whether this is a relative-time
+        # axis. Set the flag directly on the formatter and locator so neither
+        # has to re-sniff the label later (the label string/timing at draw time
+        # proved unreliable).
+        x_is_time = is_time_label(text)
+        fmt = x_axis.get_major_formatter()
+        if isinstance(fmt, ExponentScalarFormatter):
+            fmt._is_time = x_is_time
+        loc = x_axis.get_major_locator()
+        if isinstance(loc, RelativeTimeLocator):
+            loc._force_time = x_is_time
 
     def set_impl_y_axis_label_text(self, impl_plot: Any, text: str):
         if not isinstance(impl_plot, MPLAxes):

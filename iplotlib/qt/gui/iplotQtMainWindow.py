@@ -14,6 +14,7 @@ from PySide6.QtCore import QMargins, Qt, Signal
 from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QWidget
 
 from PySide6.QtGui import QCloseEvent, QShowEvent
+from iplotlib.core.canvas import Canvas
 from iplotlib.core.command import IplotCommand
 from iplotlib.core.signal import Signal as IplotSignal
 
@@ -66,12 +67,13 @@ class IplotQtMainWindow(QMainWindow):
     def wire_connections(self):
         self.toolBar.undoAction.triggered.connect(self.undo)
         self.toolBar.redoAction.triggered.connect(self.redo)
+        self.toolBar.homeAction.triggered.connect(self.home)
         self.toolBar.statistics.triggered.connect(self.show_stats)
-        self.toolBar.toolActivated.connect(
-            lambda tool_name:
-            [self.canvasStack.widget(i).set_mouse_mode(tool_name) for i in range(self.canvasStack.count())])
+        self.toolBar.minimapAction.toggled.connect(self.on_minimap_toggled)
+        self.toolBar.toolActivated.connect(self.on_tool_activated)
         self.canvasStack.canvasAdded.connect(self.on_canvas_add)
         self.canvasStack.currentChanged.connect(lambda idx: self.check_history(self.canvasStack.widget(idx)))
+        self.canvasStack.currentChanged.connect(lambda _: self.refresh_minimap_availability())
         self.toolBar.saveImageAction.triggered.connect(self.save_canvas_image)
         self.toolBar.redrawAction.triggered.connect(self.re_draw)
         self.toolBar.detachAction.triggered.connect(self.detach)
@@ -80,6 +82,18 @@ class IplotQtMainWindow(QMainWindow):
             [self.prefWindow.show(),
              self.prefWindow.raise_(),
              self.prefWindow.activateWindow()])
+
+    def on_tool_activated(self, tool_name: str):
+        """Apply the selected tool to every canvas; re-clicking the active
+        RULER tool surfaces its window (the activation opens it behind the
+        canvas). Detected here rather than in set_mouse_mode, which canvas
+        reloads re-invoke with the current mode."""
+        current = self.canvasStack.currentWidget()
+        re_clicked = current is not None and getattr(current, '_mmode', None) == tool_name
+        for i in range(self.canvasStack.count()):
+            self.canvasStack.widget(i).set_mouse_mode(tool_name)
+        if re_clicked and tool_name == Canvas.MOUSE_MODE_RULER:
+            current.show_ruler_window()
 
     def undo(self):
         w = self.canvasStack.currentWidget()
@@ -103,6 +117,16 @@ class IplotQtMainWindow(QMainWindow):
         QApplication.restoreOverrideCursor()
         self.check_history(w)
 
+    def home(self):
+        """Restore every plot to the range captured at draw time."""
+        w = self.canvasStack.currentWidget()
+        if not w:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        w.reset_all_views()
+        QApplication.restoreOverrideCursor()
+        self.check_history(w)
+
     def show_stats(self):
         w = self.canvasStack.currentWidget()
         if not w:
@@ -111,6 +135,29 @@ class IplotQtMainWindow(QMainWindow):
         # are not refreshed automatically per-frame.
         w.stats(w.get_canvas())
         w.show_stats()
+
+    def on_minimap_toggled(self, checked: bool):
+        w = self.canvasStack.currentWidget()
+        if not w:
+            return
+        w.set_minimap(checked)
+
+    def refresh_minimap_availability(self):
+        w = self.canvasStack.currentWidget()
+        action = self.toolBar.minimapAction
+        if not w:
+            action.setEnabled(False)
+            return
+        canvas = w.get_canvas()
+        eligible = canvas is not None and canvas.is_minimap_eligible()
+        action.setEnabled(eligible)
+        desired = bool(eligible and canvas is not None and canvas.show_minimap)
+        if action.isChecked() != desired:
+            action.blockSignals(True)
+            action.setChecked(desired)
+            action.blockSignals(False)
+        if not eligible and canvas is not None and canvas.show_minimap:
+            w.set_minimap(False)
 
     def save_canvas_image(self):
         w = self.canvasStack.currentWidget()
@@ -159,6 +206,8 @@ class IplotQtMainWindow(QMainWindow):
         """
         w.cmdDone.connect(partial(self.on_cmd_done, w))
         w.openPlotPreferences.connect(self._open_plot_preferences)
+        w.focusChanged.connect(self.refresh_minimap_availability)
+        self.refresh_minimap_availability()
 
     def on_cmd_done(self, w: IplotQtCanvas, cmd: IplotCommand):
         """
@@ -168,6 +217,7 @@ class IplotQtMainWindow(QMainWindow):
         """
         self.check_history(w)
         self.toolBar.undoAction.setText(f"Undo {cmd.name}")
+        self.refresh_minimap_availability()
 
     def _open_plot_preferences(self, target):
         """Open preferences window and navigate to the given Plot or Signal in the tree.
@@ -214,18 +264,51 @@ class IplotQtMainWindow(QMainWindow):
         prev = self.prefWindow.current_canvas or {}
         # shared_x_axis toggle changes range semantics — invalidate X limits and skip
         # retention so the refresh recomputes ranges under the new setting.
-        toggled = canvas is not None and prev.get('shared_x_axis') != getattr(canvas, 'shared_x_axis', None)
-        if toggled:
+        x_toggled = canvas is not None and prev.get('shared_x_axis') != getattr(canvas, 'shared_x_axis', None)
+        # A log<->linear switch invalidates the retained Y view — drop those plots' Y
+        # limits so the refresh re-autoscales them.
+        log_changed = self._plots_with_log_scale_change(canvas, prev) if canvas is not None else []
+        if x_toggled:
             for col in canvas.plots:
                 for plot in col:
                     if plot is not None and plot.axes:
                         plot.axes[0].set_limits(None, None, 'current')
+        for plot in log_changed:
+            y_axes = plot.axes[1] if isinstance(plot.axes[1], (list, tuple)) else [plot.axes[1]]
+            for y_axis in y_axes:
+                y_axis.set_limits(None, None, 'current')
+        if x_toggled or log_changed:
             w.refresh()
         else:
             with w.view_retainer():
                 w.refresh()
         self.prefWindow.set_canvas_from_preferences()
         self.prefWindow.post_applied()
+        self.refresh_minimap_availability()
+
+    @staticmethod
+    def _plots_with_log_scale_change(canvas, prev: dict) -> list:
+        """
+        Plots whose effective log_scale differs from the last applied preferences.
+        log_scale resolves per plot with a canvas-level fallback, so changes at either
+        level are caught.
+        """
+        prev_canvas_log = prev.get('log_scale')
+        prev_plots = prev.get('plots') or []
+        changed = []
+        for i, col in enumerate(canvas.plots):
+            prev_col = prev_plots[i] if i < len(prev_plots) else []
+            for j, plot in enumerate(col):
+                if plot is None or not plot.axes:
+                    continue
+                cur_log = plot.log_scale if plot.log_scale is not None else canvas.log_scale
+                prev_plot = prev_col[j] if j < len(prev_col) else None
+                prev_log = prev_plot.get('log_scale') if isinstance(prev_plot, dict) else None
+                if prev_log is None:
+                    prev_log = prev_canvas_log
+                if bool(cur_log) != bool(prev_log):
+                    changed.append(plot)
+        return changed
 
     def reset_prefs(self):
         w = self.canvasStack.currentWidget()
@@ -281,7 +364,7 @@ class IplotQtMainWindow(QMainWindow):
         super().showEvent(event)
         for i in range(self.canvasStack.count()):
             self.check_history(self.canvasStack.widget(i))
-        super().showEvent(event)
+        self.refresh_minimap_availability()
 
     def closeEvent(self, event: QCloseEvent):
         """

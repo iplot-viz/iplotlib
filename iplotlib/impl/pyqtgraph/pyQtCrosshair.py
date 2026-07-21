@@ -4,7 +4,7 @@ import pyqtgraph as pg
 from pyqtgraph import PlotItem, InfiniteLine, TextItem, PlotDataItem
 from pyqtgraph.Qt import QtGui
 from iplotlib.core.impl_base import ImplementationPlotCacheTable
-from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
+from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter, _fmt_duration
 from PySide6.QtCore import QPointF
 
 class pyQtCrosshair:
@@ -107,6 +107,26 @@ class pyQtCrosshair:
                         view_box.addItem(annotation, ignoreBounds=True)
                         self.value_annotations.append(annotation)
 
+    @staticmethod
+    def _format_left_axis_value(axis, value, vmin, vmax):
+        # Format the Y label with the left axis' own tick strings so it matches
+        # the axis (no scientific notation when the ticks show none, mint #94).
+        try:
+            if getattr(axis, 'logMode', False):
+                # Log ticks are powers of ten; the cursor reads the plain value.
+                return f"{10.0 ** min(float(value), 300.0):g}"
+            size = axis.geometry().height()
+            if size <= 0:
+                size = 800
+            tick_levels = axis.tickValues(vmin, vmax, size)
+            spacing = tick_levels[0][0] if tick_levels else 0
+            scale = getattr(axis, 'autoSIPrefixScale', 1.0) * getattr(axis, 'scale', 1.0)
+            if spacing > 0:
+                return axis.tickStrings([value], scale, spacing)[0]
+            return f"{value * scale:g}"
+        except Exception:
+            return f"{value:g}"
+
     def on_move(self, pos):
         if not self._is_active:
             return
@@ -177,11 +197,17 @@ class pyQtCrosshair:
                     text_key = f"x{i}"
                     current_text = self._text_cache.get(text_key)
                     if isinstance(axis, NanosecondDateFormatter):
-                        if getattr(axis, '_numeric_offset', 0) != 0:
-                            new_text = f"{xi * axis.autoSIPrefixScale:g}"
+                        if getattr(axis, 'is_date', True):
+                            # Absolute date axis: full UTC timestamp
+                            # (year..nanosecond), not the truncated tick label.
+                            new_text = axis.format_full(xi)
+                        elif axis._is_rel_time():
+                            # Relative *time* axis (label 'Time'): human-readable
+                            # duration (e.g. 36ms250us452ns, -4ms500us).
+                            new_text = _fmt_duration(int(round(float(xi) * 1e9)), 1)
                         else:
-                            ts = axis.tickStrings([xi], 1.0, getattr(axis, '_tick_spacing', 1))
-                            new_text = ts[0]
+                            # Other relative quantity: plain numeric value.
+                            new_text = f"{xi:.6g}"
                     else:
                         new_text = f"{xi:.6g}"
                     if current_text != new_text:
@@ -199,7 +225,7 @@ class pyQtCrosshair:
                     axis_l = plot.getAxis("left")
                     text_key = f"y{i}"
                     current_text = self._text_cache.get(text_key)
-                    new_text = f"{y:.6g}"
+                    new_text = self._format_left_axis_value(axis_l, y, ymin, ymax)
                     if current_text != new_text:
                         self.y_arrows[i].setText(new_text)
                         self._text_cache[text_key] = new_text
@@ -239,7 +265,12 @@ class pyQtCrosshair:
                         annotation.setAnchor((ax, 0.5))
                         annotation._last_anchor = (ax, 0.5)
                     annotation.setPos(xp, yp)
-                    annotation.setText(f"{y_data[idx]:.6g}")
+                    # getData() is log10-mapped in log mode; the readout shows
+                    # the data value.
+                    y_val = y_data[idx]
+                    if getattr(line, 'opts', {}).get('logMode', (False, False))[1]:
+                        y_val = 10.0 ** y_val
+                    annotation.setText(f"{y_val:.6g}")
                     annotation.setVisible(True)
                 else:
                     annotation.setVisible(False)

@@ -145,6 +145,12 @@ class IplotSignalAdapter(ProcessingSignal):
         self.x_data = BufferObject()
         self.y_data = BufferObject()
         self.z_data = BufferObject()
+        # Full-range minimap snapshot; invalidated by clear_minimap_snapshot().
+        self._minimap_x_data = None
+        self._minimap_y_data = None
+        self._minimap_y_max_data = None
+        self._minimap_y_avg_data = None
+        self._minimap_is_downsampled = False
 
         # 2. Post-initialize ArraySignal's properties and our name.
         self._init_label()
@@ -337,7 +343,7 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.result = Result.FAIL
         self.status_info.msg = msg
         self.status_info.num_points = 0
-        logger.warning(f"Data Access Error: {msg}")
+        logger.warning(f"Data Access Error in {self._signal_context()}: {msg}")
 
     def set_proc_success(self):
         self.status_info.reset()
@@ -352,7 +358,21 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.result = Result.FAIL
         self.status_info.msg = msg
         self.status_info.num_points = 0
-        logger.warning(f"Processing Error: {msg}")
+        logger.warning(f"Processing Error in {self._signal_context()}: {msg}")
+
+    def _signal_context(self) -> str:
+        alias = getattr(self, 'alias', '') or ''
+        name = getattr(self, 'name', '') or ''
+        parts = []
+        if alias and alias != name:
+            parts.append(f"signal '{alias}'")
+        if name:
+            parts.append(f"variable/expression='{name}'")
+        for attr in ('x_expr', 'y_expr', 'z_expr'):
+            expr = getattr(self, attr, '') or ''
+            if expr and expr not in ('${self}.time', '${self}.data', '${self}.data_store[2]'):
+                parts.append(f"{attr}='{expr}'")
+        return ', '.join(parts) if parts else 'signal'
 
     def inject_external(self, append: bool = False, **kwargs):
         AccessHelper.on_fetch_done(self, kwargs, append=append)
@@ -488,7 +508,67 @@ class IplotSignalAdapter(ProcessingSignal):
         self.z_data = self.truncate_to_target(self.z_data, self.x_data,
                                               source_label='z', target_label='x')
 
+        # 3b. Align envelope avg buffer to x_data for the minimap snapshot guard below.
+        if getattr(self, 'envelope', False) and len(self.data_store) >= 4:
+            self.data_store[3] = self.truncate_to_target(
+                self.data_store[3], self.x_data,
+                source_label='avg', target_label='x')
+
+        # 4. Capture the full-range minimap snapshot on first populate.
+        if self._minimap_x_data is None and len(self.x_data) > 0:
+            self._minimap_x_data = self.x_data.copy()
+            self._minimap_y_data = self.y_data.copy()
+            self._minimap_is_downsampled = self.isDownsampled
+            if (getattr(self, 'envelope', False) and len(self.data_store) >= 4
+                    and len(self.z_data) == len(self.x_data)
+                    and len(self.data_store[3]) == len(self.x_data)):
+                self._minimap_y_max_data = self.z_data.copy()
+                self._minimap_y_avg_data = self.data_store[3].copy()
+
         self._report_xyz_data()
+
+    def clear_minimap_snapshot(self):
+        """Drop the cached full-range minimap data so the next load repopulates it."""
+        self._minimap_x_data = None
+        self._minimap_y_data = None
+        self._minimap_y_max_data = None
+        self._minimap_y_avg_data = None
+        self._minimap_is_downsampled = False
+
+    def restore_minimap_snapshot(self):
+        """
+        Restore the buffers and the downsampled state to the full-range data
+        captured at draw time (the same snapshot the minimap renders) and return
+        it shaped like :meth:`get_data`, or None when no snapshot is available.
+
+        The data hash is refreshed so the restored buffers count as up to date for
+        the current time range: redisplaying them triggers no data access.
+        """
+        x_data = self._minimap_x_data
+        y_data = self._minimap_y_data
+        if x_data is None or y_data is None or len(x_data) == 0:
+            return None
+        envelope = getattr(self, 'envelope', False)
+        if envelope and (self._minimap_y_max_data is None or self._minimap_y_avg_data is None):
+            return None
+
+        self.x_data = x_data.copy()
+        self.y_data = y_data.copy()
+        if envelope:
+            self.z_data = self._minimap_y_max_data.copy()
+            # Realign the raw envelope store: statistics index min/max/avg by the displayed data.
+            self.data_store[0] = self.x_data
+            self.data_store[1] = self.y_data
+            self.data_store[2] = self.z_data
+            self.data_store[3] = self._minimap_y_avg_data.copy()
+        # The downsampled state drives the legend marker and the next-zoom refetch.
+        self.isDownsampled = self._minimap_is_downsampled
+        self._access_md5sum = self.calculate_data_hash()
+        self.set_da_success()
+
+        if envelope:
+            return [self.x_data, self.y_data, self.z_data, self.data_store[3]]
+        return [self.x_data, self.y_data, self.z_data]
 
     def _process_data(self):
         # 1. Cannot process data when _fetch_data failed or did not occur

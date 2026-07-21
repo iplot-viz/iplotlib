@@ -3,7 +3,7 @@
 import gc
 import os
 from datetime import datetime
-from typing import Any, Callable, Collection, List, Tuple
+from typing import Any, Callable, Collection, Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
@@ -31,7 +31,8 @@ from iplotlib.core import (Axis,
                            SignalXY,
                            SignalContour)
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
-from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
+from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
+from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter, is_time_label
 
 logger = setupLogger.get_logger(__name__)
 
@@ -104,6 +105,11 @@ class QtViewBox(pg.ViewBox):
         super().mousePressEvent(ev)
         self.pressed.emit(self, ev)
 
+    def mouseDoubleClickEvent(self, ev):
+        # Skip super(): its default re-invokes mousePressEvent, emitting `pressed`
+        # twice and duplicating the action. Emit once here.
+        self.pressed.emit(self, ev)
+
     def mouseMoveEvent(self, ev):
         super().mouseMoveEvent(ev)
         # Emit dragged signal when mouse moves (for drag preview)
@@ -140,6 +146,7 @@ class PyQtGraphParser(BackendParserBase):
         self.legend_size = 8
         self._cursors = []
         self._cursor_active = False
+        self._rulers = []  # type: List[pyQtRuler]
         self._grid_spacing_labels = {}  # PlotItem -> TextItem
         self._cell_gl = {}
         self._layout_stacks = {}
@@ -184,6 +191,10 @@ class PyQtGraphParser(BackendParserBase):
         canvas = kwargs.get('canvas')
         if canvas:
             self.process_ipl_canvas(canvas)
+
+        if kwargs.get('autoscale', False):
+            # Force an 'Autoscale All' on the exported image only (CLI export option).
+            self.autoscale_all_plots()
 
         ext = os.path.splitext(filename)[1].lower() if '.' in filename else '.png'
         if ext == '.svg':
@@ -294,7 +305,7 @@ class PyQtGraphParser(BackendParserBase):
     def _update_marker_by_point_count(marker_line: PlotDataItem, signal_x_data, signal_style: dict):
         if len(signal_x_data) == 1:
             marker_line.setSymbol('x')
-            marker_line.setSymbolSize(5)
+            marker_line.setSymbolSize(signal_style.get('symbolSize') or 5)
         else:
             symbol = signal_style.get('symbol')
             marker_line.setSymbol(symbol or None)
@@ -517,63 +528,63 @@ class PyQtGraphParser(BackendParserBase):
         color_map = self._pm.get_value(signal, 'color_map')
         curves = []
 
-        # TODO: Check size z_data
         if plot_lines is not None:
             for curve in plot_lines:
                 if isinstance(curve, IsocurveItem):
                     curve.setParentItem(None)
                     plot_item.removeItem(curve)
             plot_lines.clear()
+
+        if contour_filled:
+            img = pg.ImageItem(z_data)
         else:
+            img = pg.ImageItem()
+
+        if (x_data.ndim == y_data.ndim == z_data.ndim == 2
+                and x_data.size and y_data.size and z_data.size):
+            x_min, x_max = np.min(x_data).item(), np.max(x_data).item()
+            y_min, y_max = np.min(y_data).item(), np.max(y_data).item()
+            z_min, z_max = np.min(z_data).item(), np.max(z_data).item()
+
+            # 1. Configure and add the image first, before any children
+            # Set rectangle view for the image. Values correspond to: x, y, w, h
+            # Transformations needed to convert pixels into real data values
+            img.setRect(QtCore.QRectF(x_min, y_min, x_max - x_min, y_max - y_min))
+
+            tr = QTransform()
+            tr.translate(x_min, y_min)
+            tr.scale((x_max - x_min) / np.shape(z_data)[0], (y_max - y_min) / np.shape(z_data)[1])
+            img.setTransform(tr)
             if contour_filled:
-                img = pg.ImageItem(z_data)
-            else:
-                img = pg.ImageItem()
+                img.setImage(z_data)
+            plot_item.addItem(img)
 
-            if x_data.ndim == y_data.ndim == z_data.ndim == 2:
-                x_min, x_max = np.min(x_data).item(), np.max(x_data).item()
-                y_min, y_max = np.min(y_data).item(), np.max(y_data).item()
-                z_min, z_max = np.min(z_data).item(), np.max(z_data).item()
+            # 2. Set ColorBarItem
+            colormap_obj = pg.colormap.get(color_map)
+            img.setColorMap(colormap_obj)
 
-                # 1. Configure and add the image first, before any children
-                # Set rectangle view for the image. Values correspond to: x, y, w, h
-                # Transformations needed to convert pixels into real data values
-                img.setRect(QtCore.QRectF(x_min, y_min, np.ptp(x_data), np.ptp(y_data)))
+            bar = self._colorbar_lut.get(id(signal))
+            bar.setImageItem(img)
+            bar.setLevels(low=z_min, high=z_max)
 
-                tr = QTransform()
-                tr.translate(x_min, y_min)
-                tr.scale((x_max - x_min) / np.shape(z_data)[0], (y_max - y_min) / np.shape(z_data)[1])
-                img.setTransform(tr)
+            # 3. Isocurves creation after img is fully set up in the scene
+            levels = np.linspace(z_min, z_max, contour_levels)
+            lut = None if contour_filled else colormap_obj.getLookupTable(nPts=256, alpha=False)
+            z_range = z_max - z_min
+
+            for i, level in enumerate(levels):
                 if contour_filled:
-                    img.setImage(z_data)
-                plot_item.addItem(img)
+                    pen = (i, len(levels) * 1.5)
+                else:
+                    norm = (level - z_min) / z_range if z_range != 0.0 else 0.0
+                    r, g, b = lut[int(norm * 255)]
+                    pen = pg.mkPen(color=(int(r), int(g), int(b)), cosmetic=True)
 
-                # 2. Set ColorBarItem
-                colormap_obj = pg.colormap.get(color_map)
-                img.setColorMap(colormap_obj)
-
-                bar = self._colorbar_lut.get(id(signal))
-                bar.setImageItem(img)
-                bar.setLevels(low=z_min, high=z_max)
-
-                # 3. Isocurves creation after img is fully set up in the scene
-                levels = np.linspace(z_min, z_max, contour_levels)
-                lut = None if contour_filled else colormap_obj.getLookupTable(nPts=256, alpha=False)
-                z_range = z_max - z_min
-
-                for i, level in enumerate(levels):
-                    if contour_filled:
-                        pen = (i, len(levels) * 1.5)
-                    else:
-                        norm = (level - z_min) / z_range if z_range != 0.0 else 0.0
-                        r, g, b = lut[int(norm * 255)]
-                        pen = pg.mkPen(color=(int(r), int(g), int(b)), cosmetic=True)
-
-                    iso_curve = pg.IsocurveItem(data=z_data, level=level, pen=pen)
-                    iso_curve.setZValue(10)
-                    iso_curve.setParentItem(img)
-                    curves.append(iso_curve)
-            return curves
+                iso_curve = pg.IsocurveItem(data=z_data, level=level, pen=pen)
+                iso_curve.setZValue(10)
+                iso_curve.setParentItem(img)
+                curves.append(iso_curve)
+        return curves
 
     def do_impl_line_plot_contour_slider(self, signal: SignalContour, plot_item: PlotItem, plot: PlotContourWithSlider,
                                          x_data, y_data, z_data):
@@ -603,7 +614,8 @@ class PyQtGraphParser(BackendParserBase):
         else:
             img = pg.ImageItem()
 
-        if x_sub_data.ndim == y_sub_data.ndim == z_sub_data.ndim == 2:
+        if (x_sub_data.ndim == y_sub_data.ndim == z_sub_data.ndim == 2
+                and x_sub_data.size and y_sub_data.size and z_sub_data.size):
             x_min, x_max = np.min(x_sub_data).item(), np.max(x_sub_data).item()
             y_min, y_max = np.min(y_sub_data).item(), np.max(y_sub_data).item()
             z_min, z_max = np.min(z_sub_data).item(), np.max(z_sub_data).item()
@@ -611,7 +623,7 @@ class PyQtGraphParser(BackendParserBase):
             # 1. Configure and add the image first, before any children
             # Set rectangle view for the image. Values correspond to: x, y, w, h
             # Transformations needed to convert pixels into real data values
-            img.setRect(QtCore.QRectF(x_min, y_min, np.ptp(x_sub_data), np.ptp(y_sub_data)))
+            img.setRect(QtCore.QRectF(x_min, y_min, x_max - x_min, y_max - y_min))
 
             # scale() - Moves origin from (0,0) to the data minimum
             # translate() - Each pixel in X becomes (x_max - x_min)/ n_cols wide, and each pixel in Y becomes
@@ -651,6 +663,12 @@ class PyQtGraphParser(BackendParserBase):
                 curves.append(iso_curve)
         return curves
 
+    def _mesh_y(self, impl_plot: PlotItem, y_data):
+        # PColorMeshItem has no setLogMode: map into log-space view by hand.
+        if impl_plot.getAxis('left').logMode:
+            return np.log10(y_data)
+        return y_data
+
     def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
         area = shapes[0][3]
         # PColorMeshItem requires at least one quad; hide until 2+ samples.
@@ -663,7 +681,7 @@ class PyQtGraphParser(BackendParserBase):
                                                     x_data, y1_data, y2_data)
         elif isinstance(area, _AlphaColorMeshItem):
             x_mesh = np.vstack([x_data, x_data])
-            y_mesh = np.vstack([y2_data, y1_data])
+            y_mesh = np.vstack([self._mesh_y(impl_plot, y2_data), self._mesh_y(impl_plot, y1_data)])
             z_mesh = np.ones((1, len(x_data) - 1))
             area.setData(x_mesh, y_mesh, z_mesh)
             area.setVisible(True)
@@ -684,8 +702,7 @@ class PyQtGraphParser(BackendParserBase):
 
         return plot_lines
 
-    @staticmethod
-    def _build_envelope_area(impl_plot: PlotItem, line_min: PlotDataItem,
+    def _build_envelope_area(self, impl_plot: PlotItem, line_min: PlotDataItem,
                              x_data, y1_data, y2_data) -> "_AlphaColorMeshItem":
         # Semi-transparent uniform colormap derived from the min-curve pen.
         pen = line_min.opts['pen']
@@ -695,7 +712,7 @@ class PyQtGraphParser(BackendParserBase):
 
         # Build mesh grids
         x_mesh = np.vstack([x_data, x_data])
-        y_mesh = np.vstack([y2_data, y1_data])
+        y_mesh = np.vstack([self._mesh_y(impl_plot, y2_data), self._mesh_y(impl_plot, y1_data)])
         z_mesh = np.ones((1, len(x_data) - 1))
 
         area = _AlphaColorMeshItem(x_mesh, y_mesh, z_mesh, colorMap=cmap, edgecolors=None)
@@ -735,6 +752,10 @@ class PyQtGraphParser(BackendParserBase):
     def process_ipl_plot_contour_colorbar(self, i_plot: PlotContour | PlotContourWithSlider, visible_stack_ids,
                                           cell_gl):
         z_data = i_plot.signals[1][0].z_data
+        # Cannot derive colorbar levels without data; defer creation until z_data is populated.
+        if z_data is None or np.asarray(z_data).size == 0:
+            return cell_gl
+
         color_map = self._pm.get_value(i_plot.signals[1][0], 'color_map')
         colormap_obj = pg.colormap.get(color_map)
 
@@ -1206,6 +1227,7 @@ class PyQtGraphParser(BackendParserBase):
                 self.align_y_axis(c)
                 break
         self.update_grid_spacing_label(current_plot)
+        self.refresh_rulers(current_plot)
 
     def _x_axis_update_callback(self, view_box: ViewBox):
         if self.canvas.streaming:
@@ -1213,6 +1235,7 @@ class PyQtGraphParser(BackendParserBase):
         current_plot = view_box.parentItem()  # type: PlotItem
         super()._x_axis_update_callback(current_plot)
         self.update_grid_spacing_label(current_plot)
+        self.refresh_rulers(current_plot)
 
     def process_ipl_log_axis(self, axis_item: AxisItem, plot: Plot):
         if axis_item.orientation != 'left':
@@ -1221,9 +1244,17 @@ class PyQtGraphParser(BackendParserBase):
         if log_scale:
             plot_item = axis_item.parentItem()
             plot_item.setLogMode(x=False, y=True)
+            # updateLogMode enables auto-range on both axes; X limits were
+            # already applied, so freeze X again to keep the requested window.
+            plot_item.getViewBox().enableAutoRange(x=False)
 
     def process_ipl_axis_params(self, fc, fs, tick_number, axis: Axis, axis_item: AxisItem):
-        tick_props = dict(maxTickLevel=0)
+        if axis_item.logMode:
+            # Draw the minor decade ticks, which is what gives a log axis its
+            # spacing, but label only the decades as matplotlib does.
+            tick_props = dict(maxTickLevel=2, maxTextLevel=1)
+        else:
+            tick_props = dict(maxTickLevel=0)
         show_all_ticks = self._pm.get_value(self.canvas, 'ticks_position')
 
         # Set ticks on the top and right axis
@@ -1292,6 +1323,14 @@ class PyQtGraphParser(BackendParserBase):
             label_props['font-size'] = f'{int(fs)}pt'
         axis_item.setLabel(text, **label_props)
 
+        # Authoritatively flag a relative-time bottom axis at the moment its
+        # 'Time' label is applied (here, during signal processing), rather than
+        # re-sniffing labelText at tick time, which proved unreliable.
+        if getattr(axis_item, 'orientation', None) == 'bottom' \
+                and isinstance(axis_item, NanosecondDateFormatter) \
+                and not getattr(axis_item, 'is_date', False):
+            axis_item._force_is_time = is_time_label(text)
+
         if axis_item.orientation == 'bottom' and text:
             if fs and fs > 0:
                 label_font = QFont()
@@ -1328,6 +1367,9 @@ class PyQtGraphParser(BackendParserBase):
                     # Draw marker with correct offset to right display
                     x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
                     y = marker.xy[1]
+                    # Marker coordinates are data-space; the log-mode view is log10.
+                    if impl_plot.getAxis('left').logMode and y > 0:
+                        y = np.log10(y)
 
                     # Create annotation if not present (import case)
                     if marker.name not in annotations_names:
@@ -1359,6 +1401,11 @@ class PyQtGraphParser(BackendParserBase):
         for c in self._cursors:
             c.remove()
         self._cursors.clear()
+
+        # remove any active rulers (impl items only — Plot.rulers data is preserved)
+        for r in self._rulers:
+            r.remove()
+        self._rulers.clear()
 
         self._cell_gl = {}
         self._layout_stacks = {}
@@ -1582,7 +1629,14 @@ class PyQtGraphParser(BackendParserBase):
         bot, top = super().autoscale_y_axis(impl_plot)
         vb = impl_plot.getViewBox()
 
-        # Set new Y axis limits
+        if impl_plot.getAxis('left').logMode:
+            # get_impl_data returns display data, already log10-mapped in log
+            # mode: bot/top are exponents, and setYRange pads in log space.
+            if np.isfinite(bot) and np.isfinite(top):
+                vb.setYRange(bot, top, padding=padding)
+            else:
+                vb.enableAutoRange(axis='y')
+            return
         vb.setYRange(bot, top, padding=padding)
 
     def set_impl_plot_slider_limits(self, plot: PlotXYWithSlider, start, end):
@@ -1830,6 +1884,113 @@ class PyQtGraphParser(BackendParserBase):
         self._cursors.clear()
         self._cursor_active = False
 
+    def _ruler_value_lines(self, impl_plot: PlotItem) -> list:
+        """Signal PlotDataItems of *impl_plot*, one per ruler value label
+        (mirrors the crosshair's value annotations)."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        lines = []
+        if ci and hasattr(ci, 'signals') and ci.signals:
+            for sig_ref in ci.signals:
+                signal = sig_ref()
+                if not signal or isinstance(signal, SignalContour):
+                    continue
+                for line in getattr(signal, 'lines', []):
+                    item = line[0] if isinstance(line, list) else line
+                    if isinstance(item, PlotDataItem):
+                        lines.append(item)
+        return lines
+
+    def _ruler_signal_values(self, impl_plot: PlotItem, x: float) -> Dict[str, float]:
+        """Value of each signal at the ruler X keyed by its label, matching the
+        ruler's green value labels. A signal is omitted when the ruler falls off
+        its data, so the table agrees with what the plot shows."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        values: Dict[str, float] = {}
+        if not ci or not getattr(ci, 'signals', None):
+            return values
+        for sig_ref in ci.signals:
+            signal = sig_ref()
+            if not signal or isinstance(signal, SignalContour):
+                continue
+            for line in getattr(signal, 'lines', []):
+                item = line[0] if isinstance(line, list) else line
+                if not isinstance(item, PlotDataItem):
+                    continue
+                x_data, y_data = item.getData()
+                if x_data is None or len(x_data) == 0:
+                    continue
+                # Nearest sample (searchsorted+clamp, as the value labels do).
+                idx = np.searchsorted(x_data, x, side="left")
+                if 0 < idx < len(x_data) and abs(x - x_data[idx - 1]) < abs(x - x_data[idx]):
+                    idx -= 1
+                idx = min(idx, len(x_data) - 1)
+                span = abs(x_data[-1] - x_data[0])
+                # Data-span tolerance (view-independent so the cell is stable on
+                # zoom); mirrors the 5% used by the value labels.
+                if span and abs(x - x_data[idx]) <= span * 0.05:
+                    values[signal.label or 'signal'] = float(y_data[idx])
+                break
+        return values
+
+    @BackendParserBase.run_in_one_thread
+    def add_ruler(self, impl_plot: PlotItem, name: str, x: float, y: float,
+                  color: str = "#FFFFFF", is_echo: bool = False) -> pyQtRuler:
+        font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
+        ruler = pyQtRuler(plot=impl_plot, name=name, xy=(x, y), color=color, font_size=font_size,
+                          value_lines=self._ruler_value_lines(impl_plot))
+        ruler.abs_x = self.transform_value(impl_plot, 0, x)
+        ruler.abs_y = self.transform_value(impl_plot, 1, y)
+        ruler.is_echo = is_echo
+        self._rulers.append(ruler)
+        return ruler
+
+    def create_ruler_echoes(self, origin_impl_plot: PlotItem, name: str,
+                            x_abs: float, y_abs: float, color: str):
+        """Mirror a ruler onto every plot sharing the time axis. Each echo carries
+        the same absolute X/Y and re-projects them to its own plot's offsets."""
+        if not self._pm.get_value(self.canvas, 'shared_x_axis'):
+            return
+        for sibling in self._get_all_shared_axes(origin_impl_plot):
+            if sibling is origin_impl_plot:
+                continue
+            x_view = self.transform_value(sibling, 0, x_abs, inverse=True)
+            y_view = self.transform_value(sibling, 1, y_abs, inverse=True)
+            self.add_ruler(sibling, name, x_view, y_view, color, is_echo=True)
+
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler(self, impl_plot: PlotItem, name: str):
+        remaining = []
+        for r in self._rulers:
+            if r.plot is impl_plot and r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler_by_name(self, name: str):
+        """Remove a ruler and its shared-x echoes across every plot (names are
+        canvas-global unique)."""
+        remaining = []
+        for r in self._rulers:
+            if r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
+    def refresh_rulers(self, impl_plot: PlotItem = None):
+        for r in self._rulers:
+            if impl_plot is None or r.plot is impl_plot:
+                r.xy = (self.transform_value(r.plot, 0, r.abs_x, inverse=True),
+                        self.transform_value(r.plot, 1, r.abs_y, inverse=True))
+                r.refresh_labels()
+
+    def get_rulers(self, impl_plot: PlotItem = None) -> List[pyQtRuler]:
+        if impl_plot is None:
+            return list(self._rulers)
+        return [r for r in self._rulers if r.plot is impl_plot]
+
     def get_impl_x_axis(self, plot: PlotItem) -> AxisItem:
         return plot.getAxis('bottom')
 
@@ -1839,8 +2000,12 @@ class PyQtGraphParser(BackendParserBase):
     def get_impl_y_axis(self, plot: PlotItem) -> AxisItem:
         return plot.getAxis('left')
 
-    def get_impl_y_axis_limits(self, plot: PlotItem) -> AxisItem:
-        return plot.getViewBox().viewRange()[1]
+    def get_impl_y_axis_limits(self, plot: PlotItem) -> Tuple[float, float]:
+        lo, hi = plot.getViewBox().viewRange()[1]
+        if plot.getAxis('left').logMode:
+            # Clamped so float ** cannot raise OverflowError.
+            return 10 ** min(lo, 300.0), 10 ** min(hi, 300.0)
+        return lo, hi
 
     def set_impl_x_axis_label_text(self, plot: PlotItem, text: str):
         ci = self._impl_plot_cache_table.get_cache_item(plot)
@@ -1874,9 +2039,17 @@ class PyQtGraphParser(BackendParserBase):
         self.process_ipl_axis_params_label(self.get_impl_y_axis(plot), text, fc, fs)
 
     def set_impl_y_axis_limits(self, plot: PlotItem, limits: tuple):
-        if isinstance(plot, PlotItem):
-            vb = plot.getViewBox()
-            vb.setYRange(limits[0], limits[1], padding=0)
+        if not isinstance(plot, PlotItem):
+            return
+        vb = plot.getViewBox()
+        if plot.getAxis('left').logMode:
+            lo, hi = limits
+            if lo is not None and hi is not None and lo > 0 and hi > 0:
+                vb.setYRange(np.log10(lo), np.log10(hi), padding=0)
+            else:
+                vb.enableAutoRange(axis='y')
+            return
+        vb.setYRange(limits[0], limits[1], padding=0)
 
     def align_y_axis(self, col: int) -> None:
         """

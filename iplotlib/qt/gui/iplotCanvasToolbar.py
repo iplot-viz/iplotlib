@@ -10,7 +10,6 @@ This module is deprecated and unused.
 #              -Port to PySide2 [Jaswant Sai Panchumarti]
 
 
-from functools import partial
 import typing
 
 from PySide6.QtCore import QMargins, Signal
@@ -41,23 +40,33 @@ class IplotQtCanvasToolbar(QToolBar):
         # Interactive plot actions.
         self._actions = QActionGroup(self)
         self._actions.setExclusive(True)
+        self._tool_actions = {}
         for tool_name in [Canvas.MOUSE_MODE_SELECT,
                           Canvas.MOUSE_MODE_CROSSHAIR,
                           Canvas.MOUSE_MODE_PAN,
                           Canvas.MOUSE_MODE_ZOOM,
                           Canvas.MOUSE_MODE_DIST,
-                          Canvas.MOUSE_MODE_MARKER]:
+                          Canvas.MOUSE_MODE_MARKER,
+                          Canvas.MOUSE_MODE_RULER]:
             tool_action = QAction(tool_name[3:], parent=self)
             tool_action.setCheckable(True)
             tool_action.setActionGroup(self._actions)
-            tool_action.triggered.connect(partial(self.toolActivated.emit, tool_name))
+            # `triggered` passes `checked` on PySide6 6.10 but not 6.6; *_ absorbs either.
+            tool_action.triggered.connect(lambda *_, n=tool_name: self.toolActivated.emit(n))
             self.addAction(tool_action)
+            self._tool_actions[tool_name] = tool_action
 
         self.addSeparator()
 
         # Statistics
         self.statistics = QAction(create_icon('stats_icon'), 'Statistics', self)
         self.addAction(self.statistics)
+
+        self.minimapAction = QAction(create_icon('minimap', 'svg'), 'Mini-map', self)
+        self.minimapAction.setCheckable(True)
+        self.minimapAction.setEnabled(False)
+        self.minimapAction.setToolTip('Show mini-map (available when a single plot is visible)')
+        self.addAction(self.minimapAction)
         self.addSeparator()
 
         # Command-history management
@@ -65,6 +74,11 @@ class IplotQtCanvasToolbar(QToolBar):
         self.redoAction = QAction(create_icon('redo'), '&Redo', self)
         self.addAction(self.undoAction)
         self.addAction(self.redoAction)
+
+        # Restore every plot to the range captured at draw time.
+        self.homeAction = QAction(create_icon('home', 'svg'), '&Home', self)
+        self.homeAction.setToolTip('Resets all plots to the original view')
+        self.addAction(self.homeAction)
 
         # Saving, etc..
         self.importAction = QAction(create_icon('open_file'), '&Import Workspace', self)

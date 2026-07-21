@@ -12,8 +12,23 @@ from pyqtgraph import PlotItem
 from iplotlib.core import PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter as MPLDateFormatter
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter as PGDateFormatter
+from iplotlib.impl.matplotlib.dateFormatter import _fmt_duration
 
 logger = Sl.get_logger(__name__)
+
+
+def _line_source_data(line):
+    """Source arrays of a backend line, in data units. pyqtgraph's
+    ``getData()`` returns log10-mapped display data in log mode, so statistics
+    must read the original dataset instead."""
+    getter = getattr(line, 'getOriginalDataset', None)  # pyqtgraph PlotDataItem
+    if getter is not None:
+        x_data, y_data = getter()
+        if x_data is not None:
+            return x_data, y_data
+    if hasattr(line, 'get_xdata'):  # matplotlib Line2D
+        return line.get_xdata(), line.get_ydata()
+    return line.getData()
 
 
 class NumericTableWidgetItem(QTableWidgetItem):
@@ -46,6 +61,8 @@ class IplotQtStatistics(QWidget):
         super().__init__(*args, **kwargs)
         self.resize(1050, 500)
         self.setWindowTitle("Statistics table")
+
+        self.canvas_columns: int = 1
 
         self.column_names = ['Signal name', 'Min', 'Avg', 'Max', 'First', 'Last', 'Samples', 'First Time', 'Last Time']
 
@@ -131,6 +148,18 @@ class IplotQtStatistics(QWidget):
         main_v_layout.addLayout(top_v_layout)
         self.setLayout(main_v_layout)
 
+    def set_canvas_columns(self, n: int):
+        """Inform the table how many columns the canvas grid has so the plot
+        identifier shown in the Signal name column matches the Stack convention
+        used in the variables config (single number when one column, row.col
+        when several)."""
+        self.canvas_columns = max(1, int(n))
+
+    def _format_plot_id(self, plot_id) -> str:
+        if self.canvas_columns <= 1:
+            return f"{plot_id[0]}"
+        return f"{plot_id[0]}.{plot_id[1]}"
+
     def _format_float(self, value):
         """
             Format float: show as integer if no decimals
@@ -157,11 +186,11 @@ class IplotQtStatistics(QWidget):
 
         return item
 
-    def _create_timestamp_item(self, timestamp, is_date, impl_plot):
+    def _create_timestamp_item(self, timestamp, x_type, impl_plot):
         """
         Creates NumericTableWidgetItem for timestamp with proper formatting
         """
-        if is_date:
+        if x_type == 1:
             # Use the appropriate formatter based on backend
             if isinstance(impl_plot, PlotItem):
                 formatter = PGDateFormatter(orientation='bottom')
@@ -171,14 +200,17 @@ class IplotQtStatistics(QWidget):
             # Format the timestamp
             formatted = formatter.date_fmt(int(timestamp), formatter.YEAR, formatter.NANOSECOND, postfix_end=True)
             item = NumericTableWidgetItem(formatted)
-        else:
+        elif x_type == 2:
             # Relative time (pulse) - data is in seconds
-            item = NumericTableWidgetItem(f"{timestamp:.9f} s")
+            item = NumericTableWidgetItem(_fmt_duration(int(round(float(timestamp) * 1e9)), 1))
+        else:
+            # not a time axis (e.g. plot temp versus current)
+            item = NumericTableWidgetItem(timestamp)
 
         item.setData(Qt.ItemDataRole.UserRole, timestamp)
         return item
 
-    def _set_stats(self, idx, min_data, avg_data, max_data, first, last, samples, first_time, last_time, is_date,
+    def _set_stats(self, idx, min_data, avg_data, max_data, first, last, samples, first_time, last_time, x_type,
                    impl_plot):
         """
             Set statistics row
@@ -189,40 +221,44 @@ class IplotQtStatistics(QWidget):
         self.table.setItem(idx, 4, self._create_item(first))
         self.table.setItem(idx, 5, self._create_item(last))
         self.table.setItem(idx, 6, self._create_item(samples))
-        self.table.setItem(idx, 7, self._create_timestamp_item(first_time, is_date, impl_plot))
-        self.table.setItem(idx, 8, self._create_timestamp_item(last_time, is_date, impl_plot))
+        self.table.setItem(idx, 7, self._create_timestamp_item(first_time, x_type, impl_plot))
+        self.table.setItem(idx, 8, self._create_timestamp_item(last_time, x_type, impl_plot))
 
     def fill_table(self, info_stats: list):
         """
-            Fill the statistics table with data for each signal
+            Fill the statistics table with data for each signal.
+
+            ``info_stats`` items are ``(signal, impl_plot, plot_id)`` tuples;
+            ``plot_id`` is the (row, col) position of the signal's plot in the
+            canvas grid, used to label the signal name with the same Stack
+            convention shown in the variables config.
         """
         self.table.setRowCount(0)
         self._current_info_stats = info_stats
         idx = 0
 
-        for signal, impl_plot in info_stats:
+        for signal, impl_plot, plot_id in info_stats:
             lines = signal.lines
-            stack = signal.get_stack()
+            stack = self._format_plot_id(plot_id)
             has_envelope = signal.data_store[2].size > 0 and signal.data_store[3].size > 0
 
             for line in lines:
                 # Insert new row
                 self.table.insertRow(idx)
-
+                x_type=1 #1 means date, 2 means rel time and 3 else
+                x_unit = signal.data_store[0].unit
                 # Add Statistics to the table
                 if has_envelope > 0:
                     line = line[0]
 
                     # Differentiate methods
                     if isinstance(impl_plot, PlotItem):
-                        x_data = line.getData()[0]
+                        x_data = _line_source_data(line)[0]
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
-                        y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
                         signal_name = f"{line.name()}, {stack}"
                     else:
-                        x_data = line.get_xdata()
+                        x_data = _line_source_data(line)[0]
                         lo, hi = impl_plot.get_xlim()
-                        y_lo, y_hi = impl_plot.get_ylim()
                         signal_name = f"{line.get_label()}, {stack}"
 
                     # The rows correspond to the signals and their corresponding stacks
@@ -233,11 +269,10 @@ class IplotQtStatistics(QWidget):
                     y_max = np.array(signal.data_store[2])
                     y_mean = np.array(signal.data_store[3])
 
-                    # Filter values
-                    mask = ((x_data >= lo) & (x_data <= hi) &
-                            (y_min >= y_lo) & (y_min <= y_hi) &
-                            (y_mean >= y_lo) & (y_mean <= y_hi) &
-                            (y_max >= y_lo) & (y_max <= y_hi))
+                    # Filter by the visible time (X) window only: gating on the Y
+                    # view zeroes the count when a flat signal is zoomed past its
+                    # spread.
+                    mask = (x_data >= lo) & (x_data <= hi)
 
                     y_min_displayed = y_min[mask]
                     y_max_displayed = y_max[mask]
@@ -260,11 +295,25 @@ class IplotQtStatistics(QWidget):
                             init_val = plot.slider_last_min
                             end_val = plot.slider_last_val if plot.slider_last_val != 0 else plot.slider_last_max
                             is_date = bool(min(x_displayed) > (1 << 53) and max(x_displayed) < (1 << 62))
+                            if not is_date:
+                                if x_unit is not None and  "time" in x_unit.lower():
+                                    x_type = 2
+                                else:
+                                    x_type = 3
+                            else:
+                                x_type = 1
                         else:
                             x_displayed = x_data[mask]
                             init_val = 0
                             end_val = -1
                             is_date = plot.axes[0].is_date
+                            if not is_date:
+                                if x_unit is not None and "time" in x_unit.lower():
+                                    x_type = 2
+                                else:
+                                    x_type = 3
+                            else:
+                                x_type = 1
 
                         if len(x_displayed) > 0:
                             first_time_raw = x_displayed[init_val].item()
@@ -292,7 +341,7 @@ class IplotQtStatistics(QWidget):
 
                         # Set statistics
                         self._set_stats(idx, min_val, avg_val, max_val, first, last, samples, first_time, last_time,
-                                        is_date, impl_plot)
+                                        x_type, impl_plot)
                     else:
                         # Indicate that there is no data
                         self.table.setItem(idx, 6, self._create_item(samples))
@@ -300,17 +349,14 @@ class IplotQtStatistics(QWidget):
                 else:
                     # Base case
                     # Differentiate methods
+                    src_x, src_y = _line_source_data(line)
+                    x_data = src_x if src_x is not None else []
+                    y_data = src_y if src_y is not None else []
                     if isinstance(impl_plot, PlotItem):
-                        x_data = line.getData()[0] if line.getData()[0] is not None else []
-                        y_data = line.getData()[1] if line.getData()[1] is not None else []
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
-                        y_lo, y_hi = impl_plot.getViewBox().viewRange()[1]
                         signal_name = f"{line.name()}, {stack}"
                     else:
-                        x_data = line.get_xdata()
-                        y_data = line.get_ydata()
                         lo, hi = impl_plot.get_xlim()
-                        y_lo, y_hi = impl_plot.get_ylim()
                         signal_name = f"{line.get_label()}, {stack}"
 
                     # The rows correspond to the signals and their corresponding stacks
@@ -319,9 +365,10 @@ class IplotQtStatistics(QWidget):
                     x_data = np.asarray(x_data)
                     y_data = np.asarray(y_data)
 
-                    # Filter values
+                    # Filter by the visible time (X) window only (see envelope
+                    # case): the Y view must not gate the sample count.
                     if (len(x_data), len(y_data)) != (0, 0):
-                        mask = ((x_data >= lo) & (x_data <= hi) & (y_data >= y_lo) & (y_data <= y_hi))
+                        mask = (x_data >= lo) & (x_data <= hi)
                         y_displayed = y_data[mask]
                         samples = y_displayed.size
                     else:
@@ -343,11 +390,25 @@ class IplotQtStatistics(QWidget):
                             init_val = plot.slider_last_min
                             end_val = plot.slider_last_val if plot.slider_last_val != 0 else plot.slider_last_max
                             is_date = bool(min(x_displayed) > (1 << 53) and max(x_displayed) < (1 << 62))
+                            if not is_date:
+                                if x_unit is not None and "time" in x_unit.lower():
+                                    x_type = 2
+                                else:
+                                    x_type = 3
+                            else:
+                                x_type = 1
                         else:
                             x_displayed = x_data[mask]
                             init_val = 0
                             end_val = -1
                             is_date = plot.axes[0].is_date
+                            if not is_date:
+                                if x_unit is not None and "time" in x_unit.lower():
+                                    x_type = 2
+                                else:
+                                    x_type = 3
+                            else:
+                                x_type = 1
 
                         if len(x_displayed) > 0:
                             first_time_raw = x_displayed[init_val].item()
@@ -375,7 +436,7 @@ class IplotQtStatistics(QWidget):
 
                         # Set statistics
                         self._set_stats(idx, min_val, avg_val, max_val, first_val, last_val, samples, first_time,
-                                        last_time, is_date, impl_plot)
+                                        last_time, x_type, impl_plot)
                     else:
                         # Indicate that there is no data
                         self.table.setItem(idx, 6, self._create_item(samples))
