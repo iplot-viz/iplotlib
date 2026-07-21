@@ -1,6 +1,7 @@
 import time
 from functools import partial
 from threading import Lock
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -15,6 +16,10 @@ _FIRST_LIVE_WAIT_S = 2.0
 
 # Sliding-window refresh cadence. Skipped for windows shorter than this period.
 _TOPUP_PERIOD_S = 3600
+
+# Injection cadence: polled chunks are buffered and merged so the O(buffer)
+# cost of inject_external is paid once per period instead of once per poll.
+_INJECT_PERIOD_S = 1.0
 
 # QThread wait budget on stop(). Loops poll stop_flag frequently, so most
 # workers exit well within this; stragglers (e.g. a receiver blocked on the
@@ -246,16 +251,47 @@ class CanvasStreamer:
         self.collectors.append(collect_thread)
 
     def stream_thread(self, ds, varnames, callback):
+        pending = {varname: [] for varname in varnames}
+        next_flush = time.monotonic() + _INJECT_PERIOD_S
         while not self.stop_flag:
             for varname in varnames:
                 dobj = self.da.get_next_data(ds, varname)
                 if dobj is not None:
-                    callback(varname, dobj)
+                    pending[varname].append(dobj)
+            if time.monotonic() >= next_flush:
+                self._flush_batches(pending, callback)
+                next_flush = time.monotonic() + _INJECT_PERIOD_S
             time.sleep(0.1)  # 100 ms
 
+        self._flush_batches(pending, callback)
         logger.info("Issuing stop subscription...")
         # Already off the UI thread; safe to call synchronously on the way out.
         self.da.stop_subscription(ds)
+
+    @staticmethod
+    def _flush_batches(pending: dict, callback):
+        for varname, chunks in pending.items():
+            if not chunks:
+                continue
+            pending[varname] = []
+            callback(varname, CanvasStreamer._merge_chunks(chunks))
+
+    @staticmethod
+    def _merge_chunks(chunks):
+        """Merge buffered chunks into a single payload; empty chunks are kept
+        only as a fallback so the handler still slides the window."""
+        filled = [c for c in chunks if len(c.xdata) > 0]
+        if not filled:
+            return chunks[-1]
+        if len(filled) == 1:
+            return filled[0]
+        last = filled[-1]
+        return SimpleNamespace(
+            xdata=np.concatenate([np.asarray(c.xdata) for c in filled]),
+            ydata=np.concatenate([np.asarray(c.ydata) for c in filled]),
+            xunit=last.xunit,
+            yunit=last.yunit,
+        )
 
     def handler(self, callback, varname, dobj):
         signals_by_name = self.signals.get(varname)

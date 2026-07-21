@@ -231,6 +231,50 @@ class HandlerEmptyPayloadTests(unittest.TestCase):
         callback.assert_called_once_with(signal)
 
 
+class BatchMergeTests(unittest.TestCase):
+    """Polled chunks are buffered and merged into one injection per flush."""
+
+    def test_merge_concatenates_chunks_and_keeps_last_units(self):
+        chunks = [
+            _FakeArchiveResponse(x=[1, 2], y=[10, 20], xunit='ns', yunit='V'),
+            _FakeArchiveResponse(x=[3], y=[30], xunit='ns', yunit='mV'),
+        ]
+        merged = CanvasStreamer._merge_chunks(chunks)
+        self.assertEqual(list(merged.xdata), [1, 2, 3])
+        self.assertEqual(list(merged.ydata), [10, 20, 30])
+        self.assertEqual(merged.yunit, 'mV')
+
+    def test_merge_skips_empty_chunks(self):
+        chunks = [
+            _FakeArchiveResponse(x=[], y=[]),
+            _FakeArchiveResponse(x=[5], y=[50], xunit='ns', yunit='V'),
+            _FakeArchiveResponse(x=[], y=[]),
+        ]
+        merged = CanvasStreamer._merge_chunks(chunks)
+        self.assertEqual(list(merged.xdata), [5])
+        self.assertEqual(list(merged.ydata), [50])
+
+    def test_merge_of_all_empty_chunks_returns_empty_payload(self):
+        chunks = [_FakeArchiveResponse(x=[], y=[]),
+                  _FakeArchiveResponse(x=[], y=[])]
+        merged = CanvasStreamer._merge_chunks(chunks)
+        self.assertEqual(len(merged.xdata), 0)
+
+    def test_flush_batches_calls_back_once_per_varname_and_clears(self):
+        pending = {
+            'a': [_FakeArchiveResponse(x=[1], y=[10], xunit='ns', yunit='V'),
+                  _FakeArchiveResponse(x=[2], y=[20], xunit='ns', yunit='V')],
+            'b': [],
+        }
+        callback = MagicMock()
+        CanvasStreamer._flush_batches(pending, callback)
+        callback.assert_called_once()
+        varname, merged = callback.call_args.args
+        self.assertEqual(varname, 'a')
+        self.assertEqual(list(merged.xdata), [1, 2])
+        self.assertEqual(pending, {'a': [], 'b': []})
+
+
 class SpawnLifecycleTests(unittest.TestCase):
     """Streaming workers run on QThreads (worker/moveToThread pattern)
     and stop() joins finished threads without leaking them."""

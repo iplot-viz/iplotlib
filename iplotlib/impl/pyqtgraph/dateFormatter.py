@@ -382,7 +382,6 @@ class NanosecondDateFormatter(pg.AxisItem):
         """Number of date segments to display after cut_start, adapted to tick spacing.
 
         Avoids showing arbitrary trailing digits (e.g. seconds when ticks are hours/days apart).
-        Returns 4 (the original behaviour) for spacings below one hour.
         """
         s = abs(self._spacing)
         if s >= 86400e9:  # >= 1 day

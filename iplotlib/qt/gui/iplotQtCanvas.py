@@ -77,8 +77,8 @@ class IplotQtCanvas(QWidget):
         self._drag_shift_is_datetime = False
         self._drag_shift_preview_line = None
 
-        # Streaming redraws are capped to one signal flush per interval.
-        self._signal_flush_interval_ms = 500
+        # Streaming redraws are capped to one signal flush per interval (1 Hz).
+        self._signal_flush_interval_ms = 1000
         self._signal_flush_last = 0.0
         self._signal_flush_timer = QTimer(self)
         self._signal_flush_timer.setSingleShot(True)
