@@ -95,14 +95,16 @@ class IplotQtCanvasToolbar(QToolBar):
         # Pulse creation. Hidden by default — the host application decides
         # whether to show it based on data-source capabilities (see
         # MTMainWindow feature-gating against UdaAccess.is_write_capable()).
-        self.createPulseAction = QAction('&Create Pulse', self)
+        self.createPulseAction = QAction(create_icon('create_pulse'), '&Create Pulse', self)
+        self.createPulseAction.setToolTip('Create Pulse')
         self.createPulseAction.setStatusTip(
             'Create a UDA pulse from the currently visible time range')
         self.createPulseAction.setVisible(False)
         self.addAction(self.createPulseAction)
 
         # Pulse update. Hidden by default; same gating as createPulseAction.
-        self.updatePulseAction = QAction('&Update Pulse', self)
+        self.updatePulseAction = QAction(create_icon('update_pulse'), '&Update Pulse', self)
+        self.updatePulseAction.setToolTip('Update Pulse')
         self.updatePulseAction.setStatusTip(
             'Search for an existing UDA pulse and update its time range, status or description')
         self.updatePulseAction.setVisible(False)
