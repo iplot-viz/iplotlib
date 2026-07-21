@@ -367,6 +367,7 @@ class ExponentScalarFormatter(ScalarFormatter):
 
     def __init__(self, label_props: dict = None, is_time: bool = False):
         super().__init__(useOffset=True, useMathText=False)
+        self.set_powerlimits((-3, 3))
         self._label_props = label_props or {}
         self._is_time = bool(is_time)
         self._eng_common = ''

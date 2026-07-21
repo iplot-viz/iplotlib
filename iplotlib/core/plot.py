@@ -17,6 +17,7 @@ import weakref
 import pandas as pd
 
 from iplotlib.core.axis import Axis, LinearAxis
+from iplotlib.core.ruler import Ruler
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 
 
@@ -59,6 +60,7 @@ class Plot(ABC):
     plot_title: str = None
     axes: List[Union[LinearAxis, List[LinearAxis]]] = None
     signals: Dict[int, List[Signal]] = None
+    rulers: List[Ruler] = None
     legend: bool = None
     legend_position: str = None
     legend_layout: str = None
@@ -75,6 +77,8 @@ class Plot(ABC):
         self._type = self.__class__.__module__ + '.' + self.__class__.__qualname__
         if self.signals is None:
             self.signals = {}
+        if self.rulers is None:
+            self.rulers = []
         if self.axes is None:
             self.axes = [LinearAxis(), [LinearAxis()]]
 
@@ -87,6 +91,18 @@ class Plot(ABC):
         if stack not in self.signals:
             self.signals[stack] = []
         self.signals[stack].append(signal)
+
+    def add_ruler(self, ruler: Ruler):
+        self.rulers.append(ruler)
+
+    def remove_ruler(self, name: str):
+        self.rulers = [r for r in self.rulers if r.name != name]
+
+    def get_ruler(self, name: str):
+        for r in self.rulers:
+            if r.name == name:
+                return r
+        return None
 
     def reset_preferences(self):
         self.plot_title = Plot.plot_title
@@ -134,10 +150,18 @@ class Plot(ABC):
                     old_axis_properties = old_plot['axes'][idxAxis]
                     axis.merge(old_axis_properties)
 
+        self.rulers = [
+            Ruler(name=r.get('name'), xy=tuple(r['xy']) if r.get('xy') is not None else None,
+                  color=r.get('color', Ruler.color), font_color=r.get('font_color', Ruler.font_color),
+                  visible=r.get('visible', True), show_label=r.get('show_label', Ruler.show_label),
+                  show_val_label=r.get('show_val_label', Ruler.show_val_label))
+            for r in old_plot.get('rulers') or []
+        ]
+
         # signals are merged at canvas level to handle move between plots
 
     @abstractmethod
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         """"""
 
     def set_x_axes_limits(self, limits, which='current'):
@@ -185,10 +209,12 @@ class PlotContour(Plot):
         self.color_map = old_plot['color_map']
         self.contour_levels = old_plot['contour_levels']
 
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         x = pd.DataFrame()
         for p, plot in enumerate(self.signals.values()):
             for s, pl_signal in enumerate(plot):
+                if progress_callback is not None:
+                    progress_callback(pl_signal.alias or pl_signal.name)
                 col_name = f"plot{row + 1}.{col + 1}"
                 if len(self.signals) > 1:
                     col_name += f".{p + 1}"
@@ -278,10 +304,12 @@ class PlotXY(Plot):
         self.marker_size = old_plot['marker_size']
         self.step = old_plot['step']
 
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         x = pd.DataFrame()
         for p, plot in enumerate(self.signals.values()):
             for s, pl_signal in enumerate(plot):
+                if progress_callback is not None:
+                    progress_callback(pl_signal.alias or pl_signal.name)
                 col_name = f"plot{row + 1}.{col + 1}"
                 if len(self.signals) > 1:
                     col_name += f".{p + 1}"
@@ -338,7 +366,7 @@ class PlotSurface(Plot):
     def merge(self, old_plot: dict):
         super().merge(old_plot)
 
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         """"""
 
 
@@ -356,7 +384,7 @@ class PlotImage(Plot):
     def merge(self, old_plot: dict):
         super().merge(old_plot)
 
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         """"""
 
 
@@ -398,10 +426,12 @@ class PlotXYWithSlider(PlotXY):
     def clean_slider(self):
         self.slider = None
 
-    def get_signals_as_df(self, row, col):
+    def get_signals_as_df(self, row, col, progress_callback=None):
         x = pd.DataFrame()
         for p, plot in enumerate(self.signals.values()):
             for s, pl_signal in enumerate(plot):
+                if progress_callback is not None:
+                    progress_callback(pl_signal.alias or pl_signal.name)
                 col_name = f"plot{row + 1}.{col + 1}"
                 if len(self.signals) > 1:
                     col_name += f".{p + 1}"

@@ -285,6 +285,32 @@ def is_time_label(label) -> bool:
     return label is not None and 'time' in str(label).lower()
 
 
+# Linear "nice" (1/2/2.5/5 x 10^k) steps, matching the fallback matplotlib's
+# LogLocator uses when a log view is too narrow to hold decade ticks.
+_LOG_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
+
+# Tick labels are plain text here, so powers of ten need superscript glyphs
+# rather than the mathtext the matplotlib backend renders.
+_SUPERSCRIPT = str.maketrans('-0123456789', '⁻⁰¹²³⁴⁵⁶⁷⁸⁹')
+
+
+def _nice_ticks(lo, hi, n):
+    """Up to ``n`` evenly spaced 'nice' (1/2/2.5/5 x 10^k) values within
+    [lo, hi]."""
+    if not (hi > lo) or n < 2:
+        return [lo]
+    raw = (hi - lo) / n
+    mag = 10.0 ** floor(log10(raw))
+    step = _LOG_STEPS[-1] * mag
+    for s in _LOG_STEPS:
+        if s * mag >= raw:
+            step = s * mag
+            break
+    first = ceil(lo / step - 1e-9)
+    last = floor(hi / step + 1e-9)
+    return [(first + i) * step for i in range(last - first + 1)]
+
+
 class NanosecondDateFormatter(pg.AxisItem):
     """Date axis formatter that takes into account ns offset if it is defined on this formatter axis
     Additionally it formats date as common_part + postfix and includes nanosecond precision if data is given as int64"""
@@ -521,13 +547,15 @@ class NanosecondDateFormatter(pg.AxisItem):
             # Adjust previous ticks to new range
             values = [v for v in self.last_values if minVal <= v <= maxVal]
 
-            # Add new ticks if needed
+            # Add new ticks if needed. Derive the step from the surviving ticks,
+            # or from the even spacing when only one survived (avoids IndexError).
+            step = (values[1] - values[0]) if len(values) >= 2 else last_range / max(n, 1)
             while len(values) < n:
                 # Add to the end or to the beginning
-                if values and values[-1] + (values[1] - values[0]) <= maxVal:
-                    values.append(values[-1] + (values[1] - values[0]))
-                elif values and values[0] - (values[1] - values[0]) >= minVal:
-                    values.insert(0, values[0] - (values[1] - values[0]))
+                if values and values[-1] + step <= maxVal:
+                    values.append(values[-1] + step)
+                elif values and values[0] - step >= minVal:
+                    values.insert(0, values[0] - step)
                 else:
                     break
             values = sorted(values)
@@ -593,16 +621,22 @@ class NanosecondDateFormatter(pg.AxisItem):
                     spacing = values[1] - values[0]
                 self._tick_spacing = spacing
             else:
-                # Y axis: fn.siScale formatting. Clear any stale duration state.
+                # Y axis. Clear any stale duration state.
                 self._eng_labels = None
                 self._eng_common = ''
                 self._numeric_offset = 0.0
                 if self.logMode:
-                    _range = 10 ** np.array(self.range)
+                    # Decade ticks plus the minor ticks that give the log its
+                    # spacing; no SI prefix or corner factor (see logTickValues).
+                    self.autoSIPrefixScale = 1.0
+                    self.labelUnit = ''
+                    self.offset_str = ''
+                    return super().tickValues(minVal, maxVal, size)
                 else:
+                    # fn.siScale formatting.
                     _range = self.range
-                (scale, prefix) = fn.siScale(max(abs(_range[0] * self.scale), abs(_range[1] * self.scale)))
-                self.set_scale(scale, prefix)
+                    (scale, prefix) = fn.siScale(max(abs(_range[0] * self.scale), abs(_range[1] * self.scale)))
+                    self.set_scale(scale, prefix)
 
         return [(spacing, values)]  # major ticks
 
@@ -632,9 +666,15 @@ class NanosecondDateFormatter(pg.AxisItem):
                     values = [f"{v:g}" for v in values]
                 self.common_label.setText(self._eng_common)
                 self._updateLabel()
+            elif self.logMode:
+                # Powers of ten, labelled by logTickStrings; the value carries
+                # its own exponent, so the corner factor stays empty.
+                values = super().tickStrings(values, scale, spacing)
+                self.common_label.setText('')
             else:
-                # Y axis: fn.siScale formatting
-                if self.labelUnit in ['', 'k']:
+                # Common 1eN corner factor as on the matplotlib backend; only
+                # bare units stay plain.
+                if self.labelUnit == '':
                     values = [f"{v:g}" for v in values]
                     self.common_label.setText("")
                 else:
@@ -643,6 +683,34 @@ class NanosecondDateFormatter(pg.AxisItem):
                         self.common_label.setText(self.offset_str)
 
         return values
+
+    def logTickValues(self, minVal, maxVal, size, stdTicks):
+        ticks = super().logTickValues(minVal, maxVal, size, stdTicks)
+        visible = [v for _, level in ticks for v in level if minVal <= v <= maxVal]
+        if len(visible) > 1:
+            return ticks
+        # Too narrow to hold decade ticks: pyqtgraph leaves a single tick, so
+        # fall back to nice linear values the way matplotlib's LogLocator does.
+        lo, hi = sorted((10.0 ** min(minVal, 300.0), 10.0 ** min(maxVal, 300.0)))
+        vals = [log10(v) for v in _nice_ticks(lo, hi, self.n_ticks) if v > 0]
+        if len(vals) < 2:
+            return ticks
+        return [(vals[1] - vals[0], vals)]
+
+    def logTickStrings(self, values, scale, spacing):
+        # pyqtgraph's own version rounds to one significant digit, which
+        # collapses the intermediate ticks of a narrow view onto one label.
+        strings = []
+        for v in values:
+            value = 10.0 ** min(float(v), 300.0) * scale
+            if value <= 0:
+                strings.append('')
+                continue
+            mantissa, exponent = f"{value:.3e}".split('e')
+            mantissa = float(mantissa)
+            factor = '' if abs(mantissa - 1.0) < 1e-9 else f"{mantissa:g}×"
+            strings.append(f"{factor}10{str(int(exponent)).translate(_SUPERSCRIPT)}")
+        return strings
 
     def set_scale(self, scale, prefix):
         exponent = int(round(-np.log10(scale)))

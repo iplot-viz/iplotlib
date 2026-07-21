@@ -97,6 +97,7 @@ class Canvas(ABC):
     MOUSE_MODE_ZOOM = 'MM_ZOOM'
     MOUSE_MODE_DIST = 'MM_DIST'
     MOUSE_MODE_MARKER = 'MM_MARKER'
+    MOUSE_MODE_RULER = 'MM_RULER'
     rows: int = 1
     cols: int = 1
     title: str = None
@@ -376,14 +377,32 @@ class Canvas(ABC):
                         if clear is not None:
                             clear()
 
-    def get_signals_as_csv(self):
+    def get_signals_as_csv(self, progress_callback=None):
+        """
+        Serialize the signals of the exported plots to CSV.
+
+        If given, `progress_callback` is invoked as each signal starts being
+        processed with (index, total, signal name), index being 1-based.
+        """
         x = pd.DataFrame()
         focus_plot = self.focus_plot
-        for c, column in enumerate(self.plots):
-            for r, row in enumerate(column):
-                if not row or (focus_plot and row != focus_plot):
-                    continue
-                df = row.get_signals_as_df(r, c)
-                x = pd.concat([x, df], axis=1)
+        exported_plots = [(r, c, row)
+                          for c, column in enumerate(self.plots)
+                          for r, row in enumerate(column)
+                          if row and not (focus_plot and row != focus_plot)]
+
+        per_signal = None
+        if progress_callback is not None:
+            total = sum(len(signals) for _, _, plot in exported_plots for signals in plot.signals.values())
+            counter = 0
+
+            def per_signal(name):
+                nonlocal counter
+                counter += 1
+                progress_callback(counter, total, name)
+
+        for r, c, row in exported_plots:
+            df = row.get_signals_as_df(r, c, progress_callback=per_signal)
+            x = pd.concat([x, df], axis=1)
 
         return x.to_csv(index=False)

@@ -154,6 +154,7 @@ class BackendParserBase(ABC):
         self._impl_plot_ranges_hash = defaultdict(
             lambda: defaultdict(dict))  # type: Dict[Any, int] # key is id(impl_plot)
         self._update = False
+        self._restoring_view = False
         self._streaming_impl_plot_lut = defaultdict(lambda: [None, None])
 
     def run_in_one_thread(func):
@@ -200,11 +201,11 @@ class BackendParserBase(ABC):
         else:
             y_displayed = []
 
-        # Check if the visible Y data contains valid values
+        # Drop NaNs before the emptiness check: an all-NaN window (e.g.
+        # pyqtgraph log mode) would make np.min raise.
+        if len(y_displayed) > 0 and np.isnan(y_displayed).any():
+            y_displayed = y_displayed[~np.isnan(y_displayed)]
         if len(y_displayed) > 0:
-            # Check if there exist NaN values in the y_displayed array
-            if np.isnan(y_displayed).any():
-                y_displayed = y_displayed[~np.isnan(y_displayed)]
             min_bot = np.min(y_displayed)
             max_top = np.max(y_displayed)
         else:
@@ -241,6 +242,27 @@ class BackendParserBase(ABC):
     @abstractmethod
     def export_image(self, filename: str, **kwargs):
         pass
+
+    def autoscale_all_plots(self):
+        """
+        Autoscale the Y axis of every PlotXY of the current canvas.
+
+        This is the headless equivalent of the interactive 'Autoscale All' action:
+        it reuses the same per-plot :meth:`autoscale_y_axis` logic but without any
+        undo/redo bookkeeping. It is meant to be used by the image export path
+        (e.g. ``export_image(..., autoscale=True)``) and does not alter the
+        behavior of the interactive autoscale in any way.
+        """
+        if self.canvas is None:
+            return
+        for column in self.canvas.plots:
+            for plot in column:
+                if not isinstance(plot, PlotXY):
+                    continue
+                for impl_plot in self._plot_impl_plot_lut.get(id(plot), []):
+                    if impl_plot is None:
+                        continue
+                    self.autoscale_y_axis(impl_plot)
 
     @abstractmethod
     def clear(self):
@@ -333,7 +355,10 @@ class BackendParserBase(ABC):
             plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
             stacked_plots = self._plot_impl_plot_lut.get(id(plot))
 
-            if self._pm.get_value(self.canvas, 'autoscale'):
+            # Undo/redo restores an exact stored view; re-autoscaling here would
+            # override the restored Y (and drop rulers whose Y falls outside the
+            # data-fit range). Skip autoscale while restoring history.
+            if self._pm.get_value(self.canvas, 'autoscale') and not getattr(self.canvas, 'undo_redo', False):
                 self._update = True
                 self.autoscale_y_axis(impl_plot)
             else:
@@ -451,6 +476,27 @@ class BackendParserBase(ABC):
 
         return shared
 
+    def _ruler_signal_values(self, impl_plot: Any, x: float) -> Dict[str, float]:
+        """Value of each signal at the ruler X keyed by its label. Backends with
+        ruler support override this; the base has no per-signal resolution."""
+        return {}
+
+    def ruler_signal_values_shared(self, impl_plot: Any, x_view: float) -> Dict[str, float]:
+        """Signal values at the ruler X for *impl_plot* extended, when the canvas
+        shares the time axis, with the signals of every shared plot evaluated at
+        the same absolute X — the values the ruler echoes display. The owner
+        plot wins on a label clash."""
+        values: Dict[str, float] = {}
+        if self._pm.get_value(self.canvas, 'shared_x_axis'):
+            x_abs = self.transform_value(impl_plot, 0, x_view)
+            for sibling in self._get_all_shared_axes(impl_plot):
+                if sibling is impl_plot:
+                    continue
+                x_sibling = self.transform_value(sibling, 0, x_abs, inverse=True)
+                values.update(self._ruler_signal_values(sibling, x_sibling))
+        values.update(self._ruler_signal_values(impl_plot, x_view))
+        return values
+
     @abstractmethod
     def get_canvas_plots(self):
         pass
@@ -554,9 +600,17 @@ class BackendParserBase(ABC):
 
                 # Adjust initial padding for Y axis
                 if ax_idx == 1 and not (isinstance(plot, PlotContour) or isinstance(plot, PlotImage)):
-                    h = end - begin
-                    begin = begin - 0.1 * h if padding_begin else begin
-                    end = end + 0.1 * h if padding_end else end
+                    if self._pm.get_value(plot, 'log_scale') and begin > 0 and end > begin:
+                        # Pad multiplicatively on a log axis: a linear margin
+                        # would go non-positive and degrade to the backend's
+                        # own autorange.
+                        factor = (end / begin) ** 0.1
+                        begin = begin / factor if padding_begin else begin
+                        end = end * factor if padding_end else end
+                    else:
+                        h = end - begin
+                        begin = begin - 0.1 * h if padding_begin else begin
+                        end = end + 0.1 * h if padding_end else end
             else:
                 begin, end = axis.begin, axis.end
 
@@ -638,6 +692,22 @@ class BackendParserBase(ABC):
         """
         """
 
+    def _draw_time_signal_data(self, signal: Signal, impl_plot: Any):
+        """
+        Data for redrawing `signal` while the view is being reset: the draw-time
+        snapshot (``restore_minimap_snapshot``), served without any data access.
+        Returns None when the snapshot cannot honour the plot (no snapshot yet,
+        or slider/contour/image data, which it does not capture).
+        """
+        if not isinstance(signal, SignalXY):
+            return None
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci else None
+        if plot is None or isinstance(plot, (PlotXYWithSlider, PlotContour, PlotImage)):
+            return None
+        restore = getattr(signal, 'restore_minimap_snapshot', None)
+        return restore() if restore is not None else None
+
     @run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
         """
@@ -657,8 +727,14 @@ class BackendParserBase(ABC):
         if impl_plot is None:
             return
 
-        # All good, make a data access request
-        signal_data = signal.get_data()
+        if self._restoring_view:
+            # View reset: redraw from the draw-time snapshot, never re-request data.
+            signal_data = self._draw_time_signal_data(signal, impl_plot)
+            if signal_data is None:
+                return
+        else:
+            # All good, make a data access request
+            signal_data = signal.get_data()
 
         # Apply shift offsets if present (persisted in signal metadata)
         # This ensures offset survives any rebuild/refresh cycle
@@ -1341,6 +1417,28 @@ class BackendParserBase(ABC):
                     all_limits.append(plot_lims)
         return all_limits
 
+    def get_view_cmd_limits(self, impl_plot: Any) -> List[IplPlotViewLimits]:
+        """
+        Return the limits a zoom/pan must snapshot for undo/redo. With a shared X axis a
+        single gesture moves every plot together, so all plots are captured; restoring
+        only the interacted one would leave the siblings unrestored on undo. Otherwise
+        only the interacted plot is captured. Uses the zoom-case Y semantics of
+        :meth:`get_plot_limits` so the stored range matches the live view.
+        """
+        if not self._pm.get_value(self.canvas, 'shared_x_axis') or not isinstance(self.canvas, Canvas):
+            return [self.get_plot_limits(impl_plot)]
+
+        all_limits = []
+        for col in self.canvas.plots:
+            for plot in col:
+                if self._focus_plot is not None and self._focus_plot != plot:
+                    continue
+                for i_plot in self._plot_impl_plot_lut.get(id(plot)) or []:
+                    plot_lims = self.get_plot_limits(i_plot)
+                    if isinstance(plot_lims, IplPlotViewLimits):
+                        all_limits.append(plot_lims)
+        return all_limits
+
     def get_plot_limits(self, impl_plot: Any, canvas_flag: bool = False) -> Optional[IplPlotViewLimits]:
         """
         Return limits for the given plot. The `which` argument can be `original` or `current`
@@ -1406,17 +1504,100 @@ class BackendParserBase(ABC):
             if impl_plot is None:
                 impl_plot = self._signal_impl_plot_lut.get(signal.uid)
 
-        # Set X limits
+        # A restore can change the numeric offset without moving the view: pyqtgraph
+        # absorbs a pan into the offset, so the view stays put and sigXRangeChanged
+        # never fires -> the axis-update callback that re-plots the offset-relative
+        # signal data does not run and the data stays drawn at the old offset.
+        x_before = self.get_impl_x_axis_limits(impl_plot) if impl_plot is not None else None
         self.set_oaw_axis_limits(impl_plot, 0, (ax_limits[0].begin, ax_limits[0].end))
+        x_view_moved = impl_plot is not None and self.get_impl_x_axis_limits(impl_plot) != x_before
         # isinstance(plot, PlotXYWithSlider): TODO: test with Slider
 
         # Set Y limits
         self.set_oaw_axis_limits(impl_plot, 1, (ax_limits[1].begin, ax_limits[1].end))
         # isinstance(plot, PlotXYWithSlider): TODO: test with Slider
 
+        # Only when the view did not move (so the callback did not re-plot) do we
+        # re-plot here, at the restored offset. matplotlib moves the view -> skipped.
+        if impl_plot is not None and not x_view_moved:
+            for signal_ref in self._impl_plot_cache_table.get_cache_item(impl_plot).signals:
+                signal = signal_ref()
+                if signal is not None:
+                    self.process_ipl_signal(signal)
+
         # Restore slider-specific limits, if the plot has one
         if isinstance(plot, PlotXYWithSlider) and self._pm.get_value(self.canvas, 'shared_x_axis'):
             self.set_impl_plot_slider_limits(plot, *limits.sliders_ranges[0].get_limits())
+
+    def _draw_time_y_limits(self, plot, begin, end):
+        """
+        Return the Y range as Draw would show it: the original extent plus the 10%
+        margin, unless a canvas-level Y min/max override is set (then it wins, with
+        no margin). Contour and image plots get no margin. Mirrors the Y handling in
+        :meth:`process_ipl_axis`.
+        """
+        if begin is None or end is None or isinstance(plot, (PlotContour, PlotImage)):
+            return begin, end
+        canvas_begin = self.canvas.canvas_begin
+        canvas_end = self.canvas.canvas_end
+        height = end - begin
+        lo = canvas_begin if canvas_begin is not None else begin - 0.1 * height
+        hi = canvas_end if canvas_end is not None else end + 0.1 * height
+        return lo, hi
+
+    def set_plot_limits_to_original(self, impl_plot: Any):
+        """
+        Restore a single plot to the ranges captured at draw time (the ``original``
+        limits), leaving every other plot untouched. The X range is the exact window
+        requested at draw time; the Y range gets the same margin Draw applies.
+
+        Reuses the view-limit plumbing of undo/redo, and the redraws it triggers are
+        served from the draw-time snapshots (:meth:`_draw_time_signal_data`), so no
+        data-access request is issued.
+        """
+        target = self.get_plot_limits(impl_plot)
+        if not isinstance(target, IplPlotViewLimits):
+            return
+        plot = target.plot_ref()
+        if plot is None:
+            return
+
+        x_begin, x_end = plot.axes[0].get_limits('original')
+        stacked_plots = self._plot_impl_plot_lut.get(id(plot))
+        y_begin, y_end = plot.axes[1][stacked_plots.index(impl_plot)].get_limits('original')
+        y_begin, y_end = self._draw_time_y_limits(plot, y_begin, y_end)
+
+        target.axes_ranges[0].set_limits(x_begin, x_end)
+        target.axes_ranges[1].set_limits(y_begin, y_end)
+        # Signals inherit the plot's X range; realign them to the draw-time window
+        # so their cached samples are reused on redraw.
+        for signal_range in target.signals_ranges:
+            signal_range.set_limits(x_begin, x_end)
+
+        self._restoring_view = True
+        try:
+            self.set_plot_limits(target)
+        finally:
+            self._restoring_view = False
+
+    def reset_all_plots_to_original(self):
+        """
+        Restore every visible plot to its draw-time ranges. Plots hidden by focus
+        mode are skipped, mirroring the iteration in :meth:`get_all_plot_limits`.
+        """
+        if not isinstance(self.canvas, Canvas):
+            return
+        for col in self.canvas.plots:
+            for plot in col:
+                if plot is None:
+                    continue
+                if self._focus_plot is not None and self._focus_plot != plot:
+                    continue
+                impl_list = self._plot_impl_plot_lut.get(id(plot))
+                if not impl_list:
+                    continue
+                for impl_plot in impl_list:
+                    self.set_plot_limits_to_original(impl_plot)
 
     @staticmethod
     def create_offset(vals: Union[List, BufferObject]) -> Union[int, np.int64, np.uint64, None]:

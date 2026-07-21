@@ -112,6 +112,9 @@ class pyQtCrosshair:
         # Format the Y label with the left axis' own tick strings so it matches
         # the axis (no scientific notation when the ticks show none, mint #94).
         try:
+            if getattr(axis, 'logMode', False):
+                # Log ticks are powers of ten; the cursor reads the plain value.
+                return f"{10.0 ** min(float(value), 300.0):g}"
             size = axis.geometry().height()
             if size <= 0:
                 size = 800
@@ -262,7 +265,12 @@ class pyQtCrosshair:
                         annotation.setAnchor((ax, 0.5))
                         annotation._last_anchor = (ax, 0.5)
                     annotation.setPos(xp, yp)
-                    annotation.setText(f"{y_data[idx]:.6g}")
+                    # getData() is log10-mapped in log mode; the readout shows
+                    # the data value.
+                    y_val = y_data[idx]
+                    if getattr(line, 'opts', {}).get('logMode', (False, False))[1]:
+                        y_val = 10.0 ** y_val
+                    annotation.setText(f"{y_val:.6g}")
                     annotation.setVisible(True)
                 else:
                     annotation.setVisible(False)

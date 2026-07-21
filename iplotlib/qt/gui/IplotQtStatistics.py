@@ -17,6 +17,20 @@ from iplotlib.impl.matplotlib.dateFormatter import _fmt_duration
 logger = Sl.get_logger(__name__)
 
 
+def _line_source_data(line):
+    """Source arrays of a backend line, in data units. pyqtgraph's
+    ``getData()`` returns log10-mapped display data in log mode, so statistics
+    must read the original dataset instead."""
+    getter = getattr(line, 'getOriginalDataset', None)  # pyqtgraph PlotDataItem
+    if getter is not None:
+        x_data, y_data = getter()
+        if x_data is not None:
+            return x_data, y_data
+    if hasattr(line, 'get_xdata'):  # matplotlib Line2D
+        return line.get_xdata(), line.get_ydata()
+    return line.getData()
+
+
 class NumericTableWidgetItem(QTableWidgetItem):
     """
     Custom QTableWidgetItem that sorts by numeric value stored in UserRole
@@ -47,6 +61,8 @@ class IplotQtStatistics(QWidget):
         super().__init__(*args, **kwargs)
         self.resize(1050, 500)
         self.setWindowTitle("Statistics table")
+
+        self.canvas_columns: int = 1
 
         self.column_names = ['Signal name', 'Min', 'Avg', 'Max', 'First', 'Last', 'Samples', 'First Time', 'Last Time']
 
@@ -132,6 +148,18 @@ class IplotQtStatistics(QWidget):
         main_v_layout.addLayout(top_v_layout)
         self.setLayout(main_v_layout)
 
+    def set_canvas_columns(self, n: int):
+        """Inform the table how many columns the canvas grid has so the plot
+        identifier shown in the Signal name column matches the Stack convention
+        used in the variables config (single number when one column, row.col
+        when several)."""
+        self.canvas_columns = max(1, int(n))
+
+    def _format_plot_id(self, plot_id) -> str:
+        if self.canvas_columns <= 1:
+            return f"{plot_id[0]}"
+        return f"{plot_id[0]}.{plot_id[1]}"
+
     def _format_float(self, value):
         """
             Format float: show as integer if no decimals
@@ -198,15 +226,20 @@ class IplotQtStatistics(QWidget):
 
     def fill_table(self, info_stats: list):
         """
-            Fill the statistics table with data for each signal
+            Fill the statistics table with data for each signal.
+
+            ``info_stats`` items are ``(signal, impl_plot, plot_id)`` tuples;
+            ``plot_id`` is the (row, col) position of the signal's plot in the
+            canvas grid, used to label the signal name with the same Stack
+            convention shown in the variables config.
         """
         self.table.setRowCount(0)
         self._current_info_stats = info_stats
         idx = 0
 
-        for signal, impl_plot in info_stats:
+        for signal, impl_plot, plot_id in info_stats:
             lines = signal.lines
-            stack = signal.get_stack()
+            stack = self._format_plot_id(plot_id)
             has_envelope = signal.data_store[2].size > 0 and signal.data_store[3].size > 0
 
             for line in lines:
@@ -220,11 +253,11 @@ class IplotQtStatistics(QWidget):
 
                     # Differentiate methods
                     if isinstance(impl_plot, PlotItem):
-                        x_data = line.getData()[0]
+                        x_data = _line_source_data(line)[0]
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
                         signal_name = f"{line.name()}, {stack}"
                     else:
-                        x_data = line.get_xdata()
+                        x_data = _line_source_data(line)[0]
                         lo, hi = impl_plot.get_xlim()
                         signal_name = f"{line.get_label()}, {stack}"
 
@@ -316,14 +349,13 @@ class IplotQtStatistics(QWidget):
                 else:
                     # Base case
                     # Differentiate methods
+                    src_x, src_y = _line_source_data(line)
+                    x_data = src_x if src_x is not None else []
+                    y_data = src_y if src_y is not None else []
                     if isinstance(impl_plot, PlotItem):
-                        x_data = line.getData()[0] if line.getData()[0] is not None else []
-                        y_data = line.getData()[1] if line.getData()[1] is not None else []
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
                         signal_name = f"{line.name()}, {stack}"
                     else:
-                        x_data = line.get_xdata()
-                        y_data = line.get_ydata()
                         lo, hi = impl_plot.get_xlim()
                         signal_name = f"{line.get_label()}, {stack}"
 
