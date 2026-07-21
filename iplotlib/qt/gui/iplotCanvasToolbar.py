@@ -10,7 +10,6 @@ This module is deprecated and unused.
 #              -Port to PySide2 [Jaswant Sai Panchumarti]
 
 
-from functools import partial
 import typing
 
 from PySide6.QtCore import QMargins, Signal
@@ -41,17 +40,21 @@ class IplotQtCanvasToolbar(QToolBar):
         # Interactive plot actions.
         self._actions = QActionGroup(self)
         self._actions.setExclusive(True)
+        self._tool_actions = {}
         for tool_name in [Canvas.MOUSE_MODE_SELECT,
                           Canvas.MOUSE_MODE_CROSSHAIR,
                           Canvas.MOUSE_MODE_PAN,
                           Canvas.MOUSE_MODE_ZOOM,
                           Canvas.MOUSE_MODE_DIST,
-                          Canvas.MOUSE_MODE_MARKER]:
+                          Canvas.MOUSE_MODE_MARKER,
+                          Canvas.MOUSE_MODE_RULER]:
             tool_action = QAction(tool_name[3:], parent=self)
             tool_action.setCheckable(True)
             tool_action.setActionGroup(self._actions)
-            tool_action.triggered.connect(partial(self.toolActivated.emit, tool_name))
+            # `triggered` passes `checked` on PySide6 6.10 but not 6.6; *_ absorbs either.
+            tool_action.triggered.connect(lambda *_, n=tool_name: self.toolActivated.emit(n))
             self.addAction(tool_action)
+            self._tool_actions[tool_name] = tool_action
 
         self.addSeparator()
 

@@ -1,7 +1,7 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 from datetime import datetime
-from typing import Any, Callable, Collection, List
+from typing import Any, Callable, Collection, Dict, List
 import pandas
 import gc
 import numpy as np
@@ -36,7 +36,8 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter, \
     NiceNanosecondLocator, RelativeTimeLocator, is_time_label
-from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor
+from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor, get_values_from_line
+from iplotlib.impl.matplotlib.iplotMplRuler import iplotMplRuler
 
 logger = setupLogger.get_logger(__name__)
 
@@ -62,6 +63,7 @@ class MatplotlibParser(BackendParserBase):
         self._legend_signal_lut = {}  # legend_line -> Signal
         self.legend_size = 8
         self._cursors = []
+        self._rulers = []  # type: List[iplotMplRuler]
         self._grid_spacing_annotations = {}  # MPLAxes -> Text artist
         self._impl_plot_ranges_hash = dict()
 
@@ -97,9 +99,13 @@ class MatplotlibParser(BackendParserBase):
         if legend is None:
             return
 
-        # Filter out '_child' lines from mpl_axes, which are added in envelope plots
-        # These lines should not be considered when matching lines to legend entries
-        valid_lines = [line for line in mpl_axes.get_lines() if not line.get_label().startswith("_child")]
+        # Only signal lines map to legend entries. Exclude envelope ('_child') and
+        # ruler ('_RulerLine') helper lines, which would shift the index; a freshly
+        # re-plotted line may be briefly absent, so guard the lookup.
+        valid_lines = [line for line in mpl_axes.get_lines()
+                       if not line.get_label().startswith(("_child", "_RulerLine"))]
+        if plot_lines not in valid_lines:
+            return
         pos = valid_lines.index(plot_lines)
         legend_label = legend.get_texts()[pos]
         legend_text = legend.get_texts()[pos].get_text()
@@ -525,6 +531,11 @@ class MatplotlibParser(BackendParserBase):
         for c in self._cursors:
             c.remove()
         self._cursors.clear()
+
+        # remove any active rulers (impl artists only — Plot.rulers data is preserved)
+        for r in self._rulers:
+            r.remove()
+        self._rulers.clear()
 
         # drop cache items and remove each Axes to release all artists and callbacks
         # for ax in list(self.figure.axes):
@@ -975,9 +986,11 @@ class MatplotlibParser(BackendParserBase):
 
     def _x_axis_update_callback(self, current_plot: MPLAxes):
         super()._x_axis_update_callback(current_plot)
+        self.refresh_rulers(current_plot)
 
     def _y_axis_update_callback(self, current_plot: MPLAxes):
         super()._y_axis_update_callback(current_plot)
+        self.refresh_rulers(current_plot)
 
     def process_ipl_log_axis(self, mpl_axis: MPLAxis, plot: Plot):
         if isinstance(mpl_axis, YAxis):
@@ -1088,7 +1101,7 @@ class MatplotlibParser(BackendParserBase):
 
     def get_impl_lines(self, impl_plot: MPLAxes):
         lines = impl_plot.get_lines()
-        lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY"]]
+        lines = [line for line in lines if line.get_label() not in ["CrossX", "CrossY", "_RulerLine"]]
         lo, hi = impl_plot.get_xlim()
         return lines, lo, hi
 
@@ -1338,6 +1351,107 @@ class MatplotlibParser(BackendParserBase):
         for cursor in self._cursors:
             cursor.remove()
         self._cursors.clear()
+
+    def _ruler_value_lines(self, impl_plot: MPLAxes) -> list:
+        """Signal line groups of *impl_plot*, one per ruler value label
+        (mirrors the crosshair's value annotations)."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        groups = []
+        if ci and hasattr(ci, 'signals') and ci.signals:
+            for sig_ref in ci.signals:
+                signal = sig_ref()
+                if not signal or isinstance(signal, SignalContour):
+                    continue
+                for line in getattr(signal, 'lines', []):
+                    groups.append(line if isinstance(line, Collection) else [line])
+        return groups
+
+    def _ruler_signal_values(self, impl_plot: MPLAxes, x: float) -> Dict[str, float]:
+        """Value of each signal at the ruler X keyed by its label, matching the
+        ruler's green value labels. A signal is omitted when the ruler falls off
+        its data, so the table agrees with what the plot shows."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        values: Dict[str, float] = {}
+        if not ci or not getattr(ci, 'signals', None):
+            return values
+        for sig_ref in ci.signals:
+            signal = sig_ref()
+            if not signal or isinstance(signal, SignalContour):
+                continue
+            for line in getattr(signal, 'lines', []):
+                group = line if isinstance(line, Collection) else [line]
+                xdata = group[0].get_xdata() if group else []
+                if len(xdata) == 0:
+                    continue
+                x_sig, y_sig = get_values_from_line(group, x)
+                span = abs(xdata[-1] - xdata[0])
+                # Data-span tolerance (view-independent so the cell is stable on
+                # zoom); mirrors the 5% used by the value labels.
+                if span and abs(x - x_sig) <= span * 0.05:
+                    values[signal.label or 'signal'] = float(y_sig)
+                break
+        return values
+
+    @BackendParserBase.run_in_one_thread
+    def add_ruler(self, impl_plot: MPLAxes, name: str, x: float, y: float,
+                  color: str = "#FFFFFF", animated: bool = False,
+                  is_echo: bool = False) -> iplotMplRuler:
+        font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
+        ruler = iplotMplRuler(ax=impl_plot, name=name, xy=(x, y), color=color,
+                              font_size=font_size, animated=animated,
+                              value_lines=self._ruler_value_lines(impl_plot))
+        ruler.abs_x = self.transform_value(impl_plot, 0, x)
+        ruler.abs_y = self.transform_value(impl_plot, 1, y)
+        ruler.is_echo = is_echo
+        self._rulers.append(ruler)
+        return ruler
+
+    def create_ruler_echoes(self, origin_impl_plot: MPLAxes, name: str,
+                            x_abs: float, y_abs: float, color: str):
+        """Mirror a ruler onto every plot sharing the time axis. Each echo carries
+        the same absolute X/Y and re-projects them to its own plot's offsets."""
+        if not self._pm.get_value(self.canvas, 'shared_x_axis'):
+            return
+        for sibling in self._get_all_shared_axes(origin_impl_plot):
+            if sibling is origin_impl_plot:
+                continue
+            x_view = self.transform_value(sibling, 0, x_abs, inverse=True)
+            y_view = self.transform_value(sibling, 1, y_abs, inverse=True)
+            self.add_ruler(sibling, name, x_view, y_view, color, is_echo=True)
+
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler(self, impl_plot: MPLAxes, name: str):
+        remaining = []
+        for r in self._rulers:
+            if r.ax is impl_plot and r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
+    @BackendParserBase.run_in_one_thread
+    def remove_ruler_by_name(self, name: str):
+        """Remove a ruler and its shared-x echoes across every plot (names are
+        canvas-global unique)."""
+        remaining = []
+        for r in self._rulers:
+            if r.name == name:
+                r.remove()
+            else:
+                remaining.append(r)
+        self._rulers = remaining
+
+    def refresh_rulers(self, impl_plot: MPLAxes = None):
+        for r in self._rulers:
+            if impl_plot is None or r.ax is impl_plot:
+                r.xy = (self.transform_value(r.ax, 0, r.abs_x, inverse=True),
+                        self.transform_value(r.ax, 1, r.abs_y, inverse=True))
+                r.refresh_labels()
+
+    def get_rulers(self, impl_plot: MPLAxes = None) -> List[iplotMplRuler]:
+        if impl_plot is None:
+            return list(self._rulers)
+        return [r for r in self._rulers if r.ax is impl_plot]
 
     def get_signal_style(self, signal: SignalXY) -> dict:
         style = dict()

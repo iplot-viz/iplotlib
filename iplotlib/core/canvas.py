@@ -97,6 +97,7 @@ class Canvas(ABC):
     MOUSE_MODE_ZOOM = 'MM_ZOOM'
     MOUSE_MODE_DIST = 'MM_DIST'
     MOUSE_MODE_MARKER = 'MM_MARKER'
+    MOUSE_MODE_RULER = 'MM_RULER'
     rows: int = 1
     cols: int = 1
     title: str = None

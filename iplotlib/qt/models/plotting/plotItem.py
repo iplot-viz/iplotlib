@@ -11,6 +11,7 @@ from PySide6.QtGui import QStandardItem
 
 from iplotlib.core import Axis, Plot
 from iplotlib.qt.models.plotting.axisItem import AxisItem
+from iplotlib.qt.models.plotting.rulerItem import RulerItem
 from iplotlib.qt.models.plotting.signalItem import SignalItem
 
 
@@ -37,6 +38,13 @@ class PlotItem(QStandardItem):
                 if self.auto_name and signal.title:
                     signal_item.setText(signal.title)
                 self.appendRow(signal_item)
+
+        # process rulers..
+        for ruler in getattr(value, 'rulers', None) or []:
+            ruler_item = RulerItem(f'Ruler {ruler.name}', self.auto_name)
+            ruler_item.setEditable(False)
+            ruler_item.setData(ruler, Qt.ItemDataRole.UserRole)
+            self.appendRow(ruler_item)
 
         # process axes..
         axis_plan = dict()

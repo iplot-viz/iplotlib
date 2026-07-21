@@ -547,13 +547,15 @@ class NanosecondDateFormatter(pg.AxisItem):
             # Adjust previous ticks to new range
             values = [v for v in self.last_values if minVal <= v <= maxVal]
 
-            # Add new ticks if needed
+            # Add new ticks if needed. Derive the step from the surviving ticks,
+            # or from the even spacing when only one survived (avoids IndexError).
+            step = (values[1] - values[0]) if len(values) >= 2 else last_range / max(n, 1)
             while len(values) < n:
                 # Add to the end or to the beginning
-                if values and values[-1] + (values[1] - values[0]) <= maxVal:
-                    values.append(values[-1] + (values[1] - values[0]))
-                elif values and values[0] - (values[1] - values[0]) >= minVal:
-                    values.insert(0, values[0] - (values[1] - values[0]))
+                if values and values[-1] + step <= maxVal:
+                    values.append(values[-1] + step)
+                elif values and values[0] - step >= minVal:
+                    values.insert(0, values[0] - step)
                 else:
                     break
             values = sorted(values)
