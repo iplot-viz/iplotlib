@@ -650,10 +650,12 @@ class IplotSignalAdapter(ProcessingSignal):
                         return
             except Exception as e:
                 self.set_proc_fail(msg=str(e))
+                return
             finally:
                 ParserHelper.dict_result.clear()
-
-        if self.status_info.result == Result.FAIL:
+        elif self.status_info.result == Result.FAIL:
+            # Only an unevaluated Fail persists: a successful evaluation above
+            # supersedes a Fail from before the children had data.
             return
 
         # 3. Finally, apply x, y, z expressions to populate `x_data`, `y_data` and `z_data` respectively
