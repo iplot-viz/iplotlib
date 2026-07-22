@@ -626,6 +626,7 @@ class BackendParserBase(ABC):
         logger.debug(f"process_ipl_axis: setting {ax_idx} axis range to {axis.original_begin} and {axis.original_end}")
 
         begin, end = +np.inf, -np.inf
+        has_samples = False
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         # X axis with shared_x_axis: aggregate across all non-slider plots so single-point
         # signals in sibling subplots land on one consolidated range.
@@ -668,14 +669,22 @@ class BackendParserBase(ABC):
                 if ax_idx == 1 and origin == 'upper':
                     begin = data[-1]
                     end = data[0]
+                    has_samples = True
                     break
 
-            if len(data) > 0:
+            # Drop NaNs before the emptiness check: an all-NaN window (e.g. a
+            # log10 expression over negative samples) would make np.min raise.
+            if len(data) > 0 and np.isnan(data).any():
                 data = data[~np.isnan(data)]
+            if len(data) > 0:
                 begin, end = min(np.min(data).item(), begin), max(np.max(data).item(), end)
-            else:
-                begin = -0.5
-                end = 0.5
+                has_samples = True
+
+        # A signal without usable samples contributes no range, so the siblings
+        # still set the limits; the fallback applies only when none of them did.
+        # A plot holding no signal at all keeps the sentinel range it always had.
+        if signals and not has_samples:
+            begin, end = -0.5, 0.5
 
         axis.set_limits(begin, end, 'original')
 
