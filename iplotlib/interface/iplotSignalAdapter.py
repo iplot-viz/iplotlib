@@ -33,6 +33,7 @@ import typing
 
 from iplotlib.interface.utils import string_classifier
 from iplotProcessing.common.errors import InvalidExpression
+from iplotProcessing.common.interpolation import InterpolationKind
 from iplotProcessing.core import BufferObject
 from iplotProcessing.core import Signal as ProcessingSignal
 from iplotProcessing.math.pre_processing.grid_mixing import align
@@ -42,6 +43,15 @@ from iplotProcessing.tools import hash_code
 from iplotLogging import setupLogger
 
 logger = setupLogger.get_logger(__name__)
+
+#: Sentinel for IplotSignalAdapter.interpolation: choose the realignment
+#: interpolation automatically from the dependencies' sampling (mint#120).
+INTERPOLATION_AUTO = 'auto'
+
+#: Dependencies sampled faster than this are considered continuously sampled for
+#: the automatic realignment interpolation; slower ones are treated as
+#: event-driven (a new value is only published on change).
+CONTINUOUS_RATE_THRESHOLD_HZ = 100.0
 
 # Dedup key (source, target, len_src, len_tgt, case): same mismatch across signals warns once.
 _TRUNCATE_WARN_KEYS: typing.Set[tuple] = set()
@@ -127,6 +137,16 @@ class IplotSignalAdapter(ProcessingSignal):
     data_access_enabled: bool = True
     processing_enabled: bool = True
     time_out_value: float = 60  # Unimplemented  ---> REVIEW: purpose of this attribute?
+    #: Interpolation used when this signal's expressions realign dependencies with
+    #: different time bases (see ParserHelper.evaluate / align()). The default
+    #: 'auto' picks linear interpolation only when every dependency is raw (not
+    #: downsampled) and its observed rate is above CONTINUOUS_RATE_THRESHOLD_HZ;
+    #: otherwise sample-and-hold ('previous') is used, because slow, event-driven
+    #: signals only publish a new value on change — no new sample means the value
+    #: is constant, and interpolating between updates would invent values
+    #: (mint#120). Any InterpolationKind value can be set explicitly to force a
+    #: specific behaviour.
+    interpolation: str = INTERPOLATION_AUTO
 
     def __post_init__(self):
         super().__init__()
@@ -157,6 +177,12 @@ class IplotSignalAdapter(ProcessingSignal):
 
         # 3. Help keep track of data access parameters.
         self._access_md5sum = None
+        # One-shot marker: the current ts range is a genuine time window that was
+        # propagated from a shared-time zoom (see set_time_window()).
+        self._ts_is_time_window = False
+        # Time base the expressions were last evaluated over (pure expression
+        # signals only); enables the reverse X-to-time mapping (mint#120).
+        self._expr_time_base = None
 
         # 4. Parse name and prepare a hierarchy of objects if needed.
         self.status_info = StatusInfo()
@@ -287,7 +313,14 @@ class IplotSignalAdapter(ProcessingSignal):
                     data_arrays.update({key: self.data_store[correspondance[key]]})
                 else:
                     logger.debug(f" in compute key={key} expr={expr}")
-                    data_arrays.update({key: ParserHelper.evaluate(self, expr)})
+                    result = ParserHelper.evaluate(self, expr)
+                    r_dbg = np.asarray(result)
+                    logger.debug(f"mint#120: compute '{getattr(self, 'label', '?')}' {key}={expr} -> "
+                                f"n={r_dbg.size} dtype={r_dbg.dtype} "
+                                f"unit={getattr(result, 'unit', '?')} "
+                                f"min={r_dbg.min() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'} "
+                                f"max={r_dbg.max() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'}")
+                    data_arrays.update({key: result})
             except Exception as e:
                 logger.error(f"Error {e} in {expr}")
                 continue
@@ -329,6 +362,50 @@ class IplotSignalAdapter(ProcessingSignal):
 
         # self.ts_start = ranges[0].astype(target_type).item() if isinstance(ranges[0], np.generic) else ranges[0]
         # self.ts_end = ranges[1].astype(target_type).item() if isinstance(ranges[0][0], np.generic) else ranges[0][1]
+
+    def set_time_window(self, begin, end):
+        """Set the requested data range from a trusted time window.
+
+        Used when a shared-time zoom is propagated to a plot whose X axis is not
+        time (X-versus-Y, iplot-viz/mint#120): ``begin``/``end`` come from the
+        time plot that was zoomed, so they are genuine times regardless of the
+        shape of this signal's processed X data. The range is marked so that
+        :meth:`_needs_refresh` allows a refetch/reprocess even when the X data is
+        not monotonically increasing (a zoom made on the X-versus-Y plot itself
+        keeps the conservative behaviour, since a non-bijective X cannot be
+        mapped back to a time interval).
+        """
+        self.set_xranges((begin, end))
+        self._ts_is_time_window = True
+        for child in self.children:
+            child._ts_is_time_window = True
+
+    def refresh_over_time_window(self, begin, end, _visited=None):
+        """Refresh this signal and its expression dependencies over a trusted time window.
+
+        Used when a shared-time zoom is propagated to an X-versus-Y plot
+        (iplot-viz/mint#120). Expression signals (e.g. x_expr='${A}.data') are
+        evaluated against the *current* buffers of their alias dependencies, so
+        those dependencies are refreshed first — including aliases that are not
+        displayed on any plot of the shared group and therefore were not
+        refetched by the zoom itself. Dependencies already refetched over the
+        same window are left untouched (their data hash is unchanged).
+        """
+        if _visited is None:
+            _visited = set()
+        if id(self) in _visited:
+            return
+        _visited.add(id(self))
+
+        for alias in getattr(self, 'depends_on', None) or ():
+            if alias == 'self':
+                continue
+            dep = ParserHelper.env.get(alias)
+            if isinstance(dep, IplotSignalAdapter) and dep is not self:
+                dep.refresh_over_time_window(begin, end, _visited)
+
+        self.set_time_window(begin, end)
+        self.get_data()
 
     def set_da_success(self):
         self.status_info.reset()
@@ -601,7 +678,9 @@ class IplotSignalAdapter(ProcessingSignal):
                     break
 
             if needs_realign and len(dependencies) > 1:
-                ParserHelper.dict_result = align(dependencies, curr_signal=self) or {}
+                ParserHelper.dict_result = align(
+                    dependencies, curr_signal=self,
+                    kind=ParserHelper.resolve_alignment_kind(self, dependencies)) or {}
 
             # 2.3 Evaluate 'self.name'. It is an expression combining multiple other signals
             try:
@@ -731,6 +810,18 @@ class IplotSignalAdapter(ProcessingSignal):
             if self.status_info.stage == Stage.INIT:
                 self.set_da_success()
                 return True
+            if getattr(self, '_ts_is_time_window', False):
+                # A shared-time zoom propagated a trusted time window to this
+                # dependent expression signal (empty name, e.g. x_expr='${A}.data',
+                # as produced by MINT for X-versus-Y rows). It has no data access of
+                # its own; its dependencies were refetched over the window by their
+                # own plots, so re-run processing to re-evaluate the X/Y expressions
+                # over their new buffers (iplot-viz/mint#120).
+                self._ts_is_time_window = False
+                self.set_da_success()
+                logger.debug(f"mint#120: forced reprocess of expression signal "
+                            f"'{self.label}' over ts=({self.ts_start}, {self.ts_end})")
+                return True
             return False
 
     def _do_data_processing(self):
@@ -747,6 +838,11 @@ class IplotSignalAdapter(ProcessingSignal):
         if not self.data_access_enabled:
             return False
 
+        # One-shot flag: consumed here so a later zoom made on the X-versus-Y plot
+        # itself falls back to the conservative monotonic-X criterion below.
+        ts_is_time_window = getattr(self, '_ts_is_time_window', False)
+        self._ts_is_time_window = False
+
         target_md5sum = self.calculate_data_hash()
         logger.debug(
             f"old={self._access_md5sum}, new={target_md5sum} downsampled={self.isDownsampled} and id={id(self)}")
@@ -759,6 +855,12 @@ class IplotSignalAdapter(ProcessingSignal):
             if AccessHelper.num_samples_override or self.isDownsampled:
                 return True
             elif self.x_expr != "${self}.time":
+                if ts_is_time_window:
+                    # The range was propagated from a shared-time zoom made on a
+                    # time plot (set_time_window); it is a valid time window no
+                    # matter what the processed X samples look like, so the X
+                    # column can safely be refetched and reprocessed over it.
+                    return True
                 x_data_incremental = all(self.x_data[i + 1] - self.x_data[i] > 0 for i in range(len(self.x_data) - 1))
                 return x_data_incremental
             elif len(self.children):
@@ -1156,7 +1258,12 @@ class ParserHelper:
                 break
 
         if needs_realign and not ParserHelper.dict_result:
-            ParserHelper.dict_result = align(dependencies, signal)
+            kind = ParserHelper.resolve_alignment_kind(signal, dependencies)
+            logger.debug(f"mint#120: evaluate '{expression}': realigning "
+                        f"{[getattr(d, 'label', '?') for d in dependencies]} "
+                        f"(time bases: {[(len(d.data_store[0]), getattr(d.data_store[0], 'unit', '?')) for d in dependencies]}, "
+                        f"kind={kind})")
+            ParserHelper.dict_result = align(dependencies, signal, kind=kind)
             signal.set_data(tmp_local_env['self'].data_store)
 
         p.clear_expr()
@@ -1168,7 +1275,83 @@ class ParserHelper:
         else:
             result = p.result
         p.clear_expr()
+
+        # Crop the result of a pure expression signal (empty name, e.g. MINT's
+        # X-versus-Y rows) to its requested time window. Dependencies may
+        # legitimately hold a superset of the window: once a zoom drops below the
+        # downsampling threshold their buffers contain raw data covering more than
+        # the requested range and are not refetched on deeper zooms. Time plots
+        # crop through the axis view, but an X-versus-Y signal derives its X from
+        # the dependency *values*, so without cropping its range stays that of the
+        # whole buffer and the axis no longer follows the zoom (mint#120).
+        if (getattr(signal, 'name', '') == ''
+                and isinstance(signal.ts_start, (int, float))
+                and isinstance(signal.ts_end, (int, float))
+                and hasattr(result, '__len__')):
+            base = None
+            if ParserHelper.dict_result:
+                base = next(iter(ParserHelper.dict_result.values())).get('time')
+            elif dependencies:
+                base = dependencies[0].data_store[0]
+            if base is not None and len(base) == len(result):
+                base_arr = np.asarray(base)
+                if np.issubdtype(base_arr.dtype, np.number):
+                    mask = (base_arr >= signal.ts_start) & (base_arr <= signal.ts_end)
+                    if mask.any() and not mask.all():
+                        logger.debug(f"mint#120: cropping '{expression}' result to ts window: "
+                                    f"{int(mask.sum())}/{len(result)} samples kept")
+                        result = result[mask]
+                        base_arr = base_arr[mask]
+                    elif not mask.any():
+                        logger.debug(f"mint#120: ts window [{signal.ts_start}, {signal.ts_end}] does not "
+                                    f"overlap the evaluated time base of '{expression}'; keeping the "
+                                    f"full buffer ({len(result)} samples)")
+                    # Retain the time base the expression was evaluated over: it
+                    # is what allows a zoom made on the X-versus-Y plot to be
+                    # mapped back to a time window when the X column is strictly
+                    # monotonic (mint#120 reverse direction). Kept consistent
+                    # with any cropping applied to the result above.
+                    signal._expr_time_base = base_arr
         return result
+
+    @staticmethod
+    def resolve_alignment_kind(signal, dependencies) -> str:
+        """Interpolation kind for realigning the dependencies of ``signal``.
+
+        An explicit InterpolationKind set on the signal wins. With the default
+        'auto', linear interpolation is chosen only when *every* dependency is
+        raw (not downsampled) and its observed sample rate is above
+        CONTINUOUS_RATE_THRESHOLD_HZ. Downsampled buffers keep sample-and-hold:
+        their grid is the downsampler's, not the signal's, so no assumption is
+        made from it. Any dependency below the threshold is treated as
+        event-driven — a new value is only published on change — and keeps
+        sample-and-hold ('previous') for the whole alignment, which never
+        invents values between updates (mint#120).
+        """
+        preference = getattr(signal, 'interpolation', None) or INTERPOLATION_AUTO
+        if preference != INTERPOLATION_AUTO:
+            return preference
+
+        for dep in dependencies:
+            if getattr(dep, 'isDownsampled', False):
+                # Downsampled buffers keep the conservative default: their grid
+                # is the downsampler's, not the signal's, so no assumption about
+                # the native sampling is made from it.
+                return InterpolationKind.PREVIOUS
+            base = dep.data_store[0]
+            n = len(base)
+            if n < 2:
+                return InterpolationKind.PREVIOUS
+            t0, t1 = float(base[0]), float(base[-1])
+            span = abs(t1 - t0)
+            if span <= 0:
+                return InterpolationKind.PREVIOUS
+            # Large values encode nanosecond timestamps (same heuristic as the
+            # date detection elsewhere in the code base).
+            span_s = span / 1e9 if max(abs(t0), abs(t1)) > (1 << 53) else span
+            if (n - 1) / span_s < CONTINUOUS_RATE_THRESHOLD_HZ:
+                return InterpolationKind.PREVIOUS
+        return InterpolationKind.LINEAR
 
     @staticmethod
     def get_dependencies(expr_list: list) -> set:

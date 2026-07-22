@@ -219,7 +219,9 @@ class IplotQtCanvas(QWidget):
             relative = False
             for row_idx, col in enumerate(canvas.plots, start=1):
                 for col_idx, plot in enumerate(col, start=1):
-                    if plot:
+                    # An X-versus-Y plot has no time axis, so it must not trigger the
+                    # different-time-range warning.
+                    if plot and self._parser._plot_x_is_time(plot):
                         axis = plot.axes[0]
                         if not axis.is_date and not isinstance(plot, PlotXYWithSlider):
                             relative = True
@@ -443,7 +445,7 @@ class IplotQtCanvas(QWidget):
                 for signals in plot.signals.values():
                     for signal in signals:
                         if signal.uid == signal_uid and isinstance(signal, SignalXY):
-                            ax = self._parser._signal_impl_plot_lut.get(signal.uid)
+                            ax = self._parser._signal_impl_plot_lut.get(self._parser.signal_lut_key(signal))
                             return signal, ax
 
     def get_marker_row(self, signal: SignalXY, marker_name: str):
@@ -462,7 +464,7 @@ class IplotQtCanvas(QWidget):
             for signal in signals:
                 if (isinstance(signal,
                                SignalXY) and signal.status_info.result == 'Success' and signal.parent is not None):
-                    impl_plot = self._parser._signal_impl_plot_lut.get(signal.uid)
+                    impl_plot = self._parser._signal_impl_plot_lut.get(self._parser.signal_lut_key(signal))
                     if impl_plot is None:
                         continue
                     plot_id = self._canvas_position_of(signal.parent()) or (1, 1)
