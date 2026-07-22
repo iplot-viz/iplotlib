@@ -22,6 +22,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
+from iplotlib.core.decimation import minmax_decimate
 from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
@@ -384,38 +385,9 @@ class MatplotlibParser(BackendParserBase):
         Set the data for a Line2D atomically (single cache invalidation).
         """
         if self.canvas.streaming and len(x_data) > _STREAM_DECIMATE_THRESHOLD:
-            x_data, y_data = self._minmax_decimate(
+            x_data, y_data = minmax_decimate(
                 x_data, y_data, _STREAM_DECIMATE_TARGET_PAIRS)
         line.set_data(x_data, y_data)
-
-    @staticmethod
-    def _minmax_decimate(x, y, target_pairs):
-        """Reduce to 2 points per bucket (per-bucket argmin/argmax of y) preserving extremes."""
-        n = len(x)
-        if n <= 2 * target_pairs:
-            return x, y
-        bucket_size = n // target_pairs
-        truncated = bucket_size * target_pairs
-        x_arr = np.asarray(x[:truncated]).reshape(target_pairs, bucket_size)
-        y_arr = np.asarray(y[:truncated]).reshape(target_pairs, bucket_size)
-        rows = np.arange(target_pairs)
-        argmin = np.argmin(y_arr, axis=1)
-        argmax = np.argmax(y_arr, axis=1)
-        x_min = x_arr[rows, argmin]
-        y_min = y_arr[rows, argmin]
-        x_max = x_arr[rows, argmax]
-        y_max = y_arr[rows, argmax]
-        min_first = x_min <= x_max
-        out_x = np.empty(2 * target_pairs, dtype=x_arr.dtype)
-        out_y = np.empty(2 * target_pairs, dtype=y_arr.dtype)
-        out_x[0::2] = np.where(min_first, x_min, x_max)
-        out_y[0::2] = np.where(min_first, y_min, y_max)
-        out_x[1::2] = np.where(min_first, x_max, x_min)
-        out_y[1::2] = np.where(min_first, y_max, y_min)
-        if n > truncated:
-            out_x = np.concatenate([out_x, np.asarray(x[truncated:])])
-            out_y = np.concatenate([out_y, np.asarray(y[truncated:])])
-        return out_x, out_y
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
         return draw_fn(x_data, y_data, **style)

@@ -85,7 +85,8 @@ class ApplyCapTests(unittest.TestCase):
         self.streamer._apply_cap(signal)
         signal.inject_external.assert_not_called()
 
-    def test_drops_oldest_when_length_exceeds_cap(self):
+    def test_drops_oldest_when_raw_tail_fills_the_cap(self):
+        # Timestamps closer than _RAW_TAIL_S to the newest one are all raw.
         self.streamer._max_points = 2
         signal = _FakeSignal(
             data=[_FakeBuf([1, 2, 3, 4]), _FakeBuf([10, 20, 30, 40])])
@@ -95,6 +96,45 @@ class ApplyCapTests(unittest.TestCase):
         self.assertFalse(kwargs['append'])
         self.assertEqual(list(kwargs['d0']), [3, 4])
         self.assertEqual(list(kwargs['d1']), [30, 40])
+
+    def test_decimates_old_samples_and_keeps_raw_tail(self):
+        self.streamer._max_points = 1000
+        sec = int(1e9)
+        x = np.arange(2000) * sec  # 1 Hz over ~33 min; tail = last 2 min
+        y = np.zeros(2000)
+        y[500] = -50.0
+        y[600] = 50.0
+        signal = _FakeSignal(data=[_FakeBuf(x), _FakeBuf(y)])
+        self.streamer._apply_cap(signal)
+        kwargs = signal.inject_external.call_args.kwargs
+        out_x = np.asarray(kwargs['d0'])
+        out_y = np.asarray(kwargs['d1'])
+        self.assertLessEqual(len(out_x), 1000)
+        self.assertTrue(np.all(np.diff(out_x) >= 0))
+        # Extremes survive decimation; the raw tail is untouched.
+        self.assertIn(-50.0, out_y)
+        self.assertIn(50.0, out_y)
+        tail = x[x >= x[-1] - 120 * sec]
+        self.assertEqual(list(out_x[-len(tail):]), list(tail))
+
+    def test_decimates_envelope_buffers_preserving_band(self):
+        self.streamer._max_points = 500
+        sec = int(1e9)
+        x = np.arange(1000) * sec
+        y_min = np.zeros(1000)
+        y_max = np.ones(1000)
+        y_avg = np.full(1000, 0.5)
+        y_min[100] = -9.0
+        y_max[200] = 9.0
+        signal = _FakeSignal(
+            envelope=True,
+            data=[_FakeBuf(x), _FakeBuf(y_min), _FakeBuf(y_max),
+                  _FakeBuf(y_avg)])
+        self.streamer._apply_cap(signal)
+        kwargs = signal.inject_external.call_args.kwargs
+        self.assertLessEqual(len(kwargs['d0']), 500)
+        self.assertEqual(np.min(np.asarray(kwargs['d1'])), -9.0)
+        self.assertEqual(np.max(np.asarray(kwargs['d2'])), 9.0)
 
 
 class ArchiveKwargsTests(unittest.TestCase):

@@ -8,6 +8,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QThread, Slot
 
 import iplotLogging.setupLogger as Sl
+from iplotlib.core.decimation import bucket_reduce_envelope, minmax_decimate
 
 logger = Sl.get_logger(__name__)
 
@@ -20,6 +21,9 @@ _TOPUP_PERIOD_S = 3600
 # Injection cadence: polled chunks are buffered and merged so the O(buffer)
 # cost of inject_external is paid once per period instead of once per poll.
 _INJECT_PERIOD_S = 1.0
+
+# Newest span kept at full resolution when the cap forces decimation.
+_RAW_TAIL_S = 120
 
 # QThread wait budget on stop(). Loops poll stop_flag frequently, so most
 # workers exit well within this; stragglers (e.g. a receiver blocked on the
@@ -196,17 +200,45 @@ class CanvasStreamer:
         signal.inject_external(append=False, **payload)
 
     def _apply_cap(self, signal):
-        # Drop-oldest trim to honour the per-signal sample cap. Caller must hold _signal_lock.
+        """Honour the per-signal cap as maximum stored points: the newest
+        ``_RAW_TAIL_S`` stay raw and older samples are decimated into the
+        remaining budget, preserving extremes. Caller must hold _signal_lock."""
         if self._max_points <= 0:
             return
         x, y, y_min, y_max = self._current_arrays(signal)
-        if len(x) <= self._max_points:
+        n = len(x)
+        if n <= self._max_points:
             return
-        n = self._max_points
+        x = np.asarray(x)
+        y = np.asarray(y)
+        if y_min is not None:
+            y_min = np.asarray(y_min)
+            y_max = np.asarray(y_max)
+
+        tail = int(np.searchsorted(x, int(x[-1]) - _RAW_TAIL_S * int(1e9),
+                                   side='left'))
+        budget = self._max_points - (n - tail)
+        if tail > 0 and budget > 4:
+            if y_min is not None:
+                hx, hmin, hmax, havg = bucket_reduce_envelope(
+                    x[:tail], y_min[:tail], y_max[:tail], y[:tail], budget)
+                y_min = np.concatenate([hmin, y_min[tail:]])
+                y_max = np.concatenate([hmax, y_max[tail:]])
+            else:
+                hx, havg = minmax_decimate(x[:tail], y[:tail], budget // 2)
+            x = np.concatenate([hx, x[tail:]])
+            y = np.concatenate([havg, y[tail:]])
+
+        # Guarantee the cap even when the raw tail alone exceeds it.
+        if len(x) > self._max_points:
+            k = self._max_points
+            x, y = x[-k:], y[-k:]
+            if y_min is not None:
+                y_min, y_max = y_min[-k:], y_max[-k:]
+
         payload = self._make_payload(
-            signal, x[-n:], y[-n:],
-            y_min=y_min[-n:] if y_min is not None else None,
-            y_max=y_max[-n:] if y_max is not None else None,
+            signal, x, y,
+            y_min=y_min, y_max=y_max,
             xunit=getattr(signal.data_store[0], 'unit', ''),
             yunit=getattr(signal.data_store[1], 'unit', ''),
         )
