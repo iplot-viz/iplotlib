@@ -950,8 +950,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     self._add_ruler_at(impl_plot, plot, system_coord.x(), system_coord.y())
                     event.accept()
                 return
-            if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER,
-                               Canvas.MOUSE_MODE_CROSSHAIR]:
+            if self._mmode == Canvas.MOUSE_MODE_MARKER:
                 if event.button() == Qt.MouseButton.RightButton:
                     return
 
