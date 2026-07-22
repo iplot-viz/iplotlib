@@ -379,9 +379,6 @@ class MatplotlibParser(BackendParserBase):
             if abs(end - cur_end) * px_per_data >= 1.0:
                 impl_plot.set_xlim(begin, end)
 
-    def _apply_xrange(self, impl_plot: MPLAxes, begin, end):
-        impl_plot.set_xlim(begin, end)
-
     def set_line_data(self, line: Line2D, x_data, y_data):
         """
         Set the data for a Line2D atomically (single cache invalidation).

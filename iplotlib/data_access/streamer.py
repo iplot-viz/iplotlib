@@ -458,63 +458,6 @@ class CanvasStreamer:
         if self._callback:
             self._callback(signal)
 
-    def change_window(self, new_window_ns: int):
-        """Update the visible window mid-stream. If wider than the current one,
-        fetch the newly-revealed range from the archive."""
-        if new_window_ns <= 0:
-            return
-        old_window_ns = self._window_ns
-        self._window_ns = int(new_window_ns)
-        if new_window_ns > old_window_ns and self._ds_to_signals:
-            self._spawn("archive-gap-fill",
-                        partial(self._gap_fill, old_window_ns, new_window_ns))
-
-    def _gap_fill(self, old_window_ns: int, new_window_ns: int):
-        now_ns = int(time.time() * 1e9)
-        new_start_ns = now_ns - new_window_ns
-        old_start_ns = now_ns - old_window_ns
-        for ds, signals in self._ds_to_signals.items():
-            if self.stop_flag:
-                return
-            for signal in signals:
-                if self.stop_flag:
-                    return
-                self._gap_fill_signal(ds, signal, new_start_ns, old_start_ns)
-
-    def _gap_fill_signal(self, ds: str, signal, start_ns: int, end_ns: int):
-        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window(
-            ds, signal, start_ns, end_ns)
-        if ax is None or len(ax) == 0:
-            return
-
-        with self._signal_lock(signal):
-            cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(signal)
-            new_x = np.asarray(ax)
-            new_y = np.asarray(ay)
-            merged_x = np.concatenate([new_x, cur_x])
-            merged_y = np.concatenate([new_y, cur_y])
-            merged_ymin = None
-            merged_ymax = None
-            if getattr(signal, 'envelope', False):
-                new_ymin = np.asarray(ay_min) if ay_min is not None else new_y
-                new_ymax = np.asarray(ay_max) if ay_max is not None else new_y
-                merged_ymin = np.concatenate(
-                    [new_ymin, cur_ymin if cur_ymin is not None else cur_y])
-                merged_ymax = np.concatenate(
-                    [new_ymax, cur_ymax if cur_ymax is not None else cur_y])
-            payload = self._make_payload(
-                signal, merged_x, merged_y,
-                y_min=merged_ymin, y_max=merged_ymax,
-                xunit=xunit, yunit=yunit,
-            )
-            signal.inject_external(append=False, **payload)
-            self._apply_cap(signal)
-            signal._streaming_has_live = True
-
-        logger.info(f"Gap-fill for {signal.name}: {len(ax)} archive points prepended")
-        if self._callback:
-            self._callback(signal)
-
     @staticmethod
     def _unpack_archive(data):
         """Returns ``(xdata, y_or_davg, ymin, ymax, xunit, yunit)``. ymin/ymax

@@ -992,24 +992,6 @@ class BackendParserBase(ABC):
     def do_impl_streaming(self, impl_plot: Any, plot: Plot, cache_item):
         pass
 
-    def update_streaming_xrange(self, window_ns: int):
-        """Set the X-axis range of all streaming plots to ``[now-window_ns, now]``."""
-        if not self.canvas or not self.canvas.streaming or window_ns <= 0:
-            return
-        now_ns = int(datetime.now().timestamp() * 1e9)
-        min_time = now_ns - window_ns
-        for col in self.canvas.plots:
-            for plot in col:
-                if plot is None:
-                    continue
-                for impl_plot in self._plot_impl_plot_lut.get(id(plot), []):
-                    begin = self.transform_value(impl_plot, 0, min_time, inverse=True)
-                    end = self.transform_value(impl_plot, 0, now_ns, inverse=True)
-                    self._apply_xrange(impl_plot, begin, end)
-
-    def _apply_xrange(self, impl_plot: Any, begin: Any, end: Any):
-        pass
-
     @abstractmethod
     def set_line_data(self, line: Any, x_data, y_data):
         pass
