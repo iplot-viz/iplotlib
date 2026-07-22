@@ -873,53 +873,50 @@ class BackendParserBase(ABC):
     def _update_marker_by_point_count(marker_line: Any, signal_x_data, signal_style: dict):
         pass
 
+    def _extend_to_now(self, impl_plot: Any, has_live: bool, x_data, *y_arrays):
+        """Extend the trace horizontally to ``now`` with the last value, so the
+        line stays glued to the right edge of the sliding window between
+        batches. Render-only: the signal buffer is not touched."""
+        if not has_live or len(x_data) == 0:
+            return (x_data, *y_arrays)
+        now = int(datetime.now().timestamp() * 1e9)
+        new_x = self.transform_value(impl_plot, 0, now, inverse=True)
+        if new_x <= x_data[-1]:
+            return (x_data, *y_arrays)
+        return (np.append(x_data, new_x),
+                *(np.append(y, y[-1]) for y in y_arrays))
+
     def update_plot_line_streaming(self, signal: SignalXY, impl_plot: Any, plot_lines, x_data, y_data, style):
         """
-        Update the streaming line. Extends the trace horizontally to ``now`` during gaps only after a live
-        sample has been received; otherwise the existing points are drawn as-is.
+        Update the streaming line, extended to ``now`` once a live sample has
+        been received; otherwise the existing points are drawn as-is.
         """
         last_x = self._streaming_impl_plot_lut[signal.uid][0]
-        last_y = self._streaming_impl_plot_lut[signal.uid][1]
         has_live = getattr(signal, '_streaming_has_live', False)
 
-        if len(x_data) > 0 and last_x != x_data[-1]:  # New data
+        if len(x_data) == 0:
+            return plot_lines
+
+        if last_x != x_data[-1]:  # New data
             self._streaming_impl_plot_lut[signal.uid] = [x_data[-1], y_data[-1]]
-            self.set_line_data(plot_lines[0], x_data, y_data)
             self._update_marker_by_point_count(plot_lines[0], x_data, style)
 
-        elif len(x_data) > 0 and last_x == x_data[-1]:  # No new data
-            if has_live:
-                now = int(datetime.now().timestamp() * 1e9)
-                new_x = self.transform_value(impl_plot, 0, now, inverse=True)
-                const_x = np.append(x_data, new_x)
-                const_y = np.append(y_data, last_y)
-                self.set_line_data(plot_lines[0], const_x, const_y)
-            else:
-                self.set_line_data(plot_lines[0], x_data, y_data)
-
+        xs, ys = self._extend_to_now(impl_plot, has_live, x_data, y_data)
+        self.set_line_data(plot_lines[0], xs, ys)
         return plot_lines
 
     def update_plot_envelope_streaming(self, signal: SignalXY, impl_plot: Any, shapes,
                                        x_data, y1_data, y2_data, y3_data, style):
         """Envelope counterpart of ``update_plot_line_streaming``: extends the
-        three curves and the area horizontally to ``now`` during gaps."""
+        three curves and the area horizontally to ``now``."""
         last_x = self._streaming_impl_plot_lut[signal.uid][0]
         has_live = getattr(signal, '_streaming_has_live', False)
-        new_data = last_x != x_data[-1]
 
-        if new_data:
+        if last_x != x_data[-1]:  # New data
             self._streaming_impl_plot_lut[signal.uid] = [x_data[-1], y3_data[-1]]
-            xs, y1s, y2s, y3s = x_data, y1_data, y2_data, y3_data
-        elif has_live:
-            now = int(datetime.now().timestamp() * 1e9)
-            new_x = self.transform_value(impl_plot, 0, now, inverse=True)
-            xs = np.append(x_data, new_x)
-            y1s = np.append(y1_data, y1_data[-1])
-            y2s = np.append(y2_data, y2_data[-1])
-            y3s = np.append(y3_data, y3_data[-1])
-        else:
-            xs, y1s, y2s, y3s = x_data, y1_data, y2_data, y3_data
 
+        xs, y1s, y2s, y3s = self._extend_to_now(
+            impl_plot, has_live, x_data, y1_data, y2_data, y3_data)
         self.set_line_data(shapes[0][0], xs, y1s)
         self.set_line_data(shapes[0][1], xs, y2s)
         self.set_line_data(shapes[0][2], xs, y3s)
