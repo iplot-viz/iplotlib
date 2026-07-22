@@ -598,7 +598,13 @@ class BackendParserBase(ABC):
         """First implementation plot drawing time on X that shares ``xy_plot``'s
         time base; it leads the propagation of a reverse (X-versus-Y) zoom."""
         for impl_plot in self.get_canvas_plots():
-            plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+            # get_canvas_plots can yield axes with no cache item (e.g. a contour
+            # colorbar); crashing here would leave the re-entrancy guard of
+            # _x_axis_update_callback set for the rest of the session.
+            try:
+                plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+            except AttributeError:
+                continue
             if plot is None or plot is xy_plot:
                 continue
             if not self._plot_x_is_time(plot):

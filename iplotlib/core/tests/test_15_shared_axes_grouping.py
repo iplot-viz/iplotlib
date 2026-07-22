@@ -526,5 +526,57 @@ class TransformDataNaNTest(unittest.TestCase):
         np.testing.assert_array_equal(np.asarray(tx), [500, 1500])
 
 
+class _FinderHost:
+    """Minimal host for _find_shared_time_base_impl over a fixed axis list."""
+
+    def __init__(self, entries):
+        # entries: list of (impl_plot, cache_item_or_None)
+        self._entries = entries
+        lut = {id(impl): item for impl, item in entries}
+        self._impl_plot_cache_table = types.SimpleNamespace(
+            get_cache_item=lambda impl: lut.get(id(impl)))
+
+    def get_canvas_plots(self):
+        return [impl for impl, _ in self._entries]
+
+    def _plot_shares_time_base(self, xy_plot, base_ts):
+        return base_ts is not None
+
+    _find_shared_time_base_impl = BackendParserBase._find_shared_time_base_impl
+    _plot_x_is_time = staticmethod(BackendParserBase._plot_x_is_time)
+    _plot_signal_ts_range = staticmethod(BackendParserBase._plot_signal_ts_range)
+
+
+class FindSharedTimeBaseImplTest(unittest.TestCase):
+    """The reverse-zoom leader lookup runs before the re-entrancy guard of
+    _x_axis_update_callback is released; an axis with no cache item (e.g. a
+    contour colorbar in figure.axes) must be skipped, not crash — a crash
+    would leave the guard set and silently disable shared-axis synchronization
+    for the rest of the session (mint#120)."""
+
+    @staticmethod
+    def _time_plot():
+        plot = PlotXY()
+        plot.add_signal(_signal_with_ts("t", 1000, 2000))
+        return plot
+
+    def test_untracked_axis_is_skipped_not_fatal(self):
+        xy_plot = PlotXY()
+        time_plot = self._time_plot()
+        time_impl = object()
+        host = _FinderHost([
+            (object(), None),  # e.g. a colorbar axis: no cache item
+            (time_impl, types.SimpleNamespace(plot=lambda: time_plot)),
+        ])
+        self.assertIs(host._find_shared_time_base_impl(xy_plot), time_impl)
+
+    def test_dead_cache_item_is_skipped(self):
+        xy_plot = PlotXY()
+        host = _FinderHost([
+            (object(), types.SimpleNamespace(plot=lambda: None)),  # dead weakref
+        ])
+        self.assertIsNone(host._find_shared_time_base_impl(xy_plot))
+
+
 if __name__ == '__main__':
     unittest.main()

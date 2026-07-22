@@ -1264,6 +1264,10 @@ class ParserHelper:
                                     f"{int(mask.sum())}/{len(result)} samples kept")
                         result = result[mask]
                         base_arr = base_arr[mask]
+                    elif not mask.any():
+                        logger.debug(f"mint#120: ts window [{signal.ts_start}, {signal.ts_end}] does not "
+                                    f"overlap the evaluated time base of '{expression}'; keeping the "
+                                    f"full buffer ({len(result)} samples)")
                     # Retain the time base the expression was evaluated over: it
                     # is what allows a zoom made on the X-versus-Y plot to be
                     # mapped back to a time window when the X column is strictly
