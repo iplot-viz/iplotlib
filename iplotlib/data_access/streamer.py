@@ -178,6 +178,23 @@ class CanvasStreamer:
             kwargs['extremities'] = True
         return kwargs
 
+    def _drop_overlap_tail(self, signal, first_ts: int):
+        """Trim buffered samples at or after ``first_ts``: archive fetches end
+        with a synthetic boundary point that can sit ahead of the next live
+        batch (client/server clock skew). Caller must hold _signal_lock."""
+        x, y, y_min, y_max = self._current_arrays(signal)
+        if len(x) == 0 or int(x[-1]) < first_ts:
+            return
+        keep = np.asarray(x) < first_ts
+        payload = self._make_payload(
+            signal, np.asarray(x)[keep], np.asarray(y)[keep],
+            y_min=np.asarray(y_min)[keep] if y_min is not None else None,
+            y_max=np.asarray(y_max)[keep] if y_max is not None else None,
+            xunit=getattr(signal.data_store[0], 'unit', ''),
+            yunit=getattr(signal.data_store[1], 'unit', ''),
+        )
+        signal.inject_external(append=False, **payload)
+
     def _apply_cap(self, signal):
         # Drop-oldest trim to honour the per-signal sample cap. Caller must hold _signal_lock.
         if self._max_points <= 0:
@@ -323,6 +340,7 @@ class CanvasStreamer:
                 xunit=dobj.xunit, yunit=dobj.yunit,
             )
             with self._signal_lock(signal):
+                self._drop_overlap_tail(signal, int(x_data[0]))
                 signal.inject_external(append=True, **result)
                 self._apply_cap(signal)
             if len(x_data) > 0 and self._window_ns > 0:
@@ -359,6 +377,15 @@ class CanvasStreamer:
             cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(signal)
             new_x = np.asarray(ax)
             new_y = np.asarray(ay)
+            if len(cur_x) > 0:
+                # The synthetic end-of-window point would break monotonicity.
+                keep = new_x < int(cur_x[0])
+                new_x = new_x[keep]
+                new_y = new_y[keep]
+                if ay_min is not None:
+                    ay_min = np.asarray(ay_min)[keep]
+                if ay_max is not None:
+                    ay_max = np.asarray(ay_max)[keep]
             merged_x = np.concatenate([new_x, cur_x])
             merged_y = np.concatenate([new_y, cur_y])
             merged_ymin = None

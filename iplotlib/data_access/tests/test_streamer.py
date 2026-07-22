@@ -231,6 +231,71 @@ class HandlerEmptyPayloadTests(unittest.TestCase):
         callback.assert_called_once_with(signal)
 
 
+class _StatefulSignal(_FakeSignal):
+    """Fake signal whose inject_external mutates data_store like
+    AccessHelper.on_fetch_done (append or replace)."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        def _apply(append=False, **res):
+            d0 = np.asarray(res['d0'])
+            d1 = np.asarray(res['d1'])
+            if append and len(self.data_store[0]) > 0:
+                d0 = np.append(np.asarray(self.data_store[0]), d0)
+                d1 = np.append(np.asarray(self.data_store[1]), d1)
+            self.data_store = [_FakeBuf(d0), _FakeBuf(d1)]
+            self.x_data = d0
+            self.y_data = d1
+
+        self.inject_external = _apply
+
+
+class MonotonicTimeAxisTests(unittest.TestCase):
+    """The buffer's time axis must never go backwards: archive fetches append
+    a synthetic end-of-window point that can sit ahead of the next live batch
+    (client/server clock skew)."""
+
+    def test_backfill_drops_archive_points_at_or_after_first_live(self):
+        fake_da = MagicMock()
+        # 1000 is the synthetic boundary point at the first live timestamp.
+        fake_da.get_archive_window.return_value = _FakeArchiveResponse(
+            x=[900, 950, 1000], y=[1.0, 2.0, 3.0])
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._max_points = 0
+        signal = _StatefulSignal(name='var')
+        signal.inject_external(append=False, d0=[1000, 1001], d1=[7.0, 8.0])
+        streamer._backfill_signal('ds', signal, window_ns=100,
+                                  callback=MagicMock())
+        self.assertEqual(list(signal.x_data), [900, 950, 1000, 1001])
+
+    def test_handler_drops_stale_synthetic_tail_before_append(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        signal = _StatefulSignal(name='var')
+        # 1000 emulates a synthetic point at client-now, ahead of server time.
+        signal.inject_external(append=False, d0=[900, 950, 1000],
+                               d1=[1.0, 2.0, 3.0])
+        streamer.signals = {'var': [signal]}
+        streamer._first_live_pending.add(signal.uid)
+        dobj = MagicMock(xdata=[995, 996], ydata=[5.0, 6.0],
+                         xunit='ns', yunit='V')
+        streamer.handler(MagicMock(), 'var', dobj)
+        x = list(signal.x_data)
+        self.assertEqual(x, sorted(x))
+        self.assertNotIn(1000, x)
+        self.assertEqual(x[-1], 996)
+
+    def test_handler_append_without_overlap_is_plain_append(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        signal = _StatefulSignal(name='var')
+        signal.inject_external(append=False, d0=[900, 950], d1=[1.0, 2.0])
+        streamer.signals = {'var': [signal]}
+        dobj = MagicMock(xdata=[995, 996], ydata=[5.0, 6.0],
+                         xunit='ns', yunit='V')
+        streamer.handler(MagicMock(), 'var', dobj)
+        self.assertEqual(list(signal.x_data), [900, 950, 995, 996])
+
+
 class BatchMergeTests(unittest.TestCase):
     """Polled chunks are buffered and merged into one injection per flush."""
 
