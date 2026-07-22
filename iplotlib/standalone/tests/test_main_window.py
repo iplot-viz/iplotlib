@@ -116,6 +116,41 @@ class MainWindowActionsTest(unittest.TestCase):
         self.app.processEvents()
         return qt_canvas
 
+    def test_reclicking_ruler_tool_surfaces_the_ruler_window(self):
+        """The first RULER activation opens its window behind the canvas; only
+        re-clicking the already active tool must surface it."""
+        win = IplotQtMainWindow()
+        try:
+            qt_canvas = self._add_canvas(win)
+            surfaced = []
+            original = qt_canvas.show_ruler_window
+            qt_canvas.show_ruler_window = lambda: (surfaced.append(True), original())
+
+            win.on_tool_activated(Canvas.MOUSE_MODE_RULER)   # activation
+            self.assertEqual(surfaced, [])
+            self.assertTrue(qt_canvas._ruler_window.isVisible())
+
+            win.on_tool_activated(Canvas.MOUSE_MODE_RULER)   # re-click
+            self.assertEqual(surfaced, [True])
+
+            # Coming back from another tool is an activation, not a re-click.
+            win.on_tool_activated(Canvas.MOUSE_MODE_SELECT)
+            win.on_tool_activated(Canvas.MOUSE_MODE_RULER)
+            self.assertEqual(surfaced, [True])
+        finally:
+            win.close()
+
+    def test_show_ruler_window_restores_a_minimized_window(self):
+        win = IplotQtMainWindow()
+        try:
+            qt_canvas = self._add_canvas(win)
+            qt_canvas._ruler_window.showMinimized()
+            qt_canvas.show_ruler_window()
+            self.assertFalse(qt_canvas._ruler_window.isMinimized())
+            self.assertTrue(qt_canvas._ruler_window.isVisible())
+        finally:
+            win.close()
+
     def test_save_canvas_image_writes_png(self):
         """IplotQtCanvas.save_canvas_image writes a PNG file."""
         import tempfile
@@ -181,13 +216,14 @@ class PreferencesWindowTest(unittest.TestCase):
         from iplotlib.core.axis import LinearAxis
         from iplotlib.core.plot import (PlotContour, PlotContourWithSlider,
                                         PlotXY, PlotXYWithSlider)
+        from iplotlib.core.ruler import Ruler
         from iplotlib.core.signal import SignalContour, SignalXY
 
         win = IplotQtPreferencesWindow(QStandardItemModel())
         try:
             expected = {Canvas, PlotXY, PlotXYWithSlider, PlotContour,
                         PlotContourWithSlider, LinearAxis, SignalXY,
-                        SignalContour, type(None)}
+                        SignalContour, Ruler, type(None)}
             self.assertEqual(expected, set(win._forms.keys()))
         finally:
             win.close()
@@ -351,6 +387,109 @@ class MinimapToolbarTest(unittest.TestCase):
             self.assertFalse(qt_canvas.get_canvas().show_minimap)
         finally:
             win.close()
+
+
+class LogScaleInvalidationTest(unittest.TestCase):
+    """A log<->linear toggle must invalidate the affected plots' retained Y view so
+    the refresh re-autoscales them. ``_plots_with_log_scale_change`` is what decides
+    which plots are affected, comparing the live canvas against the last applied dict.
+    """
+
+    @staticmethod
+    def _two_plot_canvas() -> Canvas:
+        core = Canvas(2, 1, title="log_invalidation")
+        x = np.linspace(0, 10, 50)
+        for _ in range(2):
+            plot = PlotXY()
+            sig = SignalXY(label="s")
+            sig.set_data([x, np.sin(x)])
+            plot.add_signal(sig)
+            core.add_plot(plot, 0)
+        return core
+
+    def test_no_change_returns_empty(self):
+        canvas = self._two_plot_canvas()
+        prev = canvas.to_dict()
+        self.assertEqual(IplotQtMainWindow._plots_with_log_scale_change(canvas, prev), [])
+
+    def test_canvas_level_toggle_flags_all_plots(self):
+        canvas = self._two_plot_canvas()
+        prev = canvas.to_dict()
+        canvas.log_scale = True
+        changed = IplotQtMainWindow._plots_with_log_scale_change(canvas, prev)
+        self.assertEqual({id(p) for p in changed},
+                         {id(canvas.plots[0][0]), id(canvas.plots[0][1])})
+
+    def test_plot_level_toggle_flags_only_that_plot(self):
+        canvas = self._two_plot_canvas()
+        prev = canvas.to_dict()
+        canvas.plots[0][1].log_scale = True
+        changed = IplotQtMainWindow._plots_with_log_scale_change(canvas, prev)
+        self.assertEqual([id(p) for p in changed], [id(canvas.plots[0][1])])
+
+    def test_explicit_plot_override_not_flagged_by_canvas_toggle(self):
+        # Plot pins log_scale=True explicitly, so a canvas-level None->True change does
+        # not alter its effective value and it must not be flagged.
+        canvas = self._two_plot_canvas()
+        canvas.plots[0][0].log_scale = True
+        prev = canvas.to_dict()
+        canvas.log_scale = True
+        changed = IplotQtMainWindow._plots_with_log_scale_change(canvas, prev)
+        self.assertEqual([id(p) for p in changed], [id(canvas.plots[0][1])])
+
+
+class MinimapFontSizeTest(unittest.TestCase):
+    """The minimap must reuse the main plot's font size (issue #141), for both
+    backends, so its ticks stay legible on high-DPI screens and follow the
+    single font-size setting instead of a hard-coded value."""
+
+    BACKENDS = ('matplotlib', 'pyqt')
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def _qt_canvas(self, backend, core):
+        qt_canvas = IplotQtCanvasFactory.new(backend, canvas=core)
+        qt_canvas.set_canvas(qt_canvas.get_canvas())
+        self.app.processEvents()
+        return qt_canvas
+
+    def test_minimap_inherits_canvas_font_size(self):
+        for backend in self.BACKENDS:
+            with self.subTest(backend=backend):
+                core = _canvas_with_signal()
+                core.font_size = 14
+                qt_canvas = self._qt_canvas(backend, core)
+                try:
+                    target = core.get_minimap_target_plot()
+                    self.assertEqual(qt_canvas._minimap_font_size(target), 14)
+                finally:
+                    qt_canvas.deleteLater()
+
+    def test_minimap_plot_font_size_overrides_canvas(self):
+        for backend in self.BACKENDS:
+            with self.subTest(backend=backend):
+                core = _canvas_with_signal()
+                core.font_size = 10
+                target = core.get_minimap_target_plot()
+                target.font_size = 22
+                qt_canvas = self._qt_canvas(backend, core)
+                try:
+                    self.assertEqual(qt_canvas._minimap_font_size(target), 22)
+                finally:
+                    qt_canvas.deleteLater()
+
+    def test_minimap_font_size_falls_back_to_default(self):
+        for backend in self.BACKENDS:
+            with self.subTest(backend=backend):
+                core = _canvas_with_signal()  # no font_size set anywhere
+                qt_canvas = self._qt_canvas(backend, core)
+                try:
+                    target = core.get_minimap_target_plot()
+                    self.assertEqual(qt_canvas._minimap_font_size(target), 8)
+                finally:
+                    qt_canvas.deleteLater()
 
 
 if __name__ == '__main__':

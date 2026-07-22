@@ -9,18 +9,20 @@ from contextlib import contextmanager
 from typing import List, Tuple, Optional
 
 import numpy as np
-from PySide6.QtCore import QMetaObject, QSize, Qt, Signal, Slot
+from PySide6.QtCore import QEventLoop, QMetaObject, QSize, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
 from iplotlib.core.signal import SignalXY
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.plot import PlotXYWithSlider, PlotContourWithSlider
+from iplotlib.core.plot import PlotXY, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.command import IplotCommand
 from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.impl_base import BackendParserBase
+from iplotlib.core.ruler import Ruler
 import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
+from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
 
 logger = Sl.get_logger(__name__)
 
@@ -52,6 +54,13 @@ class IplotQtCanvas(QWidget):
         self._marker_window.dropMarker.connect(self.draw_marker_label)
         self._marker_window.deleteMarker.connect(self.delete_marker_label)
 
+        # Iplotlib rulers
+        self._ruler_window = IplotQtRuler()
+        self._ruler_window.deleteRuler.connect(self.delete_ruler)
+        self._ruler_window.visibilityRuler.connect(self.toggle_ruler_visibility)
+        self._ruler_window.colorRuler.connect(self.change_ruler_color)
+        self._ruler_window.fontColorRuler.connect(self.change_ruler_font_color)
+        self._ruler_window.labelVisibilityRuler.connect(self.toggle_ruler_label)
 
         # Statistics
         self._stats_table = IplotQtStatistics()
@@ -155,6 +164,8 @@ class IplotQtCanvas(QWidget):
         elif self._mmode == Canvas.MOUSE_MODE_DIST:
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_MARKER:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        elif self._mmode == Canvas.MOUSE_MODE_RULER:
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_PAN:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -274,6 +285,66 @@ class IplotQtCanvas(QWidget):
                 return col[target_row]
         return None
 
+    def show_ruler_window(self):
+        """Bring the rulers window to the front, showing it if needed."""
+        if self._ruler_window.isMinimized():
+            self._ruler_window.showNormal()
+        else:
+            self._ruler_window.show()
+        self._ruler_window.raise_()
+        self._ruler_window.activateWindow()
+
+    @staticmethod
+    def _plot_x_is_time(plot) -> bool:
+        """Whether *plot*'s X axis carries time: absolute dates or a
+        relative-time unit (the same signal-unit test the statistics table
+        applies to pick its duration format)."""
+        if bool(getattr(plot.axes[0], 'is_date', False)):
+            return True
+        for signals in getattr(plot, 'signals', {}).values():
+            for signal in signals or []:
+                try:
+                    unit = signal.data_store[0].unit
+                except (AttributeError, IndexError, TypeError):
+                    continue
+                if unit and 'time' in str(unit).lower():
+                    return True
+        return False
+
+    def _ruler_owner_plot_id(self, name) -> Optional[Tuple[int, int]]:
+        """Position of the plot whose model owns ruler *name* (ruler names are
+        canvas-global unique)."""
+        canvas = self._parser.canvas if self._parser else None
+        if canvas is None:
+            return None
+        for col in canvas.plots:
+            for plot in col:
+                if plot is not None and plot.get_ruler(name) is not None:
+                    return self._canvas_position_of(plot)
+        return None
+
+    def _remove_ruler_from_menu(self, name, plot_id):
+        # The context menu can target a shared-x echo whose model ruler and
+        # window row belong to another plot; route the deletion to the owner.
+        plot_id = self._ruler_owner_plot_id(name) or plot_id
+        self.delete_ruler(name, plot_id, True)
+        self._ruler_window.remove_row_by_name(name, plot_id)
+
+    def _apply_ruler_state(self, ruler):
+        """Push a model ruler's non-default state onto its backend artists
+        (origin and shared-x echoes); re-added artists start with defaults."""
+        for r in self._parser.get_rulers():
+            if r.name != ruler.name:
+                continue
+            if ruler.font_color != Ruler.font_color:
+                r.set_font_color(ruler.font_color)
+            if not ruler.show_label:
+                r.set_show_label(False)
+            if not ruler.show_val_label:
+                r.set_show_val_label(False)
+            if not ruler.visible:
+                r.set_visible(False)
+
     @abstractmethod
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         """"""
@@ -282,6 +353,25 @@ class IplotQtCanvas(QWidget):
     def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
         """"""
 
+    @abstractmethod
+    def delete_ruler(self, name, plot_id, persist):
+        """Remove a ruler from the backend (and from Plot.rulers when persist=True)."""
+
+    @abstractmethod
+    def toggle_ruler_visibility(self, name, plot_id, visible):
+        """Toggle a ruler's visibility on the backend."""
+
+    @abstractmethod
+    def change_ruler_color(self, name, plot_id, color):
+        """Update a ruler's color on the backend."""
+
+    @abstractmethod
+    def change_ruler_font_color(self, name, plot_id, color):
+        """Update a ruler's label font color on the backend."""
+
+    @abstractmethod
+    def toggle_ruler_label(self, name, plot_id, show_label, show_val_label):
+        """Toggle a ruler's name label and signal value labels on the backend."""
 
     def get_signals(self, canvas: Canvas):
         signal_list = []
@@ -378,8 +468,8 @@ class IplotQtCanvas(QWidget):
                     if impl_plot is None:
                         continue
                     plot_id = self._canvas_position_of(signal.parent()) or (1, 1)
-                    info_stats.append((signal, impl_plot))
-            #self._stats_table.set_canvas_columns(len(canvas.plots))
+                    info_stats.append((signal, impl_plot, plot_id))
+            self._stats_table.set_canvas_columns(len(canvas.plots))
             self._stats_table.fill_table(info_stats)
 
     @contextmanager
@@ -392,34 +482,29 @@ class IplotQtCanvas(QWidget):
         finally:
             self._parser._hm.undo()
 
-    def stage_view_lim_cmd(self, impl_plot):
-        """stage a view command"""
+    def stage_view_lim_cmd(self, impl_plot, name: str = None):
+        """stage a view command. `name` labels the command; defaults to the active mouse mode."""
 
-        name = self._mmode[3:]
-        old_limits = [self._parser.get_plot_limits(impl_plot)]
-        cmd = IplotAxesRangeCmd(name.capitalize(), old_limits, parser=self._parser)
+        if name is None:
+            name = self._mmode[3:].capitalize()
+        old_limits = self._parser.get_view_cmd_limits(impl_plot)
+        cmd = IplotAxesRangeCmd(name, old_limits, parser=self._parser)
         self._staging_cmds.append(cmd)
         logger.debug(f"Staged {cmd}")
 
     def commit_view_lim_cmd(self, impl_plot):
         """commit a view command"""
         cmd = self._staging_cmds.pop()
-        cmd.new_lim = [self._parser.get_plot_limits(impl_plot)]
+        cmd.new_lim = self._parser.get_view_cmd_limits(impl_plot)
         assert len(cmd.new_lim) == len(cmd.old_lim)
 
         # Check if any limit actually changed
         if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            QApplication.processEvents()
+            # Exclude user input: this runs inside the mouse-release handler and
+            # re-entering it corrupts the backends' drag state.
+            QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
             QApplication.restoreOverrideCursor()
-
-            # Update new limits after data refresh.
-            # Focus case: If focus plot is active and X-axis is shared, retrieve synchronized limits across
-            # all shared plots.
-            # if self._parser.canvas.focus_plot and self._parser.canvas.shared_x_axis:
-            #     cmd.new_lim = self._parser.get_all_plot_limits_focus()
-            # else:
-            #     cmd.new_lim = self._parser.get_all_plot_limits()
 
             self._commitd_cmds.append(cmd)
             logger.debug(f"Committed {cmd}")
@@ -435,6 +520,49 @@ class IplotQtCanvas(QWidget):
             self.cmdDone.emit(cmd)
         except IndexError:
             return
+
+    def _flush_view(self):
+        """
+        Redraw after a view-limit change. Backends that repaint eagerly on range
+        changes (pyqtgraph) need nothing here; matplotlib overrides this.
+        """
+
+    def reset_plot_view(self, impl_plot):
+        """
+        Restore a single plot to its draw-time view (the "Reset zoom/pan" action),
+        leaving every other plot untouched. Recorded as one undoable command,
+        mirroring the autoscale flow.
+        """
+        ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        if not hasattr(ci, 'plot') or not isinstance(ci.plot(), PlotXY):
+            return
+        self.stage_view_lim_cmd(impl_plot, name='Reset zoom/pan')
+        self._parser.set_plot_limits_to_original(impl_plot)
+        while len(self._staging_cmds):
+            self.commit_view_lim_cmd(impl_plot)
+        while len(self._commitd_cmds):
+            self.push_view_lim_cmd()
+        self._flush_view()
+        self.stats(self.get_canvas())
+
+    def reset_all_views(self):
+        """
+        Restore every plot to its draw-time view (the toolbar "Home" action).
+        Captured as a single undoable command so one undo reverts the whole reset.
+        """
+        if self._parser is None or self.get_canvas() is None:
+            return
+        old_limits = self._parser.get_all_plot_limits()
+        if not old_limits:
+            return
+        cmd = IplotAxesRangeCmd('Home', old_limits, parser=self._parser)
+        self._parser.reset_all_plots_to_original()
+        cmd.new_lim = self._parser.get_all_plot_limits()
+        if any(old != new for old, new in zip(cmd.old_lim, cmd.new_lim)):
+            self._parser._hm.done(cmd)
+            self.cmdDone.emit(cmd)
+        self._flush_view()
+        self.stats(self.get_canvas())
 
     def clean_canvas(self):
         """

@@ -209,18 +209,9 @@ class RenderingTest(unittest.TestCase):
                 self._render_simple_canvas(backend, "pref_grid_off", grid=False)
 
     def test_14_preference_log_scale(self):
-        """Canvas with log_scale=True must render Y axis on a log scale.
-
-        Pyqtgraph currently draws an empty plot when log_scale is enabled on
-        a SignalXY (axis ticks come out logarithmic but the line itself is
-        not rendered). Matplotlib works. The pyqt subtest is skipped until
-        the backend is fixed — see follow-up issue.
-        """
+        """Canvas with log_scale=True must render Y axis on a log scale."""
         for backend in BACKENDS:
             with self.subTest(backend=backend):
-                if backend == 'pyqt':
-                    self.skipTest("pyqtgraph log_scale does not render the "
-                                  "signal line — see follow-up issue")
                 self._render_simple_canvas(backend, "pref_log_scale", log_scale=True)
 
     def test_15_preference_font_size_large(self):

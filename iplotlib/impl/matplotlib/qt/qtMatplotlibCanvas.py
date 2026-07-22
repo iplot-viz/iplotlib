@@ -30,6 +30,7 @@ from matplotlib.patches import Rectangle
 from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
+from iplotlib.core.ruler import Ruler
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, NiceNanosecondLocator, \
     ExponentScalarFormatter, RelativeTimeLocator, is_time_label
@@ -44,12 +45,22 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     """Qt widget that internally uses a matplotlib canvas backend"""
 
     dropSignal = Signal(object)
+    _PREVIEW_RULER_NAME = "__preview__"
 
     def __init__(self, parent=None, tight_layout=True, **kwargs):
         super().__init__(parent, **kwargs)
 
         self._dist_calculator = DistanceCalculator()
         self._draw_call_counter = 0
+        # Ruler grabbed for dragging, and its blit background captured on first motion.
+        self._ruler_drag = None
+        self._ruler_drag_bg = None
+        self._ruler_drag_echoes = []
+        # Ghost ruler previewing where a double-click would place the next one.
+        self._preview_ruler_ax = None
+        self._preview_ruler_identity = None
+        self._preview_background = None
+        self._preview_cid_draw = None
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
@@ -119,6 +130,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self.render()
         self._update_minimap()
         super().set_canvas(canvas)
+        self._repaint_rulers_from_canvas()
 
     def _get_main_axes_for_minimap(self):
         canvas = self.get_canvas()
@@ -131,6 +143,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if not impl_list:
             return None
         return impl_list[-1]
+
+    def _minimap_font_size(self, target_plot) -> int:
+        """Font size for the minimap tick labels: the same effective size as the
+        main plot it mirrors, so a font-size change propagates to both (#141).
+
+        Resolved through the usual property hierarchy (x-axis -> plot -> canvas
+        -> default) rather than a dedicated minimap control, keeping the setting
+        single-sourced.
+        """
+        axis = target_plot.axes[0] if (target_plot is not None and getattr(target_plot, 'axes', None)) else None
+        ref = axis if axis is not None else target_plot
+        fs = self._parser._pm.get_value(ref, 'font_size') if ref is not None else None
+        return int(fs) if fs else 8
 
     def _disconnect_minimap_xlim(self):
         if self._minimap_connected_main_ax is not None:
@@ -173,7 +198,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             canvas.snapshot_minimap_baseline(x_min, x_max)
             baseline = canvas.get_minimap_baseline()
 
-        signature = (id(target_plot), baseline)
+        # Mirror the main plot's font size so the minimap ticks stay legible and
+        # track font-size changes (issue #141). Part of the signature so a change
+        # forces a rebuild that re-applies it.
+        fs = self._minimap_font_size(target_plot)
+        signature = (id(target_plot), baseline, fs)
         if self._minimap_signature != signature or self._minimap_axes is None:
             self._disconnect_minimap_xlim()
             self._minimap_figure.clear()
@@ -207,8 +236,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             ax.autoscale_view(scalex=False, scaley=True)
             ax.set_xlim(baseline[0], baseline[1], auto=False)
             ax.set_autoscalex_on(False)
-            ax.tick_params(axis='x', labelsize=7)
-            ax.tick_params(axis='y', labelsize=7)
+            ax.tick_params(axis='x', labelsize=fs)
+            ax.tick_params(axis='y', labelsize=fs)
             ax.set_facecolor('#f5f5f5')
             main_x_formatter = main_ax.xaxis.get_major_formatter()
             if isinstance(main_x_formatter, NanosecondDateFormatter):
@@ -244,6 +273,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # relative axis falls through to the default numeric formatter.
                 ax.xaxis.set_major_locator(RelativeTimeLocator(force_time=True))
                 ax.xaxis.set_major_formatter(ExponentScalarFormatter(is_time=True))
+
+            # The UTC prefix is rendered as the x-axis offset text; size it too
+            # (after the formatter is set), like the main axis does
+            # (matplotlibCanvas.process_ipl_axis_params).
+            ax.xaxis.get_offset_text().set_fontsize(fs)
 
             rect = Rectangle((baseline[0], 0), baseline[1] - baseline[0], 1,
                              facecolor='#ffb300', edgecolor='#e65100',
@@ -347,6 +381,311 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self._parser.figure.canvas.draw()
                     return
 
+    def _get_plot_by_id(self, plot_id):
+        return self._plot_at_canvas_position(plot_id)
+
+    def _get_impl_plot_for_plot(self, plot):
+        """Return the matplotlib Axes hosting *plot* (first matching axes)."""
+        for ax in self._parser.figure.axes:
+            ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
+            if ci and hasattr(ci, 'plot') and ci.plot() is plot:
+                return ax
+        return None
+
+    def delete_ruler(self, name, plot_id, persist):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        impl_plot = self._get_impl_plot_for_plot(plot)
+        if impl_plot is not None:
+            # Removes the origin and its shared-x echoes across every plot.
+            self._parser.remove_ruler_by_name(name)
+        if persist:
+            plot.remove_ruler(name)
+        # The freed name may change what the next ruler will be called.
+        self._clear_preview_ruler()
+        self._preview_ruler_identity = None
+        self.render()
+
+    def toggle_ruler_visibility(self, name, plot_id, visible):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.visible = visible
+        # Apply to the origin and its echoes (names are canvas-global unique).
+        for r in self._parser.get_rulers():
+            if r.name == name:
+                r.set_visible(visible)
+        self.render()
+
+    def change_ruler_color(self, name, plot_id, color):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.color = color
+        for r in self._parser.get_rulers():
+            if r.name == name:
+                r.set_color(color)
+        self.render()
+
+    def change_ruler_font_color(self, name, plot_id, color):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.font_color = color
+        for r in self._parser.get_rulers():
+            if r.name == name:
+                r.set_font_color(color)
+        self.render()
+
+    def toggle_ruler_label(self, name, plot_id, show_label, show_val_label):
+        plot = self._get_plot_by_id(plot_id)
+        if plot is None:
+            return
+        ruler = plot.get_ruler(name)
+        if ruler:
+            ruler.show_label = show_label
+            ruler.show_val_label = show_val_label
+        for r in self._parser.get_rulers():
+            if r.name == name:
+                r.set_show_label(show_label)
+                r.set_show_val_label(show_val_label)
+        self.render()
+
+    def _add_ruler_at(self, impl_plot, plot, x: float, y: float,
+                      name: str = None, color: str = None):
+        if name is None:
+            name = self._ruler_window.next_name()
+        if color is None:
+            color = self._ruler_window.next_color(name)
+        x_abs = self._parser.transform_value(impl_plot, 0, x)
+        y_abs = self._parser.transform_value(impl_plot, 1, y)
+        ruler = Ruler(name=name, xy=(x_abs, y_abs), color=color, visible=True)
+        plot.add_ruler(ruler)
+        # The ghost previewing this ruler is superseded by the real one.
+        self._clear_preview_ruler()
+        self._preview_ruler_identity = None
+        self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
+        self._parser.create_ruler_echoes(impl_plot, name, x_abs, y_abs, ruler.color)
+        is_date = bool(getattr(plot.axes[0], 'is_date', False))
+        plot_id = self._canvas_position_of(plot) or (1, 1)
+        self._ruler_window.set_canvas_columns(len(self._parser.canvas.plots))
+        self._ruler_window.add_row(name, plot_id, (x_abs, y_abs), ruler.color,
+                                    visible=True, is_date=is_date,
+                                    signal_values=self._parser.ruler_signal_values_shared(impl_plot, x),
+                                    x_is_time=self._plot_x_is_time(plot))
+        if not self._ruler_window.isVisible():
+            self._ruler_window.show()
+        # Do not steal focus from the canvas.
+        self.window().activateWindow()
+
+    def _preview_identity_for_next(self):
+        """Name/color the next ruler will get, so the ghost previews them."""
+        if self._preview_ruler_identity is not None:
+            return self._preview_ruler_identity
+        name = self._ruler_window.next_name()
+        return {'name': name, 'color': self._ruler_window.next_color(name)}
+
+    def _show_preview_ruler(self, impl_plot, x: float, y: float):
+        ident = self._preview_identity_for_next()
+        existing = next((r for r in self._parser.get_rulers(impl_plot)
+                         if r.name == self._PREVIEW_RULER_NAME), None)
+        if existing is not None and self._preview_ruler_ax is impl_plot:
+            existing.abs_x = self._parser.transform_value(impl_plot, 0, x)
+            existing.abs_y = self._parser.transform_value(impl_plot, 1, y)
+            existing.xy = (x, y)
+            existing.refresh_labels()
+            self._blit_preview()
+            return
+        self._clear_preview_ruler()
+        ruler = self._parser.add_ruler(impl_plot, self._PREVIEW_RULER_NAME,
+                                        x, y, ident['color'], animated=True)
+        ruler.set_label_text(ident['name'])
+        self._preview_ruler_ax = impl_plot
+        self._preview_ruler_identity = ident
+        if self._preview_cid_draw is None:
+            self._preview_cid_draw = self._mpl_renderer.mpl_connect(
+                'draw_event', self._on_draw_capture_bg)
+        self._preview_background = self._mpl_renderer.copy_from_bbox(
+            self._parser.figure.bbox)
+        self._blit_preview()
+
+    def _on_draw_capture_bg(self, event):
+        # A full redraw invalidates the blit background; recapture it.
+        if self._preview_ruler_ax is None:
+            return
+        self._preview_background = self._mpl_renderer.copy_from_bbox(
+            self._parser.figure.bbox)
+
+    def _blit_preview(self):
+        if self._preview_background is None or self._preview_ruler_ax is None:
+            return
+        self._mpl_renderer.restore_region(self._preview_background)
+        for r in self._parser.get_rulers(self._preview_ruler_ax):
+            if r.name == self._PREVIEW_RULER_NAME:
+                r.draw_artists()
+        self._mpl_renderer.blit(self._parser.figure.bbox)
+
+    def _clear_preview_ruler(self):
+        axes_with_preview = {r.ax for r in self._parser.get_rulers()
+                             if r.name == self._PREVIEW_RULER_NAME}
+        for ax in axes_with_preview:
+            self._parser.remove_ruler(ax, self._PREVIEW_RULER_NAME)
+        self._preview_ruler_ax = None
+        self._preview_background = None
+        if self._preview_cid_draw is not None:
+            self._mpl_renderer.mpl_disconnect(self._preview_cid_draw)
+            self._preview_cid_draw = None
+
+    def _begin_ruler_drag(self, impl_plot, plot, ruler):
+        """Grab a ruler for dragging; blit background is captured lazily on first motion."""
+        self._clear_preview_ruler()
+        self._ruler_drag = (impl_plot, plot, ruler)
+        self._ruler_drag_bg = None
+        # Shared-x echoes move in lockstep with the origin during the drag.
+        self._ruler_drag_echoes = [r for r in self._parser.get_rulers()
+                                   if r.name == ruler.name and r is not ruler]
+
+    def _drag_ruler_to(self, x: float, y: float):
+        """Move the grabbed ruler (and its shared-x echoes) to (x, y) and blit."""
+        impl_plot, _, ruler = self._ruler_drag
+        echoes = self._ruler_drag_echoes
+        if self._ruler_drag_bg is None:
+            # First motion: capture a clean background without the moving artists.
+            ruler.set_visible(False)
+            for echo in echoes:
+                echo.set_visible(False)
+            self._mpl_renderer.draw()
+            self._ruler_drag_bg = self._mpl_renderer.copy_from_bbox(self._parser.figure.bbox)
+            ruler.set_visible(True)
+            for echo in echoes:
+                echo.set_visible(True)
+        x_abs = self._parser.transform_value(impl_plot, 0, x)
+        y_abs = self._parser.transform_value(impl_plot, 1, y)
+        ruler.abs_x = x_abs
+        ruler.abs_y = y_abs
+        ruler.xy = (x, y)
+        ruler.refresh_labels()
+        for echo in echoes:
+            echo.abs_x = x_abs
+            echo.abs_y = y_abs
+            echo.xy = (self._parser.transform_value(echo.ax, 0, x_abs, inverse=True),
+                       self._parser.transform_value(echo.ax, 1, y_abs, inverse=True))
+            echo.refresh_labels()
+        self._mpl_renderer.restore_region(self._ruler_drag_bg)
+        ruler.draw_artists()
+        for echo in echoes:
+            echo.draw_artists()
+        self._mpl_renderer.blit(self._parser.figure.bbox)
+
+    def _end_ruler_drag(self):
+        """Persist the dragged ruler's position to the model and the window. The
+        model ruler and its window row live on the origin's plot, so route there
+        even when a shared-x echo was the artist being dragged."""
+        _, _, ruler = self._ruler_drag
+        echoes = self._ruler_drag_echoes
+        moved = self._ruler_drag_bg is not None
+        self._ruler_drag = None
+        self._ruler_drag_bg = None
+        self._ruler_drag_echoes = []
+        if not moved:
+            return  # click without motion: nothing to persist
+        origin = next((r for r in [ruler] + echoes if not r.is_echo), ruler)
+        self._persist_ruler_position(origin)
+        self.render()
+
+    def _persist_ruler_position(self, origin):
+        """Write an origin ruler's current (abs_x, y) to its model ruler and its
+        row in the Ruler window."""
+        ci = self._parser._impl_plot_cache_table.get_cache_item(origin.ax)
+        origin_plot = ci.plot() if ci else None
+        if origin_plot is None:
+            return
+        x_abs, y_abs = origin.abs_x, origin.abs_y
+        core = origin_plot.get_ruler(origin.name)
+        if core is not None:
+            core.xy = (x_abs, y_abs)
+        plot_id = self._canvas_position_of(origin_plot) or (1, 1)
+        self._ruler_window.update_row_xy(
+            origin.name, plot_id, (x_abs, y_abs),
+            signal_values=self._parser.ruler_signal_values_shared(origin.ax, origin.xy[0]))
+
+    def _find_ruler_near(self, impl_plot, event):
+        rulers = self._parser.get_rulers(impl_plot)
+        if not rulers or event.x is None or event.y is None:
+            return None
+        best = None
+        best_dist = float('inf')
+        renderer = self._mpl_renderer.get_renderer() if hasattr(self._mpl_renderer, 'get_renderer') else None
+        for r in rulers:
+            if r.name == self._PREVIEW_RULER_NAME:
+                continue
+            try:
+                ruler_px = impl_plot.transData.transform((r.xy[0], r.xy[1]))
+            except (ValueError, TypeError):
+                continue
+            dx = abs(ruler_px[0] - event.x)
+            dy = abs(ruler_px[1] - event.y)
+            d = None
+            if dx <= self.PICK_RADIUS_PX and dy <= self.PICK_RADIUS_PX:
+                d = float(np.hypot(dx, dy))
+            else:
+                name_label = getattr(r, 'name_label', None)
+                if name_label is not None and name_label.get_visible():
+                    try:
+                        bbox = name_label.get_window_extent(renderer)
+                        if bbox.contains(event.x, event.y):
+                            d = 0.0
+                    except (RuntimeError, AttributeError):
+                        pass
+            if d is not None and d < best_dist:
+                best_dist = d
+                best = r
+        return best
+
+    def _repaint_rulers_from_canvas(self):
+        self._clear_preview_ruler()
+        self._preview_ruler_identity = None
+        self._ruler_window.clear_info()
+        canvas = self._parser.canvas
+        if not canvas:
+            return
+        self._ruler_window.set_canvas_columns(len(canvas.plots))
+        added = False
+        for col_idx, col in enumerate(canvas.plots):
+            for row_idx, plot in enumerate(col):
+                if not plot or not getattr(plot, 'rulers', None):
+                    continue
+                impl_plot = self._get_impl_plot_for_plot(plot)
+                if impl_plot is None:
+                    continue
+                plot_id = (row_idx + 1, col_idx + 1)
+                is_date = bool(getattr(plot.axes[0], 'is_date', False))
+                for ruler in plot.rulers:
+                    x_view = self._parser.transform_value(impl_plot, 0, ruler.xy[0], inverse=True)
+                    y_view = self._parser.transform_value(impl_plot, 1, ruler.xy[1], inverse=True)
+                    self._parser.add_ruler(impl_plot, ruler.name, x_view, y_view, ruler.color)
+                    self._parser.create_ruler_echoes(impl_plot, ruler.name,
+                                                     ruler.xy[0], ruler.xy[1], ruler.color)
+                    self._ruler_window.add_row(ruler.name, plot_id, ruler.xy,
+                                                ruler.color, ruler.visible, is_date,
+                                                ruler.font_color, ruler.show_label,
+                                                ruler.show_val_label,
+                                                self._parser.ruler_signal_values_shared(impl_plot, x_view),
+                                                x_is_time=self._plot_x_is_time(plot))
+                    self._apply_ruler_state(ruler)
+                    added = True
+                self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
+        # Only re-draw when rulers were actually restored.
+        if added:
+            self.render()
+
     def autoscale_y(self, impl_plot):
         """
             Autoscale the Y axis of a single PlotXY and store the action for undo/redo
@@ -416,6 +755,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if self._mmode is None:
             return
 
+        if mode != Canvas.MOUSE_MODE_RULER and self._preview_ruler_ax is not None:
+            self._clear_preview_ruler()
+            self._preview_ruler_identity = None
+            self.render()
+
         if mode == Canvas.MOUSE_MODE_SELECT:
             self._mpl_toolbar.canvas.widgetlock.release(self._mpl_toolbar)
         elif mode == Canvas.MOUSE_MODE_CROSSHAIR:
@@ -433,6 +777,15 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             else:
                 self._marker_window.raise_()
                 self._marker_window.activateWindow()
+        elif mode == Canvas.MOUSE_MODE_RULER:
+            if not self._ruler_window.isVisible():
+                self._ruler_window.show()
+            elif self._ruler_window.isMinimized():
+                self._ruler_window.showNormal()
+            # Open behind the canvas.
+            self._ruler_window.lower()
+            self.window().activateWindow()
+            self.window().raise_()
 
     def undo(self):
         self._parser.undo()
@@ -445,6 +798,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     @Slot()
     def render(self):
         self._mpl_renderer.draw()
+
+    def _flush_view(self):
+        self.render()
 
     # custom event handlers
     def _mpl_draw_finish(self, event: DrawEvent):
@@ -586,7 +942,32 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         return None, None, None
 
     def _mpl_mouse_motion_handler(self, event: MouseEvent):
-        """Handle mouse motion for drag shift preview."""
+        """Handle mouse motion for ruler drag, ruler ghost preview and drag shift."""
+        if self._ruler_drag is not None:
+            impl_plot = self._ruler_drag[0]
+            if (event.inaxes is impl_plot
+                    and event.xdata is not None and event.ydata is not None):
+                self._drag_ruler_to(event.xdata, event.ydata)
+            return
+        if self._mmode == Canvas.MOUSE_MODE_RULER:
+            if event.inaxes is None or event.xdata is None or event.ydata is None:
+                if self._preview_ruler_ax is not None:
+                    self._clear_preview_ruler()
+                    self._mpl_renderer.draw()
+                return
+            ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+            plot = ci.plot() if hasattr(ci, 'plot') else None
+            if plot is None or isinstance(plot, (PlotContour, PlotContourWithSlider)):
+                return
+            # No ghost while hovering an existing ruler (a double-click there
+            # grabs/ignores instead of creating).
+            if self._find_ruler_near(event.inaxes, event) is not None:
+                if self._preview_ruler_ax is not None:
+                    self._clear_preview_ruler()
+                    self._mpl_renderer.draw()
+                return
+            self._show_preview_ruler(event.inaxes, event.xdata, event.ydata)
+            return
         if not self._drag_shift_active or self._drag_shift_signal is None:
             return
         if event.inaxes != self._drag_shift_impl_plot:
@@ -621,6 +1002,21 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             return
 
         if event.dblclick:
+            if (self._mmode == Canvas.MOUSE_MODE_RULER
+                    and event.button == MouseButton.LEFT
+                    and event.inaxes is not None
+                    and event.xdata is not None and event.ydata is not None):
+                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
+                plot = ci.plot() if hasattr(ci, 'plot') else None
+                if plot is None or isinstance(plot, (PlotContour, PlotContourWithSlider)):
+                    return
+                # Double-clicking on an existing ruler must not stack a new one on top.
+                if self._find_ruler_near(event.inaxes, event) is not None:
+                    return
+                # Double-click creates a ruler at the cursor.
+                self._add_ruler_at(event.inaxes, plot, event.xdata, event.ydata)
+                self.render()
+                return
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN] and event.button == MouseButton.RIGHT:
                 mpl_axes = event.inaxes
                 if not isinstance(mpl_axes, MPLAxes):
@@ -695,6 +1091,17 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             if not hasattr(ci, 'plot'):
                 return
             plot = ci.plot()
+            if self._mmode == Canvas.MOUSE_MODE_RULER and event.button == MouseButton.LEFT:
+                if isinstance(plot, (PlotContour, PlotContourWithSlider)):
+                    logger.warning(f"Rulers are not supported for {type(plot).__name__}")
+                    return
+                if event.xdata is None or event.ydata is None:
+                    return
+                # Grab the nearest ruler to drag; empty space is a no-op.
+                hit = self._find_ruler_near(event.inaxes, event)
+                if hit is not None:
+                    self._begin_ruler_drag(event.inaxes, plot, hit)
+                return
             if event.button == MouseButton.RIGHT:
                 if getattr(self._mpl_toolbar, '_zoom_info', None) is not None:
                     self._mpl_toolbar.release_zoom(event)
@@ -779,6 +1186,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _mpl_mouse_release_handler(self, event: MouseEvent):
         self._debug_log_event(event, "Mouse released")
+        if self._ruler_drag is not None:
+            self._end_ruler_drag()
+            return
         if event.dblclick:
             pass
         else:
@@ -806,8 +1216,17 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             return
         ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
         autoscale_menu = QMenu(self)
+        if self._mmode == Canvas.MOUSE_MODE_RULER and hasattr(ci, 'plot'):
+            hit = self._find_ruler_near(event.inaxes, event)
+            if hit is not None:
+                plot_id = self._canvas_position_of(ci.plot()) or (1, 1)
+                autoscale_menu.addAction(
+                    f"Remove ruler {hit.name}",
+                    lambda n=hit.name, p=plot_id: self._remove_ruler_from_menu(n, p))
+                autoscale_menu.addSeparator()
         autoscale_menu.addAction("Autoscale", lambda: self.autoscale_y(event.inaxes))
         autoscale_menu.addAction("Autoscale All", self.autoscale_all_y)
+        autoscale_menu.addAction("Reset zoom/pan", lambda: self.reset_plot_view(event.inaxes))
         if self._parser.canvas.focus_plot is None:
             autoscale_menu.addAction("Focus on plot", lambda: self._full_screen_mode_on(event.inaxes))
         else:
@@ -820,6 +1239,12 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         if nearest_signal:
             autoscale_menu.addAction("Signal Preferences",
                                      lambda s=nearest_signal: self.openPlotPreferences.emit(s))
+        extender = getattr(self._parser, 'context_menu_extender', None)
+        if callable(extender):
+            try:
+                extender(autoscale_menu, ci.plot() if ci else None)
+            except Exception:
+                logger.exception("context_menu_extender failed")
         autoscale_menu.popup(event.guiEvent.globalPos())
 
     def keyPressEvent(self, event: QKeyEvent):
