@@ -94,6 +94,22 @@ class CanvasStreamer:
         thread.start()
         return thread
 
+    @staticmethod
+    def _carrier(signal):
+        """Expression signals stream through their child variable: the child
+        owns the raw buffers and the parent re-evaluates on injection."""
+        children = getattr(signal, 'children', None)
+        if children and len(children) == 1 and hasattr(children[0], 'inject_external'):
+            return children[0]
+        return signal
+
+    @staticmethod
+    def _reprocess(signal):
+        try:
+            signal._do_data_processing()
+        except Exception:
+            logger.exception(f"Processing failed for {signal.name}")
+
     def _signal_lock(self, signal):
         lock = self._inject_locks.get(signal.uid)
         if lock is None:
@@ -259,16 +275,18 @@ class CanvasStreamer:
         signals = {}
         for s in all_signals:
             s._streaming_has_live = False
-            signals[s.name] = signals.get(s.name, []) + [s]
+            cname = self._carrier(s).name
+            signals[cname] = signals.get(cname, []) + [s]
         self.signals = signals
 
         signals_by_ds = dict()
         for s in all_signals:
+            cname = self._carrier(s).name
             if signals_by_ds.get(s.data_source):
-                if s.name not in signals_by_ds[s.data_source]:
-                    signals_by_ds[s.data_source].append(s.name)
+                if cname not in signals_by_ds[s.data_source]:
+                    signals_by_ds[s.data_source].append(cname)
             else:
-                signals_by_ds[s.data_source] = [s.name]
+                signals_by_ds[s.data_source] = [cname]
 
         self._window_ns = int(window_ns) if window_ns else 0
         self._max_points = int(max_points) if max_points else 0
@@ -348,7 +366,8 @@ class CanvasStreamer:
             logger.warning(f'signal name {varname} was not found')
             return
         for signal in signals_by_name:
-            if not hasattr(signal, 'inject_external'):
+            carrier = self._carrier(signal)
+            if not hasattr(carrier, 'inject_external'):
                 continue
             x_data = dobj.xdata
             y_data = dobj.ydata
@@ -357,8 +376,8 @@ class CanvasStreamer:
                 callback(signal)
                 continue
             if signal.uid in self._first_live_pending:
-                cur_x = signal.x_data
-                cur_y = signal.y_data
+                cur_x = carrier.x_data
+                cur_y = carrier.y_data
                 if cur_x is not None and len(cur_x) > 0 and len(x_data) > 0:
                     cur_x_arr = np.asarray(cur_x)
                     cur_y_arr = np.asarray(cur_y)
@@ -368,13 +387,15 @@ class CanvasStreamer:
                     y_data = np.concatenate([flat_y, np.asarray(y_data)])
                 self._first_live_pending.discard(signal.uid)
             result = self._make_payload(
-                signal, x_data, y_data,
+                carrier, x_data, y_data,
                 xunit=dobj.xunit, yunit=dobj.yunit,
             )
-            with self._signal_lock(signal):
-                self._drop_overlap_tail(signal, int(x_data[0]))
-                signal.inject_external(append=True, **result)
-                self._apply_cap(signal)
+            with self._signal_lock(carrier):
+                self._drop_overlap_tail(carrier, int(x_data[0]))
+                carrier.inject_external(append=True, **result)
+                self._apply_cap(carrier)
+            if carrier is not signal:
+                self._reprocess(signal)
             if len(x_data) > 0 and self._window_ns > 0:
                 now_ns = int(time.time() * 1e9)
                 if int(x_data[-1]) >= now_ns - self._window_ns:
@@ -394,19 +415,20 @@ class CanvasStreamer:
                 self._backfill_signal(ds, signal, window_ns, callback)
 
     def _backfill_signal(self, ds: str, signal, window_ns: int, callback):
-        archive_end_ns, found_live = self._wait_for_first_live(signal)
+        carrier = self._carrier(signal)
+        archive_end_ns, found_live = self._wait_for_first_live(carrier)
         archive_start_ns = archive_end_ns - window_ns
 
         ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window(
-            ds, signal, archive_start_ns, archive_end_ns)
+            ds, carrier, archive_start_ns, archive_end_ns)
         if ax is None or len(ax) == 0:
             ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_last_archive_value(
-                ds, signal, archive_end_ns)
+                ds, carrier, archive_end_ns)
         if ax is None or len(ax) == 0:
             return
 
-        with self._signal_lock(signal):
-            cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(signal)
+        with self._signal_lock(carrier):
+            cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(carrier)
             new_x = np.asarray(ax)
             new_y = np.asarray(ay)
             if len(cur_x) > 0:
@@ -430,14 +452,16 @@ class CanvasStreamer:
                 merged_ymax = np.concatenate(
                     [new_ymax, cur_ymax if cur_ymax is not None else cur_y])
             payload = self._make_payload(
-                signal, merged_x, merged_y,
+                carrier, merged_x, merged_y,
                 y_min=merged_ymin, y_max=merged_ymax,
                 xunit=xunit, yunit=yunit,
             )
-            signal.inject_external(append=False, **payload)
-            self._apply_cap(signal)
+            carrier.inject_external(append=False, **payload)
+            self._apply_cap(carrier)
             signal._streaming_has_live = True
 
+        if carrier is not signal:
+            self._reprocess(signal)
         if not found_live:
             self._first_live_pending.add(signal.uid)
 
@@ -472,17 +496,18 @@ class CanvasStreamer:
                     self._topup_signal(ds, signal, period_ns)
 
     def _topup_signal(self, ds: str, signal, period_ns: int):
+        carrier = self._carrier(signal)
         now_ns = int(time.time() * 1e9)
         last_period_start_ns = now_ns - period_ns
         cutoff_ns = now_ns - self._window_ns
 
         ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window(
-            ds, signal, last_period_start_ns, now_ns)
+            ds, carrier, last_period_start_ns, now_ns)
         if ax is None or len(ax) == 0:
             return
 
-        with self._signal_lock(signal):
-            cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(signal)
+        with self._signal_lock(carrier):
+            cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(carrier)
             keep_mask = (cur_x >= cutoff_ns) & (cur_x < last_period_start_ns)
             kept_x = cur_x[keep_mask]
             kept_y = cur_y[keep_mask]
@@ -504,14 +529,16 @@ class CanvasStreamer:
                 merged_ymax = np.concatenate([kept_ymax, new_ymax])
 
             payload = self._make_payload(
-                signal, merged_x, merged_y,
+                carrier, merged_x, merged_y,
                 y_min=merged_ymin, y_max=merged_ymax,
                 xunit=xunit, yunit=yunit,
             )
-            signal.inject_external(append=False, **payload)
-            self._apply_cap(signal)
+            carrier.inject_external(append=False, **payload)
+            self._apply_cap(carrier)
             signal._streaming_has_live = True
 
+        if carrier is not signal:
+            self._reprocess(signal)
         logger.info(f"Top-up for {signal.name}: {len(ax)} archive points, "
                     f"{len(kept_x)} prior live points retained")
         if self._callback:

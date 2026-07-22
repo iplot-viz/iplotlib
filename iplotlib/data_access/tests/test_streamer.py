@@ -336,6 +336,47 @@ class MonotonicTimeAxisTests(unittest.TestCase):
         self.assertEqual(list(signal.x_data), [900, 950, 995, 996])
 
 
+class ExpressionCarrierTests(unittest.TestCase):
+    """Expression signals stream through their single child: raw data goes to
+    the child's buffers and the parent re-evaluates after each injection."""
+
+    def test_carrier_of_plain_signal_is_itself(self):
+        signal = _FakeSignal(name='var')
+        self.assertIs(CanvasStreamer._carrier(signal), signal)
+
+    def test_carrier_of_expression_signal_is_its_child(self):
+        child = _FakeSignal(name='VAR')
+        parent = _FakeSignal(name='${VAR}*10')
+        parent.children = [child]
+        self.assertIs(CanvasStreamer._carrier(parent), child)
+
+    def test_handler_injects_into_child_and_reprocesses_parent(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        child = _StatefulSignal(name='VAR')
+        parent = _FakeSignal(name='${VAR}*10')
+        parent.children = [child]
+        parent._do_data_processing = MagicMock()
+        streamer.signals = {'VAR': [parent]}
+        callback = MagicMock()
+        dobj = MagicMock(xdata=[1, 2], ydata=[3.0, 4.0], xunit='ns', yunit='V')
+        streamer.handler(callback, 'VAR', dobj)
+        self.assertEqual(list(child.x_data), [1, 2])
+        parent._do_data_processing.assert_called_once()
+        callback.assert_called_once_with(parent)
+
+    def test_parent_processing_error_does_not_break_the_stream(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        child = _StatefulSignal(name='VAR')
+        parent = _FakeSignal(name='${VAR}*10')
+        parent.children = [child]
+        parent._do_data_processing = MagicMock(side_effect=RuntimeError('boom'))
+        streamer.signals = {'VAR': [parent]}
+        callback = MagicMock()
+        dobj = MagicMock(xdata=[1], ydata=[3.0], xunit='ns', yunit='V')
+        streamer.handler(callback, 'VAR', dobj)
+        callback.assert_called_once_with(parent)
+
+
 class BatchMergeTests(unittest.TestCase):
     """Polled chunks are buffered and merged into one injection per flush."""
 
