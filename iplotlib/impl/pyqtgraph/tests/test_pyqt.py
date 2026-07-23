@@ -206,6 +206,31 @@ class SetYAxisLimitsLogModeTests(QAppOffscreenTestAdapter):
         self.assertFalse(np.isnan(hi2))
 
 
+class StreamUnitLabelRealignTests(QAppOffscreenTestAdapter):
+    """A Y label arriving after the build (stream units) must retrigger the
+    column width alignment."""
+
+    def _parser_with_plot(self):
+        import pyqtgraph as pg
+        parser = PyQtGraphParser()
+        plot = pg.PlotItem()
+        parser._layout_stacks[(0, 0)] = {1: plot}
+        calls = []
+        parser.align_y_axis = lambda col: calls.append(col)
+        return parser, plot, calls
+
+    def test_changed_y_label_realigns_its_column(self):
+        parser, plot, calls = self._parser_with_plot()
+        parser.set_impl_y_axis_label_text(plot, '[kV]')
+        self.assertEqual(calls, [0])
+
+    def test_unchanged_y_label_does_not_realign(self):
+        parser, plot, calls = self._parser_with_plot()
+        parser.set_impl_y_axis_label_text(plot, '[kV]')
+        parser.set_impl_y_axis_label_text(plot, '[kV]')
+        self.assertEqual(calls, [0])
+
+
 class LogModeConsistencyTests(QAppOffscreenTestAdapter):
     """Log-mode readouts must stay in data units and match the matplotlib
     backend: statistics read source values, autoscale must not re-log the

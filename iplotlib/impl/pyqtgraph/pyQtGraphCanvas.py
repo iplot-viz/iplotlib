@@ -2005,7 +2005,16 @@ class PyQtGraphParser(BackendParserBase):
                                                                                         'font_color') if i_plot else None
         fs = self._pm.get_value(y_axis, 'font_size') if y_axis else self._pm.get_value(i_plot,
                                                                                        'font_size') if i_plot else None
-        self.process_ipl_axis_params_label(self.get_impl_y_axis(plot), text, fc, fs)
+        axis_item = self.get_impl_y_axis(plot)
+        realign = text is not None and getattr(axis_item, 'labelText', '') != text
+        self.process_ipl_axis_params_label(axis_item, text, fc, fs)
+        if realign:
+            # Stream units arrive after the build-time column alignment, so the
+            # axis widths must be recomputed to make room for the new label.
+            for (r, c), stacks in self._layout_stacks.items():
+                if plot in stacks.values():
+                    self.align_y_axis(c)
+                    break
 
     def set_impl_y_axis_limits(self, plot: PlotItem, limits: tuple):
         if not isinstance(plot, PlotItem):

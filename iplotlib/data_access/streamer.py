@@ -198,19 +198,15 @@ class CanvasStreamer:
             kwargs['extremities'] = True
         return kwargs
 
-    def _drop_overlap_tail(self, signal, first_ts: int):
-        """Trim buffered samples at or after ``first_ts``: archive fetches end
-        with a synthetic boundary point that can sit ahead of the next live
-        batch (client/server clock skew). Caller must hold _signal_lock."""
+    def _cut_overlap_tail(self, signal, first_ts: int):
+        """Trim buffered samples at or after ``first_ts`` so the batch can be
+        appended monotonically, and return them as ``(x, y, ymin, ymax)`` for
+        the caller to fold back into the batch. Returns None when the batch
+        does not overlap the buffer. Caller must hold _signal_lock."""
         x, y, y_min, y_max = self._current_arrays(signal)
         if len(x) == 0 or int(x[-1]) < first_ts:
-            return
+            return None
         keep = np.asarray(x) < first_ts
-        dropped = int((~keep).sum())
-        if dropped > 1:
-            # More than the boundary point means the feed rewound over buffered
-            # data; if the re-emitted range is sparser this shows as a gap.
-            logger.debug(f"Live batch for {getattr(signal, 'name', '?')} rewound over {dropped} buffered samples")
         payload = self._make_payload(
             signal, np.asarray(x)[keep], np.asarray(y)[keep],
             y_min=np.asarray(y_min)[keep] if y_min is not None else None,
@@ -219,17 +215,40 @@ class CanvasStreamer:
             yunit=getattr(signal.data_store[1], 'unit', ''),
         )
         signal.inject_external(append=False, **payload)
+        return (np.asarray(x)[~keep], np.asarray(y)[~keep],
+                np.asarray(y_min)[~keep] if y_min is not None else None,
+                np.asarray(y_max)[~keep] if y_max is not None else None)
+
+    @staticmethod
+    def _fold_tail(tail, x, y):
+        """Merge a cut buffer tail with a live batch chronologically. On a
+        re-emitted timestamp the batch sample wins. Returns (x, y, ymin, ymax);
+        ymin/ymax are None unless the tail carried envelope bounds."""
+        tx, ty, t_min, t_max = tail
+        mx = np.concatenate([tx, np.asarray(x)])
+        my = np.concatenate([ty, np.asarray(y)])
+        m_min = np.concatenate([t_min, np.asarray(y)]) if t_min is not None else None
+        m_max = np.concatenate([t_max, np.asarray(y)]) if t_max is not None else None
+        order = np.argsort(mx, kind='stable')
+        keep = np.empty(len(order), dtype=bool)
+        keep[-1] = True
+        keep[:-1] = mx[order][1:] > mx[order][:-1]
+        sel = order[keep]
+        return (mx[sel], my[sel],
+                m_min[sel] if m_min is not None else None,
+                m_max[sel] if m_max is not None else None)
 
     def _apply_cap(self, signal):
         """Honour the per-signal cap as maximum stored points: the newest
         ``_RAW_TAIL_S`` stay raw and older samples are decimated into the
-        remaining budget, preserving extremes. Caller must hold _signal_lock."""
+        remaining budget, preserving extremes. Caller must hold _signal_lock.
+        Returns True when the buffer was actually reduced."""
         if self._max_points <= 0:
-            return
+            return False
         x, y, y_min, y_max = self._current_arrays(signal)
         n = len(x)
         if n <= self._max_points:
-            return
+            return False
         x = np.asarray(x)
         y = np.asarray(y)
         if y_min is not None:
@@ -264,6 +283,7 @@ class CanvasStreamer:
             yunit=getattr(signal.data_store[1], 'unit', ''),
         )
         signal.inject_external(append=False, **payload)
+        return True
 
     def start(self, canvas, callback, window_ns: int = None, max_points: int = 0):
         self.stop_flag = False
@@ -280,6 +300,8 @@ class CanvasStreamer:
         signals = {}
         for s in all_signals:
             s._streaming_has_live = False
+            # A '*' inherited from the last Draw would outlive its data here.
+            s.isDownsampled = False
             cname = self._carrier(s).name
             signals[cname] = signals.get(cname, []) + [s]
         self.signals = signals
@@ -363,13 +385,20 @@ class CanvasStreamer:
         else:
             x = np.concatenate([np.asarray(c.xdata) for c in filled])
             y = np.concatenate([np.asarray(c.ydata) for c in filled])
-        # The feed can re-emit or interleave overlapping ranges; only samples
-        # that advance the time axis keep the buffer monotonic.
+        # The feed interleaves and re-emits ranges; a stable sort restores
+        # monotonicity without losing real samples.
+        order = np.argsort(x, kind='stable')
+        if not np.array_equal(order, np.arange(len(order))):
+            logger.debug(f"Reordered {len(x)} samples of a live batch")
+            x = x[order]
+            y = y[order]
+        # For a re-emitted timestamp the stable sort leaves the newest emission
+        # last; keep that one.
         keep = np.empty(len(x), dtype=bool)
-        keep[0] = True
-        keep[1:] = x[1:] > np.maximum.accumulate(x)[:-1]
+        keep[-1] = True
+        keep[:-1] = x[1:] > x[:-1]
         if not keep.all():
-            logger.debug(f"Dropped {int((~keep).sum())} out-of-order samples from a live batch")
+            logger.debug(f"Dropped {int((~keep).sum())} duplicate timestamps from a live batch")
             x = x[keep]
             y = y[keep]
         return SimpleNamespace(xdata=x, ydata=y, xunit=last.xunit, yunit=last.yunit)
@@ -389,7 +418,8 @@ class CanvasStreamer:
                 # No new samples: skip injection but keep the window sliding.
                 callback(signal)
                 continue
-            if signal.uid in self._first_live_pending:
+            first_live = signal.uid in self._first_live_pending
+            if first_live:
                 cur_x = carrier.x_data
                 cur_y = carrier.y_data
                 if cur_x is not None and len(cur_x) > 0 and len(x_data) > 0:
@@ -400,14 +430,24 @@ class CanvasStreamer:
                     x_data = np.concatenate([flat_x, np.asarray(x_data)])
                     y_data = np.concatenate([flat_y, np.asarray(y_data)])
                 self._first_live_pending.discard(signal.uid)
-            result = self._make_payload(
-                carrier, x_data, y_data,
-                xunit=dobj.xunit, yunit=dobj.yunit,
-            )
             with self._signal_lock(carrier):
-                self._drop_overlap_tail(carrier, int(x_data[0]))
+                tail = self._cut_overlap_tail(carrier, int(x_data[0]))
+                y_min = y_max = None
+                if tail is not None and not first_live:
+                    # Overlapped buffer samples are real feed data; on the first
+                    # live batch the tail is the backfill's synthetic boundary
+                    # point, a projection to discard.
+                    x_data, y_data, y_min, y_max = self._fold_tail(
+                        tail, x_data, y_data)
+                result = self._make_payload(
+                    carrier, x_data, y_data, y_min=y_min, y_max=y_max,
+                    xunit=dobj.xunit, yunit=dobj.yunit,
+                )
                 carrier.inject_external(append=True, **result)
-                self._apply_cap(carrier)
+                if self._apply_cap(carrier):
+                    # Flag the plotted signal, not the carrier: the streaming
+                    # reprocess path never aggregates children's flags.
+                    signal.isDownsampled = True
             if carrier is not signal:
                 self._reprocess(signal)
             if len(x_data) > 0 and self._window_ns > 0:
@@ -440,6 +480,10 @@ class CanvasStreamer:
                 ds, carrier, archive_end_ns)
         if ax is None or len(ax) == 0:
             return
+        if ay_min is not None and not getattr(signal, 'envelope', False):
+            # An envelope reply to a raw request means UDA overflowed and
+            # decimated — the same condition the Draw path flags.
+            signal.isDownsampled = True
 
         with self._signal_lock(carrier):
             cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(carrier)
@@ -471,7 +515,8 @@ class CanvasStreamer:
                 xunit=xunit, yunit=yunit,
             )
             carrier.inject_external(append=False, **payload)
-            self._apply_cap(carrier)
+            if self._apply_cap(carrier):
+                signal.isDownsampled = True
             signal._streaming_has_live = True
 
         if carrier is not signal:
@@ -519,6 +564,8 @@ class CanvasStreamer:
             ds, carrier, last_period_start_ns, now_ns)
         if ax is None or len(ax) == 0:
             return
+        if ay_min is not None and not getattr(signal, 'envelope', False):
+            signal.isDownsampled = True
 
         with self._signal_lock(carrier):
             cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(carrier)

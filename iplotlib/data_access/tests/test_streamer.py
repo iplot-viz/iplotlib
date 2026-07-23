@@ -41,6 +41,7 @@ class _FakeSignal:
             self.data_store = data
         self.inject_external = MagicMock()
         self._streaming_has_live = False
+        self.isDownsampled = False
         # x_data is read by _wait_for_first_live; non-empty short-circuits the wait.
         self.x_data = [] if x_data is None else x_data
         self.y_data = []
@@ -116,6 +117,13 @@ class ApplyCapTests(unittest.TestCase):
         self.assertIn(50.0, out_y)
         tail = x[x >= x[-1] - 120 * sec]
         self.assertEqual(list(out_x[-len(tail):]), list(tail))
+
+    def test_reports_whether_the_buffer_was_reduced(self):
+        self.streamer._max_points = 3
+        signal = _FakeSignal(data=[_FakeBuf([1, 2, 3]), _FakeBuf([10, 20, 30])])
+        self.assertFalse(self.streamer._apply_cap(signal))
+        self.streamer._max_points = 2
+        self.assertTrue(self.streamer._apply_cap(signal))
 
     def test_decimates_envelope_buffers_preserving_band(self):
         self.streamer._max_points = 500
@@ -233,6 +241,41 @@ class BackfillSignalTests(unittest.TestCase):
         self.assertTrue(self.signal._streaming_has_live)
         self.callback.assert_called_once_with(self.signal)
 
+    def test_envelope_reply_to_raw_request_flags_downsampled(self):
+        # get_archive_window only returns an envelope when UDA overflowed.
+        fake_da = MagicMock()
+        fake_da.get_archive_window.return_value = _FakeArchiveResponse(
+            x=[10, 20, 30], y=[1, 2, 3], xunit='ns', yunit='V',
+            ymin=[0, 1, 2], ymax=[2, 3, 4])
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._max_points = 0
+        streamer._backfill_signal('ds', self.signal, window_ns=100,
+                                  callback=self.callback)
+        self.assertTrue(self.signal.isDownsampled)
+
+    def test_raw_reply_does_not_flag_downsampled(self):
+        fake_da = MagicMock()
+        fake_da.get_archive_window.return_value = _FakeArchiveResponse(
+            x=[10, 20, 30], y=[1, 2, 3], xunit='ns', yunit='V')
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._max_points = 0
+        streamer._backfill_signal('ds', self.signal, window_ns=100,
+                                  callback=self.callback)
+        self.assertFalse(self.signal.isDownsampled)
+
+    def test_envelope_signal_reply_does_not_flag_downsampled(self):
+        # Buckets are an envelope signal's normal representation, as in Draw.
+        signal = _FakeSignal(name='var', envelope=True, x_data=[100])
+        fake_da = MagicMock()
+        fake_da.get_envelope.return_value = _FakeArchiveResponse(
+            x=[10, 20, 30], y=[1, 2, 3], xunit='ns', yunit='V',
+            ymin=[0, 1, 2], ymax=[2, 3, 4])
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._max_points = 0
+        streamer._backfill_signal('ds', signal, window_ns=100,
+                                  callback=self.callback)
+        self.assertFalse(signal.isDownsampled)
+
     def test_returns_silently_when_both_window_and_fallback_empty(self):
         fake_da = MagicMock()
         fake_da.get_archive_window.return_value = _FakeArchiveResponse(
@@ -325,6 +368,29 @@ class MonotonicTimeAxisTests(unittest.TestCase):
         self.assertNotIn(1000, x)
         self.assertEqual(x[-1], 996)
 
+    def test_handler_folds_overlapped_live_samples_into_the_batch(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        signal = _StatefulSignal(name='var')
+        signal.inject_external(append=False, d0=[900, 950, 970],
+                               d1=[1.0, 2.0, 3.0])
+        streamer.signals = {'var': [signal]}
+        dobj = MagicMock(xdata=[960, 980], ydata=[5.0, 6.0],
+                         xunit='ns', yunit='V')
+        streamer.handler(MagicMock(), 'var', dobj)
+        self.assertEqual(list(signal.x_data), [900, 950, 960, 970, 980])
+        self.assertEqual(list(signal.y_data), [1.0, 2.0, 5.0, 3.0, 6.0])
+
+    def test_handler_fold_prefers_the_batch_on_a_re_emitted_timestamp(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        signal = _StatefulSignal(name='var')
+        signal.inject_external(append=False, d0=[900, 950], d1=[1.0, 2.0])
+        streamer.signals = {'var': [signal]}
+        dobj = MagicMock(xdata=[950, 960], ydata=[9.0, 6.0],
+                         xunit='ns', yunit='V')
+        streamer.handler(MagicMock(), 'var', dobj)
+        self.assertEqual(list(signal.x_data), [900, 950, 960])
+        self.assertEqual(list(signal.y_data), [1.0, 9.0, 6.0])
+
     def test_handler_append_without_overlap_is_plain_append(self):
         streamer = CanvasStreamer(da=MagicMock())
         signal = _StatefulSignal(name='var')
@@ -400,21 +466,21 @@ class BatchMergeTests(unittest.TestCase):
         self.assertEqual(list(merged.xdata), [5])
         self.assertEqual(list(merged.ydata), [50])
 
-    def test_merge_drops_out_of_order_samples_across_chunks(self):
+    def test_merge_sorts_interleaved_samples_across_chunks(self):
         chunks = [
             _FakeArchiveResponse(x=[1, 2, 5], y=[10, 20, 50], xunit='ns', yunit='V'),
             _FakeArchiveResponse(x=[4, 6], y=[40, 60], xunit='ns', yunit='V'),
         ]
         merged = CanvasStreamer._merge_chunks(chunks)
-        self.assertEqual(list(merged.xdata), [1, 2, 5, 6])
-        self.assertEqual(list(merged.ydata), [10, 20, 50, 60])
+        self.assertEqual(list(merged.xdata), [1, 2, 4, 5, 6])
+        self.assertEqual(list(merged.ydata), [10, 20, 40, 50, 60])
 
-    def test_merge_drops_out_of_order_samples_within_a_single_chunk(self):
+    def test_merge_sorts_within_a_single_chunk_keeping_newest_duplicate(self):
         chunks = [_FakeArchiveResponse(x=[1, 3, 2, 3, 4], y=[10, 30, 20, 31, 40],
                                        xunit='ns', yunit='V')]
         merged = CanvasStreamer._merge_chunks(chunks)
-        self.assertEqual(list(merged.xdata), [1, 3, 4])
-        self.assertEqual(list(merged.ydata), [10, 30, 40])
+        self.assertEqual(list(merged.xdata), [1, 2, 3, 4])
+        self.assertEqual(list(merged.ydata), [10, 20, 31, 40])
 
     def test_merge_of_all_empty_chunks_returns_empty_payload(self):
         chunks = [_FakeArchiveResponse(x=[], y=[]),
