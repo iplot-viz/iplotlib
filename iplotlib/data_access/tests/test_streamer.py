@@ -215,6 +215,7 @@ class FetchArchiveWindowCompleteTests(unittest.TestCase):
         fake_da.get_archive_window.side_effect = replies
         streamer = CanvasStreamer(da=fake_da)
         streamer._max_points = 0
+        streamer._retry_pause_s = 0
         return streamer, fake_da
 
     def test_truncated_reply_is_resumed_until_covered(self):

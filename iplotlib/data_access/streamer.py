@@ -30,8 +30,10 @@ _RAW_TAIL_S = 120
 _ARCHIVE_SLICE_NS = 3600 * int(1e9)
 
 # Rounds of retries over refused slices; refusals are transient, so a later
-# attempt usually gets the data.
+# attempt usually gets the data. The pause lets the server recover between
+# rounds instead of hammering it back-to-back.
 _ARCHIVE_RETRY_ROUNDS = 3
+_ARCHIVE_RETRY_PAUSE_S = 3.0
 
 # QThread wait budget on stop(). Loops poll stop_flag frequently, so most
 # workers exit well within this; stragglers (e.g. a receiver blocked on the
@@ -124,6 +126,18 @@ class CanvasStreamer:
             lock = Lock()
             self._inject_locks[signal.uid] = lock
         return lock
+
+    # Class attribute so tests can zero the wait.
+    _retry_pause_s = _ARCHIVE_RETRY_PAUSE_S
+
+    def _pause(self, seconds):
+        """Interruptible wait; returns True when stop was requested."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if self.stop_flag:
+                return True
+            time.sleep(0.1)
+        return self.stop_flag
 
     @staticmethod
     def _make_payload(signal, x, y, *, y_min=None, y_max=None, xunit='', yunit=''):
@@ -272,6 +286,8 @@ class CanvasStreamer:
         # through every round.
         for attempt in range(_ARCHIVE_RETRY_ROUNDS):
             if not holes:
+                break
+            if self._pause(self._retry_pause_s):
                 break
             final = attempt == _ARCHIVE_RETRY_ROUNDS - 1
             remaining = []
