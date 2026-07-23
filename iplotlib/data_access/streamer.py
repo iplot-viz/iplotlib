@@ -206,6 +206,11 @@ class CanvasStreamer:
         if len(x) == 0 or int(x[-1]) < first_ts:
             return
         keep = np.asarray(x) < first_ts
+        dropped = int((~keep).sum())
+        if dropped > 1:
+            # More than the boundary point means the feed rewound over buffered
+            # data; if the re-emitted range is sparser this shows as a gap.
+            logger.info(f"Live batch for {getattr(signal, 'name', '?')} rewound over {dropped} buffered samples")
         payload = self._make_payload(
             signal, np.asarray(x)[keep], np.asarray(y)[keep],
             y_min=np.asarray(y_min)[keep] if y_min is not None else None,
@@ -345,20 +350,29 @@ class CanvasStreamer:
 
     @staticmethod
     def _merge_chunks(chunks):
-        """Merge buffered chunks into a single payload; empty chunks are kept
-        only as a fallback so the handler still slides the window."""
+        """Merge buffered chunks into a single chronological payload; empty
+        chunks are kept only as a fallback so the handler still slides the
+        window."""
         filled = [c for c in chunks if len(c.xdata) > 0]
         if not filled:
             return chunks[-1]
-        if len(filled) == 1:
-            return filled[0]
         last = filled[-1]
-        return SimpleNamespace(
-            xdata=np.concatenate([np.asarray(c.xdata) for c in filled]),
-            ydata=np.concatenate([np.asarray(c.ydata) for c in filled]),
-            xunit=last.xunit,
-            yunit=last.yunit,
-        )
+        if len(filled) == 1:
+            x = np.asarray(last.xdata)
+            y = np.asarray(last.ydata)
+        else:
+            x = np.concatenate([np.asarray(c.xdata) for c in filled])
+            y = np.concatenate([np.asarray(c.ydata) for c in filled])
+        # The feed can re-emit or interleave overlapping ranges; only samples
+        # that advance the time axis keep the buffer monotonic.
+        keep = np.empty(len(x), dtype=bool)
+        keep[0] = True
+        keep[1:] = x[1:] > np.maximum.accumulate(x)[:-1]
+        if not keep.all():
+            logger.info(f"Dropped {int((~keep).sum())} out-of-order samples from a live batch")
+            x = x[keep]
+            y = y[keep]
+        return SimpleNamespace(xdata=x, ydata=y, xunit=last.xunit, yunit=last.yunit)
 
     def handler(self, callback, varname, dobj):
         signals_by_name = self.signals.get(varname)

@@ -400,6 +400,22 @@ class BatchMergeTests(unittest.TestCase):
         self.assertEqual(list(merged.xdata), [5])
         self.assertEqual(list(merged.ydata), [50])
 
+    def test_merge_drops_out_of_order_samples_across_chunks(self):
+        chunks = [
+            _FakeArchiveResponse(x=[1, 2, 5], y=[10, 20, 50], xunit='ns', yunit='V'),
+            _FakeArchiveResponse(x=[4, 6], y=[40, 60], xunit='ns', yunit='V'),
+        ]
+        merged = CanvasStreamer._merge_chunks(chunks)
+        self.assertEqual(list(merged.xdata), [1, 2, 5, 6])
+        self.assertEqual(list(merged.ydata), [10, 20, 50, 60])
+
+    def test_merge_drops_out_of_order_samples_within_a_single_chunk(self):
+        chunks = [_FakeArchiveResponse(x=[1, 3, 2, 3, 4], y=[10, 30, 20, 31, 40],
+                                       xunit='ns', yunit='V')]
+        merged = CanvasStreamer._merge_chunks(chunks)
+        self.assertEqual(list(merged.xdata), [1, 3, 4])
+        self.assertEqual(list(merged.ydata), [10, 30, 40])
+
     def test_merge_of_all_empty_chunks_returns_empty_payload(self):
         chunks = [_FakeArchiveResponse(x=[], y=[]),
                   _FakeArchiveResponse(x=[], y=[])]
