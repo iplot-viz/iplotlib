@@ -191,14 +191,30 @@ class CanvasStreamer:
                 ds, signal, cursor, end_ns)
             if ax is None or len(ax) == 0:
                 break
+            ax = np.asarray(ax)
+            ay = np.asarray(ay)
+            if ay_min is not None:
+                ay_min = np.asarray(ay_min)
+                ay_max = np.asarray(ay_max)
             last = int(ax[-1])
             if last < cursor:
                 break
+            # extremities appends a synthetic sample at the requested end even
+            # when the server truncated the reply: a lone final point far from
+            # its predecessor is that projection, not real coverage. Two-point
+            # replies are legitimate (a flat signal's boundary samples).
+            if (len(ax) >= 3 and last >= resume_below
+                    and int(ax[-2]) < resume_below
+                    and last - int(ax[-2]) > (end_ns - start_ns) // 100):
+                ax, ay = ax[:-1], ay[:-1]
+                if ay_min is not None:
+                    ay_min, ay_max = ay_min[:-1], ay_max[:-1]
+                last = int(ax[-1])
             xunit, yunit = xu, yu
-            xs.append(np.asarray(ax))
-            ys.append(np.asarray(ay))
-            y_mins.append(np.asarray(ay_min if ay_min is not None else ay))
-            y_maxs.append(np.asarray(ay_max if ay_max is not None else ay))
+            xs.append(ax)
+            ys.append(ay)
+            y_mins.append(ay_min if ay_min is not None else ay)
+            y_maxs.append(ay_max if ay_max is not None else ay)
             has_bounds = has_bounds or ay_min is not None
             if last >= resume_below:
                 break

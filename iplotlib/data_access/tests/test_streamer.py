@@ -251,6 +251,32 @@ class FetchArchiveWindowCompleteTests(unittest.TestCase):
             'ds', _FakeSignal(name='var'), 0, end)
         self.assertEqual(fake_da.get_archive_window.call_count, 1)
 
+    def test_truncated_reply_with_synthetic_end_point_is_resumed(self):
+        # The dense part stops at 500s but extremities appends a point at the
+        # requested end; coverage must be judged by the sample before the jump.
+        end = 1000 * self.SEC
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, 500 * self.SEC, end], y=[1.0, 2.0, 9.0]),
+            _FakeArchiveResponse(x=[600 * self.SEC, end], y=[3.0, 4.0]),
+        ])
+        x, y, *_ = streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 2)
+        second = fake_da.get_archive_window.call_args_list[1].kwargs
+        self.assertEqual(second['tsS'], str(500 * self.SEC + 1))
+        self.assertEqual(list(x), [0, 500 * self.SEC, 600 * self.SEC, end])
+        self.assertEqual(list(y), [1.0, 2.0, 3.0, 4.0])
+
+    def test_flat_signal_two_boundary_points_are_not_resumed(self):
+        end = 1000 * self.SEC
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, end], y=[5.0, 5.0]),
+        ])
+        x, *_ = streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 1)
+        self.assertEqual(list(x), [0, end])
+
     def test_non_advancing_reply_stops_the_loop(self):
         end = 1000 * self.SEC
         streamer, fake_da = self._streamer([
