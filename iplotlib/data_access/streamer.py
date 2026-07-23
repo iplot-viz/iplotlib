@@ -177,10 +177,13 @@ class CanvasStreamer:
         return self._unpack_archive(data)
 
     @staticmethod
-    def _sanitize_archive_chunk(ax, ay, ay_min, ay_max, cursor, req_end):
+    def _sanitize_archive_chunk(ax, ay, ay_min, ay_max, cursor, req_end,
+                                reject_boundary_pair=False):
         """Keep the part of a reply that advances the fetch: drops the
         synthetic end-of-request projection appended to truncated replies and
-        anything before ``cursor``. Returns None when nothing new remains."""
+        anything before ``cursor``. With ``reject_boundary_pair`` a reply
+        carrying only the extremities boundary points counts as a refusal.
+        Returns None when nothing new remains."""
         if ax is None or len(ax) == 0:
             return None
         ax = np.asarray(ax)
@@ -204,6 +207,10 @@ class CanvasStreamer:
         ax, ay = ax[keep], ay[keep]
         if ay_min is not None:
             ay_min, ay_max = ay_min[keep], ay_max[keep]
+        if reject_boundary_pair and len(ax) <= 2:
+            interior = (ax > cursor + margin) & (ax < req_end - margin)
+            if not interior.any():
+                return None
         return ax, ay, ay_min, ay_max
 
     def _fetch_archive_window_complete(self, ds, signal, start_ns, end_ns):
@@ -232,7 +239,8 @@ class CanvasStreamer:
             ax, ay, ay_min, ay_max, xu, yu = self._fetch_archive_window(
                 ds, signal, cursor, req_end)
             chunk = self._sanitize_archive_chunk(
-                ax, ay, ay_min, ay_max, cursor, req_end)
+                ax, ay, ay_min, ay_max, cursor, req_end,
+                reject_boundary_pair=sliced)
             if chunk is None:
                 if not sliced:
                     if ax is None or len(ax) == 0:

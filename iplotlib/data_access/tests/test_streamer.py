@@ -318,6 +318,25 @@ class FetchArchiveWindowCompleteTests(unittest.TestCase):
              4000 * self.SEC, 7150 * self.SEC])
         self.assertEqual(list(y), [1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
 
+    def test_boundary_only_slice_reply_counts_as_refusal(self):
+        # A refused slice can come back as just the two extremities boundary
+        # points; that pair must not count as coverage in slice mode.
+        end = 7200 * self.SEC
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, 100 * self.SEC], y=[1.0, 1.0]),
+            _FakeArchiveResponse(x=[100 * self.SEC + 1, 3700 * self.SEC],
+                                 y=[1.0, 1.0]),
+            _FakeArchiveResponse(x=[4000 * self.SEC, 7150 * self.SEC], y=[3.0, 3.0]),
+            _FakeArchiveResponse(x=[2000 * self.SEC, 3000 * self.SEC], y=[2.0, 2.0]),
+        ])
+        x, y, *_ = streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 4)
+        self.assertEqual(
+            list(x),
+            [0, 100 * self.SEC, 2000 * self.SEC, 3000 * self.SEC,
+             4000 * self.SEC, 7150 * self.SEC])
+
     def test_slice_refused_twice_leaves_the_gap(self):
         end = 7200 * self.SEC
         streamer, fake_da = self._streamer([
