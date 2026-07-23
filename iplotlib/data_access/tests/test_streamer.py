@@ -286,10 +286,11 @@ class FetchArchiveWindowCompleteTests(unittest.TestCase):
             _FakeArchiveResponse(x=[], y=[]),
             _FakeArchiveResponse(x=[5000 * self.SEC, 7000 * self.SEC], y=[2.0, 2.0]),
             _FakeArchiveResponse(x=[8000 * self.SEC, 10750 * self.SEC], y=[3.0, 3.0]),
+            _FakeArchiveResponse(x=[], y=[]),  # retry of the skipped slice
         ])
         x, *_ = streamer._fetch_archive_window_complete(
             'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 4)
+        self.assertEqual(fake_da.get_archive_window.call_count, 5)
         self.assertEqual(
             list(x),
             [0, 600 * self.SEC, 5000 * self.SEC, 7000 * self.SEC,
@@ -298,15 +299,50 @@ class FetchArchiveWindowCompleteTests(unittest.TestCase):
         self.assertEqual(second['tsS'], str(600 * self.SEC + 1))
         self.assertEqual(second['tsE'], str(600 * self.SEC + 1 + 3600 * self.SEC))
 
+    def test_refused_slice_is_retried_and_merged_in_order(self):
+        end = 7200 * self.SEC
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, 100 * self.SEC], y=[1.0, 1.0]),
+            _FakeArchiveResponse(x=[], y=[]),
+            _FakeArchiveResponse(x=[4000 * self.SEC, 7150 * self.SEC], y=[3.0, 3.0]),
+            _FakeArchiveResponse(x=[2000 * self.SEC, 3000 * self.SEC], y=[2.0, 2.0]),
+        ])
+        x, y, *_ = streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 4)
+        retry = fake_da.get_archive_window.call_args_list[3].kwargs
+        self.assertEqual(retry['tsS'], str(100 * self.SEC + 1))
+        self.assertEqual(
+            list(x),
+            [0, 100 * self.SEC, 2000 * self.SEC, 3000 * self.SEC,
+             4000 * self.SEC, 7150 * self.SEC])
+        self.assertEqual(list(y), [1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
+
+    def test_slice_refused_twice_leaves_the_gap(self):
+        end = 7200 * self.SEC
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, 100 * self.SEC], y=[1.0, 1.0]),
+            _FakeArchiveResponse(x=[], y=[]),
+            _FakeArchiveResponse(x=[4000 * self.SEC, 7150 * self.SEC], y=[3.0, 3.0]),
+            _FakeArchiveResponse(x=[], y=[]),
+        ])
+        x, *_ = streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 4)
+        self.assertEqual(
+            list(x),
+            [0, 100 * self.SEC, 4000 * self.SEC, 7150 * self.SEC])
+
     def test_non_advancing_reply_stops_the_loop(self):
         end = 1000 * self.SEC
         streamer, fake_da = self._streamer([
             _FakeArchiveResponse(x=[0, 500 * self.SEC], y=[1.0, 2.0]),
             _FakeArchiveResponse(x=[100 * self.SEC, 400 * self.SEC], y=[9.0, 9.0]),
+            _FakeArchiveResponse(x=[], y=[]),  # retry of the skipped slice
         ])
         x, *_ = streamer._fetch_archive_window_complete(
             'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 2)
+        self.assertEqual(fake_da.get_archive_window.call_count, 3)
         self.assertEqual(list(x), [0, 500 * self.SEC])
 
 

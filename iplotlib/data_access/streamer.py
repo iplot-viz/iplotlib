@@ -224,6 +224,7 @@ class CanvasStreamer:
         max_chunks = int((end_ns - start_ns) // _ARCHIVE_SLICE_NS) + 8
         cursor = start_ns
         sliced = False
+        holes = []
         for _ in range(max_chunks):
             if cursor >= resume_below:
                 break
@@ -238,6 +239,7 @@ class CanvasStreamer:
                         break
                     sliced = True
                     continue
+                holes.append((cursor, req_end))
                 cursor = req_end + 1
                 continue
             cx, cy, c_min, c_max = chunk
@@ -251,12 +253,33 @@ class CanvasStreamer:
                 sliced = True
                 logger.info(f"Archive reply for {signal.name} truncated; continuing in slices")
             cursor = int(cx[-1]) + 1
+
+        # Refusals are transient (a slice denied to one signal is served to the
+        # next moments later): give each skipped slice a second chance.
+        for h_start, h_end in holes:
+            ax, ay, ay_min, ay_max, xu, yu = self._fetch_archive_window(
+                ds, signal, h_start, h_end)
+            chunk = self._sanitize_archive_chunk(
+                ax, ay, ay_min, ay_max, h_start, h_end)
+            if chunk is None:
+                logger.warning(f"Archive slice for {signal.name} not served after retry; leaving a gap")
+                continue
+            cx, cy, c_min, c_max = chunk
+            if xunit is None:
+                xunit, yunit = xu, yu
+            xs.append(cx)
+            ys.append(cy)
+            y_mins.append(c_min if c_min is not None else cy)
+            y_maxs.append(c_max if c_max is not None else cy)
+            has_bounds = has_bounds or c_min is not None
+
         if not xs:
             return None, None, None, None, None, None
-        x = np.concatenate(xs)
-        y = np.concatenate(ys)
-        y_min = np.concatenate(y_mins) if has_bounds else None
-        y_max = np.concatenate(y_maxs) if has_bounds else None
+        order = sorted(range(len(xs)), key=lambda i: int(xs[i][0]))
+        x = np.concatenate([xs[i] for i in order])
+        y = np.concatenate([ys[i] for i in order])
+        y_min = np.concatenate([y_mins[i] for i in order]) if has_bounds else None
+        y_max = np.concatenate([y_maxs[i] for i in order]) if has_bounds else None
         return x, y, y_min, y_max, xunit, yunit
 
     def _fetch_last_archive_value(self, ds, signal, end_ns):
