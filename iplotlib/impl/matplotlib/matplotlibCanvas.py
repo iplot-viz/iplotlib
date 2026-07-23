@@ -1630,7 +1630,13 @@ class MatplotlibParser(BackendParserBase):
             label_props['color'] = fc
         if fs and fs > 0:
             label_props['fontsize'] = fs
-        self.get_impl_y_axis(impl_plot).set_label_text(text, **label_props)
+        y_axis = self.get_impl_y_axis(impl_plot)
+        if self._tight_layout_requested and not self.figure.get_tight_layout() \
+                and y_axis.get_label_text() != text:
+            # Stream units arrive after the layout freeze in do_impl_streaming;
+            # refit once so the new label gets its own margin space.
+            self.enable_tight_layout()
+        y_axis.set_label_text(text, **label_props)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to

@@ -260,6 +260,21 @@ class LogScaleAxisTests(QAppOffscreenTestAdapter):
         self.assertAlmostEqual(lo, 1e-4, places=10)
         self.assertAlmostEqual(hi, 2e-4, places=10)
 
+    def test_stream_unit_label_reflows_frozen_layout(self):
+        parser = MatplotlibParser()
+        ax = parser.figure.add_subplot()
+        parser.disable_tight_layout()  # streaming freeze from do_impl_streaming
+        parser.set_impl_y_axis_label_text(ax, '[kV]')
+        self.assertTrue(parser.figure.get_tight_layout())
+
+    def test_stream_unit_label_unchanged_keeps_layout_frozen(self):
+        parser = MatplotlibParser()
+        ax = parser.figure.add_subplot()
+        parser.set_impl_y_axis_label_text(ax, '[kV]')
+        parser.disable_tight_layout()
+        parser.set_impl_y_axis_label_text(ax, '[kV]')
+        self.assertFalse(parser.figure.get_tight_layout())
+
     def test_log_mode_falls_back_to_autoscale_on_non_positive(self):
         import warnings
         parser = MatplotlibParser()
