@@ -25,8 +25,9 @@ _INJECT_PERIOD_S = 1.0
 # Newest span kept at full resolution when the cap forces decimation.
 _RAW_TAIL_S = 120
 
-# Retry budget for archive windows the server returns truncated in time.
-_ARCHIVE_MAX_CHUNKS = 20
+# Slice size for re-fetching an archive window the server truncated: small
+# requests are served reliably where a repeated full-window request is not.
+_ARCHIVE_SLICE_NS = 3600 * int(1e9)
 
 # QThread wait budget on stop(). Loops poll stop_flag frequently, so most
 # workers exit well within this; stragglers (e.g. a receiver blocked on the
@@ -175,51 +176,81 @@ class CanvasStreamer:
             return None, None, None, None, None, None
         return self._unpack_archive(data)
 
+    @staticmethod
+    def _sanitize_archive_chunk(ax, ay, ay_min, ay_max, cursor, req_end):
+        """Keep the part of a reply that advances the fetch: drops the
+        synthetic end-of-request projection appended to truncated replies and
+        anything before ``cursor``. Returns None when nothing new remains."""
+        if ax is None or len(ax) == 0:
+            return None
+        ax = np.asarray(ax)
+        ay = np.asarray(ay)
+        if ay_min is not None:
+            ay_min = np.asarray(ay_min)
+            ay_max = np.asarray(ay_max)
+        margin = max((req_end - cursor) // 100, int(1e9))
+        # A lone final point far from its predecessor is the extremities
+        # projection at the requested end, not coverage. Two-point replies are
+        # legitimate (a flat signal's boundary samples).
+        if (len(ax) >= 3 and int(ax[-1]) >= req_end - margin
+                and int(ax[-2]) < req_end - margin
+                and int(ax[-1]) - int(ax[-2]) > margin):
+            ax, ay = ax[:-1], ay[:-1]
+            if ay_min is not None:
+                ay_min, ay_max = ay_min[:-1], ay_max[:-1]
+        keep = ax >= cursor
+        if not keep.any():
+            return None
+        ax, ay = ax[keep], ay[keep]
+        if ay_min is not None:
+            ay_min, ay_max = ay_min[keep], ay_max[keep]
+        return ax, ay, ay_min, ay_max
+
     def _fetch_archive_window_complete(self, ds, signal, start_ns, end_ns):
-        """Fetch ``[start_ns, end_ns]`` resuming after each partial reply: the
-        UDA server can truncate a long window well before ``end_ns``. Returns
+        """Fetch ``[start_ns, end_ns]`` tolerating truncated replies: the UDA
+        server can stop a long window early (with a synthetic extremity at the
+        requested end masking the cut) and refuses to resume the remainder as
+        one request. After a short first reply the fetch continues in
+        ``_ARCHIVE_SLICE_NS`` slices, skipping any slice it refuses. Returns
         the same tuple as ``_fetch_archive_window``."""
         xs, ys, y_mins, y_maxs = [], [], [], []
         xunit = yunit = None
         has_bounds = False
         # Replies that stop just short of the end (e.g. envelope buckets) are
-        # complete enough; only a clearly early stop is worth resuming.
-        resume_below = end_ns - max((end_ns - start_ns) // 100, int(1e9))
+        # complete enough; only a clearly early stop is worth resuming. Floored
+        # above start_ns so even a sub-margin window is fetched once.
+        resume_below = max(start_ns + 1,
+                           end_ns - max((end_ns - start_ns) // 100, int(1e9)))
+        max_chunks = int((end_ns - start_ns) // _ARCHIVE_SLICE_NS) + 8
         cursor = start_ns
-        for _ in range(_ARCHIVE_MAX_CHUNKS):
+        sliced = False
+        for _ in range(max_chunks):
+            if cursor >= resume_below:
+                break
+            req_end = min(cursor + _ARCHIVE_SLICE_NS, end_ns) if sliced else end_ns
             ax, ay, ay_min, ay_max, xu, yu = self._fetch_archive_window(
-                ds, signal, cursor, end_ns)
-            if ax is None or len(ax) == 0:
-                break
-            ax = np.asarray(ax)
-            ay = np.asarray(ay)
-            if ay_min is not None:
-                ay_min = np.asarray(ay_min)
-                ay_max = np.asarray(ay_max)
-            last = int(ax[-1])
-            if last < cursor:
-                break
-            # extremities appends a synthetic sample at the requested end even
-            # when the server truncated the reply: a lone final point far from
-            # its predecessor is that projection, not real coverage. Two-point
-            # replies are legitimate (a flat signal's boundary samples).
-            if (len(ax) >= 3 and last >= resume_below
-                    and int(ax[-2]) < resume_below
-                    and last - int(ax[-2]) > (end_ns - start_ns) // 100):
-                ax, ay = ax[:-1], ay[:-1]
-                if ay_min is not None:
-                    ay_min, ay_max = ay_min[:-1], ay_max[:-1]
-                last = int(ax[-1])
+                ds, signal, cursor, req_end)
+            chunk = self._sanitize_archive_chunk(
+                ax, ay, ay_min, ay_max, cursor, req_end)
+            if chunk is None:
+                if not sliced:
+                    if ax is None or len(ax) == 0:
+                        break
+                    sliced = True
+                    continue
+                cursor = req_end + 1
+                continue
+            cx, cy, c_min, c_max = chunk
             xunit, yunit = xu, yu
-            xs.append(ax)
-            ys.append(ay)
-            y_mins.append(ay_min if ay_min is not None else ay)
-            y_maxs.append(ay_max if ay_max is not None else ay)
-            has_bounds = has_bounds or ay_min is not None
-            if last >= resume_below:
-                break
-            logger.info(f"Archive reply for {signal.name} stopped early; resuming from {last}")
-            cursor = last + 1
+            xs.append(cx)
+            ys.append(cy)
+            y_mins.append(c_min if c_min is not None else cy)
+            y_maxs.append(c_max if c_max is not None else cy)
+            has_bounds = has_bounds or c_min is not None
+            if not sliced and int(cx[-1]) < resume_below:
+                sliced = True
+                logger.info(f"Archive reply for {signal.name} truncated; continuing in slices")
+            cursor = int(cx[-1]) + 1
         if not xs:
             return None, None, None, None, None, None
         x = np.concatenate(xs)

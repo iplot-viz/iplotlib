@@ -277,6 +277,27 @@ class FetchArchiveWindowCompleteTests(unittest.TestCase):
         self.assertEqual(fake_da.get_archive_window.call_count, 1)
         self.assertEqual(list(x), [0, end])
 
+    def test_refused_remainder_marches_on_in_slices(self):
+        # After a truncated first reply the fetch continues in hour slices,
+        # skipping a slice the server returns empty.
+        end = 10800 * self.SEC
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, 600 * self.SEC], y=[1.0, 1.0]),
+            _FakeArchiveResponse(x=[], y=[]),
+            _FakeArchiveResponse(x=[5000 * self.SEC, 7000 * self.SEC], y=[2.0, 2.0]),
+            _FakeArchiveResponse(x=[8000 * self.SEC, 10750 * self.SEC], y=[3.0, 3.0]),
+        ])
+        x, *_ = streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 4)
+        self.assertEqual(
+            list(x),
+            [0, 600 * self.SEC, 5000 * self.SEC, 7000 * self.SEC,
+             8000 * self.SEC, 10750 * self.SEC])
+        second = fake_da.get_archive_window.call_args_list[1].kwargs
+        self.assertEqual(second['tsS'], str(600 * self.SEC + 1))
+        self.assertEqual(second['tsE'], str(600 * self.SEC + 1 + 3600 * self.SEC))
+
     def test_non_advancing_reply_stops_the_loop(self):
         end = 1000 * self.SEC
         streamer, fake_da = self._streamer([
