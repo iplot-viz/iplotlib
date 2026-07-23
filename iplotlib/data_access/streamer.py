@@ -210,7 +210,7 @@ class CanvasStreamer:
         if dropped > 1:
             # More than the boundary point means the feed rewound over buffered
             # data; if the re-emitted range is sparser this shows as a gap.
-            logger.info(f"Live batch for {getattr(signal, 'name', '?')} rewound over {dropped} buffered samples")
+            logger.debug(f"Live batch for {getattr(signal, 'name', '?')} rewound over {dropped} buffered samples")
         payload = self._make_payload(
             signal, np.asarray(x)[keep], np.asarray(y)[keep],
             y_min=np.asarray(y_min)[keep] if y_min is not None else None,
@@ -369,7 +369,7 @@ class CanvasStreamer:
         keep[0] = True
         keep[1:] = x[1:] > np.maximum.accumulate(x)[:-1]
         if not keep.all():
-            logger.info(f"Dropped {int((~keep).sum())} out-of-order samples from a live batch")
+            logger.debug(f"Dropped {int((~keep).sum())} out-of-order samples from a live batch")
             x = x[keep]
             y = y[keep]
         return SimpleNamespace(xdata=x, ydata=y, xunit=last.xunit, yunit=last.yunit)
