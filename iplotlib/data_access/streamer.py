@@ -29,6 +29,10 @@ _RAW_TAIL_S = 120
 # requests are served reliably where a repeated full-window request is not.
 _ARCHIVE_SLICE_NS = 3600 * int(1e9)
 
+# Rounds of retries over refused slices; refusals are transient, so a later
+# attempt usually gets the data.
+_ARCHIVE_RETRY_ROUNDS = 3
+
 # QThread wait budget on stop(). Loops poll stop_flag frequently, so most
 # workers exit well within this; stragglers (e.g. a receiver blocked on the
 # SSE socket) are parked in _lingering_threads instead of blocking the UI.
@@ -263,23 +267,34 @@ class CanvasStreamer:
             cursor = int(cx[-1]) + 1
 
         # Refusals are transient (a slice denied to one signal is served to the
-        # next moments later): give each skipped slice a second chance.
-        for h_start, h_end in holes:
-            ax, ay, ay_min, ay_max, xu, yu = self._fetch_archive_window(
-                ds, signal, h_start, h_end)
-            chunk = self._sanitize_archive_chunk(
-                ax, ay, ay_min, ay_max, h_start, h_end)
-            if chunk is None:
-                logger.warning(f"Archive slice for {signal.name} not served after retry; leaving a gap")
-                continue
-            cx, cy, c_min, c_max = chunk
-            if xunit is None:
-                xunit, yunit = xu, yu
-            xs.append(cx)
-            ys.append(cy)
-            y_mins.append(c_min if c_min is not None else cy)
-            y_maxs.append(c_max if c_max is not None else cy)
-            has_bounds = has_bounds or c_min is not None
+        # next moments later): retry skipped slices in rounds. A boundary-only
+        # pair (a genuinely flat slice) is only accepted once it has persisted
+        # through every round.
+        for attempt in range(_ARCHIVE_RETRY_ROUNDS):
+            if not holes:
+                break
+            final = attempt == _ARCHIVE_RETRY_ROUNDS - 1
+            remaining = []
+            for h_start, h_end in holes:
+                ax, ay, ay_min, ay_max, xu, yu = self._fetch_archive_window(
+                    ds, signal, h_start, h_end)
+                chunk = self._sanitize_archive_chunk(
+                    ax, ay, ay_min, ay_max, h_start, h_end,
+                    reject_boundary_pair=not final)
+                if chunk is None:
+                    remaining.append((h_start, h_end))
+                    continue
+                cx, cy, c_min, c_max = chunk
+                if xunit is None:
+                    xunit, yunit = xu, yu
+                xs.append(cx)
+                ys.append(cy)
+                y_mins.append(c_min if c_min is not None else cy)
+                y_maxs.append(c_max if c_max is not None else cy)
+                has_bounds = has_bounds or c_min is not None
+            holes = remaining
+        for _ in holes:
+            logger.warning(f"Archive slice for {signal.name} not served after retries; leaving a gap")
 
         if not xs:
             return None, None, None, None, None, None

@@ -286,11 +286,13 @@ class FetchArchiveWindowCompleteTests(unittest.TestCase):
             _FakeArchiveResponse(x=[], y=[]),
             _FakeArchiveResponse(x=[5000 * self.SEC, 7000 * self.SEC], y=[2.0, 2.0]),
             _FakeArchiveResponse(x=[8000 * self.SEC, 10750 * self.SEC], y=[3.0, 3.0]),
-            _FakeArchiveResponse(x=[], y=[]),  # retry of the skipped slice
+            _FakeArchiveResponse(x=[], y=[]),  # retry rounds
+            _FakeArchiveResponse(x=[], y=[]),
+            _FakeArchiveResponse(x=[], y=[]),
         ])
         x, *_ = streamer._fetch_archive_window_complete(
             'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 5)
+        self.assertEqual(fake_da.get_archive_window.call_count, 7)
         self.assertEqual(
             list(x),
             [0, 600 * self.SEC, 5000 * self.SEC, 7000 * self.SEC,
@@ -337,31 +339,54 @@ class FetchArchiveWindowCompleteTests(unittest.TestCase):
             [0, 100 * self.SEC, 2000 * self.SEC, 3000 * self.SEC,
              4000 * self.SEC, 7150 * self.SEC])
 
-    def test_slice_refused_twice_leaves_the_gap(self):
+    def test_slice_refused_every_round_leaves_the_gap(self):
         end = 7200 * self.SEC
         streamer, fake_da = self._streamer([
             _FakeArchiveResponse(x=[0, 100 * self.SEC], y=[1.0, 1.0]),
             _FakeArchiveResponse(x=[], y=[]),
             _FakeArchiveResponse(x=[4000 * self.SEC, 7150 * self.SEC], y=[3.0, 3.0]),
+            _FakeArchiveResponse(x=[], y=[]),  # retry rounds
+            _FakeArchiveResponse(x=[], y=[]),
             _FakeArchiveResponse(x=[], y=[]),
         ])
         x, *_ = streamer._fetch_archive_window_complete(
             'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 4)
+        self.assertEqual(fake_da.get_archive_window.call_count, 6)
         self.assertEqual(
             list(x),
             [0, 100 * self.SEC, 4000 * self.SEC, 7150 * self.SEC])
+
+    def test_persistent_boundary_pair_is_accepted_in_the_final_round(self):
+        end = 7200 * self.SEC
+        pair = dict(x=[100 * self.SEC + 1, 3700 * self.SEC], y=[1.0, 1.0])
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, 100 * self.SEC], y=[1.0, 1.0]),
+            _FakeArchiveResponse(**pair),
+            _FakeArchiveResponse(x=[4000 * self.SEC, 7150 * self.SEC], y=[3.0, 3.0]),
+            _FakeArchiveResponse(**pair),  # retry rounds
+            _FakeArchiveResponse(**pair),
+            _FakeArchiveResponse(**pair),
+        ])
+        x, *_ = streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 6)
+        self.assertEqual(
+            list(x),
+            [0, 100 * self.SEC, 100 * self.SEC + 1, 3700 * self.SEC,
+             4000 * self.SEC, 7150 * self.SEC])
 
     def test_non_advancing_reply_stops_the_loop(self):
         end = 1000 * self.SEC
         streamer, fake_da = self._streamer([
             _FakeArchiveResponse(x=[0, 500 * self.SEC], y=[1.0, 2.0]),
             _FakeArchiveResponse(x=[100 * self.SEC, 400 * self.SEC], y=[9.0, 9.0]),
-            _FakeArchiveResponse(x=[], y=[]),  # retry of the skipped slice
+            _FakeArchiveResponse(x=[], y=[]),  # retry rounds
+            _FakeArchiveResponse(x=[], y=[]),
+            _FakeArchiveResponse(x=[], y=[]),
         ])
         x, *_ = streamer._fetch_archive_window_complete(
             'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 3)
+        self.assertEqual(fake_da.get_archive_window.call_count, 5)
         self.assertEqual(list(x), [0, 500 * self.SEC])
 
 
