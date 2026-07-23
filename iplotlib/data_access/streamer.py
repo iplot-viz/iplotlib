@@ -25,6 +25,9 @@ _INJECT_PERIOD_S = 1.0
 # Newest span kept at full resolution when the cap forces decimation.
 _RAW_TAIL_S = 120
 
+# Retry budget for archive windows the server returns truncated in time.
+_ARCHIVE_MAX_CHUNKS = 20
+
 # QThread wait budget on stop(). Loops poll stop_flag frequently, so most
 # workers exit well within this; stragglers (e.g. a receiver blocked on the
 # SSE socket) are parked in _lingering_threads instead of blocking the UI.
@@ -171,6 +174,43 @@ class CanvasStreamer:
         if data is None or getattr(data, 'errcode', -1) != 0:
             return None, None, None, None, None, None
         return self._unpack_archive(data)
+
+    def _fetch_archive_window_complete(self, ds, signal, start_ns, end_ns):
+        """Fetch ``[start_ns, end_ns]`` resuming after each partial reply: the
+        UDA server can truncate a long window well before ``end_ns``. Returns
+        the same tuple as ``_fetch_archive_window``."""
+        xs, ys, y_mins, y_maxs = [], [], [], []
+        xunit = yunit = None
+        has_bounds = False
+        # Replies that stop just short of the end (e.g. envelope buckets) are
+        # complete enough; only a clearly early stop is worth resuming.
+        resume_below = end_ns - max((end_ns - start_ns) // 100, int(1e9))
+        cursor = start_ns
+        for _ in range(_ARCHIVE_MAX_CHUNKS):
+            ax, ay, ay_min, ay_max, xu, yu = self._fetch_archive_window(
+                ds, signal, cursor, end_ns)
+            if ax is None or len(ax) == 0:
+                break
+            last = int(ax[-1])
+            if last < cursor:
+                break
+            xunit, yunit = xu, yu
+            xs.append(np.asarray(ax))
+            ys.append(np.asarray(ay))
+            y_mins.append(np.asarray(ay_min if ay_min is not None else ay))
+            y_maxs.append(np.asarray(ay_max if ay_max is not None else ay))
+            has_bounds = has_bounds or ay_min is not None
+            if last >= resume_below:
+                break
+            logger.info(f"Archive reply for {signal.name} stopped early; resuming from {last}")
+            cursor = last + 1
+        if not xs:
+            return None, None, None, None, None, None
+        x = np.concatenate(xs)
+        y = np.concatenate(ys)
+        y_min = np.concatenate(y_mins) if has_bounds else None
+        y_max = np.concatenate(y_maxs) if has_bounds else None
+        return x, y, y_min, y_max, xunit, yunit
 
     def _fetch_last_archive_value(self, ds, signal, end_ns):
         try:
@@ -473,7 +513,7 @@ class CanvasStreamer:
         archive_end_ns, found_live = self._wait_for_first_live(carrier)
         archive_start_ns = archive_end_ns - window_ns
 
-        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window(
+        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window_complete(
             ds, carrier, archive_start_ns, archive_end_ns)
         if ax is None or len(ax) == 0:
             ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_last_archive_value(
@@ -560,7 +600,7 @@ class CanvasStreamer:
         last_period_start_ns = now_ns - period_ns
         cutoff_ns = now_ns - self._window_ns
 
-        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window(
+        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window_complete(
             ds, carrier, last_period_start_ns, now_ns)
         if ax is None or len(ax) == 0:
             return

@@ -204,6 +204,65 @@ class FetchLastArchiveValueTests(unittest.TestCase):
         self.assertEqual(result, (None,) * 6)
 
 
+class FetchArchiveWindowCompleteTests(unittest.TestCase):
+    """The UDA server can return a window truncated in time; the fetch must
+    resume from the last received sample until the window is covered."""
+
+    SEC = int(1e9)
+
+    def _streamer(self, replies):
+        fake_da = MagicMock()
+        fake_da.get_archive_window.side_effect = replies
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._max_points = 0
+        return streamer, fake_da
+
+    def test_truncated_reply_is_resumed_until_covered(self):
+        end = 1000 * self.SEC
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, 500 * self.SEC], y=[1.0, 2.0]),
+            _FakeArchiveResponse(x=[600 * self.SEC, end], y=[3.0, 4.0]),
+        ])
+        x, y, *_ = streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 2)
+        second = fake_da.get_archive_window.call_args_list[1].kwargs
+        self.assertEqual(second['tsS'], str(500 * self.SEC + 1))
+        self.assertEqual(list(x), [0, 500 * self.SEC, 600 * self.SEC, end])
+        self.assertEqual(list(y), [1.0, 2.0, 3.0, 4.0])
+
+    def test_full_reply_is_fetched_once(self):
+        end = 1000 * self.SEC
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, end], y=[1.0, 2.0]),
+        ])
+        x, *_ = streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 1)
+        self.assertEqual(list(x), [0, end])
+
+    def test_reply_short_of_the_end_by_a_margin_is_not_resumed(self):
+        # Envelope buckets legitimately stop just short of the window end.
+        end = 1000 * self.SEC
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, 995 * self.SEC], y=[1.0, 2.0]),
+        ])
+        streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 1)
+
+    def test_non_advancing_reply_stops_the_loop(self):
+        end = 1000 * self.SEC
+        streamer, fake_da = self._streamer([
+            _FakeArchiveResponse(x=[0, 500 * self.SEC], y=[1.0, 2.0]),
+            _FakeArchiveResponse(x=[100 * self.SEC, 400 * self.SEC], y=[9.0, 9.0]),
+        ])
+        x, *_ = streamer._fetch_archive_window_complete(
+            'ds', _FakeSignal(name='var'), 0, end)
+        self.assertEqual(fake_da.get_archive_window.call_count, 2)
+        self.assertEqual(list(x), [0, 500 * self.SEC])
+
+
 class BackfillSignalTests(unittest.TestCase):
     """Tests for CanvasStreamer._backfill_signal (archive seeding + fallback)."""
 
