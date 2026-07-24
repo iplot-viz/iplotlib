@@ -1174,5 +1174,43 @@ class CrosshairMatplotlibYLabelFormatTest(unittest.TestCase):
         self.assertNotIn('e', arrow.get_text().lower())
 
 
+class AllNaNSignalTest(unittest.TestCase):
+    """A signal can be all-NaN over the visible window — a log10 expression
+    evaluated on negative samples is the common case. Such a signal must not
+    break the axis-limit pass nor erase the range of the signals beside it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    @staticmethod
+    def _canvas_with_a_blank_signal() -> Canvas:
+        core = Canvas(1, 1, title="all_nan")
+        x = np.linspace(0, 10, 50)
+        plot = PlotXY()
+        usable = SignalXY(label="usable")
+        usable.set_data([x, np.linspace(2.0, 4.0, 50)])
+        blank = SignalXY(label="blank")
+        blank.set_data([x, np.full(50, np.nan)])
+        plot.add_signal(usable)
+        plot.add_signal(blank)
+        core.add_plot(plot, 0)
+        return core
+
+    def test_all_nan_signal_keeps_the_range_of_its_siblings(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = self._canvas_with_a_blank_signal()
+                plot = canvas.plots[0][0]
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(400, 300)
+                self.app.processEvents()
+
+                y_axis = plot.axes[1][0]
+                self.assertAlmostEqual(y_axis.original_begin, 2.0)
+                self.assertAlmostEqual(y_axis.original_end, 4.0)
+
+
 if __name__ == '__main__':
     unittest.main()
