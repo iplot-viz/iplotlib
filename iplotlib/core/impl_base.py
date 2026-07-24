@@ -1241,6 +1241,11 @@ class BackendParserBase(ABC):
                     plot = cache_item.plot() if cache_item is not None else None
                     if cache_item is not None and plot is not None:
                         self.do_impl_streaming(impl_plot, plot, cache_item)
+                        # A legend built before the first batch omitted this
+                        # envelope (it had no artists then); rebuild it now that
+                        # the curves exist so it shows up.
+                        if plot is not None and hasattr(self, 'rebuild_legend'):
+                            self.rebuild_legend(impl_plot, plot)
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
 
     @abstractmethod

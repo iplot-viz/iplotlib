@@ -354,6 +354,10 @@ class PyQtGraphParser(BackendParserBase):
         y_chunks = []
         for signal_ref in cache_item.signals:
             signal = signal_ref()
+            # An envelope awaiting its first streaming batch has no lines yet;
+            # there is nothing to scale from until it is drawn.
+            if signal is None or not signal.lines:
+                continue
             is_envelope = getattr(signal, 'envelope', False)
             # Envelope signal.lines is nested [[curve_min, curve_max, curve_avg, area]].
             first_artist = signal.lines[0][0] if is_envelope else signal.lines[0]
@@ -1003,7 +1007,16 @@ class PyQtGraphParser(BackendParserBase):
                 legend_lines = [sample.item for sample in legend_samples]
 
                 for signal in signals:
-                    for line in self._signal_impl_shape_lut.get(id(signal)):
+                    # A signal not drawn yet (e.g. an envelope awaiting its
+                    # first streaming batch) has no shapes and no legend entry;
+                    # skip it so the mapping stays aligned instead of iterating
+                    # over None.
+                    shapes = self._signal_impl_shape_lut.get(id(signal))
+                    if not shapes:
+                        continue
+                    for line in shapes:
+                        if ix_legend >= len(legend_lines):
+                            break
                         self.map_legend_to_ax[legend_lines[ix_legend]] = line
                         self._legend_signal_lut[id(legend_samples[ix_legend])] = signal
                         label_item = plot.legend.items[ix_legend][1]
