@@ -608,73 +608,164 @@ class CanvasStreamer:
 
     def _archive_backfill(self, ds_to_signals: dict, window_ns: int, callback):
         """Seed each signal's visible window with archive data, anchoring the
-        end at the first live sample (or now, if none arrives in time)."""
+        end at the first live sample (or now, if none arrives in time). Slices
+        are fetched round-robin, newest first, and injected as they arrive, so
+        every plot shows its recent history within the first turn instead of
+        waiting for the signals scheduled before it."""
+        jobs = []
         for ds, signals in ds_to_signals.items():
-            if self.stop_flag:
-                return
             for signal in signals:
                 if self.stop_flag:
                     return
-                self._backfill_signal(ds, signal, window_ns, callback)
+                carrier = self._carrier(signal)
+                end_ns, found_live = self._wait_for_first_live(carrier)
+                if not found_live:
+                    self._first_live_pending.add(signal.uid)
+                jobs.append({'ds': ds, 'signal': signal, 'carrier': carrier,
+                             'lo': end_ns - window_ns, 'hi': end_ns,
+                             'end': end_ns, 'holes': [], 'points': 0})
 
-    def _backfill_signal(self, ds: str, signal, window_ns: int, callback):
-        carrier = self._carrier(signal)
-        archive_end_ns, found_live = self._wait_for_first_live(carrier)
-        archive_start_ns = archive_end_ns - window_ns
+        pending = list(jobs)
+        while pending and not self.stop_flag:
+            for job in list(pending):
+                if self.stop_flag:
+                    return
+                if not self._backfill_turn(job, callback):
+                    pending.remove(job)
 
-        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window_complete(
-            ds, carrier, archive_start_ns, archive_end_ns)
-        if ax is None or len(ax) == 0:
-            ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_last_archive_value(
-                ds, carrier, archive_end_ns)
-        if ax is None or len(ax) == 0:
-            return
-        if ay_min is not None and not getattr(signal, 'envelope', False):
+        # Refusals are transient (a slice denied to one signal is served to
+        # the next moments later): retry the skipped slices in rounds. A
+        # boundary-only pair (a genuinely flat slice) is only accepted once it
+        # has persisted through every round.
+        for attempt in range(_ARCHIVE_RETRY_ROUNDS):
+            if not any(job['holes'] for job in jobs):
+                break
+            if self._pause(self._retry_pause_s):
+                return
+            final = attempt == _ARCHIVE_RETRY_ROUNDS - 1
+            for job in jobs:
+                if self.stop_flag:
+                    return
+                self._retry_holes(job, callback, final)
+
+        for job in jobs:
+            for _ in job['holes']:
+                logger.warning(f"Archive slice for {job['signal'].name} not served after retries; leaving a gap")
+            if job['points'] == 0:
+                self._backfill_last_value(job, callback)
+            if job['points']:
+                logger.info(f"Archive backfill for {job['signal'].name}: {job['points']} points prepended")
+
+    def _backfill_turn(self, job, callback):
+        """Fetch and inject the newest pending slice of a backfill job.
+        Returns False when the job's window is exhausted."""
+        hi = job['hi']
+        if hi <= job['lo']:
+            return False
+        req_lo = max(job['lo'], hi - _ARCHIVE_SLICE_NS)
+        job['hi'] = req_lo - 1
+        chunk, c_hi = self._fetch_slice(job, req_lo, hi, reject_boundary_pair=True)
+        if chunk is None:
+            job['holes'].append((req_lo, hi))
+        else:
+            if c_hi < hi - self._slice_margin(req_lo, hi):
+                # The reply covered only the start of the slice.
+                job['holes'].append((c_hi + 1, hi))
+            self._inject_archive_chunk(job, chunk, callback)
+        return job['hi'] > job['lo']
+
+    def _retry_holes(self, job, callback, final):
+        remaining = []
+        for h_lo, h_hi in job['holes']:
+            if self.stop_flag:
+                break
+            chunk, c_hi = self._fetch_slice(job, h_lo, h_hi,
+                                            reject_boundary_pair=not final)
+            if chunk is None:
+                remaining.append((h_lo, h_hi))
+                continue
+            if c_hi < h_hi - self._slice_margin(h_lo, h_hi):
+                remaining.append((c_hi + 1, h_hi))
+            self._inject_archive_chunk(job, chunk, callback)
+        job['holes'] = remaining
+
+    def _fetch_slice(self, job, lo, hi, reject_boundary_pair):
+        """Returns ``(chunk, last_ts)`` where chunk also carries the units, or
+        ``(None, None)`` when the reply brought nothing usable."""
+        ax, ay, ay_min, ay_max, xu, yu = self._fetch_archive_window(
+            job['ds'], job['carrier'], lo, hi)
+        chunk = self._sanitize_archive_chunk(
+            ax, ay, ay_min, ay_max, lo, hi,
+            reject_boundary_pair=reject_boundary_pair)
+        if chunk is None:
+            return None, None
+        cx, cy, c_min, c_max = chunk
+        return (cx, cy, c_min, c_max, xu or '', yu or ''), int(cx[-1])
+
+    @staticmethod
+    def _slice_margin(lo, hi):
+        return max((hi - lo) // 100, int(1e9))
+
+    def _inject_archive_chunk(self, job, chunk, callback):
+        cx, cy, c_min, c_max, xunit, yunit = chunk
+        signal = job['signal']
+        carrier = job['carrier']
+        if c_min is not None and not getattr(signal, 'envelope', False):
             # An envelope reply to a raw request means UDA overflowed and
             # decimated — the same condition the Draw path flags.
             signal.isDownsampled = True
-
+        is_env = getattr(signal, 'envelope', False)
+        cx = np.asarray(cx)
+        cy = np.asarray(cy)
         with self._signal_lock(carrier):
-            cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(carrier)
-            new_x = np.asarray(ax)
-            new_y = np.asarray(ay)
+            cur_x, cur_y, cur_min, cur_max = self._current_arrays(carrier)
+            m_min = m_max = None
             if len(cur_x) > 0:
-                # The synthetic end-of-window point would break monotonicity.
-                keep = new_x < int(cur_x[0])
-                new_x = new_x[keep]
-                new_y = new_y[keep]
-                if ay_min is not None:
-                    ay_min = np.asarray(ay_min)[keep]
-                if ay_max is not None:
-                    ay_max = np.asarray(ay_max)[keep]
-            merged_x = np.concatenate([new_x, cur_x])
-            merged_y = np.concatenate([new_y, cur_y])
-            merged_ymin = None
-            merged_ymax = None
-            if getattr(signal, 'envelope', False):
-                new_ymin = np.asarray(ay_min) if ay_min is not None else new_y
-                new_ymax = np.asarray(ay_max) if ay_max is not None else new_y
-                merged_ymin = np.concatenate(
-                    [new_ymin, cur_ymin if cur_ymin is not None else cur_y])
-                merged_ymax = np.concatenate(
-                    [new_ymax, cur_ymax if cur_ymax is not None else cur_y])
+                mx = np.concatenate([cx, cur_x])
+                my = np.concatenate([cy, cur_y])
+                if is_env:
+                    m_min = np.concatenate([
+                        np.asarray(c_min) if c_min is not None else cy,
+                        cur_min if cur_min is not None else cur_y])
+                    m_max = np.concatenate([
+                        np.asarray(c_max) if c_max is not None else cy,
+                        cur_max if cur_max is not None else cur_y])
+                # Chunk first + stable sort + keep-last: on a timestamp
+                # collision the buffered sample wins over an archive boundary
+                # point.
+                order = np.argsort(mx, kind='stable')
+                keep = np.empty(len(order), dtype=bool)
+                keep[-1] = True
+                keep[:-1] = mx[order][1:] > mx[order][:-1]
+                sel = order[keep]
+                mx, my = mx[sel], my[sel]
+                if is_env:
+                    m_min, m_max = m_min[sel], m_max[sel]
+            else:
+                mx, my = cx, cy
+                if is_env:
+                    m_min = np.asarray(c_min) if c_min is not None else cy
+                    m_max = np.asarray(c_max) if c_max is not None else cy
             payload = self._make_payload(
-                carrier, merged_x, merged_y,
-                y_min=merged_ymin, y_max=merged_ymax,
+                carrier, mx, my, y_min=m_min, y_max=m_max,
                 xunit=xunit, yunit=yunit,
             )
             carrier.inject_external(append=False, **payload)
             if self._apply_cap(carrier):
                 signal.isDownsampled = True
             signal._streaming_has_live = True
-
         if carrier is not signal:
             self._reprocess(signal)
-        if not found_live:
-            self._first_live_pending.add(signal.uid)
-
-        logger.info(f"Archive backfill for {signal.name}: {len(ax)} points prepended")
+        job['points'] += len(cx)
         callback(signal)
+
+    def _backfill_last_value(self, job, callback):
+        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_last_archive_value(
+            job['ds'], job['carrier'], job['end'])
+        if ax is None or len(ax) == 0:
+            return
+        self._inject_archive_chunk(
+            job, (ax, ay, ay_min, ay_max, xunit or '', yunit or ''), callback)
 
     def _wait_for_first_live(self, signal):
         """Returns (end_ns, found_live) so the caller can distinguish path 1 from

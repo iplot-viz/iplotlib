@@ -392,21 +392,33 @@ class FetchArchiveWindowCompleteTests(unittest.TestCase):
 
 
 class BackfillSignalTests(unittest.TestCase):
-    """Tests for CanvasStreamer._backfill_signal (archive seeding + fallback)."""
+    """Tests for the archive seeding of a single signal (plus fallback)."""
+
+    SEC = int(1e9)
+    WINDOW = 3600 * int(1e9)
 
     def setUp(self):
         # Non-empty x_data short-circuits _wait_for_first_live (no 2s sleep).
-        self.signal = _FakeSignal(name='var', x_data=[100])
+        self.signal = _FakeSignal(name='var', x_data=[self.WINDOW])
         self.callback = MagicMock()
+
+    def _mk_streamer(self, fake_da):
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._max_points = 0
+        streamer._retry_pause_s = 0
+        return streamer
+
+    def _full_reply(self, **kwargs):
+        return _FakeArchiveResponse(
+            x=[10 * self.SEC, 2000 * self.SEC, 3580 * self.SEC, 3590 * self.SEC],
+            y=[1, 2, 3, 4], xunit='ns', yunit='V', **kwargs)
 
     def test_window_with_data_does_not_call_fallback(self):
         fake_da = MagicMock()
-        fake_da.get_archive_window.return_value = _FakeArchiveResponse(
-            x=[10, 20, 30], y=[1, 2, 3], xunit='ns', yunit='V')
-        streamer = CanvasStreamer(da=fake_da)
-        streamer._max_points = 0
-        streamer._backfill_signal('ds', self.signal, window_ns=100,
-                                  callback=self.callback)
+        fake_da.get_archive_window.return_value = self._full_reply()
+        streamer = self._mk_streamer(fake_da)
+        streamer._archive_backfill({'ds': [self.signal]}, self.WINDOW,
+                                   self.callback)
         self.assertEqual(fake_da.get_archive_window.call_count, 1)
         self.assertTrue(self.signal._streaming_has_live)
         self.callback.assert_called_once_with(self.signal)
@@ -415,65 +427,92 @@ class BackfillSignalTests(unittest.TestCase):
         fake_da = MagicMock()
         fake_da.get_archive_window.side_effect = [
             _FakeArchiveResponse(x=[], y=[]),
-            _FakeArchiveResponse(x=[5], y=[99]),
+            _FakeArchiveResponse(x=[], y=[]),  # retry rounds
+            _FakeArchiveResponse(x=[], y=[]),
+            _FakeArchiveResponse(x=[], y=[]),
+            _FakeArchiveResponse(x=[5], y=[99]),  # last-value fallback
         ]
-        streamer = CanvasStreamer(da=fake_da)
-        streamer._max_points = 0
-        streamer._backfill_signal('ds', self.signal, window_ns=100,
-                                  callback=self.callback)
-        self.assertEqual(fake_da.get_archive_window.call_count, 2)
-        second_kwargs = fake_da.get_archive_window.call_args_list[1].kwargs
-        self.assertEqual(second_kwargs.get('nbp'), 1)
-        self.assertEqual(second_kwargs.get('decType'), 'last')
+        streamer = self._mk_streamer(fake_da)
+        streamer._archive_backfill({'ds': [self.signal]}, self.WINDOW,
+                                   self.callback)
+        self.assertEqual(fake_da.get_archive_window.call_count, 5)
+        last_kwargs = fake_da.get_archive_window.call_args_list[4].kwargs
+        self.assertEqual(last_kwargs.get('nbp'), 1)
+        self.assertEqual(last_kwargs.get('decType'), 'last')
         self.assertTrue(self.signal._streaming_has_live)
         self.callback.assert_called_once_with(self.signal)
 
     def test_envelope_reply_to_raw_request_flags_downsampled(self):
         # get_archive_window only returns an envelope when UDA overflowed.
         fake_da = MagicMock()
-        fake_da.get_archive_window.return_value = _FakeArchiveResponse(
-            x=[10, 20, 30], y=[1, 2, 3], xunit='ns', yunit='V',
-            ymin=[0, 1, 2], ymax=[2, 3, 4])
-        streamer = CanvasStreamer(da=fake_da)
-        streamer._max_points = 0
-        streamer._backfill_signal('ds', self.signal, window_ns=100,
-                                  callback=self.callback)
+        fake_da.get_archive_window.return_value = self._full_reply(
+            ymin=[0, 1, 2, 3], ymax=[2, 3, 4, 5])
+        streamer = self._mk_streamer(fake_da)
+        streamer._archive_backfill({'ds': [self.signal]}, self.WINDOW,
+                                   self.callback)
         self.assertTrue(self.signal.isDownsampled)
 
     def test_raw_reply_does_not_flag_downsampled(self):
         fake_da = MagicMock()
-        fake_da.get_archive_window.return_value = _FakeArchiveResponse(
-            x=[10, 20, 30], y=[1, 2, 3], xunit='ns', yunit='V')
-        streamer = CanvasStreamer(da=fake_da)
-        streamer._max_points = 0
-        streamer._backfill_signal('ds', self.signal, window_ns=100,
-                                  callback=self.callback)
+        fake_da.get_archive_window.return_value = self._full_reply()
+        streamer = self._mk_streamer(fake_da)
+        streamer._archive_backfill({'ds': [self.signal]}, self.WINDOW,
+                                   self.callback)
         self.assertFalse(self.signal.isDownsampled)
 
     def test_envelope_signal_reply_does_not_flag_downsampled(self):
         # Buckets are an envelope signal's normal representation, as in Draw.
-        signal = _FakeSignal(name='var', envelope=True, x_data=[100])
+        signal = _FakeSignal(name='var', envelope=True, x_data=[self.WINDOW])
         fake_da = MagicMock()
-        fake_da.get_envelope.return_value = _FakeArchiveResponse(
-            x=[10, 20, 30], y=[1, 2, 3], xunit='ns', yunit='V',
-            ymin=[0, 1, 2], ymax=[2, 3, 4])
-        streamer = CanvasStreamer(da=fake_da)
-        streamer._max_points = 0
-        streamer._backfill_signal('ds', signal, window_ns=100,
-                                  callback=self.callback)
+        fake_da.get_envelope.return_value = self._full_reply(
+            ymin=[0, 1, 2, 3], ymax=[2, 3, 4, 5])
+        streamer = self._mk_streamer(fake_da)
+        streamer._archive_backfill({'ds': [signal]}, self.WINDOW,
+                                   self.callback)
         self.assertFalse(signal.isDownsampled)
 
     def test_returns_silently_when_both_window_and_fallback_empty(self):
         fake_da = MagicMock()
         fake_da.get_archive_window.return_value = _FakeArchiveResponse(
             x=[], y=[], errcode=-1)
-        streamer = CanvasStreamer(da=fake_da)
-        streamer._max_points = 0
-        streamer._backfill_signal('ds', self.signal, window_ns=100,
-                                  callback=self.callback)
+        streamer = self._mk_streamer(fake_da)
+        streamer._archive_backfill({'ds': [self.signal]}, self.WINDOW,
+                                   self.callback)
         self.assertFalse(self.signal._streaming_has_live)
         self.signal.inject_external.assert_not_called()
         self.callback.assert_not_called()
+
+
+class ProgressiveBackfillTests(unittest.TestCase):
+    """Slices are fetched round-robin newest-first across signals so every
+    plot paints its recent history in the first turn."""
+
+    SEC = int(1e9)
+
+    def test_slices_alternate_between_signals_newest_first(self):
+        end = 7200 * self.SEC
+        sig_a = _FakeSignal(name='a', x_data=[end])
+        sig_b = _FakeSignal(name='b', x_data=[end])
+
+        def full(lo, hi):
+            return _FakeArchiveResponse(
+                x=[lo + 1, (lo + hi) // 2, hi - 20 * self.SEC, hi - 1],
+                y=[1.0, 1.0, 1.0, 1.0], xunit='ns', yunit='V')
+
+        fake_da = MagicMock()
+        fake_da.get_archive_window.side_effect = [
+            full(3600 * self.SEC, end), full(3600 * self.SEC, end),
+            full(0, 3600 * self.SEC), full(0, 3600 * self.SEC),
+        ]
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._max_points = 0
+        streamer._retry_pause_s = 0
+        streamer._archive_backfill({'ds': [sig_a, sig_b]}, end, MagicMock())
+        calls = fake_da.get_archive_window.call_args_list
+        self.assertEqual([c.kwargs['varname'] for c in calls],
+                         ['a', 'b', 'a', 'b'])
+        self.assertEqual([int(c.kwargs['tsS']) for c in calls],
+                         [3600 * self.SEC, 3600 * self.SEC, 0, 0])
 
 
 class HandlerEmptyPayloadTests(unittest.TestCase):
@@ -533,10 +572,10 @@ class MonotonicTimeAxisTests(unittest.TestCase):
             x=[900, 950, 1000], y=[1.0, 2.0, 3.0])
         streamer = CanvasStreamer(da=fake_da)
         streamer._max_points = 0
+        streamer._retry_pause_s = 0
         signal = _StatefulSignal(name='var')
         signal.inject_external(append=False, d0=[1000, 1001], d1=[7.0, 8.0])
-        streamer._backfill_signal('ds', signal, window_ns=100,
-                                  callback=MagicMock())
+        streamer._archive_backfill({'ds': [signal]}, 100, MagicMock())
         self.assertEqual(list(signal.x_data), [900, 950, 1000, 1001])
 
     def test_handler_drops_stale_synthetic_tail_before_append(self):
