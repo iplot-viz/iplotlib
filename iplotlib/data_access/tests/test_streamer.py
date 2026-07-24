@@ -204,193 +204,6 @@ class FetchLastArchiveValueTests(unittest.TestCase):
         self.assertEqual(result, (None,) * 6)
 
 
-class FetchArchiveWindowCompleteTests(unittest.TestCase):
-    """The UDA server can return a window truncated in time; the fetch must
-    resume from the last received sample until the window is covered."""
-
-    SEC = int(1e9)
-
-    def _streamer(self, replies):
-        fake_da = MagicMock()
-        fake_da.get_archive_window.side_effect = replies
-        streamer = CanvasStreamer(da=fake_da)
-        streamer._max_points = 0
-        streamer._retry_pause_s = 0
-        return streamer, fake_da
-
-    def test_truncated_reply_is_resumed_until_covered(self):
-        end = 1000 * self.SEC
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, 500 * self.SEC], y=[1.0, 2.0]),
-            _FakeArchiveResponse(x=[600 * self.SEC, end], y=[3.0, 4.0]),
-        ])
-        x, y, *_ = streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 2)
-        second = fake_da.get_archive_window.call_args_list[1].kwargs
-        self.assertEqual(second['tsS'], str(500 * self.SEC + 1))
-        self.assertEqual(list(x), [0, 500 * self.SEC, 600 * self.SEC, end])
-        self.assertEqual(list(y), [1.0, 2.0, 3.0, 4.0])
-
-    def test_full_reply_is_fetched_once(self):
-        end = 1000 * self.SEC
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, end], y=[1.0, 2.0]),
-        ])
-        x, *_ = streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 1)
-        self.assertEqual(list(x), [0, end])
-
-    def test_reply_short_of_the_end_by_a_margin_is_not_resumed(self):
-        # Envelope buckets legitimately stop just short of the window end.
-        end = 1000 * self.SEC
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, 995 * self.SEC], y=[1.0, 2.0]),
-        ])
-        streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 1)
-
-    def test_truncated_reply_with_synthetic_end_point_is_resumed(self):
-        # The dense part stops at 500s but extremities appends a point at the
-        # requested end; coverage must be judged by the sample before the jump.
-        end = 1000 * self.SEC
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, 500 * self.SEC, end], y=[1.0, 2.0, 9.0]),
-            _FakeArchiveResponse(x=[600 * self.SEC, end], y=[3.0, 4.0]),
-        ])
-        x, y, *_ = streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 2)
-        second = fake_da.get_archive_window.call_args_list[1].kwargs
-        self.assertEqual(second['tsS'], str(500 * self.SEC + 1))
-        self.assertEqual(list(x), [0, 500 * self.SEC, 600 * self.SEC, end])
-        self.assertEqual(list(y), [1.0, 2.0, 3.0, 4.0])
-
-    def test_flat_signal_two_boundary_points_are_not_resumed(self):
-        end = 1000 * self.SEC
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, end], y=[5.0, 5.0]),
-        ])
-        x, *_ = streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 1)
-        self.assertEqual(list(x), [0, end])
-
-    def test_refused_remainder_marches_on_in_slices(self):
-        # After a truncated first reply the fetch continues in hour slices,
-        # skipping a slice the server returns empty.
-        end = 10800 * self.SEC
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, 600 * self.SEC], y=[1.0, 1.0]),
-            _FakeArchiveResponse(x=[], y=[]),
-            _FakeArchiveResponse(x=[5000 * self.SEC, 7000 * self.SEC], y=[2.0, 2.0]),
-            _FakeArchiveResponse(x=[8000 * self.SEC, 10750 * self.SEC], y=[3.0, 3.0]),
-            _FakeArchiveResponse(x=[], y=[]),  # retry rounds
-            _FakeArchiveResponse(x=[], y=[]),
-            _FakeArchiveResponse(x=[], y=[]),
-        ])
-        x, *_ = streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 7)
-        self.assertEqual(
-            list(x),
-            [0, 600 * self.SEC, 5000 * self.SEC, 7000 * self.SEC,
-             8000 * self.SEC, 10750 * self.SEC])
-        second = fake_da.get_archive_window.call_args_list[1].kwargs
-        self.assertEqual(second['tsS'], str(600 * self.SEC + 1))
-        self.assertEqual(second['tsE'], str(600 * self.SEC + 1 + 3600 * self.SEC))
-
-    def test_refused_slice_is_retried_and_merged_in_order(self):
-        end = 7200 * self.SEC
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, 100 * self.SEC], y=[1.0, 1.0]),
-            _FakeArchiveResponse(x=[], y=[]),
-            _FakeArchiveResponse(x=[4000 * self.SEC, 7150 * self.SEC], y=[3.0, 3.0]),
-            _FakeArchiveResponse(x=[2000 * self.SEC, 3000 * self.SEC], y=[2.0, 2.0]),
-        ])
-        x, y, *_ = streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 4)
-        retry = fake_da.get_archive_window.call_args_list[3].kwargs
-        self.assertEqual(retry['tsS'], str(100 * self.SEC + 1))
-        self.assertEqual(
-            list(x),
-            [0, 100 * self.SEC, 2000 * self.SEC, 3000 * self.SEC,
-             4000 * self.SEC, 7150 * self.SEC])
-        self.assertEqual(list(y), [1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
-
-    def test_boundary_only_slice_reply_counts_as_refusal(self):
-        # A refused slice can come back as just the two extremities boundary
-        # points; that pair must not count as coverage in slice mode.
-        end = 7200 * self.SEC
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, 100 * self.SEC], y=[1.0, 1.0]),
-            _FakeArchiveResponse(x=[100 * self.SEC + 1, 3700 * self.SEC],
-                                 y=[1.0, 1.0]),
-            _FakeArchiveResponse(x=[4000 * self.SEC, 7150 * self.SEC], y=[3.0, 3.0]),
-            _FakeArchiveResponse(x=[2000 * self.SEC, 3000 * self.SEC], y=[2.0, 2.0]),
-        ])
-        x, y, *_ = streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 4)
-        self.assertEqual(
-            list(x),
-            [0, 100 * self.SEC, 2000 * self.SEC, 3000 * self.SEC,
-             4000 * self.SEC, 7150 * self.SEC])
-
-    def test_slice_refused_every_round_leaves_the_gap(self):
-        end = 7200 * self.SEC
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, 100 * self.SEC], y=[1.0, 1.0]),
-            _FakeArchiveResponse(x=[], y=[]),
-            _FakeArchiveResponse(x=[4000 * self.SEC, 7150 * self.SEC], y=[3.0, 3.0]),
-            _FakeArchiveResponse(x=[], y=[]),  # retry rounds
-            _FakeArchiveResponse(x=[], y=[]),
-            _FakeArchiveResponse(x=[], y=[]),
-        ])
-        x, *_ = streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 6)
-        self.assertEqual(
-            list(x),
-            [0, 100 * self.SEC, 4000 * self.SEC, 7150 * self.SEC])
-
-    def test_persistent_boundary_pair_is_accepted_in_the_final_round(self):
-        end = 7200 * self.SEC
-        pair = dict(x=[100 * self.SEC + 1, 3700 * self.SEC], y=[1.0, 1.0])
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, 100 * self.SEC], y=[1.0, 1.0]),
-            _FakeArchiveResponse(**pair),
-            _FakeArchiveResponse(x=[4000 * self.SEC, 7150 * self.SEC], y=[3.0, 3.0]),
-            _FakeArchiveResponse(**pair),  # retry rounds
-            _FakeArchiveResponse(**pair),
-            _FakeArchiveResponse(**pair),
-        ])
-        x, *_ = streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 6)
-        self.assertEqual(
-            list(x),
-            [0, 100 * self.SEC, 100 * self.SEC + 1, 3700 * self.SEC,
-             4000 * self.SEC, 7150 * self.SEC])
-
-    def test_non_advancing_reply_stops_the_loop(self):
-        end = 1000 * self.SEC
-        streamer, fake_da = self._streamer([
-            _FakeArchiveResponse(x=[0, 500 * self.SEC], y=[1.0, 2.0]),
-            _FakeArchiveResponse(x=[100 * self.SEC, 400 * self.SEC], y=[9.0, 9.0]),
-            _FakeArchiveResponse(x=[], y=[]),  # retry rounds
-            _FakeArchiveResponse(x=[], y=[]),
-            _FakeArchiveResponse(x=[], y=[]),
-        ])
-        x, *_ = streamer._fetch_archive_window_complete(
-            'ds', _FakeSignal(name='var'), 0, end)
-        self.assertEqual(fake_da.get_archive_window.call_count, 5)
-        self.assertEqual(list(x), [0, 500 * self.SEC])
-
-
 class BackfillSignalTests(unittest.TestCase):
     """Tests for the archive seeding of a single signal (plus fallback)."""
 
@@ -405,7 +218,6 @@ class BackfillSignalTests(unittest.TestCase):
     def _mk_streamer(self, fake_da):
         streamer = CanvasStreamer(da=fake_da)
         streamer._max_points = 0
-        streamer._retry_pause_s = 0
         return streamer
 
     def _full_reply(self, **kwargs):
@@ -426,17 +238,14 @@ class BackfillSignalTests(unittest.TestCase):
     def test_empty_window_triggers_last_value_fallback(self):
         fake_da = MagicMock()
         fake_da.get_archive_window.side_effect = [
-            _FakeArchiveResponse(x=[], y=[]),
-            _FakeArchiveResponse(x=[], y=[]),  # retry rounds
-            _FakeArchiveResponse(x=[], y=[]),
-            _FakeArchiveResponse(x=[], y=[]),
+            _FakeArchiveResponse(x=[], y=[]),     # empty window request
             _FakeArchiveResponse(x=[5], y=[99]),  # last-value fallback
         ]
         streamer = self._mk_streamer(fake_da)
         streamer._archive_backfill({'ds': [self.signal]}, self.WINDOW,
                                    self.callback)
-        self.assertEqual(fake_da.get_archive_window.call_count, 5)
-        last_kwargs = fake_da.get_archive_window.call_args_list[4].kwargs
+        self.assertEqual(fake_da.get_archive_window.call_count, 2)
+        last_kwargs = fake_da.get_archive_window.call_args_list[1].kwargs
         self.assertEqual(last_kwargs.get('nbp'), 1)
         self.assertEqual(last_kwargs.get('decType'), 'last')
         self.assertTrue(self.signal._streaming_has_live)
@@ -483,36 +292,55 @@ class BackfillSignalTests(unittest.TestCase):
         self.callback.assert_not_called()
 
 
-class ProgressiveBackfillTests(unittest.TestCase):
-    """Slices are fetched round-robin newest-first across signals so every
-    plot paints its recent history in the first turn."""
+class WindowSizeBackfillTests(unittest.TestCase):
+    """A window up to an hour is read raw (all points); a wider one is read as
+    a single server-side envelope, one request per signal."""
 
     SEC = int(1e9)
+    HOUR = 3600 * int(1e9)
 
-    def test_slices_alternate_between_signals_newest_first(self):
-        end = 7200 * self.SEC
-        sig_a = _FakeSignal(name='a', x_data=[end])
-        sig_b = _FakeSignal(name='b', x_data=[end])
+    def _full(self, **kwargs):
+        return _FakeArchiveResponse(
+            x=[10 * self.SEC, 2000 * self.SEC], y=[1, 2],
+            xunit='ns', yunit='V', **kwargs)
 
-        def full(lo, hi):
-            return _FakeArchiveResponse(
-                x=[lo + 1, (lo + hi) // 2, hi - 20 * self.SEC, hi - 1],
-                y=[1.0, 1.0, 1.0, 1.0], xunit='ns', yunit='V')
-
-        fake_da = MagicMock()
-        fake_da.get_archive_window.side_effect = [
-            full(3600 * self.SEC, end), full(3600 * self.SEC, end),
-            full(0, 3600 * self.SEC), full(0, 3600 * self.SEC),
-        ]
+    def _streamer(self, fake_da):
         streamer = CanvasStreamer(da=fake_da)
         streamer._max_points = 0
-        streamer._retry_pause_s = 0
-        streamer._archive_backfill({'ds': [sig_a, sig_b]}, end, MagicMock())
-        calls = fake_da.get_archive_window.call_args_list
-        self.assertEqual([c.kwargs['varname'] for c in calls],
-                         ['a', 'b', 'a', 'b'])
-        self.assertEqual([int(c.kwargs['tsS']) for c in calls],
-                         [3600 * self.SEC, 3600 * self.SEC, 0, 0])
+        return streamer
+
+    def test_window_within_an_hour_reads_raw(self):
+        fake_da = MagicMock()
+        fake_da.get_archive_window.return_value = self._full()
+        signal = _FakeSignal(name='var', x_data=[self.HOUR])
+        streamer = self._streamer(fake_da)
+        streamer._archive_backfill({'ds': [signal]}, self.HOUR, MagicMock())
+        self.assertEqual(fake_da.get_archive_window.call_count, 1)
+        fake_da.get_envelope.assert_not_called()
+
+    def test_wide_window_reads_a_single_envelope(self):
+        fake_da = MagicMock()
+        fake_da.get_envelope.return_value = self._full(
+            ymin=[0, 1], ymax=[2, 3])
+        signal = _FakeSignal(name='var', x_data=[10 * self.HOUR])
+        streamer = self._streamer(fake_da)
+        streamer._archive_backfill({'ds': [signal]}, 10 * self.HOUR, MagicMock())
+        self.assertEqual(fake_da.get_envelope.call_count, 1)
+        fake_da.get_archive_window.assert_not_called()
+        self.assertEqual(fake_da.get_envelope.call_args.kwargs['nbp'], 1920)
+        self.assertTrue(signal.isDownsampled)
+
+    def test_one_request_per_signal(self):
+        fake_da = MagicMock()
+        fake_da.get_envelope.return_value = self._full(ymin=[0, 1], ymax=[2, 3])
+        sigs = [_FakeSignal(name='a', x_data=[10 * self.HOUR]),
+                _FakeSignal(name='b', x_data=[10 * self.HOUR])]
+        streamer = self._streamer(fake_da)
+        streamer._archive_backfill({'ds': sigs}, 10 * self.HOUR, MagicMock())
+        self.assertEqual(fake_da.get_envelope.call_count, 2)
+        self.assertEqual([c.kwargs['varname']
+                          for c in fake_da.get_envelope.call_args_list],
+                         ['a', 'b'])
 
 
 class HandlerEmptyPayloadTests(unittest.TestCase):

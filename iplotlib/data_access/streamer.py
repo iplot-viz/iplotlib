@@ -25,15 +25,14 @@ _INJECT_PERIOD_S = 1.0
 # Newest span kept at full resolution when the cap forces decimation.
 _RAW_TAIL_S = 120
 
-# Slice size for re-fetching an archive window the server truncated: small
-# requests are served reliably where a repeated full-window request is not.
-_ARCHIVE_SLICE_NS = 3600 * int(1e9)
+# A window wider than this is fetched as a single server-side envelope
+# (decimated), matching how the dashboard reads the archive; at or below it
+# every raw point is kept. A raw hour stays under the server's sample cap, so
+# it is served whole in one request instead of truncating.
+_MAX_RAW_WINDOW_NS = 3600 * int(1e9)
 
-# Rounds of retries over refused slices; refusals are transient, so a later
-# attempt usually gets the data. The pause lets the server recover between
-# rounds instead of hammering it back-to-back.
-_ARCHIVE_RETRY_ROUNDS = 3
-_ARCHIVE_RETRY_PAUSE_S = 3.0
+# Bucket count requested when a window is fetched as an envelope.
+_ENVELOPE_TARGET_POINTS = 1920
 
 # QThread wait budget on stop(). Loops poll stop_flag frequently, so most
 # workers exit well within this; stragglers (e.g. a receiver blocked on the
@@ -127,18 +126,6 @@ class CanvasStreamer:
             self._inject_locks[signal.uid] = lock
         return lock
 
-    # Class attribute so tests can zero the wait.
-    _retry_pause_s = _ARCHIVE_RETRY_PAUSE_S
-
-    def _pause(self, seconds):
-        """Interruptible wait; returns True when stop was requested."""
-        deadline = time.monotonic() + seconds
-        while time.monotonic() < deadline:
-            if self.stop_flag:
-                return True
-            time.sleep(0.1)
-        return self.stop_flag
-
     @staticmethod
     def _make_payload(signal, x, y, *, y_min=None, y_max=None, xunit='', yunit=''):
         """Build an inject_external payload. Envelope signals expand to
@@ -173,18 +160,24 @@ class CanvasStreamer:
         y = np.asarray(ds[1]) if len(ds) > 1 else np.array([])
         return x, y, None, None
 
-    def _fetch_archive_window(self, ds, signal, start_ns, end_ns):
-        # get_archive_window only falls back to envelope on UDA overflow;
-        # envelope signals must call get_envelope directly.
-        is_envelope = getattr(signal, 'envelope', False)
-        fetch = self.da.get_envelope if is_envelope else self.da.get_archive_window
+    def _fetch_archive_range(self, ds, signal, start_ns, end_ns, use_envelope):
+        # use_envelope forces a decimated read for wide windows; envelope-typed
+        # signals always read that way. Otherwise a raw read is used, which the
+        # access layer still decimates to an envelope on server overflow.
+        is_envelope = use_envelope or getattr(signal, 'envelope', False)
+        if is_envelope:
+            fetch = self.da.get_envelope
+            kwargs = {'nbp': _ENVELOPE_TARGET_POINTS}
+        else:
+            fetch = self.da.get_archive_window
+            kwargs = self._archive_kwargs(signal)
         try:
             data = fetch(
                 ds,
                 varname=signal.name,
                 tsS=str(start_ns),
                 tsE=str(end_ns),
-                **self._archive_kwargs(signal),
+                **kwargs,
             )
         except Exception as exc:
             logger.warning(f"Archive fetch failed for {signal.name}: {exc}")
@@ -193,133 +186,6 @@ class CanvasStreamer:
         if data is None or getattr(data, 'errcode', -1) != 0:
             return None, None, None, None, None, None
         return self._unpack_archive(data)
-
-    @staticmethod
-    def _sanitize_archive_chunk(ax, ay, ay_min, ay_max, cursor, req_end,
-                                reject_boundary_pair=False):
-        """Keep the part of a reply that advances the fetch: drops the
-        synthetic end-of-request projection appended to truncated replies and
-        anything before ``cursor``. With ``reject_boundary_pair`` a reply
-        carrying only the extremities boundary points counts as a refusal.
-        Returns None when nothing new remains."""
-        if ax is None or len(ax) == 0:
-            return None
-        ax = np.asarray(ax)
-        ay = np.asarray(ay)
-        if ay_min is not None:
-            ay_min = np.asarray(ay_min)
-            ay_max = np.asarray(ay_max)
-        margin = max((req_end - cursor) // 100, int(1e9))
-        # A lone final point far from its predecessor is the extremities
-        # projection at the requested end, not coverage. Two-point replies are
-        # legitimate (a flat signal's boundary samples).
-        if (len(ax) >= 3 and int(ax[-1]) >= req_end - margin
-                and int(ax[-2]) < req_end - margin
-                and int(ax[-1]) - int(ax[-2]) > margin):
-            ax, ay = ax[:-1], ay[:-1]
-            if ay_min is not None:
-                ay_min, ay_max = ay_min[:-1], ay_max[:-1]
-        keep = ax >= cursor
-        if not keep.any():
-            return None
-        ax, ay = ax[keep], ay[keep]
-        if ay_min is not None:
-            ay_min, ay_max = ay_min[keep], ay_max[keep]
-        if reject_boundary_pair and len(ax) <= 2:
-            interior = (ax > cursor + margin) & (ax < req_end - margin)
-            if not interior.any():
-                return None
-        return ax, ay, ay_min, ay_max
-
-    def _fetch_archive_window_complete(self, ds, signal, start_ns, end_ns):
-        """Fetch ``[start_ns, end_ns]`` tolerating truncated replies: the UDA
-        server can stop a long window early (with a synthetic extremity at the
-        requested end masking the cut) and refuses to resume the remainder as
-        one request. After a short first reply the fetch continues in
-        ``_ARCHIVE_SLICE_NS`` slices, skipping any slice it refuses. Returns
-        the same tuple as ``_fetch_archive_window``."""
-        xs, ys, y_mins, y_maxs = [], [], [], []
-        xunit = yunit = None
-        has_bounds = False
-        # Replies that stop just short of the end (e.g. envelope buckets) are
-        # complete enough; only a clearly early stop is worth resuming. Floored
-        # above start_ns so even a sub-margin window is fetched once.
-        resume_below = max(start_ns + 1,
-                           end_ns - max((end_ns - start_ns) // 100, int(1e9)))
-        max_chunks = int((end_ns - start_ns) // _ARCHIVE_SLICE_NS) + 8
-        cursor = start_ns
-        sliced = False
-        holes = []
-        for _ in range(max_chunks):
-            if cursor >= resume_below:
-                break
-            req_end = min(cursor + _ARCHIVE_SLICE_NS, end_ns) if sliced else end_ns
-            ax, ay, ay_min, ay_max, xu, yu = self._fetch_archive_window(
-                ds, signal, cursor, req_end)
-            chunk = self._sanitize_archive_chunk(
-                ax, ay, ay_min, ay_max, cursor, req_end,
-                reject_boundary_pair=sliced)
-            if chunk is None:
-                if not sliced:
-                    if ax is None or len(ax) == 0:
-                        break
-                    sliced = True
-                    continue
-                holes.append((cursor, req_end))
-                cursor = req_end + 1
-                continue
-            cx, cy, c_min, c_max = chunk
-            xunit, yunit = xu, yu
-            xs.append(cx)
-            ys.append(cy)
-            y_mins.append(c_min if c_min is not None else cy)
-            y_maxs.append(c_max if c_max is not None else cy)
-            has_bounds = has_bounds or c_min is not None
-            if not sliced and int(cx[-1]) < resume_below:
-                sliced = True
-                logger.info(f"Archive reply for {signal.name} truncated; continuing in slices")
-            cursor = int(cx[-1]) + 1
-
-        # Refusals are transient (a slice denied to one signal is served to the
-        # next moments later): retry skipped slices in rounds. A boundary-only
-        # pair (a genuinely flat slice) is only accepted once it has persisted
-        # through every round.
-        for attempt in range(_ARCHIVE_RETRY_ROUNDS):
-            if not holes:
-                break
-            if self._pause(self._retry_pause_s):
-                break
-            final = attempt == _ARCHIVE_RETRY_ROUNDS - 1
-            remaining = []
-            for h_start, h_end in holes:
-                ax, ay, ay_min, ay_max, xu, yu = self._fetch_archive_window(
-                    ds, signal, h_start, h_end)
-                chunk = self._sanitize_archive_chunk(
-                    ax, ay, ay_min, ay_max, h_start, h_end,
-                    reject_boundary_pair=not final)
-                if chunk is None:
-                    remaining.append((h_start, h_end))
-                    continue
-                cx, cy, c_min, c_max = chunk
-                if xunit is None:
-                    xunit, yunit = xu, yu
-                xs.append(cx)
-                ys.append(cy)
-                y_mins.append(c_min if c_min is not None else cy)
-                y_maxs.append(c_max if c_max is not None else cy)
-                has_bounds = has_bounds or c_min is not None
-            holes = remaining
-        for _ in holes:
-            logger.warning(f"Archive slice for {signal.name} not served after retries; leaving a gap")
-
-        if not xs:
-            return None, None, None, None, None, None
-        order = sorted(range(len(xs)), key=lambda i: int(xs[i][0]))
-        x = np.concatenate([xs[i] for i in order])
-        y = np.concatenate([ys[i] for i in order])
-        y_min = np.concatenate([y_mins[i] for i in order]) if has_bounds else None
-        y_max = np.concatenate([y_maxs[i] for i in order]) if has_bounds else None
-        return x, y, y_min, y_max, xunit, yunit
 
     def _fetch_last_archive_value(self, ds, signal, end_ns):
         try:
@@ -607,12 +473,12 @@ class CanvasStreamer:
             callback(signal)
 
     def _archive_backfill(self, ds_to_signals: dict, window_ns: int, callback):
-        """Seed each signal's visible window with archive data, anchoring the
-        end at the first live sample (or now, if none arrives in time). Slices
-        are fetched round-robin, newest first, and injected as they arrive, so
-        every plot shows its recent history within the first turn instead of
-        waiting for the signals scheduled before it."""
-        jobs = []
+        """Seed each signal's visible window from the archive in a single
+        request per signal, anchoring the end at the first live sample (or now,
+        if none arrives in time). Windows wider than an hour are read as a
+        server-side envelope (decimated), the way the dashboard reads them;
+        shorter windows keep every raw point."""
+        use_envelope = window_ns > _MAX_RAW_WINDOW_NS
         for ds, signals in ds_to_signals.items():
             for signal in signals:
                 if self.stop_flag:
@@ -621,95 +487,21 @@ class CanvasStreamer:
                 end_ns, found_live = self._wait_for_first_live(carrier)
                 if not found_live:
                     self._first_live_pending.add(signal.uid)
-                jobs.append({'ds': ds, 'signal': signal, 'carrier': carrier,
-                             'lo': end_ns - window_ns, 'hi': end_ns,
-                             'end': end_ns, 'holes': [], 'points': 0})
+                ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_range(
+                    ds, carrier, end_ns - window_ns, end_ns, use_envelope)
+                if ax is None or len(ax) == 0:
+                    self._backfill_last_value(ds, signal, carrier, end_ns, callback)
+                    continue
+                n = self._inject_archive_chunk(
+                    signal, carrier,
+                    (ax, ay, ay_min, ay_max, xunit or '', yunit or ''), callback)
+                if n:
+                    logger.info(f"Archive backfill for {signal.name}: {n} points prepended")
 
-        pending = list(jobs)
-        while pending and not self.stop_flag:
-            for job in list(pending):
-                if self.stop_flag:
-                    return
-                if not self._backfill_turn(job, callback):
-                    pending.remove(job)
-
-        # Refusals are transient (a slice denied to one signal is served to
-        # the next moments later): retry the skipped slices in rounds. A
-        # boundary-only pair (a genuinely flat slice) is only accepted once it
-        # has persisted through every round.
-        for attempt in range(_ARCHIVE_RETRY_ROUNDS):
-            if not any(job['holes'] for job in jobs):
-                break
-            if self._pause(self._retry_pause_s):
-                return
-            final = attempt == _ARCHIVE_RETRY_ROUNDS - 1
-            for job in jobs:
-                if self.stop_flag:
-                    return
-                self._retry_holes(job, callback, final)
-
-        for job in jobs:
-            for _ in job['holes']:
-                logger.warning(f"Archive slice for {job['signal'].name} not served after retries; leaving a gap")
-            if job['points'] == 0:
-                self._backfill_last_value(job, callback)
-            if job['points']:
-                logger.info(f"Archive backfill for {job['signal'].name}: {job['points']} points prepended")
-
-    def _backfill_turn(self, job, callback):
-        """Fetch and inject the newest pending slice of a backfill job.
-        Returns False when the job's window is exhausted."""
-        hi = job['hi']
-        if hi <= job['lo']:
-            return False
-        req_lo = max(job['lo'], hi - _ARCHIVE_SLICE_NS)
-        job['hi'] = req_lo - 1
-        chunk, c_hi = self._fetch_slice(job, req_lo, hi, reject_boundary_pair=True)
-        if chunk is None:
-            job['holes'].append((req_lo, hi))
-        else:
-            if c_hi < hi - self._slice_margin(req_lo, hi):
-                # The reply covered only the start of the slice.
-                job['holes'].append((c_hi + 1, hi))
-            self._inject_archive_chunk(job, chunk, callback)
-        return job['hi'] > job['lo']
-
-    def _retry_holes(self, job, callback, final):
-        remaining = []
-        for h_lo, h_hi in job['holes']:
-            if self.stop_flag:
-                break
-            chunk, c_hi = self._fetch_slice(job, h_lo, h_hi,
-                                            reject_boundary_pair=not final)
-            if chunk is None:
-                remaining.append((h_lo, h_hi))
-                continue
-            if c_hi < h_hi - self._slice_margin(h_lo, h_hi):
-                remaining.append((c_hi + 1, h_hi))
-            self._inject_archive_chunk(job, chunk, callback)
-        job['holes'] = remaining
-
-    def _fetch_slice(self, job, lo, hi, reject_boundary_pair):
-        """Returns ``(chunk, last_ts)`` where chunk also carries the units, or
-        ``(None, None)`` when the reply brought nothing usable."""
-        ax, ay, ay_min, ay_max, xu, yu = self._fetch_archive_window(
-            job['ds'], job['carrier'], lo, hi)
-        chunk = self._sanitize_archive_chunk(
-            ax, ay, ay_min, ay_max, lo, hi,
-            reject_boundary_pair=reject_boundary_pair)
-        if chunk is None:
-            return None, None
-        cx, cy, c_min, c_max = chunk
-        return (cx, cy, c_min, c_max, xu or '', yu or ''), int(cx[-1])
-
-    @staticmethod
-    def _slice_margin(lo, hi):
-        return max((hi - lo) // 100, int(1e9))
-
-    def _inject_archive_chunk(self, job, chunk, callback):
+    def _inject_archive_chunk(self, signal, carrier, chunk, callback):
+        """Prepend an archive chunk to the carrier buffer, merging against any
+        live samples already present. Returns the number of archive points."""
         cx, cy, c_min, c_max, xunit, yunit = chunk
-        signal = job['signal']
-        carrier = job['carrier']
         if c_min is not None and not getattr(signal, 'envelope', False):
             # An envelope reply to a raw request means UDA overflowed and
             # decimated — the same condition the Draw path flags.
@@ -756,16 +548,17 @@ class CanvasStreamer:
             signal._streaming_has_live = True
         if carrier is not signal:
             self._reprocess(signal)
-        job['points'] += len(cx)
         callback(signal)
+        return len(cx)
 
-    def _backfill_last_value(self, job, callback):
+    def _backfill_last_value(self, ds, signal, carrier, end_ns, callback):
         ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_last_archive_value(
-            job['ds'], job['carrier'], job['end'])
+            ds, carrier, end_ns)
         if ax is None or len(ax) == 0:
             return
         self._inject_archive_chunk(
-            job, (ax, ay, ay_min, ay_max, xunit or '', yunit or ''), callback)
+            signal, carrier,
+            (ax, ay, ay_min, ay_max, xunit or '', yunit or ''), callback)
 
     def _wait_for_first_live(self, signal):
         """Returns (end_ns, found_live) so the caller can distinguish path 1 from
@@ -800,8 +593,8 @@ class CanvasStreamer:
         last_period_start_ns = now_ns - period_ns
         cutoff_ns = now_ns - self._window_ns
 
-        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_window_complete(
-            ds, carrier, last_period_start_ns, now_ns)
+        ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_range(
+            ds, carrier, last_period_start_ns, now_ns, use_envelope=False)
         if ax is None or len(ax) == 0:
             return
         if ay_min is not None and not getattr(signal, 'envelope', False):
