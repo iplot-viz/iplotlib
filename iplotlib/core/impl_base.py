@@ -1212,6 +1212,12 @@ class BackendParserBase(ABC):
         data = self.transform_data(impl_plot, signal_data)
 
         if hasattr(signal, 'envelope') and signal.envelope:
+            if len(data) == 3 and len(data[0]) == 0:
+                # An envelope with no samples yet drops its (empty) average
+                # array; pad it so the empty curves are still drawn and the
+                # signal joins the legend from the start, the way a plain signal
+                # already does while it awaits its first streaming batch.
+                data = list(data) + [data[1][:0]]
             if len(data) != 4:
                 logger.error(f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data"
                              f" arrays (==4). {signal}")

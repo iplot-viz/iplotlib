@@ -1,12 +1,12 @@
-"""Regression tests for the legend of an envelope signal that is still waiting
-for its first streaming batch.
+"""Legend tests for an envelope signal during streaming.
 
-On Stream the canvas is (re)built before the backfill arrives, so envelope
-signals have no artists yet: their shape lookup is None and ``signal.lines`` is
-empty. The legend build used to iterate over that None (crash, legend gone) and
-the streaming autoscale used to index the empty ``lines`` (crash). Both backends
-had the flaw. These tests build that exact state and assert it no longer raises,
-and that the envelope joins the legend once its first batch is drawn.
+On Stream the canvas is (re)built before the backfill arrives, so an envelope
+signal has no samples yet. Its empty average array is dropped, leaving three
+data arrays; the draw path pads the missing average so the empty curves are
+still drawn and the signal joins the legend from the start, the way a plain
+signal already does. These tests assert the build does not raise and that the
+envelope is in the legend both right after build and once its first batch draws,
+on both backends.
 """
 
 import unittest
@@ -58,9 +58,18 @@ class StreamingEnvelopeLegendTest(unittest.TestCase):
         self.app.processEvents()
         return qt
 
+    @staticmethod
+    def _legend_count(parser, signal):
+        impl_plot = parser._signal_impl_plot_lut.get(parser.signal_lut_key(signal))
+        if impl_plot is None:
+            return None
+        if hasattr(impl_plot, 'get_legend'):  # matplotlib Axes
+            legend = impl_plot.get_legend()
+            return len(legend.get_texts()) if legend else 0
+        legend = getattr(impl_plot, 'legend', None)  # pyqtgraph PlotItem
+        return len(legend.items) if legend is not None else 0
+
     def test_build_and_first_batch_do_not_raise(self):
-        # Both the legend build (was TypeError over None) and the streaming
-        # autoscale on the next batch (was IndexError over empty lines).
         for backend in BACKENDS:
             with self.subTest(backend=backend):
                 canvas, raw, env = self._canvas_with_empty_envelope()
@@ -70,38 +79,23 @@ class StreamingEnvelopeLegendTest(unittest.TestCase):
                 qt._parser.process_ipl_signal(env)
                 self.app.processEvents()
 
-    def test_matplotlib_envelope_enters_legend_after_first_batch(self):
-        canvas, raw, env = self._canvas_with_empty_envelope()
-        qt = self._build('matplotlib', canvas)
-        ax = qt._parser._signal_impl_plot_lut.get(env.uid)
+    def test_envelope_is_in_legend_from_build_and_stays(self):
+        # The empty envelope must appear in the legend already at build (both
+        # signals -> two entries) and must not drop out when its first batch
+        # draws, on both backends.
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, raw, env = self._canvas_with_empty_envelope()
+                qt = self._build(backend, canvas)
 
-        # The raw signal drew an (empty) line, so the legend exists but omits
-        # the not-yet-drawn envelope.
-        self.assertIsNotNone(ax.get_legend())
-        before = len(ax.get_legend().get_texts())
+                self.assertEqual(self._legend_count(qt._parser, env), 2)
 
-        self._feed_first_batch(raw, env)
-        qt._parser.process_ipl_signal(raw)
-        qt._parser.process_ipl_signal(env)
-        self.app.processEvents()
+                self._feed_first_batch(raw, env)
+                qt._parser.process_ipl_signal(raw)
+                qt._parser.process_ipl_signal(env)
+                self.app.processEvents()
 
-        self.assertIsNotNone(ax.get_legend())
-        self.assertEqual(len(ax.get_legend().get_texts()), before + 1)
-
-    def test_pyqtgraph_envelope_stays_in_legend_after_first_batch(self):
-        # pyqtgraph auto-populates the legend as curves are drawn; the streaming
-        # legend refresh must not clear it and drop the envelope entry.
-        canvas, raw, env = self._canvas_with_empty_envelope()
-        qt = self._build('pyqt', canvas)
-        plot = qt._parser._signal_impl_plot_lut.get(env.uid)
-        before = len(plot.legend.items)
-
-        self._feed_first_batch(raw, env)
-        qt._parser.process_ipl_signal(raw)
-        qt._parser.process_ipl_signal(env)
-        self.app.processEvents()
-
-        self.assertEqual(len(plot.legend.items), before + 1)
+                self.assertEqual(self._legend_count(qt._parser, env), 2)
 
 
 if __name__ == '__main__':
