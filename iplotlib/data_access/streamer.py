@@ -444,8 +444,8 @@ class CanvasStreamer:
                     # Break the line between the archive block and the live
                     # feed rather than joining them with a diagonal: the archive
                     # ends ~2 min behind the first live sample, so a NaN placed
-                    # just before that sample leaves the gap visible, the way the
-                    # reference dashboard shows it.
+                    # just before that sample leaves the gap visible instead of
+                    # interpolating across empty time.
                     gap_x = np.asarray([int(x_data[0]) - 1],
                                        dtype=np.asarray(cur_x).dtype)
                     x_data = np.concatenate([gap_x, np.asarray(x_data)])
