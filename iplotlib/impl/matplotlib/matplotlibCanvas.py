@@ -119,8 +119,14 @@ class MatplotlibParser(BackendParserBase):
             logger.warning(f"legend_downsampled_signal: line for signal {signal.label} not found on axes; skipping")
             return
         pos = valid_lines.index(plot_lines)
-        legend_label = legend.get_texts()[pos]
-        legend_text = legend.get_texts()[pos].get_text()
+        texts = legend.get_texts()
+        if pos >= len(texts):
+            # Axes lines and legend entries can briefly disagree mid-rebuild
+            # (more drawn lines than legend labels); skip rather than index past
+            # the end.
+            return
+        legend_label = texts[pos]
+        legend_text = texts[pos].get_text()
 
         if legend_text.endswith('*') and not signal.isDownsampled:
             legend_label.set_text(legend_text[:-1])

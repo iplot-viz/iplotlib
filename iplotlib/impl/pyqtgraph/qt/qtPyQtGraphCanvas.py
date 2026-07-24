@@ -94,29 +94,38 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._disconnect_preview_scene()
 
         self._parser.deactivate_cursor()
-        self._parser.process_ipl_canvas(canvas)
-        self._parser.figure.ci.layout.activate()
 
-        if canvas:
-            self.set_mouse_mode(self._mmode or canvas.mouse_mode)
+        # Tearing down and repopulating the live GraphicsLayoutWidget paints the
+        # emptied scene for one frame (a blank flash), unlike matplotlib whose
+        # deferred draw only shows the final layout. Freeze repaints across the
+        # rebuild so it is painted once, going straight to the new plots.
+        self._parser.figure.setUpdatesEnabled(False)
+        try:
+            self._parser.process_ipl_canvas(canvas)
+            self._parser.figure.ci.layout.activate()
 
-        # Connect events for each plot - only connect if not already connected
-        for stack in self._parser._layout_stacks.values():
-            for plot in stack.values():
-                vb = plot.getViewBox()
-                vb_id = id(vb)
-                if vb_id not in self._connected_viewboxes:
-                    vb.pressed.connect(self._impl_mouse_press_handler)
-                    vb.released.connect(self._impl_mouse_release_handler)
-                    vb.dragged.connect(self._impl_mouse_drag_handler)
-                    # Ruler labels are positioned in scene coordinates; a widget
-                    # resize moves the axes without a range change, so re-project.
-                    vb.sigResized.connect(self._on_viewbox_resized)
-                    self._connected_viewboxes.add(vb_id)
+            if canvas:
+                self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
-        super().set_canvas(canvas)
-        self._repaint_rulers_from_canvas()
-        self._update_minimap()
+            # Connect events for each plot - only connect if not already connected
+            for stack in self._parser._layout_stacks.values():
+                for plot in stack.values():
+                    vb = plot.getViewBox()
+                    vb_id = id(vb)
+                    if vb_id not in self._connected_viewboxes:
+                        vb.pressed.connect(self._impl_mouse_press_handler)
+                        vb.released.connect(self._impl_mouse_release_handler)
+                        vb.dragged.connect(self._impl_mouse_drag_handler)
+                        # Ruler labels are positioned in scene coordinates; a widget
+                        # resize moves the axes without a range change, so re-project.
+                        vb.sigResized.connect(self._on_viewbox_resized)
+                        self._connected_viewboxes.add(vb_id)
+
+            super().set_canvas(canvas)
+            self._repaint_rulers_from_canvas()
+            self._update_minimap()
+        finally:
+            self._parser.figure.setUpdatesEnabled(True)
 
     def _repaint_rulers_from_canvas(self):
         self._clear_preview_ruler()
