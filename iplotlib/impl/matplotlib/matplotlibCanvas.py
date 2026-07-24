@@ -113,6 +113,10 @@ class MatplotlibParser(BackendParserBase):
         valid_lines = [line for line in mpl_axes.get_lines()
                        if not line.get_label().startswith(("_child", "_RulerLine"))]
         if plot_lines not in valid_lines:
+            # The cached line does not belong to these axes (e.g. stale cache after
+            # a rebuild). Skip the legend update rather than aborting the caller —
+            # an exception here used to leave the shared-x sync half-applied.
+            logger.warning(f"legend_downsampled_signal: line for signal {signal.label} not found on axes; skipping")
             return
         pos = valid_lines.index(plot_lines)
         legend_label = legend.get_texts()[pos]
@@ -937,7 +941,7 @@ class MatplotlibParser(BackendParserBase):
                         self.process_ipl_axis(x_axis, ax_idx, plot, mpl_axes)
 
                 for signal in signals:
-                    self._signal_impl_plot_lut.update({signal.uid: mpl_axes})
+                    self._signal_impl_plot_lut.update({self.signal_lut_key(signal): mpl_axes})
                     self.process_ipl_signal(signal)
 
                 # Show the plot legend if enabled
@@ -1152,7 +1156,7 @@ class MatplotlibParser(BackendParserBase):
                                                              nice_locator=locator))
 
     def process_ipl_signal_impl_plot(self, signal: Signal):
-        mpl_axes = self._signal_impl_plot_lut.get(signal.uid)  # type: MPLAxes
+        mpl_axes = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))  # type: MPLAxes
         if not isinstance(mpl_axes, MPLAxes):
             logger.error(f"MPLAxes not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
