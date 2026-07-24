@@ -264,6 +264,11 @@ class MatplotlibParser(BackendParserBase):
 
         self.figure.canvas.draw_idle()
 
+    def refresh_streaming_legend(self, impl_plot: MPLAxes, plot: Plot):
+        # matplotlib builds the legend once, so an envelope drawn on its first
+        # streaming batch is absent until the legend is rebuilt from the axes.
+        self.rebuild_legend(impl_plot, plot)
+
     def register_dynamic_signal(self, impl_plot: MPLAxes, plot: Plot, signal):
         """Register a dynamically added signal and update legend."""
         import weakref

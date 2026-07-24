@@ -88,6 +88,21 @@ class StreamingEnvelopeLegendTest(unittest.TestCase):
         self.assertIsNotNone(ax.get_legend())
         self.assertEqual(len(ax.get_legend().get_texts()), before + 1)
 
+    def test_pyqtgraph_envelope_stays_in_legend_after_first_batch(self):
+        # pyqtgraph auto-populates the legend as curves are drawn; the streaming
+        # legend refresh must not clear it and drop the envelope entry.
+        canvas, raw, env = self._canvas_with_empty_envelope()
+        qt = self._build('pyqt', canvas)
+        plot = qt._parser._signal_impl_plot_lut.get(env.uid)
+        before = len(plot.legend.items)
+
+        self._feed_first_batch(raw, env)
+        qt._parser.process_ipl_signal(raw)
+        qt._parser.process_ipl_signal(env)
+        self.app.processEvents()
+
+        self.assertEqual(len(plot.legend.items), before + 1)
+
 
 if __name__ == '__main__':
     unittest.main()
