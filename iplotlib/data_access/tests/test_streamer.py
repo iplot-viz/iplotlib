@@ -2,6 +2,7 @@
 (envelope vs raw, nbp gating), the empty-window last-value fallback,
 and the _streaming_has_live flag set during backfill."""
 
+import time
 import unittest
 from threading import Event
 from unittest.mock import MagicMock
@@ -42,7 +43,8 @@ class _FakeSignal:
         self.inject_external = MagicMock()
         self._streaming_has_live = False
         self.isDownsampled = False
-        # x_data is read by _wait_for_first_live; non-empty short-circuits the wait.
+        # Mirrors the live buffer the handler reads back; the backfill no longer
+        # consults it (the archive end is anchored at now - live_retention).
         self.x_data = [] if x_data is None else x_data
         self.y_data = []
 
@@ -87,7 +89,7 @@ class ApplyCapTests(unittest.TestCase):
         signal.inject_external.assert_not_called()
 
     def test_drops_oldest_when_raw_tail_fills_the_cap(self):
-        # Timestamps closer than _RAW_TAIL_S to the newest one are all raw.
+        # Timestamps within live_retention of the newest one are all raw.
         self.streamer._max_points = 2
         signal = _FakeSignal(
             data=[_FakeBuf([1, 2, 3, 4]), _FakeBuf([10, 20, 30, 40])])
@@ -211,7 +213,6 @@ class BackfillSignalTests(unittest.TestCase):
     WINDOW = 3600 * int(1e9)
 
     def setUp(self):
-        # Non-empty x_data short-circuits _wait_for_first_live (no 2s sleep).
         self.signal = _FakeSignal(name='var', x_data=[self.WINDOW])
         self.callback = MagicMock()
 
@@ -292,12 +293,15 @@ class BackfillSignalTests(unittest.TestCase):
         self.callback.assert_not_called()
 
 
-class WindowSizeBackfillTests(unittest.TestCase):
-    """A window up to an hour is read raw (all points); a wider one is read as
-    a single server-side envelope, one request per signal."""
+class EnvelopeSelectionBackfillTests(unittest.TestCase):
+    """Envelope is opt-in per signal (Envelope column), independent of window
+    size: a plain signal is read raw, an envelope signal as a single
+    server-side envelope; one request per signal. The archive is read up to
+    live_retention behind now, and the feed covers the newest span."""
 
     SEC = int(1e9)
     HOUR = 3600 * int(1e9)
+    RETENTION = 120 * int(1e9)
 
     def _full(self, **kwargs):
         return _FakeArchiveResponse(
@@ -309,38 +313,52 @@ class WindowSizeBackfillTests(unittest.TestCase):
         streamer._max_points = 0
         return streamer
 
-    def test_window_within_an_hour_reads_raw(self):
+    def test_plain_signal_reads_raw_regardless_of_window(self):
         fake_da = MagicMock()
         fake_da.get_archive_window.return_value = self._full()
-        signal = _FakeSignal(name='var', x_data=[self.HOUR])
+        signal = _FakeSignal(name='var', envelope=False)
         streamer = self._streamer(fake_da)
-        streamer._archive_backfill({'ds': [signal]}, self.HOUR, MagicMock())
+        # A very wide window still reads raw when the signal is not envelope.
+        streamer._archive_backfill({'ds': [signal]}, 10 * self.HOUR, MagicMock())
         self.assertEqual(fake_da.get_archive_window.call_count, 1)
         fake_da.get_envelope.assert_not_called()
 
-    def test_wide_window_reads_a_single_envelope(self):
+    def test_envelope_signal_reads_a_single_envelope(self):
         fake_da = MagicMock()
-        fake_da.get_envelope.return_value = self._full(
-            ymin=[0, 1], ymax=[2, 3])
-        signal = _FakeSignal(name='var', x_data=[10 * self.HOUR])
+        fake_da.get_envelope.return_value = self._full(ymin=[0, 1], ymax=[2, 3])
+        signal = _FakeSignal(name='var', envelope=True)
         streamer = self._streamer(fake_da)
-        streamer._archive_backfill({'ds': [signal]}, 10 * self.HOUR, MagicMock())
+        streamer._archive_backfill({'ds': [signal]}, self.HOUR, MagicMock())
         self.assertEqual(fake_da.get_envelope.call_count, 1)
         fake_da.get_archive_window.assert_not_called()
         self.assertEqual(fake_da.get_envelope.call_args.kwargs['nbp'], 1920)
-        self.assertTrue(signal.isDownsampled)
 
     def test_one_request_per_signal(self):
         fake_da = MagicMock()
-        fake_da.get_envelope.return_value = self._full(ymin=[0, 1], ymax=[2, 3])
-        sigs = [_FakeSignal(name='a', x_data=[10 * self.HOUR]),
-                _FakeSignal(name='b', x_data=[10 * self.HOUR])]
+        fake_da.get_archive_window.return_value = self._full()
+        sigs = [_FakeSignal(name='a'), _FakeSignal(name='b')]
         streamer = self._streamer(fake_da)
-        streamer._archive_backfill({'ds': sigs}, 10 * self.HOUR, MagicMock())
-        self.assertEqual(fake_da.get_envelope.call_count, 2)
+        streamer._archive_backfill({'ds': sigs}, self.HOUR, MagicMock())
+        self.assertEqual(fake_da.get_archive_window.call_count, 2)
         self.assertEqual([c.kwargs['varname']
-                          for c in fake_da.get_envelope.call_args_list],
+                          for c in fake_da.get_archive_window.call_args_list],
                          ['a', 'b'])
+
+    def test_archive_ends_a_retention_behind_now(self):
+        fake_da = MagicMock()
+        fake_da.get_archive_window.return_value = self._full()
+        signal = _FakeSignal(name='var')
+        streamer = self._streamer(fake_da)
+        before = int(time.time() * 1e9)
+        streamer._archive_backfill({'ds': [signal]}, self.HOUR, MagicMock())
+        after = int(time.time() * 1e9)
+        kw = fake_da.get_archive_window.call_args.kwargs
+        tsS, tsE = int(kw['tsS']), int(kw['tsE'])
+        # End sits ~live_retention behind now; the archive spans exactly the
+        # window minus that retention (the feed fills the rest).
+        self.assertLessEqual(before - tsE, self.RETENTION)
+        self.assertGreaterEqual(after - tsE, self.RETENTION)
+        self.assertEqual(tsE - tsS, self.HOUR - self.RETENTION)
 
 
 class HandlerEmptyPayloadTests(unittest.TestCase):
@@ -389,38 +407,41 @@ class _StatefulSignal(_FakeSignal):
 
 
 class MonotonicTimeAxisTests(unittest.TestCase):
-    """The buffer's time axis must never go backwards: archive fetches append
-    a synthetic end-of-window point that can sit ahead of the next live batch
-    (client/server clock skew)."""
+    """The buffer's time axis must never go backwards, and the first live batch
+    breaks the line so the archive block and the feed are not joined."""
 
-    def test_backfill_drops_archive_points_at_or_after_first_live(self):
+    def test_backfill_merges_archive_ahead_of_existing_buffer(self):
         fake_da = MagicMock()
-        # 1000 is the synthetic boundary point at the first live timestamp.
         fake_da.get_archive_window.return_value = _FakeArchiveResponse(
             x=[900, 950, 1000], y=[1.0, 2.0, 3.0])
         streamer = CanvasStreamer(da=fake_da)
         streamer._max_points = 0
-        streamer._retry_pause_s = 0
         signal = _StatefulSignal(name='var')
+        # A live sample already sits in the buffer; the archive is prepended and
+        # the buffer wins a timestamp collision (1000).
         signal.inject_external(append=False, d0=[1000, 1001], d1=[7.0, 8.0])
         streamer._archive_backfill({'ds': [signal]}, 100, MagicMock())
         self.assertEqual(list(signal.x_data), [900, 950, 1000, 1001])
+        self.assertEqual(list(signal.y_data), [1.0, 2.0, 7.0, 8.0])
 
-    def test_handler_drops_stale_synthetic_tail_before_append(self):
+    def test_first_live_batch_inserts_a_break_after_the_archive(self):
         streamer = CanvasStreamer(da=MagicMock())
         signal = _StatefulSignal(name='var')
-        # 1000 emulates a synthetic point at client-now, ahead of server time.
-        signal.inject_external(append=False, d0=[900, 950, 1000],
-                               d1=[1.0, 2.0, 3.0])
+        # Archive block; the first live batch arrives well ahead of it.
+        signal.inject_external(append=False, d0=[900, 950], d1=[1.0, 2.0])
         streamer.signals = {'var': [signal]}
         streamer._first_live_pending.add(signal.uid)
-        dobj = MagicMock(xdata=[995, 996], ydata=[5.0, 6.0],
+        dobj = MagicMock(xdata=[1000, 1001], ydata=[5.0, 6.0],
                          xunit='ns', yunit='V')
         streamer.handler(MagicMock(), 'var', dobj)
         x = list(signal.x_data)
-        self.assertEqual(x, sorted(x))
-        self.assertNotIn(1000, x)
-        self.assertEqual(x[-1], 996)
+        y = list(signal.y_data)
+        # A NaN just before the first live sample breaks the line so the two
+        # blocks are not joined by a diagonal.
+        self.assertEqual(x, [900, 950, 999, 1000, 1001])
+        self.assertTrue(np.isnan(y[2]))
+        self.assertEqual([y[0], y[1], y[3], y[4]], [1.0, 2.0, 5.0, 6.0])
+        self.assertNotIn(signal.uid, streamer._first_live_pending)
 
     def test_handler_folds_overlapped_live_samples_into_the_batch(self):
         streamer = CanvasStreamer(da=MagicMock())

@@ -312,7 +312,10 @@ class PyQtGraphParser(BackendParserBase):
             marker_line.setSymbol(symbol or None)
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
-        line = draw_fn(x=x_data, y=y_data, **style)
+        # connect='finite' breaks the line at NaN samples (e.g. the archive/live
+        # seam while streaming) instead of drawing across them; pyqtgraph's
+        # default connects every point and would corrupt the curve.
+        line = draw_fn(x=x_data, y=y_data, connect='finite', **style)
         return [line]
 
     def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
@@ -396,7 +399,8 @@ class PyQtGraphParser(BackendParserBase):
         if self.canvas.streaming and len(x_data) > _STREAM_DECIMATE_THRESHOLD:
             x_data, y_data = minmax_decimate(
                 x_data, y_data, _STREAM_DECIMATE_TARGET_PAIRS)
-        line.setData(x=x_data, y=y_data)
+        # connect='finite' keeps NaN gaps (archive/live seam) as breaks.
+        line.setData(x=x_data, y=y_data, connect='finite')
 
     @staticmethod
     def set_line_style(style: dict, line: PlotDataItem):

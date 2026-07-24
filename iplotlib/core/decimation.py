@@ -3,9 +3,9 @@
 import numpy as np
 
 
-def minmax_decimate(x, y, target_pairs):
-    """Reduce to at most ``2 * target_pairs`` points: one argmin/argmax pair
-    per bucket, preserving extremes at their true coordinates."""
+def _minmax_decimate_finite(x, y, target_pairs):
+    """Reduce a NaN-free run to at most ``2 * target_pairs`` argmin/argmax
+    pairs, preserving extremes at their true coordinates."""
     n = len(x)
     if target_pairs <= 0 or n <= 2 * target_pairs:
         return x, y
@@ -38,6 +38,47 @@ def minmax_decimate(x, y, target_pairs):
     out_x[1::2] = np.where(min_first, x_max, x_min)
     out_y[1::2] = np.where(min_first, y_max, y_min)
     return out_x, out_y
+
+
+def minmax_decimate(x, y, target_pairs):
+    """Reduce to at most ``2 * target_pairs`` points: one argmin/argmax pair
+    per bucket, preserving extremes at their true coordinates. NaN samples mark
+    line breaks (e.g. the archive/live seam): each finite run is reduced on its
+    own with a share of the budget and the gaps are kept, so a break is never
+    bridged nor allowed to poison a bucket's argmin/argmax."""
+    n = len(x)
+    if target_pairs <= 0 or n <= 2 * target_pairs:
+        return x, y
+    x = np.asarray(x)
+    y = np.asarray(y)
+    finite = np.isfinite(y)
+    if finite.all():
+        return _minmax_decimate_finite(x, y, target_pairs)
+
+    edges = np.diff(finite.astype(np.int8))
+    starts = np.where(edges == 1)[0] + 1
+    ends = np.where(edges == -1)[0] + 1
+    if finite[0]:
+        starts = np.append(0, starts)
+    if finite[-1]:
+        ends = np.append(ends, n)
+    runs = list(zip(starts, ends))
+    total = sum(e - s for s, e in runs)
+    if total == 0:
+        return x, y
+
+    out_x, out_y = [], []
+    for k, (s, e) in enumerate(runs):
+        if k > 0:
+            # One NaN between runs keeps the break; its timestamp is the last
+            # gap sample so the gap stays where it is in time.
+            out_x.append(x[s - 1:s])
+            out_y.append(np.asarray([np.nan], dtype=y.dtype))
+        share = max(1, int(round(target_pairs * (e - s) / total)))
+        rx, ry = _minmax_decimate_finite(x[s:e], y[s:e], share)
+        out_x.append(np.asarray(rx))
+        out_y.append(np.asarray(ry))
+    return np.concatenate(out_x), np.concatenate(out_y)
 
 
 def bucket_reduce_envelope(x, y_min, y_max, y_avg, target_points):

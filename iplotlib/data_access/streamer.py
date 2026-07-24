@@ -1,3 +1,4 @@
+import os
 import time
 from functools import partial
 from threading import Lock
@@ -12,9 +13,6 @@ from iplotlib.core.decimation import bucket_reduce_envelope, minmax_decimate
 
 logger = Sl.get_logger(__name__)
 
-# Max wait for the first live sample before anchoring the archive end at "now".
-_FIRST_LIVE_WAIT_S = 2.0
-
 # Sliding-window refresh cadence. Skipped for windows shorter than this period.
 _TOPUP_PERIOD_S = 3600
 
@@ -22,16 +20,22 @@ _TOPUP_PERIOD_S = 3600
 # cost of inject_external is paid once per period instead of once per poll.
 _INJECT_PERIOD_S = 1.0
 
-# Newest span kept at full resolution when the cap forces decimation.
-_RAW_TAIL_S = 120
+# Newest live span kept whole. The archiver lags the live feed by roughly this
+# much, so the backfill stops here and the feed covers the rest; it is also the
+# span left at full resolution when the cap forces decimation. Overridable
+# through MINT_STREAMING_LIVE_SECONDS for tuning without a code change.
+_DEFAULT_LIVE_RETENTION_S = 120
 
-# A window wider than this is fetched as a single server-side envelope
-# (decimated), matching how the dashboard reads the archive; at or below it
-# every raw point is kept. A raw hour stays under the server's sample cap, so
-# it is served whole in one request instead of truncating.
-_MAX_RAW_WINDOW_NS = 3600 * int(1e9)
 
-# Bucket count requested when a window is fetched as an envelope.
+def _live_retention_s() -> int:
+    try:
+        return max(0, int(os.environ.get('MINT_STREAMING_LIVE_SECONDS',
+                                          _DEFAULT_LIVE_RETENTION_S)))
+    except (TypeError, ValueError):
+        return _DEFAULT_LIVE_RETENTION_S
+
+
+# Bucket count requested when an (opt-in) envelope signal is fetched.
 _ENVELOPE_TARGET_POINTS = 1920
 
 # QThread wait budget on stop(). Loops poll stop_flag frequently, so most
@@ -160,11 +164,11 @@ class CanvasStreamer:
         y = np.asarray(ds[1]) if len(ds) > 1 else np.array([])
         return x, y, None, None
 
-    def _fetch_archive_range(self, ds, signal, start_ns, end_ns, use_envelope):
-        # use_envelope forces a decimated read for wide windows; envelope-typed
-        # signals always read that way. Otherwise a raw read is used, which the
-        # access layer still decimates to an envelope on server overflow.
-        is_envelope = use_envelope or getattr(signal, 'envelope', False)
+    def _fetch_archive_range(self, ds, signal, start_ns, end_ns):
+        # Read as a server-side envelope only when the user opted this signal
+        # into one (Envelope column). A plain raw read is used otherwise, which
+        # the access layer still decimates to an envelope on server overflow.
+        is_envelope = getattr(signal, 'envelope', False)
         if is_envelope:
             fetch = self.da.get_envelope
             kwargs = {'nbp': _ENVELOPE_TARGET_POINTS}
@@ -255,8 +259,8 @@ class CanvasStreamer:
 
     def _apply_cap(self, signal):
         """Honour the per-signal cap as maximum stored points: the newest
-        ``_RAW_TAIL_S`` stay raw and older samples are decimated into the
-        remaining budget, preserving extremes. Caller must hold _signal_lock.
+        ``live_retention`` span stays raw and older samples are decimated into
+        the remaining budget, preserving extremes. Caller must hold _signal_lock.
         Returns True when the buffer was actually reduced."""
         if self._max_points <= 0:
             return False
@@ -270,7 +274,7 @@ class CanvasStreamer:
             y_min = np.asarray(y_min)
             y_max = np.asarray(y_max)
 
-        tail = int(np.searchsorted(x, int(x[-1]) - _RAW_TAIL_S * int(1e9),
+        tail = int(np.searchsorted(x, int(x[-1]) - _live_retention_s() * int(1e9),
                                    side='left'))
         budget = self._max_points - (n - tail)
         if tail > 0 and budget > 4:
@@ -436,22 +440,21 @@ class CanvasStreamer:
             first_live = signal.uid in self._first_live_pending
             if first_live:
                 cur_x = carrier.x_data
-                cur_y = carrier.y_data
                 if cur_x is not None and len(cur_x) > 0 and len(x_data) > 0:
-                    cur_x_arr = np.asarray(cur_x)
-                    cur_y_arr = np.asarray(cur_y)
-                    flat_x = np.asarray(x_data[:1], dtype=cur_x_arr.dtype)
-                    flat_y = np.asarray([cur_y_arr[-1]], dtype=cur_y_arr.dtype)
-                    x_data = np.concatenate([flat_x, np.asarray(x_data)])
-                    y_data = np.concatenate([flat_y, np.asarray(y_data)])
+                    # Break the line between the archive block and the live
+                    # feed rather than joining them with a diagonal: the archive
+                    # ends ~2 min behind the first live sample, so a NaN placed
+                    # just before that sample leaves the gap visible, the way the
+                    # reference dashboard shows it.
+                    gap_x = np.asarray([int(x_data[0]) - 1],
+                                       dtype=np.asarray(cur_x).dtype)
+                    x_data = np.concatenate([gap_x, np.asarray(x_data)])
+                    y_data = np.concatenate([[np.nan], np.asarray(y_data)])
                 self._first_live_pending.discard(signal.uid)
             with self._signal_lock(carrier):
                 tail = self._cut_overlap_tail(carrier, int(x_data[0]))
                 y_min = y_max = None
-                if tail is not None and not first_live:
-                    # Overlapped buffer samples are real feed data; on the first
-                    # live batch the tail is the backfill's synthetic boundary
-                    # point, a projection to discard.
+                if tail is not None:
                     x_data, y_data, y_min, y_max = self._fold_tail(
                         tail, x_data, y_data)
                 result = self._make_payload(
@@ -474,21 +477,22 @@ class CanvasStreamer:
 
     def _archive_backfill(self, ds_to_signals: dict, window_ns: int, callback):
         """Seed each signal's visible window from the archive in a single
-        request per signal, anchoring the end at the first live sample (or now,
-        if none arrives in time). Windows wider than an hour are read as a
-        server-side envelope (decimated), the way the dashboard reads them;
-        shorter windows keep every raw point."""
-        use_envelope = window_ns > _MAX_RAW_WINDOW_NS
+        request per signal. The archive lags the live feed, so it is read only
+        up to ``now - live_retention`` and the feed fills the newest span; the
+        first live batch then breaks the line so the two blocks are not joined
+        by a diagonal. A signal is read as an envelope only when the user opted
+        it into one."""
+        now_ns = int(time.time() * 1e9)
+        end_ns = now_ns - _live_retention_s() * int(1e9)
+        start_ns = now_ns - window_ns
         for ds, signals in ds_to_signals.items():
             for signal in signals:
                 if self.stop_flag:
                     return
                 carrier = self._carrier(signal)
-                end_ns, found_live = self._wait_for_first_live(carrier)
-                if not found_live:
-                    self._first_live_pending.add(signal.uid)
+                self._first_live_pending.add(signal.uid)
                 ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_range(
-                    ds, carrier, end_ns - window_ns, end_ns, use_envelope)
+                    ds, carrier, start_ns, end_ns)
                 if ax is None or len(ax) == 0:
                     self._backfill_last_value(ds, signal, carrier, end_ns, callback)
                     continue
@@ -560,17 +564,6 @@ class CanvasStreamer:
             signal, carrier,
             (ax, ay, ay_min, ay_max, xunit or '', yunit or ''), callback)
 
-    def _wait_for_first_live(self, signal):
-        """Returns (end_ns, found_live) so the caller can distinguish path 1 from
-        path 2 (no live sample within the timeout)."""
-        deadline = time.monotonic() + _FIRST_LIVE_WAIT_S
-        while time.monotonic() < deadline and not self.stop_flag:
-            x = signal.x_data
-            if x is not None and len(x) > 0:
-                return int(x[0]), True
-            time.sleep(0.05)
-        return int(time.time() * 1e9), False
-
     def _hourly_topup(self):
         """Refresh the most recent ``_TOPUP_PERIOD_S`` from archive each period
         and drop samples older than ``self._window_ns``."""
@@ -594,7 +587,7 @@ class CanvasStreamer:
         cutoff_ns = now_ns - self._window_ns
 
         ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_range(
-            ds, carrier, last_period_start_ns, now_ns, use_envelope=False)
+            ds, carrier, last_period_start_ns, now_ns)
         if ax is None or len(ax) == 0:
             return
         if ay_min is not None and not getattr(signal, 'envelope', False):
