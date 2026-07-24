@@ -935,7 +935,7 @@ class PyQtGraphParser(BackendParserBase):
 
             # Process signal
             for signal in signals:
-                self._signal_impl_plot_lut.update({signal.uid: plot})
+                self._signal_impl_plot_lut.update({self.signal_lut_key(signal): plot})
                 self.process_ipl_signal(signal)
 
             # Legend processing for downsampled data when drawing
@@ -1269,7 +1269,7 @@ class PyQtGraphParser(BackendParserBase):
         impl_axis.set_offset(ci.offsets[ax_idx])
 
     def process_ipl_signal_impl_plot(self, signal: Signal):
-        plot = self._signal_impl_plot_lut.get(signal.uid)  # type: PlotItem
+        plot = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))  # type: PlotItem
         if not isinstance(plot, PlotItem):
             logger.error(f"PlotItem not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
@@ -2005,7 +2005,10 @@ class PyQtGraphParser(BackendParserBase):
                 continue
 
             spacing, values = tv[0]
-            labels = ax.tickStrings(values, scale=1.0, spacing=spacing)
+            # Measure with the same scale generateDrawSpecs will draw with (tickValues
+            # above just refreshed autoSIPrefixScale); a narrower width would make the
+            # AxisItem bounding-rect check cull every label.
+            labels = ax.tickStrings(values, scale=ax.autoSIPrefixScale * ax.scale, spacing=spacing)
 
             # Measure tick label text width
             fm = QFontMetricsF(ax.style.get('tickFont') or QtWidgets.QApplication.font())
