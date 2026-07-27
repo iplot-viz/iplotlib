@@ -17,6 +17,19 @@ from iplotlib.impl.matplotlib.dateFormatter import _fmt_duration
 logger = Sl.get_logger(__name__)
 
 
+def _window_to_data_coords(impl_plot, lo, hi):
+    """Visible-window bounds in the buffer's raw units. The backends shift or
+    scale the painted axis by a per-plot offset for float precision, so the
+    display window must be mapped back before masking raw timestamps."""
+    ci = getattr(impl_plot, '_ipl_cache_item', None)
+    offset = ci.offsets.get(0, 0) if ci is not None and hasattr(ci, 'offsets') else 0
+    if offset == 100_000:
+        return lo * offset, hi * offset
+    if offset:
+        return lo + offset, hi + offset
+    return lo, hi
+
+
 def _line_source_data(line):
     """Source arrays of a backend line, in data units. pyqtgraph's
     ``getData()`` returns log10-mapped display data in log mode, so statistics
@@ -255,29 +268,31 @@ class IplotQtStatistics(QWidget):
 
                     # Differentiate methods
                     if isinstance(impl_plot, PlotItem):
-                        x_data = _line_source_data(line)[0]
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
                         signal_name = f"{line.name()}, {stack}"
                     else:
-                        x_data = _line_source_data(line)[0]
                         lo, hi = impl_plot.get_xlim()
                         signal_name = f"{line.get_label()}, {stack}"
 
                     # The rows correspond to the signals and their corresponding stacks
                     self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
-                    x_data = np.asarray(x_data)
-                    # Read min/max/avg from the painted curves, not data_store:
-                    # while streaming the display decimates the curves together,
-                    # so only they are guaranteed to align with x_data.
-                    y_min = np.asarray(_line_source_data(curves[0])[1])
-                    y_max = np.asarray(_line_source_data(curves[1])[1])
-                    y_mean = np.asarray(_line_source_data(curves[2])[1])
+                    # Statistics come from the buffered dataset, not the painted
+                    # curves: while streaming the display is decimated for paint
+                    # speed and would under-report the samples.
+                    x_data = np.asarray(signal.data_store[0])
+                    y_min = np.asarray(signal.data_store[1])
+                    y_max = np.asarray(signal.data_store[2])
+                    y_mean = np.asarray(signal.data_store[3])
+                    n = min(x_data.size, y_min.size, y_max.size, y_mean.size)
+                    x_data, y_min, y_max, y_mean = (
+                        x_data[:n], y_min[:n], y_max[:n], y_mean[:n])
 
                     # Filter by the visible time (X) window only: gating on the Y
                     # view zeroes the count when a flat signal is zoomed past its
                     # spread.
-                    mask = (x_data >= lo) & (x_data <= hi)
+                    lo_d, hi_d = _window_to_data_coords(impl_plot, lo, hi)
+                    mask = (x_data >= lo_d) & (x_data <= hi_d)
 
                     y_min_displayed = y_min[mask]
                     y_max_displayed = y_max[mask]
@@ -323,25 +338,22 @@ class IplotQtStatistics(QWidget):
                                 x_type = 1
 
                         if len(x_displayed) > 0:
-                            first_time_raw = x_displayed[init_val].item()
-                            last_time_raw = x_displayed[end_val].item()
+                            first_time = x_displayed[init_val].item()
+                            last_time = x_displayed[end_val].item()
 
-                            # Apply inverse transformation if there's an offset
-                            if hasattr(impl_plot, '_ipl_cache_item'):
+                            # Buffer timestamps are already raw; only the slider
+                            # path reads axis-convention values that still need
+                            # the inverse offset transformation.
+                            if (isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider))
+                                    and hasattr(impl_plot, '_ipl_cache_item')):
                                 ci = impl_plot._ipl_cache_item
                                 offset = ci.offsets.get(0, 0) if hasattr(ci, 'offsets') else 0
                                 if offset == 100_000:
-                                    first_time = first_time_raw * offset
-                                    last_time = last_time_raw * offset
+                                    first_time *= offset
+                                    last_time *= offset
                                 elif offset != 0:
-                                    first_time = first_time_raw + offset
-                                    last_time = last_time_raw + offset
-                                else:
-                                    first_time = first_time_raw
-                                    last_time = last_time_raw
-                            else:
-                                first_time = first_time_raw
-                                last_time = last_time_raw
+                                    first_time += offset
+                                    last_time += offset
                         else:
                             first_time = 0
                             last_time = 0
@@ -361,9 +373,6 @@ class IplotQtStatistics(QWidget):
                     if isinstance(line, (list, tuple)):
                         line = line[0]
                     # Differentiate methods
-                    src_x, src_y = _line_source_data(line)
-                    x_data = src_x if src_x is not None else []
-                    y_data = src_y if src_y is not None else []
                     if isinstance(impl_plot, PlotItem):
                         lo, hi = impl_plot.getViewBox().viewRange()[0]
                         signal_name = f"{line.name()}, {stack}"
@@ -374,13 +383,28 @@ class IplotQtStatistics(QWidget):
                     # The rows correspond to the signals and their corresponding stacks
                     self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
-                    x_data = np.asarray(x_data)
-                    y_data = np.asarray(y_data)
+                    # Prefer the buffered dataset (see envelope case) so the
+                    # display decimation does not under-report; fall back to the
+                    # painted line for shapes the buffer cannot describe per
+                    # line (e.g. 2D signals drawn as one line per column).
+                    ds = signal.data_store
+                    buf_x = np.asarray(ds[0]) if len(ds) > 0 else np.asarray([])
+                    buf_y = np.asarray(ds[1]) if len(ds) > 1 else np.asarray([])
+                    use_buffer = (buf_y.ndim == 1 and buf_y.size > 0
+                                  and buf_x.size == buf_y.size)
+                    if use_buffer:
+                        x_data, y_data = buf_x, buf_y
+                        lo_d, hi_d = _window_to_data_coords(impl_plot, lo, hi)
+                    else:
+                        src_x, src_y = _line_source_data(line)
+                        x_data = np.asarray(src_x if src_x is not None else [])
+                        y_data = np.asarray(src_y if src_y is not None else [])
+                        lo_d, hi_d = lo, hi
 
                     # Filter by the visible time (X) window only (see envelope
                     # case): the Y view must not gate the sample count.
                     if (len(x_data), len(y_data)) != (0, 0):
-                        mask = (x_data >= lo) & (x_data <= hi)
+                        mask = (x_data >= lo_d) & (x_data <= hi_d)
                         y_displayed = y_data[mask]
                         samples = y_displayed.size
                     else:
@@ -424,25 +448,23 @@ class IplotQtStatistics(QWidget):
                                 x_type = 1
 
                         if len(x_displayed) > 0:
-                            first_time_raw = x_displayed[init_val].item()
-                            last_time_raw = x_displayed[end_val].item()
+                            first_time = x_displayed[init_val].item()
+                            last_time = x_displayed[end_val].item()
 
-                            # Apply inverse transformation if there's an offset
-                            if hasattr(impl_plot, '_ipl_cache_item'):
+                            # Buffer timestamps are already raw; painted-line
+                            # (fallback) and slider values follow the axis
+                            # convention and need the inverse transformation.
+                            needs_offset = (not use_buffer or isinstance(
+                                plot, (PlotXYWithSlider, PlotContourWithSlider)))
+                            if needs_offset and hasattr(impl_plot, '_ipl_cache_item'):
                                 ci = impl_plot._ipl_cache_item
                                 offset = ci.offsets.get(0, 0) if hasattr(ci, 'offsets') else 0
                                 if offset == 100_000:
-                                    first_time = first_time_raw * offset
-                                    last_time = last_time_raw * offset
+                                    first_time *= offset
+                                    last_time *= offset
                                 elif offset != 0:
-                                    first_time = first_time_raw + offset
-                                    last_time = last_time_raw + offset
-                                else:
-                                    first_time = first_time_raw
-                                    last_time = last_time_raw
-                            else:
-                                first_time = first_time_raw
-                                last_time = last_time_raw
+                                    first_time += offset
+                                    last_time += offset
                         else:
                             first_time = 0
                             last_time = 0
