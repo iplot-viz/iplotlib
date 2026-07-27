@@ -171,7 +171,7 @@ class CanvasStreamer:
         is_envelope = getattr(signal, 'envelope', False)
         if is_envelope:
             fetch = self.da.get_envelope
-            kwargs = {'nbp': _ENVELOPE_TARGET_POINTS}
+            kwargs = {'nbp': self._max_points or _ENVELOPE_TARGET_POINTS}
         else:
             fetch = self.da.get_archive_window
             kwargs = self._archive_kwargs(signal)
@@ -212,9 +212,13 @@ class CanvasStreamer:
         kwargs = {}
         if self._max_points > 0:
             kwargs['nbp'] = self._max_points
-        # Envelope buckets already cover boundaries; extremities=True crashes UDA.
+            # Keep the point budget if the server overflows into an envelope.
+            kwargs['env_nbp'] = self._max_points
+        # Extremities is the user's per-signal opt-in (table column), the same
+        # contract as the envelope column. Envelope requests omit it:
+        # extremities=True crashes UDA.
         if not (signal is not None and getattr(signal, 'envelope', False)):
-            kwargs['extremities'] = True
+            kwargs['extremities'] = bool(getattr(signal, 'extremities', False))
         return kwargs
 
     def _cut_overlap_tail(self, signal, first_ts: int):

@@ -325,6 +325,13 @@ class BackendParserBase(ABC):
         self._signal_impl_shape_lut.clear()
         self._streaming_impl_plot_lut.clear()
 
+        # A rebuild invalidates any redraw still queued for the previous canvas
+        # (e.g. a stream stopped mid-flush on import). Drop them so stale signals
+        # are not pushed onto plots that no longer exist.
+        with self._pending_signal_lock:
+            self._pending_signal_refs.clear()
+            self._signal_flush_scheduled = False
+
     def process_ipl_canvas(self, canvas: Canvas):
         """
         Prepare the implementation canvas.

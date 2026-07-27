@@ -32,10 +32,11 @@ class _FakeBuf:
 class _FakeSignal:
     """Minimal signal stub exposing only what the streamer touches."""
 
-    def __init__(self, name='sig', envelope=False, data=None, x_data=None):
+    def __init__(self, name='sig', envelope=False, extremities=False, data=None, x_data=None):
         self.name = name
         self.uid = id(self)
         self.envelope = envelope
+        self.extremities = extremities
         if data is None:
             self.data_store = [_FakeBuf([]), _FakeBuf([])]
         else:
@@ -153,21 +154,27 @@ class ArchiveKwargsTests(unittest.TestCase):
     def setUp(self):
         self.streamer = CanvasStreamer(da=None)
 
-    def test_raw_signal_without_cap_requests_extremities_only(self):
+    def test_raw_signal_extremities_follows_the_table_column(self):
         self.streamer._max_points = 0
         kwargs = self.streamer._archive_kwargs(signal=_FakeSignal(envelope=False))
+        self.assertEqual(kwargs, {'extremities': False})
+        kwargs = self.streamer._archive_kwargs(
+            signal=_FakeSignal(envelope=False, extremities=True))
         self.assertEqual(kwargs, {'extremities': True})
 
-    def test_raw_signal_with_cap_adds_nbp(self):
+    def test_raw_signal_with_cap_adds_nbp_and_envelope_budget(self):
+        # env_nbp keeps the point budget when the server overflows the raw
+        # request into an envelope, instead of the coarse default.
         self.streamer._max_points = 100
         kwargs = self.streamer._archive_kwargs(signal=_FakeSignal(envelope=False))
-        self.assertEqual(kwargs, {'nbp': 100, 'extremities': True})
+        self.assertEqual(kwargs, {'nbp': 100, 'env_nbp': 100, 'extremities': False})
 
     def test_envelope_signal_omits_extremities(self):
         # Envelope buckets already cover boundaries; extremities=True crashes UDA.
         self.streamer._max_points = 50
-        kwargs = self.streamer._archive_kwargs(signal=_FakeSignal(envelope=True))
-        self.assertEqual(kwargs, {'nbp': 50})
+        kwargs = self.streamer._archive_kwargs(
+            signal=_FakeSignal(envelope=True, extremities=True))
+        self.assertEqual(kwargs, {'nbp': 50, 'env_nbp': 50})
         self.assertNotIn('extremities', kwargs)
 
 
@@ -332,6 +339,17 @@ class EnvelopeSelectionBackfillTests(unittest.TestCase):
         self.assertEqual(fake_da.get_envelope.call_count, 1)
         fake_da.get_archive_window.assert_not_called()
         self.assertEqual(fake_da.get_envelope.call_args.kwargs['nbp'], 1920)
+
+    def test_envelope_request_uses_the_point_budget_when_set(self):
+        # The per-signal cap sizes every archive query; the coarse default is
+        # only a fallback for capless runs.
+        fake_da = MagicMock()
+        fake_da.get_envelope.return_value = self._full(ymin=[0, 1], ymax=[2, 3])
+        signal = _FakeSignal(name='var', envelope=True)
+        streamer = self._streamer(fake_da)
+        streamer._max_points = 10_000
+        streamer._archive_backfill({'ds': [signal]}, self.HOUR, MagicMock())
+        self.assertEqual(fake_da.get_envelope.call_args.kwargs['nbp'], 10_000)
 
     def test_one_request_per_signal(self):
         fake_da = MagicMock()

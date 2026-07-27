@@ -250,7 +250,8 @@ class IplotQtStatistics(QWidget):
                 x_unit = signal.data_store[0].unit
                 # Add Statistics to the table
                 if has_envelope > 0:
-                    line = line[0]
+                    curves = line
+                    line = curves[0]
 
                     # Differentiate methods
                     if isinstance(impl_plot, PlotItem):
@@ -266,9 +267,12 @@ class IplotQtStatistics(QWidget):
                     self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
                     x_data = np.asarray(x_data)
-                    y_min = np.array(signal.data_store[1])
-                    y_max = np.array(signal.data_store[2])
-                    y_mean = np.array(signal.data_store[3])
+                    # Read min/max/avg from the painted curves, not data_store:
+                    # while streaming the display decimates the curves together,
+                    # so only they are guaranteed to align with x_data.
+                    y_min = np.asarray(_line_source_data(curves[0])[1])
+                    y_max = np.asarray(_line_source_data(curves[1])[1])
+                    y_mean = np.asarray(_line_source_data(curves[2])[1])
 
                     # Filter by the visible time (X) window only: gating on the Y
                     # view zeroes the count when a flat signal is zoomed past its
@@ -281,10 +285,12 @@ class IplotQtStatistics(QWidget):
                     samples = y_mean_displayed.size
 
                     if samples > 0:
-                        # NumPy scalars → float
-                        min_val = np.min(y_min_displayed).item()
-                        avg_val = np.mean(y_mean_displayed).item()
-                        max_val = np.max(y_max_displayed).item()
+                        # NaN-aware: a streaming buffer holds a NaN sample that
+                        # breaks the line between archive and live blocks; it
+                        # must not poison the aggregates. NumPy scalars → float
+                        min_val = np.nanmin(y_min_displayed).item()
+                        avg_val = np.nanmean(y_mean_displayed).item()
+                        max_val = np.nanmax(y_max_displayed).item()
                         first = (y_min_displayed[0].item(), y_mean_displayed[0].item(), y_max_displayed[0].item())
                         last = (y_min_displayed[-1].item(), y_mean_displayed[-1].item(), y_max_displayed[-1].item())
 
@@ -349,6 +355,11 @@ class IplotQtStatistics(QWidget):
 
                 else:
                     # Base case
+                    # An envelope still awaiting its first batch has nested
+                    # artists but no envelope data yet; report its min curve
+                    # (empty -> a no-data row) instead of failing on the list.
+                    if isinstance(line, (list, tuple)):
+                        line = line[0]
                     # Differentiate methods
                     src_x, src_y = _line_source_data(line)
                     x_data = src_x if src_x is not None else []
@@ -376,10 +387,11 @@ class IplotQtStatistics(QWidget):
                         samples = 0
 
                     if samples > 0:
+                        # NaN-aware, same reason as the envelope branch above.
                         # NumPy scalars → float
-                        min_val = np.min(y_displayed).item()
-                        avg_val = np.mean(y_displayed).item()
-                        max_val = np.max(y_displayed).item()
+                        min_val = np.nanmin(y_displayed).item()
+                        avg_val = np.nanmean(y_displayed).item()
+                        max_val = np.nanmax(y_displayed).item()
                         first_val = y_displayed[0].item()
                         last_val = y_displayed[-1].item()
 
