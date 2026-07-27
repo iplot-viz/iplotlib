@@ -357,7 +357,7 @@ class CanvasStreamer:
                 self._spawn("archive-topup", self._hourly_topup)
 
     def start_stream(self, ds, varnames, callback):
-        logger.info(F"STREAM START vars={varnames} ds={ds} startSubscription={self.da.start_subscription}")
+        logger.debug(F"Subscribing to {ds} for {len(varnames)} variables: {varnames}")
         # Receiver: blocking SSE subscription loop feeding per-variable queues.
         receive_thread = self._spawn(
             "receiver", partial(self.da.start_subscription, ds, params=varnames))
