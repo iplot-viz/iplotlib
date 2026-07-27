@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from iplotlib.core.decimation import minmax_decimate
+from iplotlib.core.decimation import bucket_reduce_envelope, minmax_decimate
 
 
 class MinMaxDecimateTests(unittest.TestCase):
@@ -69,6 +69,27 @@ class MinMaxDecimateTests(unittest.TestCase):
         ox, oy = minmax_decimate(x, y, 20)
         self.assertTrue(np.array_equal(ox, x))
         self.assertTrue(np.isnan(oy[1]))
+
+    def test_output_meets_the_budget_when_ratio_is_just_above_two(self):
+        # n / pairs slightly above 2 used to ceil into 3-sized buckets and
+        # return only 2n/3 points, silently shrinking capped buffers.
+        n, pairs = 10104, 4990
+        x = np.arange(n)
+        y = np.sin(np.linspace(0, 400, n))
+        ox, oy = minmax_decimate(x, y, pairs)
+        self.assertEqual(len(ox), 2 * pairs)
+        self.assertEqual(oy.min(), y.min())
+        self.assertEqual(oy.max(), y.max())
+        self.assertTrue(np.all(np.diff(ox) >= 0))
+
+    def test_envelope_reduction_fills_the_whole_budget(self):
+        n, target = 10104, 10000
+        x = np.arange(n)
+        y = np.sin(np.linspace(0, 400, n))
+        ox, omin, omax, oavg = bucket_reduce_envelope(x, y - 1, y + 1, y, target)
+        self.assertEqual(len(ox), target)
+        self.assertTrue(np.all(omin <= oavg + 1e-9))
+        self.assertTrue(np.all(oavg <= omax + 1e-9))
 
 
 if __name__ == '__main__':
