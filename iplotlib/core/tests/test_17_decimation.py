@@ -77,10 +77,32 @@ class MinMaxDecimateTests(unittest.TestCase):
         x = np.arange(n)
         y = np.sin(np.linspace(0, 400, n))
         ox, oy = minmax_decimate(x, y, pairs)
-        self.assertEqual(len(ox), 2 * pairs)
+        self.assertGreaterEqual(len(ox), 2 * pairs)
+        self.assertLessEqual(len(ox), 2 * pairs + 2)
         self.assertEqual(oy.min(), y.min())
         self.assertEqual(oy.max(), y.max())
         self.assertTrue(np.all(np.diff(ox) >= 0))
+
+    def test_run_endpoints_are_pinned(self):
+        n = 10104
+        x = np.arange(n)
+        y = np.sin(np.linspace(0, 400, n))
+        ox, oy = minmax_decimate(x, y, 4990)
+        self.assertEqual(ox[0], x[0])
+        self.assertEqual(ox[-1], x[-1])
+
+    def test_repeated_decimation_does_not_erode_the_left_edge(self):
+        # A capped stream re-decimates history as batches arrive; without
+        # pinned endpoints and evenly spread buckets each pass ate the oldest
+        # samples and the plotted block visibly shrank from the left.
+        x = np.arange(10104, dtype=np.int64)
+        y = np.sin(np.linspace(0, 400, 10104))
+        for _ in range(300):
+            x, y = minmax_decimate(x, y, 4990)
+            new_x = np.arange(x[-1] + 1, x[-1] + 31, dtype=np.int64)
+            x = np.concatenate([x, new_x])
+            y = np.concatenate([y, np.zeros(30)])
+        self.assertEqual(x[0], 0)
 
     def test_envelope_reduction_fills_the_whole_budget(self):
         n, target = 10104, 10000
@@ -90,6 +112,20 @@ class MinMaxDecimateTests(unittest.TestCase):
         self.assertEqual(len(ox), target)
         self.assertTrue(np.all(omin <= oavg + 1e-9))
         self.assertTrue(np.all(oavg <= omax + 1e-9))
+
+    def test_repeated_envelope_reduction_keeps_the_left_stamp(self):
+        x = np.arange(10104, dtype=np.int64)
+        lo = np.zeros(10104)
+        hi = np.ones(10104)
+        avg = np.full(10104, 0.5)
+        for _ in range(300):
+            x, lo, hi, avg = bucket_reduce_envelope(x, lo, hi, avg, 10000)
+            new_x = np.arange(x[-1] + 1, x[-1] + 31, dtype=np.int64)
+            x = np.concatenate([x, new_x])
+            lo = np.concatenate([lo, np.zeros(30)])
+            hi = np.concatenate([hi, np.ones(30)])
+            avg = np.concatenate([avg, np.full(30, 0.5)])
+        self.assertEqual(x[0], 0)
 
 
 if __name__ == '__main__':

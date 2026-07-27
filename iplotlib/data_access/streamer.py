@@ -270,7 +270,9 @@ class CanvasStreamer:
             return False
         x, y, y_min, y_max = self._current_arrays(signal)
         n = len(x)
-        if n <= self._max_points:
+        # Slack keeps the cap from re-decimating the history on every live
+        # batch: each pass costs CPU and re-reduces already-reduced samples.
+        if n <= self._max_points + self._max_points // 50:
             return False
         x = np.asarray(x)
         y = np.asarray(y)
@@ -281,14 +283,16 @@ class CanvasStreamer:
         tail = int(np.searchsorted(x, int(x[-1]) - _live_retention_s() * int(1e9),
                                    side='left'))
         budget = self._max_points - (n - tail)
-        if tail > 0 and budget > 4:
+        if tail > 0 and budget > 8:
             if y_min is not None:
                 hx, hmin, hmax, havg = bucket_reduce_envelope(
                     x[:tail], y_min[:tail], y_max[:tail], y[:tail], budget)
                 y_min = np.concatenate([hmin, y_min[tail:]])
                 y_max = np.concatenate([hmax, y_max[tail:]])
             else:
-                hx, havg = minmax_decimate(x[:tail], y[:tail], budget // 2)
+                # A couple of pairs under budget leaves room for the pinned
+                # run endpoints, so the trailing hard trim stays a no-op.
+                hx, havg = minmax_decimate(x[:tail], y[:tail], budget // 2 - 3)
             x = np.concatenate([hx, x[tail:]])
             y = np.concatenate([havg, y[tail:]])
 

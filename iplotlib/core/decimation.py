@@ -3,63 +3,47 @@
 import numpy as np
 
 
-def _bucket_edges(n, buckets):
-    """Split ``n`` samples into exactly ``buckets`` contiguous buckets: the
-    first ``n % buckets`` take one extra sample, so no sample is left over. A
-    ceil-sized reshape instead would yield far fewer buckets when ``n/buckets``
-    sits just above an integer (e.g. 2.02 -> 3-sized buckets -> 2/3 of the
-    requested output), silently shrinking capped streaming buffers."""
-    size = n // buckets
-    rem = n % buckets
-    return size, rem, (size + 1) * rem
-
-
-def _minmax_reduce_block(x, y, bucket):
-    rows = len(x) // bucket
-    x_arr = x.reshape(rows, bucket)
-    y_arr = y.reshape(rows, bucket)
-    r = np.arange(rows)
-    argmin = np.argmin(y_arr, axis=1)
-    argmax = np.argmax(y_arr, axis=1)
-    return (x_arr[r, argmin], y_arr[r, argmin],
-            x_arr[r, argmax], y_arr[r, argmax])
+def _even_bucket_ids(n, buckets):
+    """Bucket id per sample, sizes differing by at most one and the larger
+    buckets spread evenly across the run. Front-loading the larger buckets
+    would concentrate every re-decimation's losses on the oldest samples and
+    visibly erode the left edge of a capped streaming buffer."""
+    return (np.arange(n, dtype=np.intp) * buckets) // n
 
 
 def _minmax_decimate_finite(x, y, target_pairs):
-    """Reduce a NaN-free run to ``2 * target_pairs`` argmin/argmax pairs,
-    preserving extremes at their true coordinates."""
+    """Reduce a NaN-free run to one argmin/argmax pair per bucket with the
+    run's endpoints pinned, preserving extremes at their true coordinates.
+    Pinning the endpoints keeps repeated re-decimation of a capped stream from
+    eroding its edges one sample at a time."""
     n = len(x)
     if target_pairs <= 0 or n <= 2 * target_pairs:
         return x, y
     x = np.asarray(x)
     y = np.asarray(y)
-    size, rem, split = _bucket_edges(n, target_pairs)
-    blocks = []
-    if rem:
-        blocks.append(_minmax_reduce_block(x[:split], y[:split], size + 1))
-    if n > split:
-        blocks.append(_minmax_reduce_block(x[split:], y[split:], size))
-    x_min = np.concatenate([b[0] for b in blocks])
-    y_min = np.concatenate([b[1] for b in blocks])
-    x_max = np.concatenate([b[2] for b in blocks])
-    y_max = np.concatenate([b[3] for b in blocks])
-    pairs = len(x_min)
-    min_first = x_min <= x_max
-    out_x = np.empty(2 * pairs, dtype=x_min.dtype)
-    out_y = np.empty(2 * pairs, dtype=y_min.dtype)
-    out_x[0::2] = np.where(min_first, x_min, x_max)
-    out_y[0::2] = np.where(min_first, y_min, y_max)
-    out_x[1::2] = np.where(min_first, x_max, x_min)
-    out_y[1::2] = np.where(min_first, y_max, y_min)
-    return out_x, out_y
+    bucket = _even_bucket_ids(n, target_pairs)
+    order = np.lexsort((y, bucket))
+    bounds = np.searchsorted(bucket[order],
+                             np.arange(target_pairs + 1, dtype=np.intp))
+    argmin = order[bounds[:-1]]
+    argmax = order[bounds[1:] - 1]
+    idx = np.empty(2 * target_pairs, dtype=np.intp)
+    idx[0::2] = np.minimum(argmin, argmax)
+    idx[1::2] = np.maximum(argmin, argmax)
+    if idx[0] != 0:
+        idx = np.concatenate((np.zeros(1, dtype=np.intp), idx))
+    if idx[-1] != n - 1:
+        idx = np.append(idx, n - 1)
+    return x[idx], y[idx]
 
 
 def minmax_decimate(x, y, target_pairs):
-    """Reduce to at most ``2 * target_pairs`` points: one argmin/argmax pair
-    per bucket, preserving extremes at their true coordinates. NaN samples mark
-    line breaks (e.g. the archive/live seam): each finite run is reduced on its
-    own with a share of the budget and the gaps are kept, so a break is never
-    bridged nor allowed to poison a bucket's argmin/argmax."""
+    """Reduce to about ``2 * target_pairs`` points (plus pinned run endpoints):
+    one argmin/argmax pair per bucket, preserving extremes at their true
+    coordinates. NaN samples mark line breaks (e.g. the archive/live seam):
+    each finite run is reduced on its own with a share of the budget and the
+    gaps are kept, so a break is never bridged nor allowed to poison a bucket's
+    argmin/argmax."""
     n = len(x)
     if target_pairs <= 0 or n <= 2 * target_pairs:
         return x, y
@@ -95,17 +79,11 @@ def minmax_decimate(x, y, target_pairs):
     return np.concatenate(out_x), np.concatenate(out_y)
 
 
-def _envelope_reduce_block(x, y_min, y_max, y_avg, bucket):
-    rows = len(x) // bucket
-    return (x.reshape(rows, bucket)[:, -1],
-            y_min.reshape(rows, bucket).min(axis=1),
-            y_max.reshape(rows, bucket).max(axis=1),
-            y_avg.reshape(rows, bucket).mean(axis=1))
-
-
 def bucket_reduce_envelope(x, y_min, y_max, y_avg, target_points):
     """Reduce envelope buffers to ``target_points``: per-bucket min of dmin,
-    max of dmax and mean of davg, stamped at the bucket's last timestamp."""
+    max of dmax and mean of davg, stamped at the bucket's last timestamp. The
+    first bucket keeps its first timestamp instead, so repeated re-decimation
+    of a capped stream cannot creep the left edge to the right."""
     n = len(x)
     if target_points <= 0 or n <= target_points:
         return x, y_min, y_max, y_avg
@@ -113,12 +91,12 @@ def bucket_reduce_envelope(x, y_min, y_max, y_avg, target_points):
     y_min = np.asarray(y_min)
     y_max = np.asarray(y_max)
     y_avg = np.asarray(y_avg)
-    size, rem, split = _bucket_edges(n, target_points)
-    blocks = []
-    if rem:
-        blocks.append(_envelope_reduce_block(
-            x[:split], y_min[:split], y_max[:split], y_avg[:split], size + 1))
-    if n > split:
-        blocks.append(_envelope_reduce_block(
-            x[split:], y_min[split:], y_max[split:], y_avg[split:], size))
-    return tuple(np.concatenate([b[i] for b in blocks]) for i in range(4))
+    bucket = _even_bucket_ids(n, target_points)
+    starts = np.searchsorted(bucket, np.arange(target_points, dtype=np.intp))
+    counts = np.diff(np.append(starts, n))
+    out_x = x[np.append(starts[1:], n) - 1]
+    out_x[0] = x[0]
+    out_min = np.minimum.reduceat(y_min, starts)
+    out_max = np.maximum.reduceat(y_max, starts)
+    out_avg = np.add.reduceat(y_avg, starts) / counts
+    return out_x, out_min, out_max, out_avg
