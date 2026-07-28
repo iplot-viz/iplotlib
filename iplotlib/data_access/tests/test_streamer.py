@@ -89,26 +89,38 @@ class ApplyCapTests(unittest.TestCase):
         self.streamer._apply_cap(signal)
         signal.inject_external.assert_not_called()
 
-    def test_drops_oldest_when_raw_tail_fills_the_cap(self):
-        # Timestamps within live_retention of the newest one are all raw.
+    def test_safety_trim_beyond_twice_the_cap(self):
+        # The local trim is a safety valve only: it fires past 2x the cap
+        # (refresh delayed / archive unavailable) and keeps the newest cap.
         self.streamer._max_points = 2
         signal = _FakeSignal(
-            data=[_FakeBuf([1, 2, 3, 4]), _FakeBuf([10, 20, 30, 40])])
+            data=[_FakeBuf([1, 2, 3, 4, 5]), _FakeBuf([10, 20, 30, 40, 50])])
         self.streamer._apply_cap(signal)
         signal.inject_external.assert_called_once()
         kwargs = signal.inject_external.call_args.kwargs
         self.assertFalse(kwargs['append'])
-        self.assertEqual(list(kwargs['d0']), [3, 4])
-        self.assertEqual(list(kwargs['d1']), [30, 40])
+        self.assertEqual(list(kwargs['d0']), [4, 5])
+        self.assertEqual(list(kwargs['d1']), [40, 50])
+
+    def test_no_trim_between_cap_and_twice_the_cap(self):
+        # Between the cap and 2x, the buffer is left intact: enforcing the
+        # cap there is the refresh worker's job (archive re-ask), because a
+        # local drop-oldest would eat multi-second archive buckets for
+        # single-second live samples and visibly shrink the window.
+        self.streamer._max_points = 2
+        signal = _FakeSignal(
+            data=[_FakeBuf([1, 2, 3, 4]), _FakeBuf([10, 20, 30, 40])])
+        self.assertFalse(self.streamer._apply_cap(signal))
+        signal.inject_external.assert_not_called()
+        self.assertTrue(self.streamer._over_cap(signal))
 
     def test_drops_oldest_without_decimating(self):
-        # mint#78 point 5: over the cap we DROP points (no local
-        # decimation); the refresh worker restores the older span from
-        # the archive at the point budget.
+        # mint#78 point 5: over the (safety) threshold we DROP points, no
+        # local decimation; the refresh restores the window from archive.
         self.streamer._max_points = 1000
         sec = int(1e9)
-        x = np.arange(2000) * sec
-        y = np.arange(2000, dtype=float)
+        x = np.arange(2500) * sec
+        y = np.arange(2500, dtype=float)
         signal = _FakeSignal(data=[_FakeBuf(x), _FakeBuf(y)])
         self.streamer._apply_cap(signal)
         kwargs = signal.inject_external.call_args.kwargs
@@ -123,11 +135,11 @@ class ApplyCapTests(unittest.TestCase):
         self.streamer._max_points = 3
         signal = _FakeSignal(data=[_FakeBuf([1, 2, 3]), _FakeBuf([10, 20, 30])])
         self.assertFalse(self.streamer._apply_cap(signal))
-        self.streamer._max_points = 2
+        self.streamer._max_points = 1
         self.assertTrue(self.streamer._apply_cap(signal))
 
     def test_caps_envelope_buffers_by_dropping_oldest(self):
-        self.streamer._max_points = 500
+        self.streamer._max_points = 400
         sec = int(1e9)
         x = np.arange(1000) * sec
         y_min = np.arange(1000, dtype=float)
@@ -139,12 +151,12 @@ class ApplyCapTests(unittest.TestCase):
                   _FakeBuf(y_avg)])
         self.streamer._apply_cap(signal)
         kwargs = signal.inject_external.call_args.kwargs
-        self.assertEqual(len(kwargs['d0']), 500)
-        # Newest 500 kept verbatim across all four buffers.
-        self.assertEqual(list(np.asarray(kwargs['d0'])), list(x[-500:]))
-        self.assertEqual(list(np.asarray(kwargs['d1'])), list(y_min[-500:]))
-        self.assertEqual(list(np.asarray(kwargs['d2'])), list(y_max[-500:]))
-        self.assertEqual(list(np.asarray(kwargs['d3'])), list(y_avg[-500:]))
+        self.assertEqual(len(kwargs['d0']), 400)
+        # Newest 400 kept verbatim across all four buffers.
+        self.assertEqual(list(np.asarray(kwargs['d0'])), list(x[-400:]))
+        self.assertEqual(list(np.asarray(kwargs['d1'])), list(y_min[-400:]))
+        self.assertEqual(list(np.asarray(kwargs['d2'])), list(y_max[-400:]))
+        self.assertEqual(list(np.asarray(kwargs['d3'])), list(y_avg[-400:]))
 
 
 class ArchiveKwargsTests(unittest.TestCase):
@@ -412,26 +424,29 @@ class WindowRefreshTests(unittest.TestCase):
                          self.WINDOW - 120 * self.SEC)
         self.assertEqual(kwargs['nbp'], 10000)
 
-    def test_keeps_live_tail_and_replaces_older_span(self):
+    def test_keeps_live_newer_than_archive_end_and_replaces_the_rest(self):
         now_ns = int(time.time() * 1e9)
         boundary_ns = now_ns - 120 * self.SEC
-        # Buffer: one stale live sample well before the boundary (should be
-        # replaced by archive) and two fresh ones after it (kept).
-        stale = boundary_ns - 600 * self.SEC
-        fresh1 = boundary_ns + 10 * self.SEC
-        fresh2 = boundary_ns + 20 * self.SEC
+        # Archive last sample is 500 s BEHIND the theoretical boundary
+        # (archiver lagging more than live_retention). Live samples between
+        # the archive's real end and the boundary must be KEPT, not lost.
         arch1 = boundary_ns - 1000 * self.SEC
         arch2 = boundary_ns - 500 * self.SEC
+        stale = boundary_ns - 600 * self.SEC   # covered by archive: replaced
+        lagged = boundary_ns - 100 * self.SEC  # after archive end: kept
+        fresh1 = boundary_ns + 10 * self.SEC   # inside retention: kept
+        fresh2 = boundary_ns + 20 * self.SEC
         reply = _FakeArchiveResponse(x=[arch1, arch2], y=[1.0, 2.0])
         streamer, fake_da, signal = self._mk(
             reply,
-            data=[_FakeBuf([stale, fresh1, fresh2]),
-                  _FakeBuf([-1.0, 3.0, 4.0])])
+            data=[_FakeBuf([stale, lagged, fresh1, fresh2]),
+                  _FakeBuf([-1.0, 2.5, 3.0, 4.0])])
         streamer._refresh_signal('ds', signal)
         kwargs = signal.inject_external.call_args.kwargs
         self.assertFalse(kwargs['append'])
-        self.assertEqual(list(kwargs['d0']), [arch1, arch2, fresh1, fresh2])
-        self.assertEqual(list(kwargs['d1']), [1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(list(kwargs['d0']),
+                         [arch1, arch2, lagged, fresh1, fresh2])
+        self.assertEqual(list(kwargs['d1']), [1.0, 2.0, 2.5, 3.0, 4.0])
         self.assertTrue(signal._streaming_has_live)
         streamer._callback.assert_called_once_with(signal)
 

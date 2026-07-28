@@ -267,20 +267,31 @@ class CanvasStreamer:
                 m_min[sel] if m_min is not None else None,
                 m_max[sel] if m_max is not None else None)
 
+    def _over_cap(self, signal):
+        """True when the buffer exceeds the cap (with slack): the caller
+        should mark the signal for a refresh, which enforces the cap by
+        re-asking the archive at the point budget and dropping the rest.
+        Caller must hold _signal_lock."""
+        if self._max_points <= 0:
+            return False
+        x, _, _, _ = self._current_arrays(signal)
+        return len(x) > self._max_points + self._max_points // 50
+
     def _apply_cap(self, signal):
-        """Honour the per-signal cap the way the mint#78 algorithm specifies:
-        "we need to keep a buffer of 10k points so if more we drop points".
-        The newest ``max_points`` samples are kept, the oldest dropped, with
-        no local decimation: restoring the older span at the point budget is
-        the refresh worker's job (one archive call for the whole window).
-        Caller must hold _signal_lock. Returns True when samples were
-        dropped; the caller should then mark the signal for a refresh."""
+        """Safety valve only: the regular cap enforcement is the refresh
+        (drop + ONE archive re-ask for the whole window at the budget, per
+        the mint#78 point-5 algorithm). Trimming the oldest locally on every
+        overflow instead would eat the coarse archive buckets far faster
+        than real time — each dropped live second costs one multi-second
+        bucket off the left edge, visibly shrinking the window — so the
+        local trim only kicks in beyond twice the cap (refresh delayed or
+        archive unavailable) to bound memory. Caller must hold _signal_lock.
+        Returns True when samples were dropped."""
         if self._max_points <= 0:
             return False
         x, y, y_min, y_max = self._current_arrays(signal)
         n = len(x)
-        # Slack keeps the cap from rewriting the buffer on every live batch.
-        if n <= self._max_points + self._max_points // 50:
+        if n <= 2 * self._max_points:
             return False
         k = self._max_points
         x = np.asarray(x)[-k:]
@@ -460,8 +471,10 @@ class CanvasStreamer:
                     # Flag the plotted signal, not the carrier: the streaming
                     # reprocess path never aggregates children's flags.
                     signal.isDownsampled = True
-                    # Points were dropped: ask the refresh worker to restore
-                    # the older span from the archive at the point budget.
+                if self._over_cap(carrier):
+                    # Over budget: the refresh worker enforces the cap by
+                    # re-asking the archive for the whole window at the
+                    # point budget and keeping the newest live span.
                     self._mark_refresh(signal)
                 if carrier is not signal:
                     # Reprocess while still holding the carrier's lock. The
@@ -552,6 +565,7 @@ class CanvasStreamer:
             carrier.inject_external(append=False, **payload)
             if self._apply_cap(carrier):
                 signal.isDownsampled = True
+            if self._over_cap(carrier):
                 self._mark_refresh(signal)
             signal._streaming_has_live = True
             if carrier is not signal:
@@ -611,12 +625,17 @@ class CanvasStreamer:
 
     def _refresh_signal(self, ds: str, signal):
         """One archive call for the whole window ``[now - window,
-        now - live_retention]`` at the point budget; the newest
-        ``live_retention`` span is kept from the live buffer because the
-        archiver lags the live feed by about that much — querying it would
-        return holes. The two blocks meet at the boundary, so no NaN break
-        is inserted here (unlike the first fill, where the archive genuinely
-        ends behind the first live sample)."""
+        now - live_retention]`` at the point budget. The live buffer keeps
+        every sample NEWER than the archive's actual last sample: the
+        archiver nominally lags live by ~live_retention, but it can lag far
+        more (processed/downsampled streams are written in blocks), and
+        keeping only the theoretical newest-2-minutes span would silently
+        discard everything between the archive's real end and that boundary
+        — the newest chunks would vanish on every refresh. Anchoring the
+        keep-boundary at the archive's own last timestamp loses nothing
+        regardless of the actual lag. No NaN break is inserted here: the
+        two blocks meet at that timestamp (unlike the first fill, where the
+        archive genuinely ends behind the first live sample)."""
         carrier = self._carrier(signal)
         now_ns = int(time.time() * 1e9)
         boundary_ns = now_ns - _live_retention_s() * int(1e9)
@@ -632,15 +651,18 @@ class CanvasStreamer:
 
         new_x = np.asarray(ax)
         new_y = np.asarray(ay)
+        # Live samples strictly after the archive's real end are kept; the
+        # archive replaces everything it actually covers.
+        keep_after_ns = int(new_x[-1])
         with self._signal_lock(carrier):
             cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(carrier)
-            keep_mask = (np.asarray(cur_x) >= boundary_ns) if len(cur_x) \
+            keep_mask = (np.asarray(cur_x) > keep_after_ns) if len(cur_x) \
                 else np.zeros(0, dtype=bool)
             kept_x = np.asarray(cur_x)[keep_mask]
             kept_y = np.asarray(cur_y)[keep_mask]
 
-            # Archive first + stable sort + keep-last: on a timestamp
-            # collision at the boundary the live sample wins.
+            # Disjoint by construction (archive <= keep_after < live tail),
+            # so a plain concatenation is already chronological.
             mx = np.concatenate([new_x, kept_x])
             my = np.concatenate([new_y, kept_y])
             merged_ymin = merged_ymax = None
@@ -653,16 +675,6 @@ class CanvasStreamer:
                 new_ymax = np.asarray(ay_max) if ay_max is not None else new_y
                 merged_ymin = np.concatenate([new_ymin, kept_ymin])
                 merged_ymax = np.concatenate([new_ymax, kept_ymax])
-            if len(mx) > 1:
-                order = np.argsort(mx, kind='stable')
-                keep = np.empty(len(order), dtype=bool)
-                keep[-1] = True
-                keep[:-1] = mx[order][1:] > mx[order][:-1]
-                sel = order[keep]
-                mx, my = mx[sel], my[sel]
-                if is_env:
-                    merged_ymin = merged_ymin[sel]
-                    merged_ymax = merged_ymax[sel]
 
             payload = self._make_payload(
                 carrier, mx, my,
@@ -670,7 +682,8 @@ class CanvasStreamer:
                 xunit=xunit, yunit=yunit,
             )
             carrier.inject_external(append=False, **payload)
-            self._apply_cap(carrier)
+            # No cap trim here: the refresh result IS the cap (10k archive
+            # points + the newest live span, per the point-5 contract).
             signal._streaming_has_live = True
             if carrier is not signal:
                 # See handler(): keep the reprocess read inside the carrier's
