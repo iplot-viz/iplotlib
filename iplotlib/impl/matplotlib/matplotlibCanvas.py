@@ -6,6 +6,7 @@ import pandas
 import gc
 import numpy as np
 import matplotlib as mpl
+import matplotlib.style as mplstyle
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis, XAxis
 from matplotlib.axis import Axis as MPLAxis
@@ -21,6 +22,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
+from iplotlib.core.decimation import minmax_decimate
 from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
@@ -45,8 +47,13 @@ STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre"
             "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
 
 
-# mpl.rcParams['path.simplify'] = True
-# mpl.rcParams['path.simplify_threshold'] = 1.0
+# Performance defaults for dense line plots (path.simplify, simplify_threshold, chunksize).
+mplstyle.use('fast')
+
+# Above this point count, streamed lines are rendered via per-bucket min/max
+# decimation so the visible line preserves extremes at viewport resolution.
+_STREAM_DECIMATE_THRESHOLD = 4000
+_STREAM_DECIMATE_TARGET_PAIRS = 2000
 
 
 class MatplotlibParser(BackendParserBase):
@@ -59,6 +66,7 @@ class MatplotlibParser(BackendParserBase):
         """Initialize underlying matplotlib classes.
         """
         # Initialize before super().__init__() because it calls clear() via process_ipl_canvas
+        self._tight_layout_requested = tight_layout
         self.map_legend_to_ax = {}
         self._legend_signal_lut = {}  # legend_line -> Signal
         self.legend_size = 8
@@ -111,8 +119,14 @@ class MatplotlibParser(BackendParserBase):
             logger.warning(f"legend_downsampled_signal: line for signal {signal.label} not found on axes; skipping")
             return
         pos = valid_lines.index(plot_lines)
-        legend_label = legend.get_texts()[pos]
-        legend_text = legend.get_texts()[pos].get_text()
+        texts = legend.get_texts()
+        if pos >= len(texts):
+            # Axes lines and legend entries can briefly disagree mid-rebuild
+            # (more drawn lines than legend labels); skip rather than index past
+            # the end.
+            return
+        legend_label = texts[pos]
+        legend_text = texts[pos].get_text()
 
         if legend_text.endswith('*') and not signal.isDownsampled:
             legend_label.set_text(legend_text[:-1])
@@ -260,6 +274,11 @@ class MatplotlibParser(BackendParserBase):
 
         self.figure.canvas.draw_idle()
 
+    def refresh_streaming_legend(self, impl_plot: MPLAxes, plot: Plot):
+        # matplotlib builds the legend once, so an envelope drawn on its first
+        # streaming batch is absent until the legend is rebuilt from the axes.
+        self.rebuild_legend(impl_plot, plot)
+
     def register_dynamic_signal(self, impl_plot: MPLAxes, plot: Plot, signal):
         """Register a dynamically added signal and update legend."""
         import weakref
@@ -289,38 +308,105 @@ class MatplotlibParser(BackendParserBase):
         """
         Updates the X and Y view ranges of the Axes based on the most recent data received from the Streaming
         """
+        if self.figure.get_tight_layout():
+            # Per-flush tight layout dominates draw cost: fit margins once and freeze them.
+            try:
+                self.figure.tight_layout()
+            except Exception:
+                logger.debug("tight_layout failed; freezing current margins")
+            self.disable_tight_layout()
+
         ax_window = impl_plot.get_xlim()[1] - impl_plot.get_xlim()[0]
 
         # Time window
         now = int(datetime.now().timestamp() * 1e9)
         min_time = now - int(ax_window)
 
-        all_y_data = []
+        y_chunks = []
         for signal_ref in cache_item.signals:
             signal = signal_ref()
-            if signal.lines[0].get_visible() and len(signal.x_data) > 0:
-                mask = (signal.x_data >= min_time) & (signal.x_data <= now)
-                all_y_data.extend(signal.y_data[mask])
+            # An envelope awaiting its first streaming batch has no lines yet;
+            # there is nothing to scale from until it is drawn.
+            if signal is None or not signal.lines:
+                continue
+            is_envelope = getattr(signal, 'envelope', False)
+            # Envelope signal.lines is nested [[line_min, line_max, line_avg, area]].
+            first_artist = signal.lines[0][0] if is_envelope else signal.lines[0]
+            if not first_artist.get_visible():
+                continue
+            # Snapshot x/y once: the receiver thread can update them between reads.
+            x_data = signal.x_data
+            y_lo = signal.y_data
+            y_hi = signal.z_data if is_envelope else y_lo
+            n = min(len(x_data), len(y_lo), len(y_hi))
+            if n == 0:
+                continue
+            x_data = x_data[:n]
+            y_lo = y_lo[:n]
+            mask = (x_data >= min_time) & (x_data <= now)
+            inside = y_lo[mask]
+            if inside.size:
+                y_chunks.append(inside)
+            if is_envelope:
+                inside_hi = y_hi[:n][mask]
+                if inside_hi.size:
+                    y_chunks.append(inside_hi)
+            # Keep the projected constant line on screen when nothing falls inside the window.
+            if not mask.any() and getattr(signal, '_streaming_has_live', False):
+                y_chunks.append(np.array([y_lo[-1]]))
+                if is_envelope:
+                    y_chunks.append(np.array([y_hi[-1]]))
 
-        if all_y_data:
-            y_max = np.nanmax(all_y_data).item()
-            y_min = np.nanmin(all_y_data).item()
-            if y_max == y_min:
-                diff = y_max * 0.05
+        # Sticky Y: re-fit only on out-of-range data or sustained underuse (regime change).
+        if y_chunks:
+            y_concat = np.concatenate(y_chunks)
+            y_max = np.nanmax(y_concat).item()
+            y_min = np.nanmin(y_concat).item()
+            cur_lo, cur_hi = impl_plot.get_ylim()
+            uninit = cur_hi <= cur_lo
+            data_range = y_max - y_min
+            view_range = cur_hi - cur_lo
+            if uninit or y_min < cur_lo or y_max > cur_hi:
+                # Wider initial margin (50%) absorbs early-batch underestimation.
+                margin = 0.5 if uninit else 0.2
+                if data_range == 0:
+                    pad = abs(y_max) * margin if y_max != 0 else 0.1
+                else:
+                    pad = data_range * margin
+                new_lo = (y_min if uninit else min(y_min, cur_lo)) - pad
+                new_hi = (y_max if uninit else max(y_max, cur_hi)) + pad
+                impl_plot.set_ylim(new_lo, new_hi)
+                impl_plot._sticky_y_underuse = 0
+            elif view_range > 0 and data_range / view_range < 0.3:
+                streak = getattr(impl_plot, '_sticky_y_underuse', 0) + 1
+                if streak >= 5:
+                    pad = data_range * 0.2 if data_range > 0 else (abs(y_max) * 0.05 if y_max != 0 else 0.1)
+                    impl_plot.set_ylim(y_min - pad, y_max + pad)
+                    impl_plot._sticky_y_underuse = 0
+                else:
+                    impl_plot._sticky_y_underuse = streak
             else:
-                diff = (y_max - y_min) * 0.1
-            impl_plot.set_ylim(y_min - diff, y_max + diff)
+                impl_plot._sticky_y_underuse = 0
 
+        # X: skip set_xlim when the shift is sub-pixel.
         begin = self.transform_value(impl_plot, 0, min_time, inverse=True)
         end = self.transform_value(impl_plot, 0, now, inverse=True)
-        impl_plot.set_xlim(begin, end)
+        cur_begin, cur_end = impl_plot.get_xlim()
+        if cur_end <= cur_begin:
+            impl_plot.set_xlim(begin, end)
+        else:
+            px_per_data = impl_plot.bbox.width / (cur_end - cur_begin)
+            if abs(end - cur_end) * px_per_data >= 1.0:
+                impl_plot.set_xlim(begin, end)
 
     def set_line_data(self, line: Line2D, x_data, y_data):
         """
-        Set the data for a Line2D
+        Set the data for a Line2D atomically (single cache invalidation).
         """
-        line.set_xdata(x=x_data)
-        line.set_ydata(y=y_data)
+        if self.canvas.streaming and len(x_data) > _STREAM_DECIMATE_THRESHOLD:
+            x_data, y_data = minmax_decimate(
+                x_data, y_data, _STREAM_DECIMATE_TARGET_PAIRS)
+        line.set_data(x_data, y_data)
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
         return draw_fn(x_data, y_data, **style)
@@ -530,6 +616,11 @@ class MatplotlibParser(BackendParserBase):
 
     def clear(self):
         super().clear()
+
+        # Undo the streaming-time layout freeze on rebuild.
+        if getattr(self, 'figure', None) is not None and self._tight_layout_requested \
+                and not self.figure.get_tight_layout():
+            self.enable_tight_layout()
 
         # remove any active multi‑cursors
         for c in self._cursors:
@@ -915,7 +1006,16 @@ class MatplotlibParser(BackendParserBase):
                     legend_lines = leg.get_lines()
                     ix_legend = 0
                     for signal in signals:
-                        for line in self._signal_impl_shape_lut.get(id(signal)):
+                        # A signal not drawn yet (e.g. an envelope awaiting its
+                        # first streaming batch) has no shapes and no legend
+                        # entry; skip it so the mapping stays aligned instead of
+                        # iterating over None.
+                        shapes = self._signal_impl_shape_lut.get(id(signal))
+                        if not shapes:
+                            continue
+                        for line in shapes:
+                            if ix_legend >= len(legend_lines):
+                                break
                             self.map_legend_to_ax[legend_lines[ix_legend]] = line
                             self._legend_signal_lut[legend_lines[ix_legend]] = signal
                             alpha = 1 if legend_lines[ix_legend].get_visible() else 0.2
@@ -1558,7 +1658,13 @@ class MatplotlibParser(BackendParserBase):
             label_props['color'] = fc
         if fs and fs > 0:
             label_props['fontsize'] = fs
-        self.get_impl_y_axis(impl_plot).set_label_text(text, **label_props)
+        y_axis = self.get_impl_y_axis(impl_plot)
+        if self._tight_layout_requested and not self.figure.get_tight_layout() \
+                and y_axis.get_label_text() != text:
+            # Stream units arrive after the layout freeze in do_impl_streaming;
+            # refit once so the new label gets its own margin space.
+            self.enable_tight_layout()
+        y_axis.set_label_text(text, **label_props)
 
     def transform_value(self, impl_plot: Any, ax_idx: int, value: Any, inverse=False):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to

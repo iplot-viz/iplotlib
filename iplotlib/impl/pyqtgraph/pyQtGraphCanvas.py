@@ -17,6 +17,7 @@ from pyqtgraph.Qt.QtWidgets import QSlider, QHBoxLayout, QVBoxLayout, QLabel, QW
 from pyqtgraph import TextItem
 
 from iplotLogging import setupLogger
+from iplotlib.core.decimation import minmax_decimate
 from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
@@ -54,6 +55,11 @@ IPLOT_PYQTGRAPH_OPENGL = os.environ.get('IPLOT_PYQTGRAPH_OPENGL', "").lower()
 use_open_gl = IPLOT_PYQTGRAPH_OPENGL in ("1", "true", "yes") if IPLOT_PYQTGRAPH_OPENGL else False
 
 pg.setConfigOptions(antialias=True, useOpenGL=use_open_gl)
+
+# Above this point count, streamed lines are rendered via per-bucket min/max
+# decimation so the visible line preserves extremes at viewport resolution.
+_STREAM_DECIMATE_THRESHOLD = 4000
+_STREAM_DECIMATE_TARGET_PAIRS = 2000
 
 
 class _AlphaColorMeshItem(PColorMeshItem):
@@ -306,7 +312,10 @@ class PyQtGraphParser(BackendParserBase):
             marker_line.setSymbol(symbol or None)
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
-        line = draw_fn(x=x_data, y=y_data, **style)
+        # connect='finite' breaks the line at NaN samples (e.g. the archive/live
+        # seam while streaming) instead of drawing across them; pyqtgraph's
+        # default connects every point and would corrupt the curve.
+        line = draw_fn(x=x_data, y=y_data, connect='finite', **style)
         return [line]
 
     def create_plot_lines_2D(self, draw_fn, signal, x_data, y_data, style):
@@ -342,16 +351,45 @@ class PyQtGraphParser(BackendParserBase):
         now = int(datetime.now().timestamp() * 1e9)
         min_time = now - int(ax_window)
 
-        all_y_data = []
+        y_chunks = []
         for signal_ref in cache_item.signals:
             signal = signal_ref()
-            if signal.lines[0].isVisible() and len(signal.x_data) > 0:
-                mask = (signal.x_data >= min_time) & (signal.x_data <= now)
-                all_y_data.extend(signal.y_data[mask])
+            # An envelope awaiting its first streaming batch has no lines yet;
+            # there is nothing to scale from until it is drawn.
+            if signal is None or not signal.lines:
+                continue
+            is_envelope = getattr(signal, 'envelope', False)
+            # Envelope signal.lines is nested [[curve_min, curve_max, curve_avg, area]].
+            first_artist = signal.lines[0][0] if is_envelope else signal.lines[0]
+            if not first_artist.isVisible():
+                continue
+            # Snapshot x/y once: the receiver thread can update them between reads.
+            x_data = signal.x_data
+            y_lo = signal.y_data
+            y_hi = signal.z_data if is_envelope else y_lo
+            n = min(len(x_data), len(y_lo), len(y_hi))
+            if n == 0:
+                continue
+            x_data = x_data[:n]
+            y_lo = y_lo[:n]
+            mask = (x_data >= min_time) & (x_data <= now)
+            inside = y_lo[mask]
+            if inside.size:
+                y_chunks.append(inside)
+            if is_envelope:
+                inside_hi = y_hi[:n][mask]
+                if inside_hi.size:
+                    y_chunks.append(inside_hi)
+            # Keep the projected constant line on screen when nothing falls inside the window.
+            if not mask.any() and getattr(signal, '_streaming_has_live', False):
+                y_chunks.append(np.array([y_lo[-1]]))
+                if is_envelope:
+                    y_chunks.append(np.array([y_hi[-1]]))
 
-        if all_y_data:
-            y_max = np.nanmax(all_y_data).item()
-            y_min = np.nanmin(all_y_data).item()
+        if y_chunks:
+            y_concat = np.concatenate(y_chunks)
+            y_max = np.nanmax(y_concat).item()
+            y_min = np.nanmin(y_concat).item()
             vb.setYRange(y_min, y_max, padding=0.1)
 
         begin = self.transform_value(impl_plot, 0, min_time, inverse=True)
@@ -362,7 +400,11 @@ class PyQtGraphParser(BackendParserBase):
         """
         Set the data for a PlotDataItem based on the attributes of SignalXY.
         """
-        line.setData(x=x_data, y=y_data)
+        if self.canvas.streaming and len(x_data) > _STREAM_DECIMATE_THRESHOLD:
+            x_data, y_data = minmax_decimate(
+                x_data, y_data, _STREAM_DECIMATE_TARGET_PAIRS)
+        # connect='finite' keeps NaN gaps (archive/live seam) as breaks.
+        line.setData(x=x_data, y=y_data, connect='finite')
 
     @staticmethod
     def set_line_style(style: dict, line: PlotDataItem):
@@ -606,11 +648,20 @@ class PyQtGraphParser(BackendParserBase):
 
     def update_area_envelope_1D(self, shapes, impl_plot: PlotItem, x_data, y1_data, y2_data, style):
         area = shapes[0][3]
-        if isinstance(area, _AlphaColorMeshItem) and len(x_data) >= 2:
+        # PColorMeshItem requires at least one quad; hide until 2+ samples.
+        if len(x_data) < 2:
+            if isinstance(area, _AlphaColorMeshItem):
+                area.setVisible(False)
+            return
+        if area is None:
+            shapes[0][3] = self._build_envelope_area(impl_plot, shapes[0][0],
+                                                    x_data, y1_data, y2_data)
+        elif isinstance(area, _AlphaColorMeshItem):
             x_mesh = np.vstack([x_data, x_data])
             y_mesh = np.vstack([self._mesh_y(impl_plot, y2_data), self._mesh_y(impl_plot, y1_data)])
             z_mesh = np.ones((1, len(x_data) - 1))
             area.setData(x_mesh, y_mesh, z_mesh)
+            area.setVisible(True)
 
     def create_area_envelope_1D(self, draw_fn, impl_plot: Any, signal, x_data, y1_data, y2_data, y3_data, style,
                                 style2):
@@ -620,26 +671,31 @@ class PyQtGraphParser(BackendParserBase):
         curve_2 = [draw_fn(x=x_data, y=y2_data, **style2)]  # type: List[PlotDataItem]
         curve_3 = [draw_fn(x=x_data, y=y3_data, **style2)]  # type: List[PlotDataItem]
 
-        # Extract base color from the min curve and create a semi-transparent uniform colormap for the envelope area
-        pen = curve_1[0].opts['pen']
-        qcolor = pen.color()
-        rgba = np.array([[qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255)]])
-        cmap = pg.ColorMap([0.0, 1.0], np.vstack([rgba, rgba]))
-
-        area = None
-        if len(x_data) >= 2:
-            # Build mesh grids
-            x_mesh = np.vstack([x_data, x_data])
-            y_mesh = np.vstack([self._mesh_y(impl_plot, y2_data), self._mesh_y(impl_plot, y1_data)])
-            z_mesh = np.ones((1, len(x_data) - 1))
-
-            area = _AlphaColorMeshItem(x_mesh, y_mesh, z_mesh, colorMap=cmap, edgecolors=None)
-            area.setZValue(-1)
-            impl_plot.addItem(area)
+        # PColorMeshItem requires at least one quad; defer until 2+ samples.
+        area = (self._build_envelope_area(impl_plot, curve_1[0], x_data, y1_data, y2_data)
+                if len(x_data) >= 2 else None)
 
         plot_lines = [curve_1 + curve_2 + curve_3 + [area]]
 
         return plot_lines
+
+    def _build_envelope_area(self, impl_plot: PlotItem, line_min: PlotDataItem,
+                             x_data, y1_data, y2_data) -> "_AlphaColorMeshItem":
+        # Semi-transparent uniform colormap derived from the min-curve pen.
+        pen = line_min.opts['pen']
+        qcolor = pen.color()
+        rgba = np.array([[qcolor.red(), qcolor.green(), qcolor.blue(), int(0.3 * 255)]])
+        cmap = pg.ColorMap([0.0, 1.0], np.vstack([rgba, rgba]))
+
+        # Build mesh grids
+        x_mesh = np.vstack([x_data, x_data])
+        y_mesh = np.vstack([self._mesh_y(impl_plot, y2_data), self._mesh_y(impl_plot, y1_data)])
+        z_mesh = np.ones((1, len(x_data) - 1))
+
+        area = _AlphaColorMeshItem(x_mesh, y_mesh, z_mesh, colorMap=cmap, edgecolors=None)
+        area.setZValue(-1)
+        impl_plot.addItem(area)
+        return area
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
         suptitle = pg.LabelItem(justify='center')
@@ -951,7 +1007,16 @@ class PyQtGraphParser(BackendParserBase):
                 legend_lines = [sample.item for sample in legend_samples]
 
                 for signal in signals:
-                    for line in self._signal_impl_shape_lut.get(id(signal)):
+                    # A signal not drawn yet (e.g. an envelope awaiting its
+                    # first streaming batch) has no shapes and no legend entry;
+                    # skip it so the mapping stays aligned instead of iterating
+                    # over None.
+                    shapes = self._signal_impl_shape_lut.get(id(signal))
+                    if not shapes:
+                        continue
+                    for line in shapes:
+                        if ix_legend >= len(legend_lines):
+                            break
                         self.map_legend_to_ax[legend_lines[ix_legend]] = line
                         self._legend_signal_lut[id(legend_samples[ix_legend])] = signal
                         label_item = plot.legend.items[ix_legend][1]
@@ -1139,10 +1204,9 @@ class PyQtGraphParser(BackendParserBase):
                     plot_with_slider.slider_last_val = val
 
     def _y_axis_update_callback(self, view_box: ViewBox):
-        if self.canvas.streaming:
-            return
         current_plot = view_box.parentItem()  # type: PlotItem
-        super()._y_axis_update_callback(current_plot)
+        if not self.canvas.streaming:
+            super()._y_axis_update_callback(current_plot)
 
         for (r, c), stacks in self._layout_stacks.items():
             if current_plot in stacks.values():
@@ -1958,7 +2022,16 @@ class PyQtGraphParser(BackendParserBase):
                                                                                         'font_color') if i_plot else None
         fs = self._pm.get_value(y_axis, 'font_size') if y_axis else self._pm.get_value(i_plot,
                                                                                        'font_size') if i_plot else None
-        self.process_ipl_axis_params_label(self.get_impl_y_axis(plot), text, fc, fs)
+        axis_item = self.get_impl_y_axis(plot)
+        realign = text is not None and getattr(axis_item, 'labelText', '') != text
+        self.process_ipl_axis_params_label(axis_item, text, fc, fs)
+        if realign:
+            # Stream units arrive after the build-time column alignment, so the
+            # axis widths must be recomputed to make room for the new label.
+            for (r, c), stacks in self._layout_stacks.items():
+                if plot in stacks.values():
+                    self.align_y_axis(c)
+                    break
 
     def set_impl_y_axis_limits(self, plot: PlotItem, limits: tuple):
         if not isinstance(plot, PlotItem):

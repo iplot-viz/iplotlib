@@ -374,9 +374,21 @@ class NanosecondDateFormatter(pg.AxisItem):
 
     def __call__(self, x, pos=None):
         if self.is_date:
-            return self.date_fmt(int(x), self.cut_start + 1, self.cut_start + 4)
+            return self.date_fmt(int(x), self.cut_start + 1, self.cut_start + self._segments_for_spacing())
         else:
             return f"{x:g}"
+
+    def _segments_for_spacing(self) -> int:
+        """Number of date segments to display after cut_start, adapted to tick spacing.
+
+        Avoids showing arbitrary trailing digits (e.g. seconds when ticks are hours/days apart).
+        """
+        s = abs(self._spacing)
+        if s >= 86400e9:  # >= 1 day
+            return 1
+        if s >= 3600e9:  # >= 1 hour
+            return 2
+        return 4
 
     def get_spacing_label(self):
         """Return a human-readable label for the current tick spacing (oscilloscope style)."""
@@ -559,6 +571,17 @@ class NanosecondDateFormatter(pg.AxisItem):
                 else:
                     break
             values = sorted(values)
+
+            # Cache may leave too few ticks to extrapolate; regenerate from scratch.
+            if len(values) < 2:
+                if self.is_date:
+                    spacing = last_range / n
+                    values = [minVal + spacing / 2 + i * spacing for i in range(n)]
+                else:
+                    spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
+                    start = (ceil((minVal - offset) / spacing) * spacing) + offset
+                    values = (np.arange(n) * spacing + start).tolist()
+                self.last_range = last_range
 
         # Thin out if too many ticks for available space
         while len(values) > n and len(values) > 2:

@@ -158,6 +158,9 @@ class BackendParserBase(ABC):
         self._update = False
         self._restoring_view = False
         self._streaming_impl_plot_lut = defaultdict(lambda: [None, None])
+        self._pending_signal_refs = {}  # type: Dict[Any, weakref.ref]
+        self._pending_signal_lock = threading.Lock()
+        self._signal_flush_scheduled = False
 
     @staticmethod
     def signal_lut_key(signal):
@@ -206,6 +209,34 @@ class BackendParserBase(ABC):
             work_item()
         except Empty:
             logger.debug("Nothing to do.")
+
+    def request_signal_redraw(self, signal):
+        """Schedule a redraw on the draw thread, coalescing bursts so multiple
+        updates per tick collapse into one batched flush. Thread-safe."""
+        if signal is None:
+            return
+        with self._pending_signal_lock:
+            self._pending_signal_refs[signal.uid] = weakref.ref(signal)
+            should_schedule = not self._signal_flush_scheduled
+            self._signal_flush_scheduled = True
+        if should_schedule and self._impl_flush_method is not None:
+            self._impl_flush_method()
+
+    @run_in_one_thread
+    def flush_pending_signals(self):
+        """Drain pending signal updates and redraw each once. Draw thread only."""
+        with self._pending_signal_lock:
+            pending = list(self._pending_signal_refs.values())
+            self._pending_signal_refs.clear()
+            self._signal_flush_scheduled = False
+        for ref in pending:
+            sig = ref()
+            if sig is None:
+                continue
+            try:
+                self.process_ipl_signal(sig)
+            except Exception:
+                logger.exception(f"Error redrawing signal {getattr(sig, 'name', '?')}")
 
     @abstractmethod
     def get_impl_data(self, curve):
@@ -293,6 +324,13 @@ class BackendParserBase(ABC):
         self._signal_impl_plot_lut.clear()
         self._signal_impl_shape_lut.clear()
         self._streaming_impl_plot_lut.clear()
+
+        # A rebuild invalidates any redraw still queued for the previous canvas
+        # (e.g. a stream stopped mid-flush on import). Drop them so stale signals
+        # are not pushed onto plots that no longer exist.
+        with self._pending_signal_lock:
+            self._pending_signal_refs.clear()
+            self._signal_flush_scheduled = False
 
     def process_ipl_canvas(self, canvas: Canvas):
         """
@@ -1181,6 +1219,12 @@ class BackendParserBase(ABC):
         data = self.transform_data(impl_plot, signal_data)
 
         if hasattr(signal, 'envelope') and signal.envelope:
+            if len(data) == 3 and len(data[0]) == 0:
+                # An envelope with no samples yet drops its (empty) average
+                # array; pad it so the empty curves are still drawn and the
+                # signal joins the legend from the start, the way a plain signal
+                # already does while it awaits its first streaming batch.
+                data = list(data) + [data[1][:0]]
             if len(data) != 4:
                 logger.error(f"Requested to draw envelope for sig({id(signal)}), but it does not have sufficient data"
                              f" arrays (==4). {signal}")
@@ -1273,31 +1317,55 @@ class BackendParserBase(ABC):
     def _update_marker_by_point_count(marker_line: Any, signal_x_data, signal_style: dict):
         pass
 
+    def _extend_to_now(self, impl_plot: Any, has_live: bool, x_data, *y_arrays):
+        """Extend the trace horizontally to ``now`` with the last value, so the
+        line stays glued to the right edge of the sliding window between
+        batches. Render-only: the signal buffer is not touched."""
+        if not has_live or len(x_data) == 0:
+            return (x_data, *y_arrays)
+        now = int(datetime.now().timestamp() * 1e9)
+        new_x = self.transform_value(impl_plot, 0, now, inverse=True)
+        if new_x <= x_data[-1]:
+            return (x_data, *y_arrays)
+        return (np.append(x_data, new_x),
+                *(np.append(y, y[-1]) for y in y_arrays))
+
     def update_plot_line_streaming(self, signal: SignalXY, impl_plot: Any, plot_lines, x_data, y_data, style):
         """
-        Updates the plot data during streaming, distinguishing between the cases when new data arrives and when no
-        new data is received.
-
-        The method stores the last X and Y points from the arrays and compares them with the most recent values. If
-        the latest X value remains unchanged, it means no new data has arrived. In this case, a constant value is drawn
-        to represent the last received Y point.
+        Update the streaming line, extended to ``now`` once a live sample has
+        been received; otherwise the existing points are drawn as-is.
         """
         last_x = self._streaming_impl_plot_lut[signal.uid][0]
-        last_y = self._streaming_impl_plot_lut[signal.uid][1]
+        has_live = getattr(signal, '_streaming_has_live', False)
 
-        if len(x_data) > 0 and last_x != x_data[-1]:  # New data
+        if len(x_data) == 0:
+            return plot_lines
+
+        if last_x != x_data[-1]:  # New data
             self._streaming_impl_plot_lut[signal.uid] = [x_data[-1], y_data[-1]]
-            self.set_line_data(plot_lines[0], x_data, y_data)
             self._update_marker_by_point_count(plot_lines[0], x_data, style)
 
-        elif len(x_data) > 0 and last_x == x_data[-1]:  # No new data
-            now = int(datetime.now().timestamp() * 1e9)
-            new_x = self.transform_value(impl_plot, 0, now, inverse=True)
-            const_x = np.append(x_data, new_x)
-            const_y = np.append(y_data, last_y)
-            self.set_line_data(plot_lines[0], const_x, const_y)
-
+        xs, ys = self._extend_to_now(impl_plot, has_live, x_data, y_data)
+        self.set_line_data(plot_lines[0], xs, ys)
         return plot_lines
+
+    def update_plot_envelope_streaming(self, signal: SignalXY, impl_plot: Any, shapes,
+                                       x_data, y1_data, y2_data, y3_data, style):
+        """Envelope counterpart of ``update_plot_line_streaming``: extends the
+        three curves and the area horizontally to ``now``."""
+        last_x = self._streaming_impl_plot_lut[signal.uid][0]
+        has_live = getattr(signal, '_streaming_has_live', False)
+
+        if last_x != x_data[-1]:  # New data
+            self._streaming_impl_plot_lut[signal.uid] = [x_data[-1], y3_data[-1]]
+
+        xs, y1s, y2s, y3s = self._extend_to_now(
+            impl_plot, has_live, x_data, y1_data, y2_data, y3_data)
+        self.set_line_data(shapes[0][0], xs, y1s)
+        self.set_line_data(shapes[0][1], xs, y2s)
+        self.set_line_data(shapes[0][2], xs, y3s)
+        self.update_area_envelope_1D(shapes, impl_plot, xs, y1s, y2s, style)
+        return shapes
 
     def do_impl_line_plot_xy(self, signal: SignalXY, impl_plot: Any, plot: PlotXY, cache_item, x_data, y_data):
 
@@ -1407,6 +1475,15 @@ class BackendParserBase(ABC):
 
     def rebuild_legend(self, impl_plot: Any, plot: Plot):
         """Rebuild legend for the given plot. Default implementation does nothing."""
+        pass
+
+    def refresh_streaming_legend(self, impl_plot: Any, plot: Plot):
+        """Bring an envelope drawn on its first streaming batch into the legend.
+
+        Backends whose legend auto-populates as curves are drawn (pyqtgraph)
+        need nothing here; those that build the legend once up front (matplotlib)
+        override this to rebuild it now that the envelope has artists.
+        """
         pass
 
     def add_marker_scaled(self, impl_plot: Any, plot: PlotXY, x_coord, y_coord):
@@ -1589,17 +1666,38 @@ class BackendParserBase(ABC):
             self.legend_downsampled_signal(signal, impl_plot, shapes[0][0])
 
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1 and y3_data.ndim == 1:
-                self.set_line_data(shapes[0][0], x_data, y1_data)
-                self.set_line_data(shapes[0][1], x_data, y2_data)
-                self.set_line_data(shapes[0][2], x_data, y3_data)
-                self.update_area_envelope_1D(shapes, impl_plot, x_data, y1_data, y2_data, style)
+                if self.canvas.streaming and len(x_data) > 0:
+                    self.update_plot_envelope_streaming(signal, impl_plot, shapes,
+                                                        x_data, y1_data, y2_data, y3_data, style)
+                else:
+                    self.set_line_data(shapes[0][0], x_data, y1_data)
+                    self.set_line_data(shapes[0][1], x_data, y2_data)
+                    self.set_line_data(shapes[0][2], x_data, y3_data)
+                    self.update_area_envelope_1D(shapes, impl_plot, x_data, y1_data, y2_data, style)
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
+
+            # Mirror line plot: without this the envelope RangeAxis stays at
+            # None and undo/redo crashes.
+            if self.canvas.streaming:
+                cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
+                plot = cache_item.plot() if cache_item is not None else None
+                if cache_item is not None and plot is not None:
+                    self.do_impl_streaming(impl_plot, plot, cache_item)
         else:
             if x_data.ndim == 1 and y1_data.ndim == 1 and y2_data.ndim == 1:
                 shapes = self.create_area_envelope_1D(draw_fn, impl_plot, signal, x_data, y1_data, y2_data, y3_data,
                                                       style, style2)
                 signal.lines = shapes
                 self._signal_impl_shape_lut.update({id(signal): shapes})
+                if self.canvas.streaming:
+                    cache_item = self._impl_plot_cache_table.get_cache_item(impl_plot)
+                    plot = cache_item.plot() if cache_item is not None else None
+                    if cache_item is not None and plot is not None:
+                        self.do_impl_streaming(impl_plot, plot, cache_item)
+                        # A legend built before the first batch omitted this
+                        # envelope (it had no artists then); let the backend
+                        # bring it in now that the curves exist.
+                        self.refresh_streaming_legend(impl_plot, plot)
             # TODO elif x_data.ndim == 1 and y1_data.ndim == 2 and y2_data.ndim == 2:
 
     @abstractmethod
@@ -2151,6 +2249,9 @@ class BackendParserBase(ABC):
         Offset-aware version of implementation's `set_impl_x_axis_limits`, `set_impl_y_axis_limits`
         The `oaw` in the function name stands for OffsetAWare.
         """
+        # Skip uninitialised RangeAxis: create_offset would crash on None - None.
+        if limits[0] is None or limits[1] is None:
+            return
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         ci.offsets[ax_idx] = self.create_offset(limits) if self.axis_uses_offset(impl_plot, ax_idx) else 0
 
@@ -2191,7 +2292,7 @@ class BackendParserBase(ABC):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
 
         for ax_idx, d in enumerate(data):
-            logger.debug(f"\t transform data ax_idx={ax_idx} d = {d} ")
+            logger.debug("\t transform data ax_idx=%s d = %s ", ax_idx, d)
             offset = ci.offsets[ax_idx]
             if offset == 0 or offset is None:
                 ret.append(d)

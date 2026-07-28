@@ -1042,8 +1042,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self.push_view_lim_cmd()
 
                 self.render()
-            elif self._mmode in [Canvas.MOUSE_MODE_CROSSHAIR, Canvas.MOUSE_MODE_ZOOM,
-                                 Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_MARKER] and event.button == MouseButton.LEFT:
+            elif self._mmode == Canvas.MOUSE_MODE_MARKER and event.button == MouseButton.LEFT:
                 mpl_axes = event.inaxes
                 if not isinstance(mpl_axes, MPLAxes):
                     return
