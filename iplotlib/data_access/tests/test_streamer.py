@@ -898,7 +898,10 @@ class StaleLiveSampleTests(unittest.TestCase):
         self.assertTrue(clamped)
         self.assertEqual(list(y), [2.0, 2.0])
 
-    def test_partial_batch_holds_the_old_value_up_to_the_first_fresh_sample(self):
+    def test_partial_batch_holds_the_old_value_as_a_step(self):
+        # The held value must stay flat until the fresh sample and then
+        # step: two points alone would be drawn as a slope across the
+        # whole window for a signal that was constant until it changed.
         ws = 1000 * self.SEC
         now = ws + 60 * self.SEC
         fresh = ws + 10 * self.SEC
@@ -906,8 +909,18 @@ class StaleLiveSampleTests(unittest.TestCase):
             np.asarray([500 * self.SEC, fresh]),
             np.asarray([1.0, 9.0]), ws, now)
         self.assertTrue(clamped)
-        self.assertEqual(list(x), [ws, fresh])
-        self.assertEqual(list(y), [1.0, 9.0])
+        self.assertEqual(list(x), [ws, fresh - 1, fresh])
+        self.assertEqual(list(y), [1.0, 1.0, 9.0])
+
+    def test_held_span_is_flat_regardless_of_the_new_value(self):
+        ws = 1000 * self.SEC
+        fresh = ws + 40000 * self.SEC
+        x, y, _ = CanvasStreamer._hold_stale_samples(
+            np.asarray([10 * self.SEC, fresh]),
+            np.asarray([4.174080, 4.174081]), ws, fresh)
+        # Everything before the step carries exactly the held value, so no
+        # slope can be interpolated across the window.
+        self.assertEqual(list(y[:-1]), [4.174080, 4.174080])
 
     def test_fresh_batch_is_untouched(self):
         ws = 1000 * self.SEC
@@ -968,9 +981,11 @@ class TrimToWindowTests(unittest.TestCase):
         self.assertTrue(self.streamer._trim_to_window(signal, ws))
         kwargs = signal.inject_external.call_args.kwargs
         self.assertFalse(kwargs['append'])
-        self.assertEqual(list(kwargs['d0']), [ws, 1200 * self.SEC, 1300 * self.SEC])
-        # The anchor carries the last pre-window value.
-        self.assertEqual(list(kwargs['d1']), [2.0, 3.0, 4.0])
+        self.assertEqual(list(kwargs['d0']),
+                         [ws, 1200 * self.SEC - 1, 1200 * self.SEC,
+                          1300 * self.SEC])
+        # The anchor carries the last pre-window value, held as a step.
+        self.assertEqual(list(kwargs['d1']), [2.0, 2.0, 3.0, 4.0])
 
     def test_all_samples_behind_the_window_collapse_to_a_held_value(self):
         ws = 1000 * self.SEC

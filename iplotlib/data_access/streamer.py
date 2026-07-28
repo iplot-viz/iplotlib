@@ -489,9 +489,14 @@ class CanvasStreamer:
             keep_min = np.asarray(y_min)[inside] if y_min is not None else None
             keep_max = np.asarray(y_max)[inside] if y_max is not None else None
             if (~inside).any() and int(keep_x[0]) > window_start_ns:
-                # Hold the last pre-window value at the edge.
-                anchor_x = np.asarray([window_start_ns], dtype=x.dtype)
-                anchor_y = np.asarray([y[~inside][-1]], dtype=y.dtype)
+                # Hold the last pre-window value at the edge, as a step (see
+                # _hold_stale_samples): anchor plus a repeat just before the
+                # first in-window sample, so the held span is flat rather
+                # than a slope drawn from the edge to that sample.
+                held = np.asarray([y[~inside][-1]], dtype=y.dtype)
+                anchor_x = np.asarray(
+                    [window_start_ns, int(keep_x[0]) - 1], dtype=x.dtype)
+                anchor_y = np.concatenate([held, held])
                 keep_x = np.concatenate([anchor_x, keep_x])
                 keep_y = np.concatenate([anchor_y, keep_y])
                 if keep_min is not None:
@@ -550,8 +555,14 @@ class CanvasStreamer:
         if int(fresh_x[0]) <= window_start_ns:
             # A real sample already sits on the boundary; no anchor needed.
             return fresh_x, fresh_y, True
-        return (np.concatenate([anchor_x, fresh_x]),
-                np.concatenate([anchor_y, fresh_y]), True)
+        # Zero-order hold: repeat the held value immediately before the first
+        # fresh sample so the trace stays flat and then steps. Emitting only
+        # the anchor and the fresh sample would leave the renderer to draw a
+        # straight line between them, i.e. a slope across the whole window
+        # for a signal that was in fact constant until it changed.
+        step_x = np.asarray([int(fresh_x[0]) - 1], dtype=x.dtype)
+        return (np.concatenate([anchor_x, step_x, fresh_x]),
+                np.concatenate([anchor_y, anchor_y, fresh_y]), True)
 
     def handler(self, callback, varname, dobj):
         signals_by_name = self.signals.get(varname)
