@@ -9,12 +9,16 @@ import numpy as np
 from PySide6.QtCore import QObject, QThread, Slot
 
 import iplotLogging.setupLogger as Sl
-from iplotlib.core.decimation import bucket_reduce_envelope, minmax_decimate
 
 logger = Sl.get_logger(__name__)
 
-# Sliding-window refresh cadence. Skipped for windows shorter than this period.
+# Periodic full-window refresh cadence: even without cap overflow, the
+# archive progressively supplants the live buffer so the two stay consistent.
 _TOPUP_PERIOD_S = 3600
+
+# Minimum spacing between cap-triggered refreshes of the same signal, so a
+# fast signal overflowing its buffer every few seconds cannot hammer UDA.
+_REFRESH_MIN_INTERVAL_S = 60
 
 # Injection cadence: polled chunks are buffered and merged so the O(buffer)
 # cost of inject_external is paid once per period instead of once per poll.
@@ -93,6 +97,8 @@ class CanvasStreamer:
         self._ds_to_signals = {}
         self._callback = None
         self._first_live_pending = set()
+        self._refresh_pending = set()
+        self._last_refresh = {}
         self._qt_threads = []
 
     def _spawn(self, name: str, target):
@@ -262,46 +268,26 @@ class CanvasStreamer:
                 m_max[sel] if m_max is not None else None)
 
     def _apply_cap(self, signal):
-        """Honour the per-signal cap as maximum stored points: the newest
-        ``live_retention`` span stays raw and older samples are decimated into
-        the remaining budget, preserving extremes. Caller must hold _signal_lock.
-        Returns True when the buffer was actually reduced."""
+        """Honour the per-signal cap the way the mint#78 algorithm specifies:
+        "we need to keep a buffer of 10k points so if more we drop points".
+        The newest ``max_points`` samples are kept, the oldest dropped, with
+        no local decimation: restoring the older span at the point budget is
+        the refresh worker's job (one archive call for the whole window).
+        Caller must hold _signal_lock. Returns True when samples were
+        dropped; the caller should then mark the signal for a refresh."""
         if self._max_points <= 0:
             return False
         x, y, y_min, y_max = self._current_arrays(signal)
         n = len(x)
-        # Slack keeps the cap from re-decimating the history on every live
-        # batch: each pass costs CPU and re-reduces already-reduced samples.
+        # Slack keeps the cap from rewriting the buffer on every live batch.
         if n <= self._max_points + self._max_points // 50:
             return False
-        x = np.asarray(x)
-        y = np.asarray(y)
+        k = self._max_points
+        x = np.asarray(x)[-k:]
+        y = np.asarray(y)[-k:]
         if y_min is not None:
-            y_min = np.asarray(y_min)
-            y_max = np.asarray(y_max)
-
-        tail = int(np.searchsorted(x, int(x[-1]) - _live_retention_s() * int(1e9),
-                                   side='left'))
-        budget = self._max_points - (n - tail)
-        if tail > 0 and budget > 8:
-            if y_min is not None:
-                hx, hmin, hmax, havg = bucket_reduce_envelope(
-                    x[:tail], y_min[:tail], y_max[:tail], y[:tail], budget)
-                y_min = np.concatenate([hmin, y_min[tail:]])
-                y_max = np.concatenate([hmax, y_max[tail:]])
-            else:
-                # A couple of pairs under budget leaves room for the pinned
-                # run endpoints, so the trailing hard trim stays a no-op.
-                hx, havg = minmax_decimate(x[:tail], y[:tail], budget // 2 - 3)
-            x = np.concatenate([hx, x[tail:]])
-            y = np.concatenate([havg, y[tail:]])
-
-        # Guarantee the cap even when the raw tail alone exceeds it.
-        if len(x) > self._max_points:
-            k = self._max_points
-            x, y = x[-k:], y[-k:]
-            if y_min is not None:
-                y_min, y_max = y_min[-k:], y_max[-k:]
+            y_min = np.asarray(y_min)[-k:]
+            y_max = np.asarray(y_max)[-k:]
 
         payload = self._make_payload(
             signal, x, y,
@@ -356,9 +342,9 @@ class CanvasStreamer:
             self._spawn("archive-backfill",
                         partial(self._archive_backfill,
                                 self._ds_to_signals, self._window_ns, callback))
-
-            if self._window_ns > _TOPUP_PERIOD_S * int(1e9):
-                self._spawn("archive-topup", self._hourly_topup)
+            # Full-window refresh worker: reacts to cap overflows for any
+            # window length and ticks periodically for long windows.
+            self._spawn("archive-refresh", self._refresh_loop)
 
     def start_stream(self, ds, varnames, callback):
         logger.debug(F"Subscribing to {ds} for {len(varnames)} variables: {varnames}")
@@ -474,6 +460,9 @@ class CanvasStreamer:
                     # Flag the plotted signal, not the carrier: the streaming
                     # reprocess path never aggregates children's flags.
                     signal.isDownsampled = True
+                    # Points were dropped: ask the refresh worker to restore
+                    # the older span from the archive at the point budget.
+                    self._mark_refresh(signal)
                 if carrier is not signal:
                     # Reprocess while still holding the carrier's lock. The
                     # expression reads the carrier's data_store, which must
@@ -563,6 +552,7 @@ class CanvasStreamer:
             carrier.inject_external(append=False, **payload)
             if self._apply_cap(carrier):
                 signal.isDownsampled = True
+                self._mark_refresh(signal)
             signal._streaming_has_live = True
             if carrier is not signal:
                 # See handler(): keep the reprocess read inside the carrier's
@@ -581,59 +571,101 @@ class CanvasStreamer:
             signal, carrier,
             (ax, ay, ay_min, ay_max, xunit or '', yunit or ''), callback)
 
-    def _hourly_topup(self):
-        """Refresh the most recent ``_TOPUP_PERIOD_S`` from archive each period
-        and drop samples older than ``self._window_ns``."""
-        period_ns = _TOPUP_PERIOD_S * int(1e9)
+    def _mark_refresh(self, signal):
+        """Flag a signal for a full-window archive refresh. Cheap and
+        thread-safe (single set.add); the refresh worker picks it up."""
+        self._refresh_pending.add(signal.uid)
+
+    def _refresh_loop(self):
+        """Refresh worker implementing the mint#78 point-5 contract: whenever
+        a signal's buffer overflowed the cap (drop-oldest happened), or on
+        the periodic tick for long windows, re-ask the archive for the whole
+        visible window in ONE call at the same point budget and keep only the
+        newest ``live_retention`` span from the live feed. Per-signal
+        refreshes are rate-limited so a fast signal cannot hammer UDA."""
+        period_target = time.monotonic() + _TOPUP_PERIOD_S
         while not self.stop_flag:
-            target = time.monotonic() + _TOPUP_PERIOD_S
-            while time.monotonic() < target and not self.stop_flag:
-                time.sleep(1)
+            time.sleep(1)
             if self.stop_flag:
                 return
+            refresh_all = time.monotonic() >= period_target
+            if refresh_all:
+                period_target = time.monotonic() + _TOPUP_PERIOD_S
+            if not refresh_all and not self._refresh_pending:
+                continue
             for ds, signals in self._ds_to_signals.items():
                 for signal in signals:
                     if self.stop_flag:
                         return
-                    self._topup_signal(ds, signal, period_ns)
+                    uid = signal.uid
+                    if not (refresh_all or uid in self._refresh_pending):
+                        continue
+                    now = time.monotonic()
+                    if (not refresh_all
+                            and now - self._last_refresh.get(uid, 0.0)
+                            < _REFRESH_MIN_INTERVAL_S):
+                        continue
+                    self._refresh_pending.discard(uid)
+                    self._last_refresh[uid] = now
+                    self._refresh_signal(ds, signal)
 
-    def _topup_signal(self, ds: str, signal, period_ns: int):
+    def _refresh_signal(self, ds: str, signal):
+        """One archive call for the whole window ``[now - window,
+        now - live_retention]`` at the point budget; the newest
+        ``live_retention`` span is kept from the live buffer because the
+        archiver lags the live feed by about that much — querying it would
+        return holes. The two blocks meet at the boundary, so no NaN break
+        is inserted here (unlike the first fill, where the archive genuinely
+        ends behind the first live sample)."""
         carrier = self._carrier(signal)
         now_ns = int(time.time() * 1e9)
-        last_period_start_ns = now_ns - period_ns
-        cutoff_ns = now_ns - self._window_ns
+        boundary_ns = now_ns - _live_retention_s() * int(1e9)
+        start_ns = now_ns - self._window_ns
 
         ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_range(
-            ds, carrier, last_period_start_ns, now_ns)
+            ds, carrier, start_ns, boundary_ns)
         if ax is None or len(ax) == 0:
             return
         if ay_min is not None and not getattr(signal, 'envelope', False):
             signal.isDownsampled = True
+        is_env = getattr(signal, 'envelope', False)
 
+        new_x = np.asarray(ax)
+        new_y = np.asarray(ay)
         with self._signal_lock(carrier):
             cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(carrier)
-            keep_mask = (cur_x >= cutoff_ns) & (cur_x < last_period_start_ns)
-            kept_x = cur_x[keep_mask]
-            kept_y = cur_y[keep_mask]
+            keep_mask = (np.asarray(cur_x) >= boundary_ns) if len(cur_x) \
+                else np.zeros(0, dtype=bool)
+            kept_x = np.asarray(cur_x)[keep_mask]
+            kept_y = np.asarray(cur_y)[keep_mask]
 
-            new_x = np.asarray(ax)
-            new_y = np.asarray(ay)
-            merged_x = np.concatenate([kept_x, new_x])
-            merged_y = np.concatenate([kept_y, new_y])
-            merged_ymin = None
-            merged_ymax = None
-            if getattr(signal, 'envelope', False):
-                kept_ymin = (cur_ymin[keep_mask]
+            # Archive first + stable sort + keep-last: on a timestamp
+            # collision at the boundary the live sample wins.
+            mx = np.concatenate([new_x, kept_x])
+            my = np.concatenate([new_y, kept_y])
+            merged_ymin = merged_ymax = None
+            if is_env:
+                kept_ymin = (np.asarray(cur_ymin)[keep_mask]
                              if cur_ymin is not None else kept_y)
-                kept_ymax = (cur_ymax[keep_mask]
+                kept_ymax = (np.asarray(cur_ymax)[keep_mask]
                              if cur_ymax is not None else kept_y)
                 new_ymin = np.asarray(ay_min) if ay_min is not None else new_y
                 new_ymax = np.asarray(ay_max) if ay_max is not None else new_y
-                merged_ymin = np.concatenate([kept_ymin, new_ymin])
-                merged_ymax = np.concatenate([kept_ymax, new_ymax])
+                merged_ymin = np.concatenate([new_ymin, kept_ymin])
+                merged_ymax = np.concatenate([new_ymax, kept_ymax])
+            if len(mx) > 1:
+                order = np.argsort(mx, kind='stable')
+                keep = np.empty(len(order), dtype=bool)
+                keep[-1] = True
+                keep[:-1] = mx[order][1:] > mx[order][:-1]
+                sel = order[keep]
+                mx, my = mx[sel], my[sel]
+                if is_env:
+                    merged_ymin = merged_ymin[sel]
+                    merged_ymax = merged_ymax[sel]
 
             payload = self._make_payload(
-                carrier, merged_x, merged_y,
+                carrier, mx, my,
                 y_min=merged_ymin, y_max=merged_ymax,
                 xunit=xunit, yunit=yunit,
             )
@@ -642,12 +674,12 @@ class CanvasStreamer:
             signal._streaming_has_live = True
             if carrier is not signal:
                 # See handler(): keep the reprocess read inside the carrier's
-                # lock so a concurrent live/backfill write cannot interleave
-                # mid-read and corrupt the derived signal.
+                # lock so a concurrent live write cannot interleave mid-read
+                # and corrupt the derived signal.
                 self._reprocess(signal)
 
-        logger.info(f"Top-up for {signal.name}: {len(ax)} archive points, "
-                    f"{len(kept_x)} prior live points retained")
+        logger.info(f"Window refresh for {signal.name}: {len(ax)} archive "
+                    f"points, {len(kept_x)} live points retained")
         if self._callback:
             self._callback(signal)
 
@@ -674,3 +706,5 @@ class CanvasStreamer:
         self.collectors.clear()
         self.streamers.clear()
         self._first_live_pending.clear()
+        self._refresh_pending.clear()
+        self._last_refresh.clear()

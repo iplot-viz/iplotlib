@@ -101,25 +101,23 @@ class ApplyCapTests(unittest.TestCase):
         self.assertEqual(list(kwargs['d0']), [3, 4])
         self.assertEqual(list(kwargs['d1']), [30, 40])
 
-    def test_decimates_old_samples_and_keeps_raw_tail(self):
+    def test_drops_oldest_without_decimating(self):
+        # mint#78 point 5: over the cap we DROP points (no local
+        # decimation); the refresh worker restores the older span from
+        # the archive at the point budget.
         self.streamer._max_points = 1000
         sec = int(1e9)
-        x = np.arange(2000) * sec  # 1 Hz over ~33 min; tail = last 2 min
-        y = np.zeros(2000)
-        y[500] = -50.0
-        y[600] = 50.0
+        x = np.arange(2000) * sec
+        y = np.arange(2000, dtype=float)
         signal = _FakeSignal(data=[_FakeBuf(x), _FakeBuf(y)])
         self.streamer._apply_cap(signal)
         kwargs = signal.inject_external.call_args.kwargs
         out_x = np.asarray(kwargs['d0'])
         out_y = np.asarray(kwargs['d1'])
-        self.assertLessEqual(len(out_x), 1000)
-        self.assertTrue(np.all(np.diff(out_x) >= 0))
-        # Extremes survive decimation; the raw tail is untouched.
-        self.assertIn(-50.0, out_y)
-        self.assertIn(50.0, out_y)
-        tail = x[x >= x[-1] - 120 * sec]
-        self.assertEqual(list(out_x[-len(tail):]), list(tail))
+        self.assertEqual(len(out_x), 1000)
+        # The newest 1000 samples survive verbatim: no resampling.
+        self.assertEqual(list(out_x), list(x[-1000:]))
+        self.assertEqual(list(out_y), list(y[-1000:]))
 
     def test_reports_whether_the_buffer_was_reduced(self):
         self.streamer._max_points = 3
@@ -128,24 +126,25 @@ class ApplyCapTests(unittest.TestCase):
         self.streamer._max_points = 2
         self.assertTrue(self.streamer._apply_cap(signal))
 
-    def test_decimates_envelope_buffers_preserving_band(self):
+    def test_caps_envelope_buffers_by_dropping_oldest(self):
         self.streamer._max_points = 500
         sec = int(1e9)
         x = np.arange(1000) * sec
-        y_min = np.zeros(1000)
-        y_max = np.ones(1000)
-        y_avg = np.full(1000, 0.5)
-        y_min[100] = -9.0
-        y_max[200] = 9.0
+        y_min = np.arange(1000, dtype=float)
+        y_max = np.arange(1000, dtype=float) + 1
+        y_avg = np.arange(1000, dtype=float) + 0.5
         signal = _FakeSignal(
             envelope=True,
             data=[_FakeBuf(x), _FakeBuf(y_min), _FakeBuf(y_max),
                   _FakeBuf(y_avg)])
         self.streamer._apply_cap(signal)
         kwargs = signal.inject_external.call_args.kwargs
-        self.assertLessEqual(len(kwargs['d0']), 500)
-        self.assertEqual(np.min(np.asarray(kwargs['d1'])), -9.0)
-        self.assertEqual(np.max(np.asarray(kwargs['d2'])), 9.0)
+        self.assertEqual(len(kwargs['d0']), 500)
+        # Newest 500 kept verbatim across all four buffers.
+        self.assertEqual(list(np.asarray(kwargs['d0'])), list(x[-500:]))
+        self.assertEqual(list(np.asarray(kwargs['d1'])), list(y_min[-500:]))
+        self.assertEqual(list(np.asarray(kwargs['d2'])), list(y_max[-500:]))
+        self.assertEqual(list(np.asarray(kwargs['d3'])), list(y_avg[-500:]))
 
 
 class ArchiveKwargsTests(unittest.TestCase):
@@ -377,6 +376,82 @@ class EnvelopeSelectionBackfillTests(unittest.TestCase):
         self.assertLessEqual(before - tsE, self.RETENTION)
         self.assertGreaterEqual(after - tsE, self.RETENTION)
         self.assertEqual(tsE - tsS, self.HOUR - self.RETENTION)
+
+
+class WindowRefreshTests(unittest.TestCase):
+    """Tests for the full-window archive refresh (mint#78 point 5):
+    one archive call for [now - window, now - live_retention] at the
+    point budget, keeping the newest live_retention span from live."""
+
+    SEC = int(1e9)
+    WINDOW = 3600 * int(1e9)
+
+    def _mk(self, reply, data):
+        fake_da = MagicMock()
+        fake_da.get_archive_window.return_value = reply
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._max_points = 10000
+        streamer._window_ns = self.WINDOW
+        streamer._callback = MagicMock()
+        signal = _FakeSignal(name='var', data=data)
+        return streamer, fake_da, signal
+
+    def test_one_call_ending_a_retention_behind_now(self):
+        reply = _FakeArchiveResponse(x=[1 * self.SEC], y=[1.0])
+        streamer, fake_da, signal = self._mk(
+            reply, data=[_FakeBuf([]), _FakeBuf([])])
+        before = time.time()
+        streamer._refresh_signal('ds', signal)
+        after = time.time()
+        self.assertEqual(fake_da.get_archive_window.call_count, 1)
+        kwargs = fake_da.get_archive_window.call_args.kwargs
+        end_ns = int(kwargs['tsE'])
+        self.assertLessEqual(end_ns, int(after * 1e9) - 110 * self.SEC)
+        self.assertGreaterEqual(end_ns, int(before * 1e9) - 130 * self.SEC)
+        self.assertEqual(int(kwargs['tsE']) - int(kwargs['tsS']),
+                         self.WINDOW - 120 * self.SEC)
+        self.assertEqual(kwargs['nbp'], 10000)
+
+    def test_keeps_live_tail_and_replaces_older_span(self):
+        now_ns = int(time.time() * 1e9)
+        boundary_ns = now_ns - 120 * self.SEC
+        # Buffer: one stale live sample well before the boundary (should be
+        # replaced by archive) and two fresh ones after it (kept).
+        stale = boundary_ns - 600 * self.SEC
+        fresh1 = boundary_ns + 10 * self.SEC
+        fresh2 = boundary_ns + 20 * self.SEC
+        arch1 = boundary_ns - 1000 * self.SEC
+        arch2 = boundary_ns - 500 * self.SEC
+        reply = _FakeArchiveResponse(x=[arch1, arch2], y=[1.0, 2.0])
+        streamer, fake_da, signal = self._mk(
+            reply,
+            data=[_FakeBuf([stale, fresh1, fresh2]),
+                  _FakeBuf([-1.0, 3.0, 4.0])])
+        streamer._refresh_signal('ds', signal)
+        kwargs = signal.inject_external.call_args.kwargs
+        self.assertFalse(kwargs['append'])
+        self.assertEqual(list(kwargs['d0']), [arch1, arch2, fresh1, fresh2])
+        self.assertEqual(list(kwargs['d1']), [1.0, 2.0, 3.0, 4.0])
+        self.assertTrue(signal._streaming_has_live)
+        streamer._callback.assert_called_once_with(signal)
+
+    def test_empty_archive_reply_leaves_buffer_untouched(self):
+        reply = _FakeArchiveResponse(x=[], y=[])
+        streamer, fake_da, signal = self._mk(
+            reply, data=[_FakeBuf([1, 2]), _FakeBuf([10, 20])])
+        streamer._refresh_signal('ds', signal)
+        signal.inject_external.assert_not_called()
+        streamer._callback.assert_not_called()
+
+    def test_cap_overflow_marks_signal_for_refresh(self):
+        streamer = CanvasStreamer(da=None)
+        streamer._max_points = 2
+        signal = _FakeSignal(
+            data=[_FakeBuf([1, 2, 3, 4]), _FakeBuf([10, 20, 30, 40])])
+        streamer._mark_refresh(signal)
+        self.assertIn(signal.uid, streamer._refresh_pending)
+        streamer.stop()
+        self.assertFalse(streamer._refresh_pending)
 
 
 class HandlerEmptyPayloadTests(unittest.TestCase):
