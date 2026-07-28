@@ -22,10 +22,9 @@ _TOPUP_PERIOD_S = 3600
 # MINT_STREAMING_REFRESH_SECONDS.
 _DEFAULT_REFRESH_MIN_INTERVAL_S = 300
 
-# Minimum spacing between refreshes of ANY signal. Without it, a periodic
-# tick or a simultaneous overflow across a large workspace fires one archive
-# request per signal back to back; each reinjection reprocesses and redraws
-# on the draw thread, which is what makes focus changes and autoscale crawl.
+# Minimum spacing between refreshes of ANY signal: each reinjection
+# reprocesses and redraws, so back-to-back refreshes across a large
+# workspace would starve the draw thread.
 _REFRESH_GLOBAL_SPACING_S = 2.0
 
 
@@ -49,12 +48,11 @@ _MAX_INJECT_PERIOD_S = 10.0
 def _inject_period_s(window_ns: int = 0, max_points: int = 0) -> float:
     """Injection cadence. Every injection re-copies the buffer, reprocesses
     expressions and redraws, so injecting faster than the display can
-    resolve is pure waste: with ``max_points`` samples across ``window_ns``
-    one bucket lasts window/max_points, and a 7-day window at 10k points
-    resolves nothing finer than about a minute. The cadence therefore
-    follows the bucket duration, clamped to [1 s, 10 s] so short windows
-    stay as responsive as before and wide ones cut CPU by up to 10x.
-    MINT_STREAMING_INJECT_SECONDS overrides the result outright."""
+    resolve is wasted work: one display bucket lasts window/max_points
+    (about a minute for 7 days at 10k points). The cadence follows the
+    bucket duration, clamped to [1 s, 10 s] so short windows stay
+    responsive. MINT_STREAMING_INJECT_SECONDS overrides the result
+    outright."""
     override = os.environ.get('MINT_STREAMING_INJECT_SECONDS')
     if override is not None:
         try:
@@ -121,9 +119,6 @@ class _StreamJob(QObject):
         finally:
             QThread.currentThread().quit()
 
-
-# CWS-SCSU-0000:CU510{1,2,3,4}-TT-XI, CTRL-SYSM-CUB-4505-61:CU000{1,2,3}-HTH-TT,BUIL-B36-VA-RT-RT1:CL0001-TT02-STATE
-# CTRL-SYSM-CUB-4505-61:CU0001-HTH-TT
 
 class CanvasStreamer:
 
@@ -320,13 +315,10 @@ class CanvasStreamer:
         """True when the buffer no longer reaches the left edge of the window,
         i.e. the safety trim dropped history that only the archive can supply.
 
-        This replaces a plain over-the-cap test as the refresh trigger. A busy
-        signal sits permanently over the cap while still covering the whole
-        window, and refreshing it then bought nothing: it re-fetched data the
-        buffer already had, once per signal per interval, which is the archive
-        request storm that made focus changes and autoscale crawl. What
-        actually warrants a round trip is a gap at the left edge.
-        Caller must hold _signal_lock."""
+        A hole, not buffer size, is the refresh trigger: a busy signal sits
+        permanently over the cap while still covering the whole window, and
+        refreshing it then re-fetches data the buffer already has, once per
+        signal per interval. Caller must hold _signal_lock."""
         if self._max_points <= 0 or self._window_ns <= 0:
             return False
         x, _, _, _ = self._current_arrays(signal)
@@ -338,14 +330,14 @@ class CanvasStreamer:
 
     def _apply_cap(self, signal):
         """Safety valve only: the regular cap enforcement is the refresh
-        (drop + ONE archive re-ask for the whole window at the budget, per
-        the mint#78 point-5 algorithm). Trimming the oldest locally on every
-        overflow instead would eat the coarse archive buckets far faster
-        than real time — each dropped live second costs one multi-second
-        bucket off the left edge, visibly shrinking the window — so the
-        local trim only kicks in beyond twice the cap (refresh delayed or
-        archive unavailable) to bound memory. Caller must hold _signal_lock.
-        Returns True when samples were dropped."""
+        worker (drop the history and re-ask the archive for the whole window
+        at the budget). Trimming the oldest locally on every overflow would
+        eat the coarse archive buckets far faster than real time — each
+        dropped live second costs one multi-second bucket off the left
+        edge, visibly shrinking the window — so the local trim only kicks
+        in beyond twice the cap (refresh delayed or archive unavailable) to
+        bound memory. Caller must hold _signal_lock. Returns True when
+        samples were dropped."""
         if self._max_points <= 0:
             return False
         x, y, y_min, y_max = self._current_arrays(signal)
@@ -494,16 +486,16 @@ class CanvasStreamer:
         A fast signal delivers far more samples per injection than a window of
         ``max_points`` can show: at 7 days and 10k points one bucket lasts a
         minute, so a kHz feed contributes 60000 samples where 2 would do. Left
-        alone the buffer fills with invisible detail, the safety trim then eats
-        the left edge, and every eviction costs an archive round trip to put it
-        back -- the request storm. Reducing the batch to min/max pairs per
-        bucket bounds buffer growth by elapsed time instead of sample rate, so
-        the buffer keeps covering the window and refreshes become rare.
+        alone the buffer fills with invisible detail, the safety trim eats the
+        left edge, and every eviction costs an archive round trip to put it
+        back. Reducing the batch to min/max pairs per bucket bounds buffer
+        growth by elapsed time instead of sample rate, so the buffer keeps
+        covering the window and refreshes stay rare.
 
-        Extremes are preserved at their true coordinates (min/max per bucket),
-        and NaN line breaks survive, so this is the same reduction the archive
-        would have applied. Envelope buffers are left alone: their band is
-        already a reduction. Returns ``(x, y, reduced)``."""
+        Extremes keep their true coordinates and NaN line breaks survive, so
+        this is the same reduction the archive would have applied. Envelope
+        buffers are left alone: their band is already a reduction. Returns
+        ``(x, y, reduced)``."""
         if self._max_points <= 0 or self._window_ns <= 0:
             return x, y, False
         if getattr(signal, 'envelope', False):
@@ -531,18 +523,17 @@ class CanvasStreamer:
         """Insert a zero-order-hold point before every sample that follows a
         gap wider than ``max_gap_ns``, returning ``(x, y, changed)``.
 
-        A process variable archived on change has no samples while it does
-        not change, so the only correct reading of a long empty span is that
-        the value held. Joining the two ends with a straight line instead
-        asserts a linear ramp that never happened -- and when the two ends
-        differ only in the last representable digit (an archive value stored
-        as float32 versus the same value arriving live as float64, say), that
-        invented ramp is what autoscale magnifies into a full-height slope
-        across the window for a signal that is in fact constant.
+        A variable archived on change has no samples while it does not
+        change, so the only correct reading of a long empty span is that the
+        value held. Joining the two ends with a straight line asserts a ramp
+        that never happened — and when the ends differ only in the last
+        representable digit (an archive float32 against the same value
+        arriving live as float64), autoscale magnifies that ramp into a
+        full-height slope for a signal that is in fact constant.
 
         Applied only to signals under hold semantics (sparse ones, whose
         buffers are small), so the O(n) scan is negligible and densely
-        sampled traces keep plain interpolation between their samples."""
+        sampled traces keep plain interpolation."""
         x = np.asarray(x)
         y = np.asarray(y)
         if len(x) < 2 or max_gap_ns <= 0:
@@ -648,12 +639,12 @@ class CanvasStreamer:
         last-known value.
 
         A live feed announces a signal that has not changed in a long time by
-        re-emitting its last value with that value's ORIGINAL timestamp (e.g.
-        a point stamped 8 July arriving today). Appending it at face value
-        stretches the X range weeks outside the requested window and squashes
-        every other trace on the plot. Semantically such a sample is not "a
-        measurement at 8 July"; it is "the value has been this since 8 July",
-        so it must be drawn as a constant line across the window instead.
+        re-emitting its last value with that value's ORIGINAL timestamp,
+        possibly weeks old. Appending it at face value stretches the X range
+        far outside the requested window and squashes every other trace on
+        the plot. Such a sample does not mean "a measurement at that instant"
+        but "the value has been this ever since", so it is drawn as a
+        constant line across the window instead.
 
         Returns ``(x, y, clamped)``. With no stale samples the inputs come
         back untouched. Otherwise the newest stale value is anchored at
@@ -931,10 +922,10 @@ class CanvasStreamer:
             self._verbose.discard(signal.uid)
 
     def _refresh_loop(self):
-        """Refresh worker implementing the mint#78 point-5 contract: whenever
-        a signal's buffer overflowed the cap, or on the periodic tick, re-ask
-        the archive for the whole visible window in ONE call at the same
-        point budget and keep the live span the archive does not yet cover.
+        """Refresh worker: whenever a signal's buffer overflowed the cap, or
+        on the periodic tick, re-ask the archive for the whole visible window
+        in ONE call at the same point budget and keep the live span the
+        archive does not yet cover.
         Only signals classified verbose (more samples in the window than the
         budget) are refreshed periodically: sparse signals never re-query
         the archive after the initial backfill. Per-signal refreshes are
@@ -980,14 +971,11 @@ class CanvasStreamer:
         now - live_retention]`` at the point budget. The live buffer keeps
         every sample NEWER than the archive's actual last sample: the
         archiver nominally lags live by ~live_retention, but it can lag far
-        more (processed/downsampled streams are written in blocks), and
-        keeping only the theoretical newest-2-minutes span would silently
-        discard everything between the archive's real end and that boundary
-        — the newest chunks would vanish on every refresh. Anchoring the
-        keep-boundary at the archive's own last timestamp loses nothing
-        regardless of the actual lag. No NaN break is inserted here: the
-        two blocks meet at that timestamp (unlike the first fill, where the
-        archive genuinely ends behind the first live sample)."""
+        more (processed/downsampled streams are written in blocks), so the
+        keep-boundary is anchored at the archive's own last timestamp and
+        loses nothing regardless of the actual lag. If that still leaves a
+        real hole before the first kept live sample, the line is broken
+        across it."""
         carrier = self._carrier(signal)
         now_ns = int(time.time() * 1e9)
         boundary_ns = now_ns - _live_retention_s() * int(1e9)
@@ -1013,6 +1001,25 @@ class CanvasStreamer:
                 else np.zeros(0, dtype=bool)
             kept_x = np.asarray(cur_x)[keep_mask]
             kept_y = np.asarray(cur_y)[keep_mask]
+            kept_ymin = kept_ymax = None
+            if is_env:
+                kept_ymin = (np.asarray(cur_ymin)[keep_mask]
+                             if cur_ymin is not None else kept_y)
+                kept_ymax = (np.asarray(cur_ymax)[keep_mask]
+                             if cur_ymax is not None else kept_y)
+            if len(kept_x) and self._window_ns > 0 \
+                    and int(kept_x[0]) - keep_after_ns > max(1, self._window_ns // 100):
+                # The archiver can lag by more than the retention span. When
+                # the reply ends well before the first kept live sample, break
+                # the line across the hole (as the first fill does) instead of
+                # joining the two blocks with a diagonal.
+                gap_x = np.asarray([int(kept_x[0]) - 1], dtype=kept_x.dtype)
+                gap_y = np.asarray([np.nan])
+                kept_x = np.concatenate([gap_x, kept_x])
+                kept_y = np.concatenate([gap_y, kept_y])
+                if is_env:
+                    kept_ymin = np.concatenate([gap_y, kept_ymin])
+                    kept_ymax = np.concatenate([gap_y, kept_ymax])
 
             # Disjoint by construction (archive <= keep_after < live tail),
             # so a plain concatenation is already chronological.
@@ -1020,10 +1027,6 @@ class CanvasStreamer:
             my = np.concatenate([new_y, kept_y])
             merged_ymin = merged_ymax = None
             if is_env:
-                kept_ymin = (np.asarray(cur_ymin)[keep_mask]
-                             if cur_ymin is not None else kept_y)
-                kept_ymax = (np.asarray(cur_ymax)[keep_mask]
-                             if cur_ymax is not None else kept_y)
                 new_ymin = np.asarray(ay_min) if ay_min is not None else new_y
                 new_ymax = np.asarray(ay_max) if ay_max is not None else new_y
                 merged_ymin = np.concatenate([new_ymin, kept_ymin])
@@ -1035,8 +1038,8 @@ class CanvasStreamer:
                 xunit=xunit, yunit=yunit,
             )
             carrier.inject_external(append=False, **payload)
-            # No cap trim here: the refresh result IS the cap (10k archive
-            # points + the newest live span, per the point-5 contract).
+            # No cap trim here: the refresh result IS the cap (budget-sized
+            # archive block plus the newest live span).
             signal._streaming_has_live = True
             if carrier is not signal:
                 # See handler(): keep the reprocess read inside the carrier's

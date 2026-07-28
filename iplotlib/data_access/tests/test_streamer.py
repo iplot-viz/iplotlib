@@ -116,7 +116,7 @@ class ApplyCapTests(unittest.TestCase):
         signal.inject_external.assert_not_called()
 
     def test_drops_oldest_without_decimating(self):
-        # mint#78 point 5: over the (safety) threshold we DROP points, no
+        # Over the (safety) threshold we DROP points, no
         # local decimation; the refresh restores the window from archive.
         self.streamer._max_points = 1000
         sec = int(1e9)
@@ -392,7 +392,7 @@ class EnvelopeSelectionBackfillTests(unittest.TestCase):
 
 
 class WindowRefreshTests(unittest.TestCase):
-    """Tests for the full-window archive refresh (mint#78 point 5):
+    """Tests for the full-window archive refresh:
     one archive call for [now - window, now - live_retention] at the
     point budget, keeping the newest live_retention span from live."""
 
@@ -445,11 +445,31 @@ class WindowRefreshTests(unittest.TestCase):
         streamer._refresh_signal('ds', signal)
         kwargs = signal.inject_external.call_args.kwargs
         self.assertFalse(kwargs['append'])
+        # The 400 s hole between the archive's real end and the first kept
+        # live sample is a genuine gap, so the line breaks across it.
         self.assertEqual(list(kwargs['d0']),
-                         [arch1, arch2, lagged, fresh1, fresh2])
-        self.assertEqual(list(kwargs['d1']), [1.0, 2.0, 2.5, 3.0, 4.0])
+                         [arch1, arch2, lagged - 1, lagged, fresh1, fresh2])
+        d1 = np.asarray(kwargs['d1'], dtype=float)
+        self.assertTrue(np.array_equal(
+            d1, [1.0, 2.0, np.nan, 2.5, 3.0, 4.0], equal_nan=True))
         self.assertTrue(signal._streaming_has_live)
         streamer._callback.assert_called_once_with(signal)
+
+    def test_contiguous_seam_gets_no_break(self):
+        now_ns = int(time.time() * 1e9)
+        boundary_ns = now_ns - 120 * self.SEC
+        arch_end = boundary_ns - 10 * self.SEC
+        live1 = boundary_ns - 5 * self.SEC   # 5 s after archive end: no hole
+        live2 = boundary_ns + 10 * self.SEC
+        reply = _FakeArchiveResponse(x=[arch_end - self.SEC, arch_end],
+                                     y=[1.0, 2.0])
+        streamer, fake_da, signal = self._mk(
+            reply, data=[_FakeBuf([live1, live2]), _FakeBuf([3.0, 4.0])])
+        streamer._refresh_signal('ds', signal)
+        kwargs = signal.inject_external.call_args.kwargs
+        self.assertEqual(list(kwargs['d0']),
+                         [arch_end - self.SEC, arch_end, live1, live2])
+        self.assertEqual(list(kwargs['d1']), [1.0, 2.0, 3.0, 4.0])
 
     def test_empty_archive_reply_leaves_buffer_untouched(self):
         reply = _FakeArchiveResponse(x=[], y=[])

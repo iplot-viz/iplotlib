@@ -993,12 +993,9 @@ class AccessHelper:
             new_store[2].unit = res['d2_unit']
         if res.get('d3_unit'):
             new_store[3].unit = res['d3_unit']
-        # Publish in one indivisible step. Building the new arrays in a
-        # separate list first and swapping the whole thing in with a single
-        # slice-assignment means a concurrent unsynchronized reader (e.g. a
-        # parent expression's reprocess on another thread) always sees either
-        # the fully-old or fully-new data_store, never a cleared or
-        # partially-populated one.
+        # Single slice-assignment so a concurrent reader (e.g. a parent
+        # expression's reprocess on another thread) sees either the old or
+        # the new data_store, never a partially-populated one.
         signal.data_store[:] = new_store
 
         signal.set_da_success()
