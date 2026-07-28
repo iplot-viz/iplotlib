@@ -970,26 +970,36 @@ class AccessHelper:
 
         # we can append to existing data if required (in case of real time streaming)
         if append and len(signal.data_store[0]) > 0:
-            signal.data_store[0] = BufferObject(np.append(signal.data_store[0], res['d0']))
-            signal.data_store[1] = BufferObject(np.append(signal.data_store[1], res['d1']))
-            signal.data_store[2] = BufferObject(np.append(signal.data_store[2], res['d2']))
-            signal.data_store[3] = BufferObject(np.append(signal.data_store[3], res['d3']))
+            new_store = [
+                BufferObject(np.append(signal.data_store[0], res['d0'])),
+                BufferObject(np.append(signal.data_store[1], res['d1'])),
+                BufferObject(np.append(signal.data_store[2], res['d2'])),
+                BufferObject(np.append(signal.data_store[3], res['d3'])),
+            ]
         else:
-            signal.data_store.clear()
-            signal.data_store.append(BufferObject(res['d0']))
-            signal.data_store.append(BufferObject(res['d1']))
-            signal.data_store.append(BufferObject(res['d2']))
-            signal.data_store.append(BufferObject(res['d3']))
+            new_store = [
+                BufferObject(res['d0']),
+                BufferObject(res['d1']),
+                BufferObject(res['d2']),
+                BufferObject(res['d3']),
+            ]
         logger.debug(f"on_fetch_done: {len(res['d1'])}")
         # units can be specified separately, if your data access module does not use the BufferObject subclass.
         if res.get('d0_unit'):
-            signal.data_store[0].unit = res['d0_unit']
+            new_store[0].unit = res['d0_unit']
         if res.get('d1_unit'):
-            signal.data_store[1].unit = res['d1_unit']
+            new_store[1].unit = res['d1_unit']
         if res.get('d2_unit'):
-            signal.data_store[2].unit = res['d2_unit']
+            new_store[2].unit = res['d2_unit']
         if res.get('d3_unit'):
-            signal.data_store[3].unit = res['d3_unit']
+            new_store[3].unit = res['d3_unit']
+        # Publish in one indivisible step. Building the new arrays in a
+        # separate list first and swapping the whole thing in with a single
+        # slice-assignment means a concurrent unsynchronized reader (e.g. a
+        # parent expression's reprocess on another thread) always sees either
+        # the fully-old or fully-new data_store, never a cleared or
+        # partially-populated one.
+        signal.data_store[:] = new_store
 
         signal.set_da_success()
 

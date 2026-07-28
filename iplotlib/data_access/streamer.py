@@ -474,8 +474,14 @@ class CanvasStreamer:
                     # Flag the plotted signal, not the carrier: the streaming
                     # reprocess path never aggregates children's flags.
                     signal.isDownsampled = True
-            if carrier is not signal:
-                self._reprocess(signal)
+                if carrier is not signal:
+                    # Reprocess while still holding the carrier's lock. The
+                    # expression reads the carrier's data_store, which must
+                    # not be mutated concurrently by another writer (topup,
+                    # backfill) while that read is in progress, or the parent
+                    # expression sees a torn (mismatched-length or partially
+                    # cleared) buffer and produces garbled output.
+                    self._reprocess(signal)
             if len(x_data) > 0 and self._window_ns > 0:
                 now_ns = int(time.time() * 1e9)
                 if int(x_data[-1]) >= now_ns - self._window_ns:
@@ -558,8 +564,11 @@ class CanvasStreamer:
             if self._apply_cap(carrier):
                 signal.isDownsampled = True
             signal._streaming_has_live = True
-        if carrier is not signal:
-            self._reprocess(signal)
+            if carrier is not signal:
+                # See handler(): keep the reprocess read inside the carrier's
+                # lock so a concurrent live/topup write cannot interleave
+                # mid-read and corrupt the derived signal.
+                self._reprocess(signal)
         callback(signal)
         return len(cx)
 
@@ -631,9 +640,12 @@ class CanvasStreamer:
             carrier.inject_external(append=False, **payload)
             self._apply_cap(carrier)
             signal._streaming_has_live = True
+            if carrier is not signal:
+                # See handler(): keep the reprocess read inside the carrier's
+                # lock so a concurrent live/backfill write cannot interleave
+                # mid-read and corrupt the derived signal.
+                self._reprocess(signal)
 
-        if carrier is not signal:
-            self._reprocess(signal)
         logger.info(f"Top-up for {signal.name}: {len(ax)} archive points, "
                     f"{len(kept_x)} prior live points retained")
         if self._callback:
