@@ -2,6 +2,7 @@
 (envelope vs raw, nbp gating), the empty-window last-value fallback,
 and the _streaming_has_live flag set during backfill."""
 
+import os
 import time
 import unittest
 from threading import Event
@@ -9,7 +10,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from iplotlib.data_access.streamer import CanvasStreamer
+from iplotlib.data_access.streamer import CanvasStreamer, _inject_period_s
 
 
 class _FakeBuf:
@@ -469,6 +470,68 @@ class WindowRefreshTests(unittest.TestCase):
         self.assertFalse(streamer._refresh_pending)
 
 
+class VerboseGatingTests(unittest.TestCase):
+    """Only verbose signals (window holds more samples than the budget)
+    are periodically refreshed from archive; sparse or empty ones are not
+    re-queried after the initial backfill."""
+
+    def setUp(self):
+        self.streamer = CanvasStreamer(da=None)
+        self.streamer._max_points = 100
+
+    def test_saturated_reply_marks_verbose(self):
+        signal = _FakeSignal()
+        self.streamer._note_verbosity(signal, np.arange(100), None)
+        self.assertIn(signal.uid, self.streamer._verbose)
+
+    def test_decimated_raw_reply_marks_verbose(self):
+        # Envelope reply to a raw request = server overflowed the budget.
+        signal = _FakeSignal(envelope=False)
+        self.streamer._note_verbosity(signal, np.arange(50), np.arange(50))
+        self.assertIn(signal.uid, self.streamer._verbose)
+
+    def test_sparse_reply_is_not_verbose(self):
+        signal = _FakeSignal()
+        self.streamer._note_verbosity(signal, np.arange(5), None)
+        self.assertNotIn(signal.uid, self.streamer._verbose)
+
+    def test_empty_reply_is_not_verbose(self):
+        # A variable with no archive data (maybe one live point later)
+        # must never join the periodic refresh population.
+        signal = _FakeSignal()
+        self.streamer._note_verbosity(signal, np.array([]), None)
+        self.assertNotIn(signal.uid, self.streamer._verbose)
+        self.streamer._note_verbosity(signal, None, None)
+        self.assertNotIn(signal.uid, self.streamer._verbose)
+
+    def test_quieting_signal_leaves_the_population(self):
+        signal = _FakeSignal()
+        self.streamer._note_verbosity(signal, np.arange(100), None)
+        self.assertIn(signal.uid, self.streamer._verbose)
+        self.streamer._note_verbosity(signal, np.arange(10), None)
+        self.assertNotIn(signal.uid, self.streamer._verbose)
+
+    def test_near_budget_reply_keeps_verbose_state(self):
+        # Hysteresis: within 10% of the budget the classification holds.
+        signal = _FakeSignal()
+        self.streamer._note_verbosity(signal, np.arange(100), None)
+        self.streamer._note_verbosity(signal, np.arange(95), None)
+        self.assertIn(signal.uid, self.streamer._verbose)
+
+    def test_cap_overflow_marks_verbose_too(self):
+        signal = _FakeSignal()
+        self.streamer._mark_refresh(signal)
+        self.assertIn(signal.uid, self.streamer._verbose)
+        self.assertIn(signal.uid, self.streamer._refresh_pending)
+
+    def test_envelope_reply_for_envelope_signal_uses_length_only(self):
+        # ay_min is always present for opted-in envelope signals; that
+        # alone must not classify them verbose.
+        signal = _FakeSignal(envelope=True)
+        self.streamer._note_verbosity(signal, np.arange(5), np.arange(5))
+        self.assertNotIn(signal.uid, self.streamer._verbose)
+
+
 class HandlerEmptyPayloadTests(unittest.TestCase):
     """An empty poll must not inject data, but still requests a redraw so
     the visible window keeps sliding."""
@@ -717,3 +780,91 @@ class SpawnLifecycleTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class VerbosityGatingTests(unittest.TestCase):
+    """Only signals whose window holds more samples than the point budget
+    are re-queried from the archive; sparse signals (few points, or none
+    with a lone live sample) are served by the initial backfill plus live."""
+
+    def setUp(self):
+        self.streamer = CanvasStreamer(da=None)
+        self.streamer._max_points = 1000
+
+    def test_saturated_reply_marks_verbose(self):
+        signal = _FakeSignal()
+        self.streamer._note_verbosity(signal, np.arange(1000), None)
+        self.assertIn(signal.uid, self.streamer._verbose)
+
+    def test_decimated_raw_reply_marks_verbose(self):
+        signal = _FakeSignal(envelope=False)
+        # A raw request answered with min/max means UDA overflowed.
+        self.streamer._note_verbosity(signal, np.arange(10), np.zeros(10))
+        self.assertIn(signal.uid, self.streamer._verbose)
+
+    def test_sparse_reply_is_not_verbose(self):
+        signal = _FakeSignal()
+        self.streamer._note_verbosity(signal, np.arange(5), None)
+        self.assertNotIn(signal.uid, self.streamer._verbose)
+
+    def test_empty_reply_clears_verbose(self):
+        signal = _FakeSignal()
+        self.streamer._verbose.add(signal.uid)
+        self.streamer._note_verbosity(signal, np.asarray([]), None)
+        self.assertNotIn(signal.uid, self.streamer._verbose)
+
+    def test_no_data_in_window_never_refreshes(self):
+        # The reported case: nothing in the archive for the interval and a
+        # single live point must not retrigger archive requests.
+        fake_da = MagicMock()
+        fake_da.get_archive_window.return_value = _FakeArchiveResponse(x=[], y=[])
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._max_points = 1000
+        streamer._window_ns = 3600 * int(1e9)
+        signal = _FakeSignal(name='sparse')
+        streamer._ds_to_signals = {'ds': [signal]}
+        streamer._archive_backfill({'ds': [signal]}, streamer._window_ns,
+                                   MagicMock())
+        self.assertNotIn(signal.uid, streamer._verbose)
+        self.assertFalse(streamer._refresh_pending)
+
+    def test_cap_overflow_marks_verbose(self):
+        signal = _FakeSignal()
+        self.streamer._mark_refresh(signal)
+        self.assertIn(signal.uid, self.streamer._verbose)
+        self.assertIn(signal.uid, self.streamer._refresh_pending)
+
+
+class InjectCadenceTests(unittest.TestCase):
+    """The injection cadence follows the bucket duration so wide windows
+    stop paying a per-second buffer copy for sub-pixel movement."""
+
+    def setUp(self):
+        self._saved = os.environ.pop('MINT_STREAMING_INJECT_SECONDS', None)
+
+    def tearDown(self):
+        os.environ.pop('MINT_STREAMING_INJECT_SECONDS', None)
+        if self._saved is not None:
+            os.environ['MINT_STREAMING_INJECT_SECONDS'] = self._saved
+
+    def test_short_window_stays_at_one_second(self):
+        self.assertEqual(_inject_period_s(60 * int(1e9), 10000), 1.0)
+
+    def test_seven_day_window_is_clamped_to_the_maximum(self):
+        self.assertEqual(_inject_period_s(7 * 86400 * int(1e9), 10000), 10.0)
+
+    def test_intermediate_window_scales_with_the_bucket(self):
+        # 10k buckets over 10 hours -> 3.6 s per bucket.
+        self.assertAlmostEqual(
+            _inject_period_s(10 * 3600 * int(1e9), 10000), 3.6, places=3)
+
+    def test_defaults_without_window_or_budget(self):
+        self.assertEqual(_inject_period_s(0, 0), 1.0)
+
+    def test_env_override_wins(self):
+        os.environ['MINT_STREAMING_INJECT_SECONDS'] = '2.5'
+        self.assertEqual(_inject_period_s(7 * 86400 * int(1e9), 10000), 2.5)
+
+    def test_invalid_env_override_falls_back_to_the_computed_value(self):
+        os.environ['MINT_STREAMING_INJECT_SECONDS'] = 'not-a-number'
+        self.assertEqual(_inject_period_s(7 * 86400 * int(1e9), 10000), 10.0)

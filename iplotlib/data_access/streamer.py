@@ -22,7 +22,33 @@ _REFRESH_MIN_INTERVAL_S = 60
 
 # Injection cadence: polled chunks are buffered and merged so the O(buffer)
 # cost of inject_external is paid once per period instead of once per poll.
-_INJECT_PERIOD_S = 1.0
+# Raising MINT_STREAMING_INJECT_SECONDS trades display latency for CPU: every
+# injection re-copies the buffer, reprocesses expressions and redraws, so on
+# large workspaces with a high point cap a 2-5 s cadence cuts CPU roughly
+# proportionally.
+_DEFAULT_INJECT_PERIOD_S = 1.0
+_MAX_INJECT_PERIOD_S = 10.0
+
+
+def _inject_period_s(window_ns: int = 0, max_points: int = 0) -> float:
+    """Injection cadence. Every injection re-copies the buffer, reprocesses
+    expressions and redraws, so injecting faster than the display can
+    resolve is pure waste: with ``max_points`` samples across ``window_ns``
+    one bucket lasts window/max_points, and a 7-day window at 10k points
+    resolves nothing finer than about a minute. The cadence therefore
+    follows the bucket duration, clamped to [1 s, 10 s] so short windows
+    stay as responsive as before and wide ones cut CPU by up to 10x.
+    MINT_STREAMING_INJECT_SECONDS overrides the result outright."""
+    override = os.environ.get('MINT_STREAMING_INJECT_SECONDS')
+    if override is not None:
+        try:
+            return max(0.2, float(override))
+        except (TypeError, ValueError):
+            pass
+    if window_ns > 0 and max_points > 0:
+        bucket_s = (window_ns / 1e9) / max_points
+        return min(_MAX_INJECT_PERIOD_S, max(_DEFAULT_INJECT_PERIOD_S, bucket_s))
+    return _DEFAULT_INJECT_PERIOD_S
 
 # Newest live span kept whole. The archiver lags the live feed by roughly this
 # much, so the backfill stops here and the feed covers the rest; it is also the
@@ -99,6 +125,7 @@ class CanvasStreamer:
         self._first_live_pending = set()
         self._refresh_pending = set()
         self._last_refresh = {}
+        self._verbose = set()
         self._qt_threads = []
 
     def _spawn(self, name: str, target):
@@ -370,7 +397,9 @@ class CanvasStreamer:
 
     def stream_thread(self, ds, varnames, callback):
         pending = {varname: [] for varname in varnames}
-        next_flush = time.monotonic() + _INJECT_PERIOD_S
+        inject_period = _inject_period_s(self._window_ns, self._max_points)
+        logger.info(f"Injection cadence for {ds}: {inject_period:.1f}s")
+        next_flush = time.monotonic() + inject_period
         while not self.stop_flag:
             for varname in varnames:
                 dobj = self.da.get_next_data(ds, varname)
@@ -378,7 +407,7 @@ class CanvasStreamer:
                     pending[varname].append(dobj)
             if time.monotonic() >= next_flush:
                 self._flush_batches(pending, callback)
-                next_flush = time.monotonic() + _INJECT_PERIOD_S
+                next_flush = time.monotonic() + inject_period
             time.sleep(0.1)  # 100 ms
 
         self._flush_batches(pending, callback)
@@ -509,7 +538,11 @@ class CanvasStreamer:
                 self._first_live_pending.add(signal.uid)
                 ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_range(
                     ds, carrier, start_ns, end_ns)
+                self._note_verbosity(signal, ax, ay_min)
                 if ax is None or len(ax) == 0:
+                    # No archive data in the window (maybe a lone live point
+                    # arrives later): the signal is not verbose, so the
+                    # refresh worker will never re-query the archive for it.
                     self._backfill_last_value(ds, signal, carrier, end_ns, callback)
                     continue
                 n = self._inject_archive_chunk(
@@ -587,37 +620,65 @@ class CanvasStreamer:
 
     def _mark_refresh(self, signal):
         """Flag a signal for a full-window archive refresh. Cheap and
-        thread-safe (single set.add); the refresh worker picks it up."""
+        thread-safe (single set.add); the refresh worker picks it up.
+        A cap overflow proves the signal is verbose, so it also joins the
+        periodic-refresh population."""
         self._refresh_pending.add(signal.uid)
+        self._verbose.add(signal.uid)
+
+    def _note_verbosity(self, signal, ax, ay_min):
+        """Classify a signal from an archive reply. A signal is "verbose"
+        when the window holds more samples than the point budget: the reply
+        saturated the budget, or a raw request overflowed into a decimated
+        (envelope) reply. Only verbose signals are worth periodic archive
+        refreshes; a sparse signal (few points, or none at all with a lone
+        live sample) gets its data from the one initial backfill and the
+        live feed, and re-asking the archive for it would waste UDA and CPU
+        for nothing. Verbosity is re-evaluated on every reply so a signal
+        that quiets down leaves the refresh population."""
+        budget = self._max_points
+        if budget <= 0:
+            return
+        n = 0 if ax is None else len(ax)
+        decimated = ay_min is not None and not getattr(signal, 'envelope', False)
+        if n >= budget or decimated:
+            self._verbose.add(signal.uid)
+        elif n < budget - budget // 10:
+            self._verbose.discard(signal.uid)
 
     def _refresh_loop(self):
         """Refresh worker implementing the mint#78 point-5 contract: whenever
-        a signal's buffer overflowed the cap (drop-oldest happened), or on
-        the periodic tick for long windows, re-ask the archive for the whole
-        visible window in ONE call at the same point budget and keep only the
-        newest ``live_retention`` span from the live feed. Per-signal
-        refreshes are rate-limited so a fast signal cannot hammer UDA."""
+        a signal's buffer overflowed the cap, or on the periodic tick, re-ask
+        the archive for the whole visible window in ONE call at the same
+        point budget and keep the live span the archive does not yet cover.
+        Only signals classified verbose (more samples in the window than the
+        budget) are refreshed periodically: sparse signals never re-query
+        the archive after the initial backfill. Per-signal refreshes are
+        rate-limited so a fast signal cannot hammer UDA."""
         period_target = time.monotonic() + _TOPUP_PERIOD_S
         while not self.stop_flag:
             time.sleep(1)
             if self.stop_flag:
                 return
-            refresh_all = time.monotonic() >= period_target
-            if refresh_all:
+            periodic = time.monotonic() >= period_target
+            if periodic:
                 period_target = time.monotonic() + _TOPUP_PERIOD_S
-            if not refresh_all and not self._refresh_pending:
+            if not periodic and not self._refresh_pending:
                 continue
             for ds, signals in self._ds_to_signals.items():
                 for signal in signals:
                     if self.stop_flag:
                         return
                     uid = signal.uid
-                    if not (refresh_all or uid in self._refresh_pending):
+                    due_pending = uid in self._refresh_pending
+                    due_periodic = periodic and uid in self._verbose
+                    if not (due_pending or due_periodic):
                         continue
                     now = time.monotonic()
-                    if (not refresh_all
+                    if (not due_periodic
                             and now - self._last_refresh.get(uid, 0.0)
                             < _REFRESH_MIN_INTERVAL_S):
+                        # Stays pending; retried on a later pass.
                         continue
                     self._refresh_pending.discard(uid)
                     self._last_refresh[uid] = now
@@ -643,6 +704,7 @@ class CanvasStreamer:
 
         ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_archive_range(
             ds, carrier, start_ns, boundary_ns)
+        self._note_verbosity(signal, ax, ay_min)
         if ax is None or len(ax) == 0:
             return
         if ay_min is not None and not getattr(signal, 'envelope', False):
@@ -721,3 +783,4 @@ class CanvasStreamer:
         self._first_live_pending.clear()
         self._refresh_pending.clear()
         self._last_refresh.clear()
+        self._verbose.clear()
