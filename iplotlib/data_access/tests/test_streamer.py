@@ -114,7 +114,6 @@ class ApplyCapTests(unittest.TestCase):
             data=[_FakeBuf([1, 2, 3, 4]), _FakeBuf([10, 20, 30, 40])])
         self.assertFalse(self.streamer._apply_cap(signal))
         signal.inject_external.assert_not_called()
-        self.assertTrue(self.streamer._over_cap(signal))
 
     def test_drops_oldest_without_decimating(self):
         # mint#78 point 5: over the (safety) threshold we DROP points, no
@@ -1084,3 +1083,82 @@ class StepAcrossGapsTests(unittest.TestCase):
         streamer._hold_semantics.add(signal.uid)
         streamer._note_verbosity(signal, np.arange(100), None)
         self.assertNotIn(signal.uid, streamer._hold_semantics)
+
+
+class RefreshTriggerTests(unittest.TestCase):
+    """Refreshes are driven by missing history at the left edge, not by the
+    buffer merely sitting over the cap, and are staggered globally."""
+
+    SEC = int(1e9)
+
+    def setUp(self):
+        self.streamer = CanvasStreamer(da=None)
+        self.streamer._max_points = 1000
+        self.streamer._window_ns = 3600 * self.SEC
+
+    def test_full_buffer_covering_the_window_needs_no_refresh(self):
+        now = int(time.time() * 1e9)
+        # Over the cap, but reaching back to the window start: nothing to fetch.
+        x = np.linspace(now - 3600 * self.SEC, now, 2000).astype(np.int64)
+        signal = _FakeSignal(data=[_FakeBuf(x), _FakeBuf(np.zeros(2000))])
+        self.assertFalse(self.streamer._has_window_hole(signal))
+
+    def test_missing_left_edge_triggers_a_refresh(self):
+        now = int(time.time() * 1e9)
+        # Only the last 5 minutes survive of a 1 hour window.
+        x = np.linspace(now - 300 * self.SEC, now, 500).astype(np.int64)
+        signal = _FakeSignal(data=[_FakeBuf(x), _FakeBuf(np.zeros(500))])
+        self.assertTrue(self.streamer._has_window_hole(signal))
+
+    def test_empty_buffer_and_no_window_are_not_holes(self):
+        self.assertFalse(self.streamer._has_window_hole(_FakeSignal()))
+        self.streamer._window_ns = 0
+        now = int(time.time() * 1e9)
+        signal = _FakeSignal(data=[_FakeBuf([now]), _FakeBuf([1.0])])
+        self.assertFalse(self.streamer._has_window_hole(signal))
+
+
+class LiveBatchReductionTests(unittest.TestCase):
+    """A live batch is reduced to the window's display resolution so buffer
+    growth follows elapsed time rather than sample rate."""
+
+    SEC = int(1e9)
+
+    def setUp(self):
+        self.streamer = CanvasStreamer(da=None)
+        self.streamer._max_points = 10000
+        self.streamer._window_ns = 7 * 86400 * self.SEC  # 1 bucket ~ 60 s
+
+    def test_fast_batch_is_reduced_and_keeps_extremes(self):
+        # 10 s of 1 kHz data: far below one bucket of a 7-day window.
+        x = (np.arange(10000) * (self.SEC // 1000)).astype(np.int64)
+        y = np.zeros(10000)
+        y[1234] = -50.0
+        y[5678] = 50.0
+        signal = _FakeSignal()
+        rx, ry, reduced = self.streamer._reduce_live_batch(signal, x, y)
+        self.assertTrue(reduced)
+        self.assertLess(len(rx), len(x))
+        self.assertIn(-50.0, list(ry))
+        self.assertIn(50.0, list(ry))
+        self.assertTrue(np.all(np.diff(rx) >= 0))
+
+    def test_slow_batch_is_untouched(self):
+        x = (np.arange(3) * 60 * self.SEC).astype(np.int64)
+        y = np.asarray([1.0, 2.0, 3.0])
+        rx, ry, reduced = self.streamer._reduce_live_batch(_FakeSignal(), x, y)
+        self.assertFalse(reduced)
+        self.assertEqual(list(rx), list(x))
+
+    def test_envelope_signal_is_untouched(self):
+        x = (np.arange(10000) * (self.SEC // 1000)).astype(np.int64)
+        y = np.zeros(10000)
+        _, _, reduced = self.streamer._reduce_live_batch(
+            _FakeSignal(envelope=True), x, y)
+        self.assertFalse(reduced)
+
+    def test_no_window_or_budget_disables_reduction(self):
+        x = (np.arange(10000) * (self.SEC // 1000)).astype(np.int64)
+        y = np.zeros(10000)
+        self.streamer._window_ns = 0
+        self.assertFalse(self.streamer._reduce_live_batch(_FakeSignal(), x, y)[2])

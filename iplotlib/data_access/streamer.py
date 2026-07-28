@@ -9,6 +9,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QThread, Slot
 
 import iplotLogging.setupLogger as Sl
+from iplotlib.core.decimation import minmax_decimate
 
 logger = Sl.get_logger(__name__)
 
@@ -17,8 +18,23 @@ logger = Sl.get_logger(__name__)
 _TOPUP_PERIOD_S = 3600
 
 # Minimum spacing between cap-triggered refreshes of the same signal, so a
-# fast signal overflowing its buffer every few seconds cannot hammer UDA.
-_REFRESH_MIN_INTERVAL_S = 60
+# fast signal overflowing its buffer cannot hammer UDA. Overridable through
+# MINT_STREAMING_REFRESH_SECONDS.
+_DEFAULT_REFRESH_MIN_INTERVAL_S = 300
+
+# Minimum spacing between refreshes of ANY signal. Without it, a periodic
+# tick or a simultaneous overflow across a large workspace fires one archive
+# request per signal back to back; each reinjection reprocesses and redraws
+# on the draw thread, which is what makes focus changes and autoscale crawl.
+_REFRESH_GLOBAL_SPACING_S = 2.0
+
+
+def _refresh_min_interval_s() -> float:
+    try:
+        return max(5.0, float(os.environ.get('MINT_STREAMING_REFRESH_SECONDS',
+                                             _DEFAULT_REFRESH_MIN_INTERVAL_S)))
+    except (TypeError, ValueError):
+        return _DEFAULT_REFRESH_MIN_INTERVAL_S
 
 # Injection cadence: polled chunks are buffered and merged so the O(buffer)
 # cost of inject_external is paid once per period instead of once per poll.
@@ -131,6 +147,7 @@ class CanvasStreamer:
         # Their buffers are normalized to a zero-order hold so an empty span
         # is drawn flat instead of as an invented ramp.
         self._hold_semantics = set()
+        self._last_refresh_any = 0.0
         self._qt_threads = []
 
     def _spawn(self, name: str, target):
@@ -299,15 +316,25 @@ class CanvasStreamer:
                 m_min[sel] if m_min is not None else None,
                 m_max[sel] if m_max is not None else None)
 
-    def _over_cap(self, signal):
-        """True when the buffer exceeds the cap (with slack): the caller
-        should mark the signal for a refresh, which enforces the cap by
-        re-asking the archive at the point budget and dropping the rest.
+    def _has_window_hole(self, signal):
+        """True when the buffer no longer reaches the left edge of the window,
+        i.e. the safety trim dropped history that only the archive can supply.
+
+        This replaces a plain over-the-cap test as the refresh trigger. A busy
+        signal sits permanently over the cap while still covering the whole
+        window, and refreshing it then bought nothing: it re-fetched data the
+        buffer already had, once per signal per interval, which is the archive
+        request storm that made focus changes and autoscale crawl. What
+        actually warrants a round trip is a gap at the left edge.
         Caller must hold _signal_lock."""
-        if self._max_points <= 0:
+        if self._max_points <= 0 or self._window_ns <= 0:
             return False
         x, _, _, _ = self._current_arrays(signal)
-        return len(x) > self._max_points + self._max_points // 50
+        if len(x) == 0:
+            return False
+        window_start = int(time.time() * 1e9) - self._window_ns
+        # A tenth of the window of missing history is worth one request.
+        return int(np.asarray(x)[0]) > window_start + self._window_ns // 10
 
     def _apply_cap(self, signal):
         """Safety valve only: the regular cap enforcement is the refresh
@@ -460,6 +487,44 @@ class CanvasStreamer:
             x = x[keep]
             y = y[keep]
         return SimpleNamespace(xdata=x, ydata=y, xunit=last.xunit, yunit=last.yunit)
+
+    def _reduce_live_batch(self, signal, x, y):
+        """Reduce a live batch to the window's display resolution.
+
+        A fast signal delivers far more samples per injection than a window of
+        ``max_points`` can show: at 7 days and 10k points one bucket lasts a
+        minute, so a kHz feed contributes 60000 samples where 2 would do. Left
+        alone the buffer fills with invisible detail, the safety trim then eats
+        the left edge, and every eviction costs an archive round trip to put it
+        back -- the request storm. Reducing the batch to min/max pairs per
+        bucket bounds buffer growth by elapsed time instead of sample rate, so
+        the buffer keeps covering the window and refreshes become rare.
+
+        Extremes are preserved at their true coordinates (min/max per bucket),
+        and NaN line breaks survive, so this is the same reduction the archive
+        would have applied. Envelope buffers are left alone: their band is
+        already a reduction. Returns ``(x, y, reduced)``."""
+        if self._max_points <= 0 or self._window_ns <= 0:
+            return x, y, False
+        if getattr(signal, 'envelope', False):
+            return x, y, False
+        x = np.asarray(x)
+        y = np.asarray(y)
+        if len(x) < 4:
+            return x, y, False
+        bucket_ns = max(1, self._window_ns // self._max_points)
+        span_ns = int(x[-1]) - int(x[0])
+        if span_ns <= 0:
+            return x, y, False
+        target_pairs = int(span_ns // bucket_ns)
+        if target_pairs <= 0:
+            target_pairs = 1
+        if len(x) <= 2 * target_pairs:
+            return x, y, False
+        rx, ry = minmax_decimate(x, y, target_pairs)
+        if len(rx) >= len(x):
+            return x, y, False
+        return rx, ry, True
 
     @staticmethod
     def _step_across_gaps(x, y, max_gap_ns: int):
@@ -656,6 +721,14 @@ class CanvasStreamer:
                     logger.info(
                         f"{varname}: live sample(s) older than the window; "
                         f"holding the last known value across it")
+                if not clamped:
+                    x_data, y_data, reduced = self._reduce_live_batch(
+                        carrier, x_data, y_data)
+                    if reduced:
+                        logger.debug(
+                            f"{varname}: live batch reduced to "
+                            f"{len(x_data)} points for the window resolution")
+                        signal.isDownsampled = True
             if first_live:
                 cur_x = carrier.x_data
                 if not clamped and cur_x is not None and len(cur_x) > 0 \
@@ -693,10 +766,9 @@ class CanvasStreamer:
                     # Flag the plotted signal, not the carrier: the streaming
                     # reprocess path never aggregates children's flags.
                     signal.isDownsampled = True
-                if self._over_cap(carrier):
-                    # Over budget: the refresh worker enforces the cap by
-                    # re-asking the archive for the whole window at the
-                    # point budget and keeping the newest live span.
+                if self._has_window_hole(carrier):
+                    # History missing at the left edge: only the archive can
+                    # supply it, so ask the refresh worker for one call.
                     self._mark_refresh(signal)
                 if carrier is not signal:
                     # Reprocess while still holding the carrier's lock. The
@@ -791,7 +863,7 @@ class CanvasStreamer:
             carrier.inject_external(append=False, **payload)
             if self._apply_cap(carrier):
                 signal.isDownsampled = True
-            if self._over_cap(carrier):
+            if self._has_window_hole(carrier):
                 self._mark_refresh(signal)
             signal._streaming_has_live = True
             if carrier is not signal:
@@ -868,6 +940,7 @@ class CanvasStreamer:
         the archive after the initial backfill. Per-signal refreshes are
         rate-limited so a fast signal cannot hammer UDA."""
         period_target = time.monotonic() + _TOPUP_PERIOD_S
+        min_interval = _refresh_min_interval_s()
         while not self.stop_flag:
             time.sleep(1)
             if self.stop_flag:
@@ -887,13 +960,19 @@ class CanvasStreamer:
                     if not (due_pending or due_periodic):
                         continue
                     now = time.monotonic()
-                    if (not due_periodic
-                            and now - self._last_refresh.get(uid, 0.0)
-                            < _REFRESH_MIN_INTERVAL_S):
-                        # Stays pending; retried on a later pass.
+                    if now - self._last_refresh_any < _REFRESH_GLOBAL_SPACING_S:
+                        # Stagger across signals: one archive round trip at a
+                        # time, so a workspace-wide tick cannot flood the
+                        # draw thread with reinjections.
+                        break
+                    if now - self._last_refresh.get(uid, 0.0) < min_interval:
+                        # Stays pending; retried on a later pass. Applies to
+                        # periodic refreshes too -- a signal refreshed for a
+                        # hole a moment ago does not need the tick as well.
                         continue
                     self._refresh_pending.discard(uid)
                     self._last_refresh[uid] = now
+                    self._last_refresh_any = now
                     self._refresh_signal(ds, signal)
 
     def _refresh_signal(self, ds: str, signal):
@@ -997,3 +1076,4 @@ class CanvasStreamer:
         self._last_refresh.clear()
         self._verbose.clear()
         self._hold_semantics.clear()
+        self._last_refresh_any = 0.0
