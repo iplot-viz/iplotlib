@@ -1001,3 +1001,86 @@ class TrimToWindowTests(unittest.TestCase):
         signal = _FakeSignal()
         self.assertFalse(self.streamer._trim_to_window(signal, 1000 * self.SEC))
         signal.inject_external.assert_not_called()
+
+
+class StepAcrossGapsTests(unittest.TestCase):
+    """A span with no samples means the value held; joining its ends with a
+    straight line invents a ramp, which autoscale turns into a full-height
+    slope when the two ends differ only in the last digit."""
+
+    SEC = int(1e9)
+
+    def test_holds_across_a_wide_gap(self):
+        x = np.asarray([0, 1000 * self.SEC])
+        y = np.asarray([4.1740798, 4.1740803])
+        out_x, out_y, changed = CanvasStreamer._step_across_gaps(
+            x, y, 10 * self.SEC)
+        self.assertTrue(changed)
+        self.assertEqual(list(out_x), [0, 1000 * self.SEC - 1, 1000 * self.SEC])
+        # Flat at the first value right up to the step.
+        self.assertEqual(list(out_y[:2]), [4.1740798, 4.1740798])
+        self.assertEqual(out_y[-1], 4.1740803)
+
+    def test_constant_signal_stays_exactly_flat(self):
+        x = np.asarray([0, 86400 * self.SEC])
+        y = np.asarray([4.17408, 4.17408])
+        out_x, out_y, changed = CanvasStreamer._step_across_gaps(
+            x, y, 864 * self.SEC)
+        self.assertTrue(changed)
+        self.assertEqual(len(set(out_y.tolist())), 1)
+
+    def test_dense_samples_are_untouched(self):
+        x = np.arange(100) * self.SEC
+        y = np.linspace(0.0, 1.0, 100)
+        out_x, out_y, changed = CanvasStreamer._step_across_gaps(
+            x, y, 10 * self.SEC)
+        self.assertFalse(changed)
+        self.assertEqual(list(out_x), list(x))
+
+    def test_multiple_gaps_each_get_a_hold(self):
+        x = np.asarray([0, 500 * self.SEC, 505 * self.SEC, 2000 * self.SEC])
+        y = np.asarray([1.0, 2.0, 3.0, 4.0])
+        out_x, out_y, changed = CanvasStreamer._step_across_gaps(
+            x, y, 100 * self.SEC)
+        self.assertTrue(changed)
+        self.assertEqual(list(out_x),
+                         [0, 500 * self.SEC - 1, 500 * self.SEC,
+                          505 * self.SEC, 2000 * self.SEC - 1,
+                          2000 * self.SEC])
+        self.assertEqual(list(out_y), [1.0, 1.0, 2.0, 3.0, 3.0, 4.0])
+
+    def test_single_point_and_no_threshold_are_noops(self):
+        x = np.asarray([0])
+        y = np.asarray([1.0])
+        self.assertFalse(CanvasStreamer._step_across_gaps(x, y, 10)[2])
+        self.assertFalse(CanvasStreamer._step_across_gaps(
+            np.asarray([0, 10]), np.asarray([1.0, 2.0]), 0)[2])
+
+    def test_apply_hold_semantics_rewrites_the_buffer(self):
+        streamer = CanvasStreamer(da=None)
+        window = 86400 * self.SEC
+        signal = _FakeSignal(
+            data=[_FakeBuf([0, window]), _FakeBuf([4.1740798, 4.1740803])])
+        self.assertTrue(streamer._apply_hold_semantics(signal, window))
+        kwargs = signal.inject_external.call_args.kwargs
+        self.assertFalse(kwargs['append'])
+        self.assertEqual(list(np.asarray(kwargs['d1'])[:2]),
+                         [4.1740798, 4.1740798])
+
+    def test_apply_hold_semantics_skips_envelope_buffers(self):
+        streamer = CanvasStreamer(da=None)
+        window = 86400 * self.SEC
+        signal = _FakeSignal(
+            envelope=True,
+            data=[_FakeBuf([0, window]), _FakeBuf([1.0, 2.0]),
+                  _FakeBuf([3.0, 4.0]), _FakeBuf([2.0, 3.0])])
+        self.assertFalse(streamer._apply_hold_semantics(signal, window))
+        signal.inject_external.assert_not_called()
+
+    def test_verbose_signal_leaves_hold_semantics(self):
+        streamer = CanvasStreamer(da=None)
+        streamer._max_points = 100
+        signal = _FakeSignal()
+        streamer._hold_semantics.add(signal.uid)
+        streamer._note_verbosity(signal, np.arange(100), None)
+        self.assertNotIn(signal.uid, streamer._hold_semantics)

@@ -126,6 +126,11 @@ class CanvasStreamer:
         self._refresh_pending = set()
         self._last_refresh = {}
         self._verbose = set()
+        # Signals whose visible content is a held last-known value (archive
+        # empty in the window, or the feed re-announcing a stale value).
+        # Their buffers are normalized to a zero-order hold so an empty span
+        # is drawn flat instead of as an invented ramp.
+        self._hold_semantics = set()
         self._qt_threads = []
 
     def _spawn(self, name: str, target):
@@ -456,6 +461,67 @@ class CanvasStreamer:
             y = y[keep]
         return SimpleNamespace(xdata=x, ydata=y, xunit=last.xunit, yunit=last.yunit)
 
+    @staticmethod
+    def _step_across_gaps(x, y, max_gap_ns: int):
+        """Insert a zero-order-hold point before every sample that follows a
+        gap wider than ``max_gap_ns``, returning ``(x, y, changed)``.
+
+        A process variable archived on change has no samples while it does
+        not change, so the only correct reading of a long empty span is that
+        the value held. Joining the two ends with a straight line instead
+        asserts a linear ramp that never happened -- and when the two ends
+        differ only in the last representable digit (an archive value stored
+        as float32 versus the same value arriving live as float64, say), that
+        invented ramp is what autoscale magnifies into a full-height slope
+        across the window for a signal that is in fact constant.
+
+        Applied only to signals under hold semantics (sparse ones, whose
+        buffers are small), so the O(n) scan is negligible and densely
+        sampled traces keep plain interpolation between their samples."""
+        x = np.asarray(x)
+        y = np.asarray(y)
+        if len(x) < 2 or max_gap_ns <= 0:
+            return x, y, False
+        gaps = np.diff(x.astype(np.int64)) > max_gap_ns
+        if not gaps.any():
+            return x, y, False
+        # A gap at index i sits between sample i and i+1: hold y[i] until
+        # just before x[i+1].
+        idx = np.flatnonzero(gaps)
+        hold_x = x[idx + 1] - 1
+        hold_y = y[idx]
+        out_x = np.concatenate([x, hold_x])
+        out_y = np.concatenate([y, hold_y])
+        order = np.argsort(out_x, kind='stable')
+        out_x, out_y = out_x[order], out_y[order]
+        # A held point landing exactly on a real sample is redundant.
+        keep = np.empty(len(out_x), dtype=bool)
+        keep[-1] = True
+        keep[:-1] = out_x[1:] > out_x[:-1]
+        return out_x[keep], out_y[keep], True
+
+    def _apply_hold_semantics(self, signal, window_ns: int):
+        """Normalize a held/sparse signal's buffer to a zero-order hold.
+        Caller must hold _signal_lock. Returns True if rewritten."""
+        if window_ns <= 0:
+            return False
+        x, y, y_min, y_max = self._current_arrays(signal)
+        if y_min is not None:
+            # An envelope buffer carries its own band; leave it alone.
+            return False
+        # A gap is anything far wider than the visible sample spacing.
+        max_gap_ns = max(1, window_ns // 100)
+        new_x, new_y, changed = self._step_across_gaps(x, y, max_gap_ns)
+        if not changed:
+            return False
+        payload = self._make_payload(
+            signal, new_x, new_y,
+            xunit=getattr(signal.data_store[0], 'unit', ''),
+            yunit=getattr(signal.data_store[1], 'unit', ''),
+        )
+        signal.inject_external(append=False, **payload)
+        return True
+
     def _trim_to_window(self, signal, window_start_ns: int):
         """Drop samples that have slid out of the visible window, holding
         the newest of them as an anchor at the left edge so the trace still
@@ -586,6 +652,7 @@ class CanvasStreamer:
                 x_data, y_data, clamped = self._hold_stale_samples(
                     x_data, y_data, now_ns - self._window_ns, now_ns)
                 if clamped:
+                    self._hold_semantics.add(signal.uid)
                     logger.info(
                         f"{varname}: live sample(s) older than the window; "
                         f"holding the last known value across it")
@@ -618,6 +685,10 @@ class CanvasStreamer:
                 if self._window_ns > 0:
                     self._trim_to_window(
                         carrier, int(time.time() * 1e9) - self._window_ns)
+                    if signal.uid in self._hold_semantics:
+                        # The held value spans the empty part of the window;
+                        # a new sample must step off it, not ramp from it.
+                        self._apply_hold_semantics(carrier, self._window_ns)
                 if self._apply_cap(carrier):
                     # Flag the plotted signal, not the carrier: the streaming
                     # reprocess path never aggregates children's flags.
@@ -746,6 +817,7 @@ class CanvasStreamer:
             ax, ay, clamped = self._hold_stale_samples(
                 ax, ay, start_ns, end_ns)
             if clamped:
+                self._hold_semantics.add(signal.uid)
                 logger.info(f"Holding last known value for {signal.name} "
                             f"across the window (no samples inside it)")
                 # min/max bounds belong to the original sample; a held value
@@ -781,6 +853,8 @@ class CanvasStreamer:
         decimated = ay_min is not None and not getattr(signal, 'envelope', False)
         if n >= budget or decimated:
             self._verbose.add(signal.uid)
+            # Densely sampled: plain interpolation between real samples.
+            self._hold_semantics.discard(signal.uid)
         elif n < budget - budget // 10:
             self._verbose.discard(signal.uid)
 
@@ -922,3 +996,4 @@ class CanvasStreamer:
         self._refresh_pending.clear()
         self._last_refresh.clear()
         self._verbose.clear()
+        self._hold_semantics.clear()
