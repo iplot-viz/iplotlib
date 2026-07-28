@@ -6,6 +6,7 @@ import os
 import time
 import unittest
 from threading import Event
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -868,3 +869,120 @@ class InjectCadenceTests(unittest.TestCase):
     def test_invalid_env_override_falls_back_to_the_computed_value(self):
         os.environ['MINT_STREAMING_INJECT_SECONDS'] = 'not-a-number'
         self.assertEqual(_inject_period_s(7 * 86400 * int(1e9), 10000), 10.0)
+
+
+class StaleLiveSampleTests(unittest.TestCase):
+    """A live sample stamped before the window is a last-known-value
+    announcement: it must be held as a constant line across the window,
+    not plotted at its own timestamp (which would stretch the X range)."""
+
+    SEC = int(1e9)
+
+    def test_fully_stale_batch_becomes_a_flat_line_across_the_window(self):
+        ws = 1_000_000 * self.SEC
+        now = ws + 3600 * self.SEC
+        # One point 20 days before the window start (the reported 8 July case).
+        old = ws - 20 * 86400 * self.SEC
+        x, y, clamped = CanvasStreamer._hold_stale_samples(
+            np.asarray([old]), np.asarray([7.5]), ws, now)
+        self.assertTrue(clamped)
+        self.assertEqual(list(x), [ws, now])
+        self.assertEqual(list(y), [7.5, 7.5])
+
+    def test_newest_stale_value_wins(self):
+        ws = 1000 * self.SEC
+        now = ws + 60 * self.SEC
+        x, y, clamped = CanvasStreamer._hold_stale_samples(
+            np.asarray([10 * self.SEC, 500 * self.SEC]),
+            np.asarray([1.0, 2.0]), ws, now)
+        self.assertTrue(clamped)
+        self.assertEqual(list(y), [2.0, 2.0])
+
+    def test_partial_batch_holds_the_old_value_up_to_the_first_fresh_sample(self):
+        ws = 1000 * self.SEC
+        now = ws + 60 * self.SEC
+        fresh = ws + 10 * self.SEC
+        x, y, clamped = CanvasStreamer._hold_stale_samples(
+            np.asarray([500 * self.SEC, fresh]),
+            np.asarray([1.0, 9.0]), ws, now)
+        self.assertTrue(clamped)
+        self.assertEqual(list(x), [ws, fresh])
+        self.assertEqual(list(y), [1.0, 9.0])
+
+    def test_fresh_batch_is_untouched(self):
+        ws = 1000 * self.SEC
+        now = ws + 60 * self.SEC
+        xs = np.asarray([ws + 1, ws + 2])
+        ys = np.asarray([1.0, 2.0])
+        x, y, clamped = CanvasStreamer._hold_stale_samples(xs, ys, ws, now)
+        self.assertFalse(clamped)
+        self.assertEqual(list(x), list(xs))
+        self.assertEqual(list(y), list(ys))
+
+    def test_no_clamping_without_a_window(self):
+        xs = np.asarray([1, 2])
+        x, y, clamped = CanvasStreamer._hold_stale_samples(
+            xs, np.asarray([1.0, 2.0]), 0, 0)
+        self.assertFalse(clamped)
+
+    def test_handler_holds_a_stale_live_point_instead_of_appending_it(self):
+        streamer = CanvasStreamer(da=None)
+        streamer._window_ns = 3600 * int(1e9)
+        streamer._max_points = 0
+        signal = _FakeSignal(name='static')
+        streamer.signals = {'static': [signal]}
+        now_ns = int(time.time() * 1e9)
+        old = now_ns - 20 * 86400 * self.SEC
+        dobj = SimpleNamespace(xdata=np.asarray([old]), ydata=np.asarray([4.2]),
+                               xunit='ns', yunit='V')
+        streamer.handler(MagicMock(), 'static', dobj)
+        kwargs = signal.inject_external.call_args.kwargs
+        out_x = np.asarray(kwargs['d0'])
+        # Nothing older than the window start survives.
+        self.assertGreaterEqual(int(out_x[0]), now_ns - streamer._window_ns)
+        self.assertEqual(list(np.asarray(kwargs['d1'])), [4.2, 4.2])
+
+
+class TrimToWindowTests(unittest.TestCase):
+    """Samples that slide out of the window are dropped, with the newest of
+    them held at the left edge so the trace still spans it."""
+
+    SEC = int(1e9)
+
+    def setUp(self):
+        self.streamer = CanvasStreamer(da=None)
+        self.streamer._window_ns = 1000 * self.SEC
+
+    def test_noop_while_the_oldest_sample_is_within_the_margin(self):
+        # Margin is a twentieth of the window: 50 s here.
+        signal = _FakeSignal(data=[_FakeBuf([970 * self.SEC]), _FakeBuf([1.0])])
+        self.assertFalse(self.streamer._trim_to_window(signal, 1000 * self.SEC))
+        signal.inject_external.assert_not_called()
+
+    def test_drops_old_samples_and_holds_an_anchor_at_the_edge(self):
+        ws = 1000 * self.SEC
+        signal = _FakeSignal(
+            data=[_FakeBuf([100 * self.SEC, 500 * self.SEC,
+                            1200 * self.SEC, 1300 * self.SEC]),
+                  _FakeBuf([1.0, 2.0, 3.0, 4.0])])
+        self.assertTrue(self.streamer._trim_to_window(signal, ws))
+        kwargs = signal.inject_external.call_args.kwargs
+        self.assertFalse(kwargs['append'])
+        self.assertEqual(list(kwargs['d0']), [ws, 1200 * self.SEC, 1300 * self.SEC])
+        # The anchor carries the last pre-window value.
+        self.assertEqual(list(kwargs['d1']), [2.0, 3.0, 4.0])
+
+    def test_all_samples_behind_the_window_collapse_to_a_held_value(self):
+        ws = 1000 * self.SEC
+        signal = _FakeSignal(
+            data=[_FakeBuf([100 * self.SEC, 200 * self.SEC]),
+                  _FakeBuf([1.0, 2.0])])
+        self.assertTrue(self.streamer._trim_to_window(signal, ws))
+        kwargs = signal.inject_external.call_args.kwargs
+        self.assertEqual(list(kwargs['d0']), [ws])
+        self.assertEqual(list(kwargs['d1']), [2.0])
+
+    def test_empty_buffer_is_a_noop(self):
+        signal = _FakeSignal()
+        self.assertFalse(self.streamer._trim_to_window(signal, 1000 * self.SEC))
+        signal.inject_external.assert_not_called()

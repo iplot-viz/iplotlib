@@ -456,6 +456,103 @@ class CanvasStreamer:
             y = y[keep]
         return SimpleNamespace(xdata=x, ydata=y, xunit=last.xunit, yunit=last.yunit)
 
+    def _trim_to_window(self, signal, window_start_ns: int):
+        """Drop samples that have slid out of the visible window, holding
+        the newest of them as an anchor at the left edge so the trace still
+        spans it. Nothing else trims the left edge for sparse signals (the
+        archive refresh only runs for verbose ones), so without this a long
+        stream keeps samples from before the window and the X axis stretches
+        past it. Rewriting costs O(buffer), so it is amortized: it only runs
+        once the oldest sample has drifted a twentieth of the window behind
+        the edge. Caller must hold _signal_lock. Returns True if rewritten."""
+        if window_start_ns <= 0:
+            return False
+        x, y, y_min, y_max = self._current_arrays(signal)
+        if len(x) == 0:
+            return False
+        x = np.asarray(x)
+        margin = max(1, self._window_ns // 20)
+        if int(x[0]) >= window_start_ns - margin:
+            return False
+
+        y = np.asarray(y)
+        inside = x >= window_start_ns
+        if not inside.any():
+            # Everything is behind the window: keep the last value only,
+            # held at the edge.
+            keep_x = np.asarray([window_start_ns], dtype=x.dtype)
+            keep_y = np.asarray([y[-1]], dtype=y.dtype)
+            keep_min = keep_max = None
+        else:
+            keep_x = x[inside]
+            keep_y = y[inside]
+            keep_min = np.asarray(y_min)[inside] if y_min is not None else None
+            keep_max = np.asarray(y_max)[inside] if y_max is not None else None
+            if (~inside).any() and int(keep_x[0]) > window_start_ns:
+                # Hold the last pre-window value at the edge.
+                anchor_x = np.asarray([window_start_ns], dtype=x.dtype)
+                anchor_y = np.asarray([y[~inside][-1]], dtype=y.dtype)
+                keep_x = np.concatenate([anchor_x, keep_x])
+                keep_y = np.concatenate([anchor_y, keep_y])
+                if keep_min is not None:
+                    keep_min = np.concatenate([anchor_y, keep_min])
+                    keep_max = np.concatenate([anchor_y, keep_max])
+
+        payload = self._make_payload(
+            signal, keep_x, keep_y, y_min=keep_min, y_max=keep_max,
+            xunit=getattr(signal.data_store[0], 'unit', ''),
+            yunit=getattr(signal.data_store[1], 'unit', ''),
+        )
+        signal.inject_external(append=False, **payload)
+        return True
+
+    @staticmethod
+    def _hold_stale_samples(x, y, window_start_ns: int, hold_to_ns: int):
+        """Convert samples older than the visible window into a held
+        last-known value.
+
+        A live feed announces a signal that has not changed in a long time by
+        re-emitting its last value with that value's ORIGINAL timestamp (e.g.
+        a point stamped 8 July arriving today). Appending it at face value
+        stretches the X range weeks outside the requested window and squashes
+        every other trace on the plot. Semantically such a sample is not "a
+        measurement at 8 July"; it is "the value has been this since 8 July",
+        so it must be drawn as a constant line across the window instead.
+
+        Returns ``(x, y, clamped)``. With no stale samples the inputs come
+        back untouched. Otherwise the newest stale value is anchored at
+        ``window_start_ns``: if the batch is entirely stale it is held to
+        ``hold_to_ns`` as a two-point flat line, and if fresher samples
+        follow, the anchor holds the old value up to the first of them.
+        """
+        x = np.asarray(x)
+        y = np.asarray(y)
+        if len(x) == 0 or window_start_ns <= 0:
+            return x, y, False
+        stale = x < window_start_ns
+        if not stale.any():
+            return x, y, False
+
+        # The newest stale sample is the last known value.
+        hold_value = y[stale][-1]
+        anchor_x = np.asarray([window_start_ns], dtype=x.dtype)
+        anchor_y = np.asarray([hold_value], dtype=y.dtype)
+
+        fresh_x = x[~stale]
+        fresh_y = y[~stale]
+        if len(fresh_x) == 0:
+            # Nothing inside the window: a flat line spanning it.
+            end_x = np.asarray([hold_to_ns], dtype=x.dtype)
+            if hold_to_ns <= window_start_ns:
+                return anchor_x, anchor_y, True
+            return (np.concatenate([anchor_x, end_x]),
+                    np.concatenate([anchor_y, anchor_y]), True)
+        if int(fresh_x[0]) <= window_start_ns:
+            # A real sample already sits on the boundary; no anchor needed.
+            return fresh_x, fresh_y, True
+        return (np.concatenate([anchor_x, fresh_x]),
+                np.concatenate([anchor_y, fresh_y]), True)
+
     def handler(self, callback, varname, dobj):
         signals_by_name = self.signals.get(varname)
         if signals_by_name is None:
@@ -472,14 +569,25 @@ class CanvasStreamer:
                 callback(signal)
                 continue
             first_live = signal.uid in self._first_live_pending
+            clamped = False
+            if self._window_ns > 0:
+                now_ns = int(time.time() * 1e9)
+                x_data, y_data, clamped = self._hold_stale_samples(
+                    x_data, y_data, now_ns - self._window_ns, now_ns)
+                if clamped:
+                    logger.info(
+                        f"{varname}: live sample(s) older than the window; "
+                        f"holding the last known value across it")
             if first_live:
                 cur_x = carrier.x_data
-                if cur_x is not None and len(cur_x) > 0 and len(x_data) > 0:
+                if not clamped and cur_x is not None and len(cur_x) > 0 \
+                        and len(x_data) > 0:
                     # Break the line between the archive block and the live
                     # feed rather than joining them with a diagonal: the archive
                     # ends ~2 min behind the first live sample, so a NaN placed
                     # just before that sample leaves the gap visible instead of
-                    # interpolating across empty time.
+                    # interpolating across empty time. A clamped batch is a
+                    # held value, not a fresh block, so it needs no break.
                     gap_x = np.asarray([int(x_data[0]) - 1],
                                        dtype=np.asarray(cur_x).dtype)
                     x_data = np.concatenate([gap_x, np.asarray(x_data)])
@@ -496,6 +604,9 @@ class CanvasStreamer:
                     xunit=dobj.xunit, yunit=dobj.yunit,
                 )
                 carrier.inject_external(append=True, **result)
+                if self._window_ns > 0:
+                    self._trim_to_window(
+                        carrier, int(time.time() * 1e9) - self._window_ns)
                 if self._apply_cap(carrier):
                     # Flag the plotted signal, not the carrier: the streaming
                     # reprocess path never aggregates children's flags.
@@ -610,10 +721,26 @@ class CanvasStreamer:
         return len(cx)
 
     def _backfill_last_value(self, ds, signal, carrier, end_ns, callback):
+        """No samples in the window: fall back to the last value recorded
+        before it and hold it across the window as a constant line. The
+        reply's timestamp is by construction older than the window (the
+        query is unbounded at the start), so injecting it verbatim would
+        stretch the X range back to whenever the signal last changed."""
         ax, ay, ay_min, ay_max, xunit, yunit = self._fetch_last_archive_value(
             ds, carrier, end_ns)
         if ax is None or len(ax) == 0:
             return
+        if self._window_ns > 0:
+            start_ns = end_ns - self._window_ns + _live_retention_s() * int(1e9)
+            ax, ay, clamped = self._hold_stale_samples(
+                ax, ay, start_ns, end_ns)
+            if clamped:
+                logger.info(f"Holding last known value for {signal.name} "
+                            f"across the window (no samples inside it)")
+                # min/max bounds belong to the original sample; a held value
+                # has no band of its own.
+                if ay_min is not None:
+                    ay_min = ay_max = None
         self._inject_archive_chunk(
             signal, carrier,
             (ax, ay, ay_min, ay_max, xunit or '', yunit or ''), callback)
