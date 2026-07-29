@@ -519,7 +519,10 @@ class NanosecondDateFormatter(pg.AxisItem):
         # answer identically the second time, which would put the mirrored ticks
         # next to -- instead of on top of -- these ones. Reuse the last answer;
         # set_offset/set_ticks_number/setStyle drop it when an input changes.
-        key = (minVal, maxVal, size, self.logMode, self._force_is_time)
+        # self.range is part of the key because the Y branch derives the SI
+        # prefix from it, and align_y_axis measures the labels with the scale
+        # this call leaves behind.
+        key = (minVal, maxVal, size, self.logMode, self._force_is_time, tuple(self.range))
         if self._tick_cache is None or self._tick_cache[0] != key:
             self._tick_cache = (key, self._compute_tick_values(minVal, maxVal, size))
         return [(spacing, list(values)) for spacing, values in self._tick_cache[1]]
