@@ -304,6 +304,12 @@ class MinimapStateTest(unittest.TestCase):
         c2.add_plot(PlotXYWithSlider(), 0)
         self.assertFalse(c2.is_minimap_eligible())
 
+    def test_eligibility_rejects_streaming(self):
+        c = _canvas_with_signal()
+        self.assertTrue(c.is_minimap_eligible())
+        c.streaming = True
+        self.assertFalse(c.is_minimap_eligible())
+
     def test_baseline_snapshot_roundtrip(self):
         c = Canvas(1, 1)
         c.snapshot_minimap_baseline(10, 20)
@@ -371,6 +377,20 @@ class MinimapToolbarTest(unittest.TestCase):
             self._add_canvas(win, multi)
             win.refresh_minimap_availability()
             self.assertFalse(win.toolBar.minimapAction.isEnabled())
+        finally:
+            win.close()
+
+    def test_minimap_action_disabled_and_turned_off_while_streaming(self):
+        win = IplotQtMainWindow()
+        try:
+            core = _canvas_with_signal()
+            core.show_minimap = True
+            core.streaming = True
+            self._add_canvas(win, core)
+            win.refresh_minimap_availability()
+            self.assertFalse(win.toolBar.minimapAction.isEnabled())
+            self.assertFalse(win.toolBar.minimapAction.isChecked())
+            self.assertFalse(core.show_minimap)
         finally:
             win.close()
 
