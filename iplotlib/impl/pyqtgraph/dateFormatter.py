@@ -331,6 +331,8 @@ class NanosecondDateFormatter(pg.AxisItem):
         # Init before super() because pyqtgraph calls labelString() during __init__
         self.labelUnit = ''
         self._numeric_offset = 0.0
+        # (inputs, tick levels) of the last tickValues computation.
+        self._tick_cache = None
         super().__init__(*args, **kwargs)
         self.postfix_end = postfix_end
         self.postfix_start = postfix_start
@@ -429,6 +431,8 @@ class NanosecondDateFormatter(pg.AxisItem):
                 return f"{s * 1e9:.3g}n/div"
 
     def set_offset(self, offset):
+        if offset != self.offset:
+            self._tick_cache = None
         self.offset = offset
 
     def date_part(self, ts_numeric, part):
@@ -498,9 +502,29 @@ class NanosecondDateFormatter(pg.AxisItem):
         return 0
 
     def set_ticks_number(self, tick_number: int):
+        if tick_number != self.n_ticks:
+            self._tick_cache = None
         self.n_ticks = tick_number
 
+    def setStyle(self, **kwds):
+        # The tick font drives how many ticks fit, so a style change invalidates
+        # the cached answer below.
+        self._tick_cache = None
+        super().setStyle(**kwds)
+
     def tickValues(self, minVal, maxVal, size):
+        # The facing axis mirrors these ticks (see MirroredAxisItem), so the same
+        # view would be solved twice per repaint. Beyond the wasted work, the
+        # non-date branch carries state across calls and is not guaranteed to
+        # answer identically the second time, which would put the mirrored ticks
+        # next to -- instead of on top of -- these ones. Reuse the last answer;
+        # set_offset/set_ticks_number/setStyle drop it when an input changes.
+        key = (minVal, maxVal, size, self.logMode, self._force_is_time)
+        if self._tick_cache is None or self._tick_cache[0] != key:
+            self._tick_cache = (key, self._compute_tick_values(minVal, maxVal, size))
+        return [(spacing, list(values)) for spacing, values in self._tick_cache[1]]
+
+    def _compute_tick_values(self, minVal, maxVal, size):
         # Limit tick count to what fits without overlapping labels
         n = self.n_ticks
         if size > 0:
@@ -786,3 +810,24 @@ class NanosecondDateFormatter(pg.AxisItem):
         e.g. 2026-06-26T14:30:45.000000456. Unlike the tick labels, this is never
         truncated to the segments that vary across the visible range."""
         return self.date_fmt(self.get_real_value(value), self.YEAR, self.NANOSECOND)
+
+
+class MirroredAxisItem(pg.AxisItem):
+    """Top/right axis that borrows the ticks of the axis it faces.
+
+    pyqtgraph draws the grid from all four axes, so a stock AxisItem here places
+    a second set of lines from its own 1/2/5 decimal ladder, unrelated to the
+    civil-time (or tick_number driven) positions the facing NanosecondDateFormatter
+    chose: with "Show all ticks" on, a 10 min grid gained a 500 s one drawn over
+    it. Mirroring keeps one grid and one set of tick marks."""
+
+    def __init__(self, source: pg.AxisItem, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._source = source
+
+    def tickValues(self, minVal, maxVal, size):
+        return self._source.tickValues(minVal, maxVal, size)
+
+    def tickStrings(self, values, scale, spacing):
+        # Only the facing axis is labelled; this one contributes marks and grid.
+        return [''] * len(values)

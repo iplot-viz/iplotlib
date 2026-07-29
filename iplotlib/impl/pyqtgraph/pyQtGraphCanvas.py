@@ -33,7 +33,7 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
-from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter, is_time_label
+from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem, NanosecondDateFormatter, is_time_label
 
 logger = setupLogger.get_logger(__name__)
 
@@ -925,6 +925,8 @@ class PyQtGraphParser(BackendParserBase):
                 axis_items["bottom"] = NanosecondDateFormatter(is_date=False, orientation='bottom')
 
             axis_items["left"] = NanosecondDateFormatter(is_date=False, orientation='left')
+            axis_items["top"] = MirroredAxisItem(axis_items["bottom"], orientation='top')
+            axis_items["right"] = MirroredAxisItem(axis_items["left"], orientation='right')
 
             signals = i_plot.signals.get(key) or list()
 
@@ -941,6 +943,11 @@ class PyQtGraphParser(BackendParserBase):
                 if len(i_plot.signals) <= 1:
                     pi.showAxes((True, True, True, True), showValues=(True, False, False, True))
                     pi.layout.setContentsMargins(0, 0, 0, 0)
+                else:
+                    # PlotItem shows every axis handed to it through axisItems;
+                    # stacked plots keep the default left/bottom pair only.
+                    pi.hideAxis('top')
+                    pi.hideAxis('right')
                 # Add space for expo
                 if stack_id == 0:
                     cell_gl.addItem(axis_items["left"].common_label, row=0, col=0)
