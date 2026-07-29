@@ -1,5 +1,6 @@
 import csv
 import re
+from contextlib import contextmanager
 from string import ascii_uppercase
 from typing import Dict, List, Set, Tuple
 
@@ -8,8 +9,8 @@ from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox,
                                 QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QMenu, QMessageBox,
-                                QPushButton, QRadioButton, QScrollArea, QStackedWidget, QTableWidget,
-                                QTableWidgetItem, QVBoxLayout, QWidget)
+                                QPushButton, QRadioButton, QScrollArea, QStackedWidget, QStyle,
+                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 import iplotLogging.setupLogger as Sl
 from iplotlib.core.plot import PlotXY
@@ -66,6 +67,13 @@ class _CheckableComboBox(QComboBox):
         item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
         self._update_text()
         self.changed.emit()
+
+    def showPopup(self):
+        # The popup is as wide as the field, which a narrow table column squeezes
+        # until the item text elides; its contents also need the check indicator.
+        view = self.view()
+        view.setMinimumWidth(view.sizeHintForColumn(0) + 2 * view.frameWidth())
+        super().showPopup()
 
     def eventFilter(self, obj, event):
         if obj is self.lineEdit() and event.type() == QEvent.Type.MouseButtonPress:
@@ -169,6 +177,7 @@ class IplotQtRuler(QWidget):
         self._sort_column = self.COL_NAME
         self._sort_order = Qt.SortOrder.AscendingOrder
         self._rendering = False
+        self._bulk_depth = 0
 
         self.rows_radio = QRadioButton("Rows")
         self.rows_radio.setToolTip("One row per ruler. Editable.")
@@ -276,30 +285,34 @@ class IplotQtRuler(QWidget):
         # Sorting must be off during insertion; re-render to handle both modes uniformly.
         self._render_table()
 
-    def remove_row_by_name(self, name: str, plot_id):
-        target = tuple(plot_id)
-        for i, row in enumerate(self._rows):
-            if row['name'] == name and row['plot_id'] == target:
-                del self._rows[i]
-                # A removed ruler can retire signal columns; re-render keeps the
-                # header set and the signals menu consistent. The rebuild drops
-                # the visual selection, so the history must go with it.
-                self.selection_history.clear()
-                self._render_table()
-                return
+    def remove_row_by_name(self, name: str):
+        """Drop every row of ruler *name*: a ruler drawn on several plots owns a
+        row per plot and is deleted as a whole."""
+        remaining = [r for r in self._rows if r['name'] != name]
+        if len(remaining) == len(self._rows):
+            return
+        self._rows = remaining
+        # A removed ruler can retire signal columns; re-render keeps the header
+        # set and the signals menu consistent. The rebuild drops the visual
+        # selection, so the history must go with it.
+        self.selection_history.clear()
+        self._render_table()
 
-    def update_row_xy(self, name: str, plot_id, xy: Tuple[float, float],
-                      signal_values: Dict[str, float] = None):
-        """Update a ruler row's (x, y) -- and its signal values, which change with
-        x -- after it is dragged on the canvas."""
-        target = tuple(plot_id)
+    def update_ruler_rows(self, name: str, rows: List[Dict]):
+        """Refresh ruler *name* after it is dragged on the canvas, from one
+        ``{'plot_id', 'xy', 'signal_values'}`` entry per plot it spans, so the
+        plots it is mirrored onto follow with their own values and not only the
+        one it was grabbed from."""
+        by_plot = {tuple(entry['plot_id']): entry for entry in rows}
         for row in self._rows:
-            if row['name'] == name and row['plot_id'] == target:
-                row['xy'] = (xy[0], xy[1])
-                if signal_values is not None:
-                    row['signal_values'] = dict(signal_values)
-                self._render_table()
-                return
+            if row['name'] != name:
+                continue
+            entry = by_plot.get(row['plot_id'])
+            if entry is None:
+                continue
+            row['xy'] = (entry['xy'][0], entry['xy'][1])
+            row['signal_values'] = dict(entry.get('signal_values') or {})
+        self._render_table()
 
     def clear_info(self):
         self._rows.clear()
@@ -333,8 +346,22 @@ class IplotQtRuler(QWidget):
         self._sort_column = column
         self._sort_order = order
 
+    @contextmanager
+    def bulk_update(self):
+        """Group several row changes into one rebuild: every change rebuilds the
+        whole view, and a ruler spanning N plots adds N rows."""
+        self._bulk_depth += 1
+        try:
+            yield
+        finally:
+            self._bulk_depth -= 1
+            if not self._bulk_depth:
+                self._render_table()
+
     def _render_table(self):
         """Rebuild the active view from ``self._rows``."""
+        if self._bulk_depth:
+            return
         # Rebuilding moves the sort indicator around; those moves are not the
         # user's choice and must not overwrite the remembered criterion.
         self._rendering = True
@@ -461,15 +488,17 @@ class IplotQtRuler(QWidget):
             self.table.insertRow(row_idx)
             self._populate_row_cells(row_idx, row)
 
-        self.table.resizeColumnsToContents()
-        # Add padding so the sort-indicator arrow does not clip the header text.
-        sort_arrow_pad = 24
-        for col in range(self.table.columnCount()):
-            self.table.setColumnWidth(col, self.table.columnWidth(col) + sort_arrow_pad)
         self.table.setSortingEnabled(True)
         column = self._sort_column if self._sort_column < self.table.columnCount() else self.COL_NAME
         self.table.sortItems(column, self._sort_order)
         self.table.horizontalHeader().setSortIndicator(column, self._sort_order)
+        self.table.resizeColumnsToContents()
+        # Fitting a column to its contents leaves its title no room for the sort
+        # indicator, which the header draws inside the section.
+        indicator = header.style().pixelMetric(QStyle.PixelMetric.PM_HeaderMarkSize, None, header)
+        for col in range(self.table.columnCount()):
+            self.table.setColumnWidth(col, max(self.table.columnWidth(col) + indicator,
+                                               header.defaultSectionSize()))
 
     def _populate_row_cells(self, row_idx: int, row: Dict):
         name_item = QTableWidgetItem(row['name'])
@@ -486,7 +515,7 @@ class IplotQtRuler(QWidget):
         x_item.setData(Qt.ItemDataRole.UserRole, x)
         self.table.setItem(row_idx, self.COL_X, x_item)
 
-        y_item = _NumericTableItem(f"{y:.6g}")
+        y_item = _NumericTableItem('' if y is None else f"{y:.6g}")
         y_item.setData(Qt.ItemDataRole.UserRole, y)
         self.table.setItem(row_idx, self.COL_Y, y_item)
 
@@ -577,13 +606,17 @@ class IplotQtRuler(QWidget):
         # One row per signal of this plot's rulers, in the global label order.
         sig_labels = [label for label in self._signal_labels
                       if any(label in (r.get('signal_values') or {}) for r in rulers)]
-        sig_rows = {label: len(self._COLUMNS_AXIS_LABELS) + i
+        # A plot the rulers are only mirrored onto has no Y reading of its own,
+        # so it drops the Y row instead of repeating the owner's value.
+        axis_labels = [label for label in self._COLUMNS_AXIS_LABELS
+                       if label != 'Y' or any(r['xy'][1] is not None for r in rulers)]
+        sig_rows = {label: len(axis_labels) + i
                     for i, label in enumerate(sig_labels)}
 
-        table = QTableWidget(len(self._COLUMNS_AXIS_LABELS) + len(sig_labels), col_count)
+        table = QTableWidget(len(axis_labels) + len(sig_labels), col_count)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        table.setVerticalHeaderLabels(list(self._COLUMNS_AXIS_LABELS)
+        table.setVerticalHeaderLabels(axis_labels
                                       + [self._wrap_label(label) for label in sig_labels])
         for label, row_idx in sig_rows.items():
             table.verticalHeaderItem(row_idx).setToolTip(label)
@@ -599,6 +632,7 @@ class IplotQtRuler(QWidget):
         h_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         h_header.setStretchLastSection(False)
 
+        has_y = 'Y' in axis_labels
         col_idx = 0
         for i, r in enumerate(rulers):
             values = r.get('signal_values') or {}
@@ -606,14 +640,16 @@ class IplotQtRuler(QWidget):
                 prev = rulers[i - 1]
                 prev_values = prev.get('signal_values') or {}
                 self._set_plain_cell(table, 0, col_idx, self._format_consecutive_dx(prev, r))
-                self._set_plain_cell(table, 1, col_idx, f"{r['xy'][1] - prev['xy'][1]:.6g}")
+                if has_y:
+                    self._set_plain_cell(table, 1, col_idx,
+                                         self._format_delta(prev['xy'][1], r['xy'][1]))
                 for label, row_idx in sig_rows.items():
                     v1, v2 = prev_values.get(label), values.get(label)
-                    delta = f"{v2 - v1:.6g}" if v1 is not None and v2 is not None else ''
-                    self._set_plain_cell(table, row_idx, col_idx, delta)
+                    self._set_plain_cell(table, row_idx, col_idx, self._format_delta(v1, v2))
                 col_idx += 1
             self._set_axis_cell(table, 0, col_idx, self._format_x(r), r['color'])
-            self._set_axis_cell(table, 1, col_idx, f"{r['xy'][1]:.6g}", r['color'])
+            if has_y:
+                self._set_axis_cell(table, 1, col_idx, f"{r['xy'][1]:.6g}", r['color'])
             for label, row_idx in sig_rows.items():
                 value = values.get(label)
                 self._set_axis_cell(table, row_idx, col_idx,
@@ -680,6 +716,13 @@ class IplotQtRuler(QWidget):
     def _format_x(row: Dict) -> str:
         x = row['xy'][0]
         return str(pd.Timestamp(x)) if row['is_date'] else f"{x:.6g}"
+
+    @staticmethod
+    def _format_delta(first, second) -> str:
+        """Signed difference, blank when either side has no reading."""
+        if first is None or second is None:
+            return ''
+        return f"{second - first:.6g}"
 
     @staticmethod
     def _set_axis_cell(table: QTableWidget, axis_row: int, col_idx: int, text: str, color: str):
@@ -795,7 +838,7 @@ class IplotQtRuler(QWidget):
                                    for label in self._signal_labels]
                     writer.writerow([
                         r['name'], self._format_plot_id(r['plot_id']), self._format_x(r),
-                        f"{r['xy'][1]:.6g}", *value_cells,
+                        '' if r['xy'][1] is None else f"{r['xy'][1]:.6g}", *value_cells,
                         str(r['visible']).lower(), self._labels_summary(r),
                         r['color'], r['font_color'],
                     ])
@@ -835,9 +878,10 @@ class IplotQtRuler(QWidget):
     def _on_visibility_changed(self, row: int, state):
         visible = state == Qt.CheckState.Checked.value
         name, plot_id = self._row_metadata(row)
-        idx = self._find_row_index(name, plot_id)
-        if idx >= 0:
-            self._rows[idx]['visible'] = visible
+        # Visibility belongs to the ruler, not to one of the plots it spans.
+        for r in self._rows:
+            if r['name'] == name:
+                r['visible'] = visible
         self.visibilityRuler.emit(name, plot_id, visible)
 
     def _on_label_mode_changed(self, row: int, combo: '_CheckableComboBox'):
@@ -863,19 +907,23 @@ class IplotQtRuler(QWidget):
         color = new_color.name()
         self._paint_color_button(button, color)
         name, plot_id = self._row_metadata(row)
-        idx = self._find_row_index(name, plot_id)
-        if idx >= 0:
-            self._rows[idx][key] = color
+        # Colours belong to the ruler, so they reach every plot it spans.
+        for r in self._rows:
+            if r['name'] == name:
+                r[key] = color
         signal.emit(name, plot_id, color)
 
     def _remove_selected(self):
         # Resolve identities BEFORE deletion so visual rows stay valid until we drop them.
         identities = [self._row_metadata(row) for row in self.selection_history]
+        removed: Set[str] = set()
         for name, plot_id in identities:
+            # Selecting two rows of the same ruler must delete it once.
+            if name in removed:
+                continue
+            removed.add(name)
             self.deleteRuler.emit(name, plot_id, True)
-            idx = self._find_row_index(name, plot_id)
-            if idx >= 0:
-                del self._rows[idx]
+        self._rows = [r for r in self._rows if r['name'] not in removed]
         self.selection_history.clear()
         self._render_table()
 
@@ -901,10 +949,11 @@ class IplotQtRuler(QWidget):
 
         data_rows = []
         for r1, r2 in zip(entries[:-1], entries[1:]):
+            y1, y2 = r1['xy'][1], r2['xy'][1]
             cells = [f"{r1['name']} → {r2['name']}",
                      self._format_dx(r1['xy'][0], r2['xy'][0], r1['is_date'],
                                      r1.get('x_is_time', False)),
-                     f"{abs(r2['xy'][1] - r1['xy'][1]):.6g}"]
+                     '' if y1 is None or y2 is None else f"{abs(y2 - y1):.6g}"]
             values1 = r1.get('signal_values') or {}
             values2 = r2.get('signal_values') or {}
             for label in sig_labels:

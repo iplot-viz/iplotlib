@@ -345,12 +345,33 @@ class IplotQtCanvas(QWidget):
                     return self._canvas_position_of(plot)
         return None
 
+    def _ruler_window_rows(self, impl_plot, x_view, xy_abs) -> List[dict]:
+        """One window row per plot a ruler placed on *impl_plot* is drawn on, each
+        with that plot's signal values and axis kind."""
+        rows = []
+        # ruler_reach yields the owner first: the mirrored plots share the time
+        # but not the Y scale, so only the owner carries a Y reading.
+        for index, (target, _, values) in enumerate(self._parser.ruler_reach(impl_plot, x_view)):
+            cache_item = self._parser._impl_plot_cache_table.get_cache_item(target)
+            plot = cache_item.plot() if cache_item else None
+            plot_id = self._canvas_position_of(plot) if plot is not None else None
+            if plot_id is None:
+                continue
+            rows.append({
+                'plot_id': plot_id,
+                'xy': xy_abs if index == 0 else (xy_abs[0], None),
+                'signal_values': values,
+                'is_date': bool(getattr(plot.axes[0], 'is_date', False)),
+                'x_is_time': self._plot_x_is_time(plot),
+            })
+        return rows
+
     def _remove_ruler_from_menu(self, name, plot_id):
         # The context menu can target a shared-x echo whose model ruler and
         # window row belong to another plot; route the deletion to the owner.
         plot_id = self._ruler_owner_plot_id(name) or plot_id
         self.delete_ruler(name, plot_id, True)
-        self._ruler_window.remove_row_by_name(name, plot_id)
+        self._ruler_window.remove_row_by_name(name)
 
     def _apply_ruler_state(self, ruler):
         """Push a model ruler's non-default state onto its backend artists

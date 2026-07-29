@@ -27,7 +27,8 @@ class pyQtRuler:
                  font_color: str = "#FFFFFF",
                  lw: int = 1,
                  font_size: int = 8,
-                 value_lines: List = None):
+                 value_lines: List = None,
+                 is_echo: bool = False):
         self.plot = plot
         self.name = name
         self.xy = xy
@@ -35,7 +36,7 @@ class pyQtRuler:
         # refresh so zoom/pan keep the ruler anchored to its data position.
         self.abs_x = xy[0]
         self.abs_y = xy[1]
-        self.is_echo = False
+        self.is_echo = is_echo
         self.color = color
         self.font_color = font_color
         self.visible = True
@@ -144,7 +145,9 @@ class pyQtRuler:
         # Inclusive bounds match the matplotlib backend (iplotMplRuler); bool()
         # because view range / xy may be numpy and setVisible rejects numpy.bool.
         in_x = bool(xmin <= x <= xmax)
-        in_y = bool(ymin <= y <= ymax)
+        # A mirrored copy carries the owner's Y against an unrelated scale, so it
+        # keeps the time line only.
+        in_y = bool(ymin <= y <= ymax) and not self.is_echo
         # Place the name on the opposite side of the vertical line from the value
         # label (which hangs toward the side with more room) so they never overlap.
         name_anchor_x = 1.0 if (x - xmin) < (xmax - x) else 0.0
