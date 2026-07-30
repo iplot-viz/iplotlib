@@ -78,7 +78,7 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
         self.widget._add_ruler_at(self.impl_plot, self.plot, 3.0, 0.3)
         self.widget.delete_ruler('A', (self.plot.col, self.plot.row), True)
-        self.widget._ruler_window.remove_row_by_name('A', (self.plot.col, self.plot.row))
+        self.widget._ruler_window.remove_row_by_name('A')
         self.assertEqual([r.name for r in self.plot.rulers], ['B'])
         self.assertEqual([r.name for r in self.widget._parser.get_rulers(self.impl_plot)], ['B'])
         self.assertEqual(self.widget._ruler_window.table.rowCount(), 1)
@@ -154,6 +154,17 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         self.assertEqual(self.plot.rulers, [])
         self.assertEqual(self.widget._ruler_window.table.rowCount(), 0)
 
+    def test_erasing_the_preview_reuses_the_blit_background(self):
+        """Hopping between plots crosses the gap between axes, where the ghost is
+        dropped: it must go without redrawing every plot."""
+        self.widget._show_preview_ruler(self.impl_plot, 2.0, 0.2)
+        draws = []
+        self.widget._mpl_renderer.draw = lambda *a, **k: draws.append(1)
+        self.widget._erase_preview_ruler()
+        self.assertIsNone(self.widget._preview_ruler_ax)
+        self.assertEqual(self.widget._parser.get_rulers(self.impl_plot), [])
+        self.assertEqual(draws, [])
+
     def test_add_ruler_clears_preview_and_takes_its_identity(self):
         self.widget._show_preview_ruler(self.impl_plot, 2.0, 0.2)
         self.widget._add_ruler_at(self.impl_plot, self.plot, 2.0, 0.2)
@@ -164,7 +175,7 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
         self.widget._add_ruler_at(self.impl_plot, self.plot, 3.0, 0.3)
         self.widget.delete_ruler('A', (self.plot.col, self.plot.row), True)
-        self.widget._ruler_window.remove_row_by_name('A', (self.plot.col, self.plot.row))
+        self.widget._ruler_window.remove_row_by_name('A')
         self.assertEqual(self.widget._preview_identity_for_next()['name'], 'A')
 
     def test_remove_from_menu_on_shared_x_echo_deletes_the_owner_ruler(self):
@@ -200,11 +211,76 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
             widget._ruler_window.close()
             widget.deleteLater()
 
-    def test_shared_x_row_carries_signal_values_of_every_shared_plot(self):
-        """With a shared time axis the ruler's row must also carry the values of
-        the sibling plots' signals (what its echoes display), so cross-plot
-        deltas can be computed; without shared time only its own plot counts."""
-        for shared, expected_labels in ((True, {'s1', 's2'}), (False, {'s1'})):
+    def test_mirrored_plots_show_no_y_reading(self):
+        """The Y value belongs to the plot the ruler was placed on: the plots it
+        is mirrored onto share the time but not the Y scale, so neither the canvas
+        nor the window may repeat it there."""
+        c = Canvas(2, 1, title="mirror_y_mpl", shared_x_axis=True)
+        x = np.linspace(0, 10, 50)
+        for scale in (1.0, 1000.0):
+            p = PlotXY()
+            s = SignalXY(label=f"s{scale:.0f}")
+            s.set_data([x, scale * np.sin(x)])
+            p.add_signal(s)
+            c.add_plot(p, 0)
+        widget = QtMatplotlibCanvas(canvas=c)
+        try:
+            plot_one, plot_two = c.plots[0]
+            impl_one = widget._get_impl_plot_for_plot(plot_one)
+            impl_two = widget._get_impl_plot_for_plot(plot_two)
+            widget._add_ruler_at(impl_one, plot_one, 5.0, 0.5)
+
+            rows = {r['plot_id']: r for r in widget._ruler_window._rows}
+            self.assertIsNotNone(rows[(1, 1)]['xy'][1])
+            self.assertIsNone(rows[(2, 1)]['xy'][1])
+
+            owner = widget._parser.get_rulers(impl_one)[0]
+            mirror = widget._parser.get_rulers(impl_two)[0]
+            self.assertTrue(owner.y_label.get_visible())
+            self.assertTrue(owner.h_line.get_visible())
+            self.assertFalse(mirror.y_label.get_visible())
+            self.assertFalse(mirror.h_line.get_visible())
+            # The time line still reaches the mirrored plot.
+            self.assertTrue(mirror.v_line.get_visible())
+        finally:
+            widget._ruler_window.close()
+            widget.deleteLater()
+
+    def test_label_toggle_only_reaches_the_plot_of_its_row(self):
+        """Each plot the ruler spans owns a row, so hiding its labels there must
+        leave the same ruler's labels on the other shared plots untouched."""
+        c = Canvas(2, 1, title="labels_per_plot_mpl", shared_x_axis=True)
+        x = np.linspace(0, 10, 50)
+        for _ in range(2):
+            p = PlotXY()
+            s = SignalXY(label="s")
+            s.set_data([x, np.sin(x)])
+            p.add_signal(s)
+            c.add_plot(p, 0)
+        widget = QtMatplotlibCanvas(canvas=c)
+        try:
+            plot_one, plot_two = c.plots[0]
+            impl_one = widget._get_impl_plot_for_plot(plot_one)
+            impl_two = widget._get_impl_plot_for_plot(plot_two)
+            widget._add_ruler_at(impl_one, plot_one, 5.0, 0.0)
+
+            widget.toggle_ruler_label('A', (1, 1), False, False)
+
+            own = widget._parser.get_rulers(impl_one)[0]
+            other = widget._parser.get_rulers(impl_two)[0]
+            self.assertFalse(own.show_label)
+            self.assertFalse(own.show_val_label)
+            self.assertTrue(other.show_label)
+            self.assertTrue(other.show_val_label)
+        finally:
+            widget._ruler_window.close()
+            widget.deleteLater()
+
+    def test_shared_x_gives_the_ruler_a_row_per_plot_with_that_plot_values(self):
+        """With a shared time axis the ruler is drawn on every shared plot, so the
+        window lists one row per plot, each carrying only the values of the signals
+        that plot holds; without shared time only its own plot is listed."""
+        for shared, expected in ((True, {(1, 1): 's1', (2, 1): 's2'}), (False, {(1, 1): 's1'})):
             c = Canvas(2, 1, title="shared_vals_mpl", shared_x_axis=shared)
             x = np.linspace(0, 10, 50)
             for i, y in enumerate((np.sin(x), np.cos(x))):
@@ -220,12 +296,20 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
                 # 5.05 sits unambiguously nearest to one sample; 5.0 would
                 # tie between two and argmin breaks the tie unlike the backends.
                 widget._add_ruler_at(impl_one, plot_one, 5.05, 0.0)
-                values = widget._ruler_window._rows[0]['signal_values']
-                self.assertEqual(set(values), expected_labels, msg=f"shared={shared}")
+                rows = {r['plot_id']: r for r in widget._ruler_window._rows}
+                self.assertEqual(set(rows), set(expected), msg=f"shared={shared}")
                 nearest = int(np.argmin(np.abs(x - 5.05)))
-                self.assertAlmostEqual(values['s1'], np.sin(x)[nearest])
-                if shared:
-                    self.assertAlmostEqual(values['s2'], np.cos(x)[nearest])
+                expected_y = {'s1': np.sin(x)[nearest], 's2': np.cos(x)[nearest]}
+                for plot_id, label in expected.items():
+                    values = rows[plot_id]['signal_values']
+                    self.assertEqual(set(values), {label}, msg=f"shared={shared}")
+                    self.assertAlmostEqual(values[label], expected_y[label])
+                # Every row sits at the same instant, but only the plot the ruler
+                # was placed on has a Y reading of its own.
+                rows_list = widget._ruler_window._rows
+                self.assertEqual({r['xy'][0] for r in rows_list}, {rows_list[0]['xy'][0]})
+                with_y = {r['plot_id'] for r in rows_list if r['xy'][1] is not None}
+                self.assertEqual(with_y, {(1, 1)}, msg=f"shared={shared}")
             finally:
                 widget._ruler_window.close()
                 widget.deleteLater()

@@ -53,7 +53,7 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         for _ in range(3):
             n = self.window.next_name()
             self.window.add_row(n, (1, 1), (0.0, 0.0), '#FFFFFF')
-        self.window.remove_row_by_name('B', (1, 1))
+        self.window.remove_row_by_name('B')
         self.assertEqual(self.window.next_name(), 'B')
 
     def test_next_color_is_stable_per_letter(self):
@@ -63,12 +63,29 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         self.assertEqual(self.window.next_color('J'), palette[9])
         self.assertEqual(self.window.next_color('A'), palette[0])
 
-    def test_remove_row_by_name_finds_matching_plot(self):
+    def test_remove_row_by_name_drops_every_plot_the_ruler_spans(self):
+        """A ruler drawn on several plots owns one row per plot and is deleted as
+        a whole, so removing it must leave no orphan row behind."""
         self.window.add_row('A', (1, 1), (1.0, 2.0), '#FFFFFF')
-        self.window.add_row('A', (2, 1), (3.0, 4.0), '#FFFFFF')
-        self.window.remove_row_by_name('A', (1, 1))
+        self.window.add_row('A', (2, 1), (1.0, 2.0), '#FFFFFF')
+        self.window.add_row('B', (1, 1), (3.0, 4.0), '#FFFFFF')
+        self.window.remove_row_by_name('A')
         self.assertEqual(self.window.table.rowCount(), 1)
-        self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_PLOT).text(), '2')
+        self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_NAME).text(), 'B')
+
+    def test_bulk_update_rebuilds_the_view_once(self):
+        """Each row change rebuilds the whole view, so the rows of a ruler that
+        spans several plots must be added inside one bulk update."""
+        rebuilds = []
+        original = self.window._rebuild_view
+        self.window._rebuild_view = lambda: (rebuilds.append(None), original())[1]
+
+        with self.window.bulk_update():
+            for plot_id in ((1, 1), (2, 1), (3, 1), (4, 1)):
+                self.window.add_row('A', plot_id, (1.0, 2.0), '#FFFFFF')
+
+        self.assertEqual(len(rebuilds), 1)
+        self.assertEqual(self.window.table.rowCount(), 4)
 
     def test_plot_id_drops_column_suffix_for_single_column_canvas(self):
         self.window.set_canvas_columns(1)
@@ -186,9 +203,10 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         self.assertEqual(item.text().replace('\n', ''), long_name)
         self.assertEqual(item.toolTip(), long_name)
 
-    def test_update_row_xy_refreshes_signal_values(self):
+    def test_update_ruler_rows_refreshes_signal_values(self):
         self.window.add_row('A', (1, 1), (2.5, 7.5), '#FFFFFF', signal_values={'VAR1': 1.0})
-        self.window.update_row_xy('A', (1, 1), (3.0, 8.0), signal_values={'VAR1': 2.0})
+        self.window.update_ruler_rows('A', [{'plot_id': (1, 1), 'xy': (3.0, 8.0),
+                                             'signal_values': {'VAR1': 2.0}}])
         self.assertEqual(self.window._rows[0]['signal_values'], {'VAR1': 2.0})
         self.assertEqual(
             self.window.table.item(0, IplotQtRuler.SIG_COL_BASE).text(), '2')
@@ -375,7 +393,7 @@ class IplotQtRulerViewModeTest(unittest.TestCase):
         self.assertEqual(copied, '1\t2\t3\n2\t2\t4')
 
     def test_singleton_plot_section_has_no_delta_column(self):
-        self.window.remove_row_by_name('B', (1, 1))
+        self.window.remove_row_by_name('B')
         self.window.columns_radio.setChecked(True)
         _, table, _ = self.window.column_sections[0]
         self.assertEqual(table.columnCount(), 1)
@@ -515,7 +533,7 @@ class RulerSortPersistenceTest(unittest.TestCase):
         self.window.table.sortByColumn(IplotQtRuler.COL_X, Qt.SortOrder.AscendingOrder)
         self.assertEqual(self._names(), ['A', 'C', 'B'])
 
-        self.window.update_row_xy('B', (2, 1), (9.0, 1.0))
+        self.window.update_ruler_rows('B', [{'plot_id': (2, 1), 'xy': (9.0, 1.0)}])
 
         self.assertEqual(self._names(), ['A', 'C', 'B'])
         header = self.window.table.horizontalHeader()
@@ -531,6 +549,16 @@ class RulerSortPersistenceTest(unittest.TestCase):
 
     def test_default_sort_is_by_ruler_name(self):
         self.assertEqual(self._names(), ['A', 'B', 'C'])
+
+    def test_columns_leave_room_for_the_sort_indicator(self):
+        """The arrow is drawn inside the section, so a column fitted to its
+        contents alone loses part of its title once sorted by that column."""
+        table = self.window.table
+        header = table.horizontalHeader()
+        self.assertTrue(header.isSortIndicatorShown())
+        narrow = [col for col in range(table.columnCount())
+                  if table.columnWidth(col) < header.defaultSectionSize()]
+        self.assertEqual(narrow, [])
 
 
 class RulerComputeDistanceDialogTest(unittest.TestCase):

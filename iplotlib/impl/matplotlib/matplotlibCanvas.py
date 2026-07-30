@@ -1503,10 +1503,10 @@ class MatplotlibParser(BackendParserBase):
         font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
         ruler = iplotMplRuler(ax=impl_plot, name=name, xy=(x, y), color=color,
                               font_size=font_size, animated=animated,
-                              value_lines=self._ruler_value_lines(impl_plot))
+                              value_lines=self._ruler_value_lines(impl_plot),
+                              is_echo=is_echo)
         ruler.abs_x = self.transform_value(impl_plot, 0, x)
         ruler.abs_y = self.transform_value(impl_plot, 1, y)
-        ruler.is_echo = is_echo
         self._rulers.append(ruler)
         return ruler
 
