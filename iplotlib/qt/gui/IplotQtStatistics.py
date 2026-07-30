@@ -260,7 +260,9 @@ class IplotQtStatistics(QWidget):
                 # Insert new row
                 self.table.insertRow(idx)
                 x_type=1 #1 means date, 2 means rel time and 3 else
-                x_unit = signal.data_store[0].unit
+                # Unit of the plotted X: an expression clears it, so a transformed
+                # axis is not read as a duration.
+                x_unit = getattr(signal.x_data, 'unit', None)
                 # Add Statistics to the table
                 if has_envelope > 0:
                     curves = line
@@ -279,8 +281,10 @@ class IplotQtStatistics(QWidget):
 
                     # Statistics come from the buffered dataset, not the painted
                     # curves: while streaming the display is decimated for paint
-                    # speed and would under-report the samples.
-                    x_data = np.asarray(signal.data_store[0])
+                    # speed and would under-report the samples. X is the buffer the
+                    # backend paints; the raw store keeps the time base, which an x
+                    # expression no longer matches.
+                    x_data = np.asarray(signal.x_data)
                     y_min = np.asarray(signal.data_store[1])
                     y_max = np.asarray(signal.data_store[2])
                     y_mean = np.asarray(signal.data_store[3])
@@ -383,13 +387,12 @@ class IplotQtStatistics(QWidget):
                     # The rows correspond to the signals and their corresponding stacks
                     self.table.setItem(idx, 0, QTableWidgetItem(signal_name))
 
-                    # Prefer the buffered dataset (see envelope case) so the
+                    # Prefer the processed buffers (see envelope case) so the
                     # display decimation does not under-report; fall back to the
-                    # painted line for shapes the buffer cannot describe per
+                    # painted line for shapes the buffers cannot describe per
                     # line (e.g. 2D signals drawn as one line per column).
-                    ds = signal.data_store
-                    buf_x = np.asarray(ds[0]) if len(ds) > 0 else np.asarray([])
-                    buf_y = np.asarray(ds[1]) if len(ds) > 1 else np.asarray([])
+                    buf_x = np.asarray(signal.x_data)
+                    buf_y = np.asarray(signal.y_data)
                     use_buffer = (buf_y.ndim == 1 and buf_y.size > 0
                                   and buf_x.size == buf_y.size)
                     if use_buffer:

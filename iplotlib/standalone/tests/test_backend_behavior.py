@@ -216,6 +216,96 @@ class StatsVerticalZoomTest(unittest.TestCase):
                 self.assertEqual(narrow, wide)
 
 
+class StatsXExpressionTest(unittest.TestCase):
+    """Regression: an expression on the X column must not blank the statistics.
+
+    The stats masked the raw time base with the visible window. An x expression
+    (``${self}.time-${self}.time[0]``, the MCTF_processing workspaces) leaves the
+    two in different units, so every sample fell outside the window and the row
+    reported 0 samples with no min/avg/max.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    @staticmethod
+    def _canvas(x_expr=None):
+        """Signal sampled over an absolute nanosecond time base, optionally
+        plotted against a relative X expression."""
+        core = Canvas(1, 1, title="x_expr")
+        time = np.linspace(1785229200000000000, 1785402000000000000, 500).astype(np.int64)
+        y = np.sin(np.linspace(0, 10, 500))
+        sig = SignalXY(label="s")
+        sig.data_access_enabled = False
+        sig.set_data([time, y])
+        if x_expr is not None:
+            sig.x_expr = x_expr
+            sig._process_data()
+        plot = PlotXY()
+        plot.add_signal(sig)
+        core.add_plot(plot, 0)
+        return core, sig
+
+    def _qt_canvas(self, backend, canvas, sig):
+        qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+        qt_canvas.set_canvas(canvas)
+        qt_canvas.resize(400, 300)
+        self.app.processEvents()
+        impl_plot = qt_canvas._parser._signal_impl_plot_lut.get(
+            qt_canvas._parser.signal_lut_key(sig))
+        self.assertIsNotNone(impl_plot)
+        return qt_canvas, impl_plot
+
+    def _row(self, qt_canvas, canvas):
+        qt_canvas.stats(canvas)
+        self.app.processEvents()
+        table = qt_canvas._stats_table.table
+        self.assertEqual(table.rowCount(), 1)
+        return [table.item(0, col) for col in range(table.columnCount())]
+
+    def _set_x_view(self, impl_plot, backend, lo, hi):
+        if backend == 'pyqt':
+            impl_plot.getViewBox().setXRange(lo, hi, padding=0)
+        else:
+            impl_plot.set_xlim(lo, hi)
+        self.app.processEvents()
+
+    def test_x_expression_keeps_the_statistics(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, sig = self._canvas("${self}.time-${self}.time[0]")
+                # Plotted X and raw time base apart: the mismatch under test.
+                self.assertNotEqual(float(sig.x_data[0]), float(sig.data_store[0][0]))
+
+                qt_canvas, _ = self._qt_canvas(backend, canvas, sig)
+                row = self._row(qt_canvas, canvas)
+                self.assertEqual(row[6].data(Qt.ItemDataRole.UserRole), 500)
+                for col in (1, 2, 3):
+                    self.assertIsNotNone(row[col])
+
+    def test_x_expression_count_follows_the_visible_window(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, sig = self._canvas("${self}.time-${self}.time[0]")
+                qt_canvas, impl_plot = self._qt_canvas(backend, canvas, sig)
+
+                # Half of the transformed range: the mask must read the window in
+                # the units of the expression, not those of the time base.
+                self._set_x_view(impl_plot, backend, 0.0, float(sig.x_data[-1]) / 2)
+                samples = self._row(qt_canvas, canvas)[6].data(Qt.ItemDataRole.UserRole)
+                self.assertGreater(samples, 0)
+                self.assertLess(samples, 500)
+
+    def test_default_x_expression_is_unchanged(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, sig = self._canvas()
+                qt_canvas, _ = self._qt_canvas(backend, canvas, sig)
+                self.assertEqual(
+                    self._row(qt_canvas, canvas)[6].data(Qt.ItemDataRole.UserRole), 500)
+
+
 class AutoscaleTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
