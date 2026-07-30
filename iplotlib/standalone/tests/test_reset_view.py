@@ -196,25 +196,32 @@ class ResetViewTest(unittest.TestCase):
                 self.assertEqual(calls['get_data'], 0)
                 self.assertEqual(len(other_signal.x_data), full_len)
 
-    def test_reset_plot_view_keeps_the_other_plots_y_range(self):
-        # Only the plot the action was invoked on gets its Y reset.
+    def test_reset_plot_view_restores_the_whole_group_y_range(self):
+        # A rubber-band zoom narrows the Y of the plot it is drawn on and leaves the
+        # rest of the group alone, so a reset invoked on any of them has to return
+        # every Y as well: the X comes back on its own, and a plot left holding the Y
+        # of a window it no longer shows is the view Home would have fixed.
         window = (TS_START + 100 * SECOND, TS_END - 100 * SECOND)
-        other_y = (-5.0, 5.0)
+        zoomed_y = (-5.0, 5.0)
         for backend in ('matplotlib', 'pyqt'):
-            with self.subTest(backend=backend):
-                canvas, qt_canvas = self._build_shared(backend)
-                parser = qt_canvas._parser
-                impl_plots = self._impl_plots(canvas, qt_canvas)
-                self._shared_zoom(qt_canvas, impl_plots[0], window)
-                parser.set_oaw_axis_limits(impl_plots[0], 1, other_y)
-                self.app.processEvents()
+            for clicked in (0, 1):
+                with self.subTest(backend=backend, clicked=clicked):
+                    canvas, qt_canvas = self._build_shared(backend)
+                    parser = qt_canvas._parser
+                    impl_plots = self._impl_plots(canvas, qt_canvas)
+                    drawn_y = [parser.get_oaw_axis_limits(impl, 1) for impl in impl_plots]
 
-                qt_canvas.reset_plot_view(impl_plots[1])
-                self.app.processEvents()
+                    self._shared_zoom(qt_canvas, impl_plots[0], window)
+                    parser.set_oaw_axis_limits(impl_plots[0], 1, zoomed_y)
+                    self.app.processEvents()
 
-                kept = parser.get_oaw_axis_limits(self._impl_plots(canvas, qt_canvas)[0], 1)
-                self.assertAlmostEqual(kept[0], other_y[0], places=3)
-                self.assertAlmostEqual(kept[1], other_y[1], places=3)
+                    qt_canvas.reset_plot_view(impl_plots[clicked])
+                    self.app.processEvents()
+
+                    for impl, (begin, end) in zip(self._impl_plots(canvas, qt_canvas), drawn_y):
+                        restored = parser.get_oaw_axis_limits(impl, 1)
+                        self.assertAlmostEqual(restored[0], begin, places=3)
+                        self.assertAlmostEqual(restored[1], end, places=3)
 
     def test_reset_plot_view_leaves_the_others_alone_without_shared_x(self):
         # Without a shared X axis the action stays limited to one plot.
