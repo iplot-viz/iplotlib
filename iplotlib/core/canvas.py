@@ -82,7 +82,8 @@ class Canvas(ABC):
     auto_refresh : int
         Auto redraw canvas every X seconds
     show_minimap : bool
-        Show a mini-map below the main plot. Only valid with a single visible plot.
+        Show a mini-map below the main plot. Only valid with a single visible plot
+        and while not streaming.
     _type : str
         type of the canvas
     max_diff: int
@@ -344,6 +345,11 @@ class Canvas(ABC):
                                 signal.merge(map_old_signals[key])
 
     def is_minimap_eligible(self) -> bool:
+        # The mini-map is a frozen overview of the window captured at draw time. A
+        # streaming x-axis keeps moving past that window and its data snapshot is
+        # never refreshed, so there is nothing meaningful left to show.
+        if self.streaming:
+            return False
         target = self.get_minimap_target_plot()
         if target is None:
             return False

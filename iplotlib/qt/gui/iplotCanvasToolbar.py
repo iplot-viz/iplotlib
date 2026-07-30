@@ -65,7 +65,8 @@ class IplotQtCanvasToolbar(QToolBar):
         self.minimapAction = QAction(create_icon('minimap', 'svg'), 'Mini-map', self)
         self.minimapAction.setCheckable(True)
         self.minimapAction.setEnabled(False)
-        self.minimapAction.setToolTip('Show mini-map (available when a single plot is visible)')
+        self.minimapAction.setToolTip('Show mini-map (available when a single plot is visible, '
+                                      'except while streaming)')
         self.addAction(self.minimapAction)
         self.addSeparator()
 
