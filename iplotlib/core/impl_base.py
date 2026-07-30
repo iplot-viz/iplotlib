@@ -766,7 +766,12 @@ class BackendParserBase(ABC):
 
     @staticmethod
     def _plot_signal_ts_range(plot):
-        """(ts_start, ts_end) of the first numeric-valued signal on ``plot``, or None."""
+        """(ts_start, ts_end) of the first numeric-valued signal on ``plot``, or None.
+
+        Returned as floats: a range restored from the axis 'original' is an exact
+        integer while one that has been through the backend comes back as float64,
+        which past 2**53 cannot hold a nanosecond, and both name the same window.
+        """
         if plot is None or not plot.signals:
             return None
         for stack in plot.signals.values():
@@ -776,7 +781,7 @@ class BackendParserBase(ABC):
                 ts_start = getattr(signal, 'ts_start', None)
                 ts_end = getattr(signal, 'ts_end', None)
                 if isinstance(ts_start, (int, float)) and isinstance(ts_end, (int, float)):
-                    return (ts_start, ts_end)
+                    return (float(ts_start), float(ts_end))
         return None
 
     @staticmethod
