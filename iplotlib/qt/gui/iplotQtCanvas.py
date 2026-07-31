@@ -579,15 +579,22 @@ class IplotQtCanvas(QWidget):
 
     def reset_plot_view(self, impl_plot):
         """
-        Restore a single plot to its draw-time view (the "Reset zoom/pan" action),
-        leaving every other plot untouched. Recorded as one undoable command,
-        mirroring the autoscale flow.
+        Restore a plot to its draw-time view (the "Reset zoom/pan" action). Recorded as
+        one undoable command, mirroring the autoscale flow.
+
+        With a shared X axis the time window belongs to the group, so the whole group is
+        restored, Y included: the X propagates on its own, and a plot left holding the Y
+        of the zoom it is no longer showing is the same view Home would have fixed.
         """
         ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
         if not hasattr(ci, 'plot') or not isinstance(ci.plot(), PlotXY):
             return
         self.stage_view_lim_cmd(impl_plot, name='Reset zoom/pan')
         self._parser.set_plot_limits_to_original(impl_plot)
+        if self._parser._pm.get_value(self.get_canvas(), 'shared_x_axis'):
+            for sibling in self._parser._get_all_shared_axes(impl_plot):
+                if sibling is not impl_plot:
+                    self._parser.set_plot_limits_to_original(sibling)
         while len(self._staging_cmds):
             self.commit_view_lim_cmd(impl_plot)
         while len(self._commitd_cmds):

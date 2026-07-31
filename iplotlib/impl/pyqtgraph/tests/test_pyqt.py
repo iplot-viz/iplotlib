@@ -307,5 +307,54 @@ class LogModeConsistencyTests(QAppOffscreenTestAdapter):
         self.assertEqual(readout, '4.39')
 
 
+class MirroredAxisTests(QAppOffscreenTestAdapter):
+    """pyqtgraph draws the grid from all four axes, so top/right must place
+    their ticks where bottom/left placed theirs -- otherwise 'Show all ticks'
+    lays a second grid, on an unrelated 1/2/5 ladder, over the first one."""
+
+    def test_date_axis_top_ticks_match_the_bottom_ones(self):
+        from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem, NanosecondDateFormatter
+        bottom = NanosecondDateFormatter(orientation='bottom')
+        top = MirroredAxisItem(bottom, orientation='top')
+        # 12 h window on 2025-08-06, the range of the reported workspace.
+        lo, hi = 1754460000_000000000, 1754503200_000000000
+        self.assertEqual(top.tickValues(lo, hi, 600), bottom.tickValues(lo, hi, 600))
+
+    def test_numeric_axis_right_ticks_match_the_left_ones(self):
+        from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem, NanosecondDateFormatter
+        left = NanosecondDateFormatter(orientation='left', is_date=False)
+        left.set_ticks_number(3)
+        right = MirroredAxisItem(left, orientation='right')
+        self.assertEqual(right.tickValues(-1.2, 1.2, 300), left.tickValues(-1.2, 1.2, 300))
+
+    def test_mirrored_axis_is_not_labelled(self):
+        from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem, NanosecondDateFormatter
+        top = MirroredAxisItem(NanosecondDateFormatter(orientation='bottom'), orientation='top')
+        self.assertEqual(top.tickStrings([1.0, 2.0], 1.0, 1.0), ['', ''])
+
+    def test_built_plot_wires_the_mirrored_axes(self):
+        from iplotlib.core.plot import PlotXY
+        from iplotlib.core.signal import SignalXY
+        from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem
+
+        canvas = Canvas(1, 1)
+        plot = PlotXY()
+        plot.axes[0].is_date = True
+        signal = SignalXY(label='sig')
+        signal.set_data([np.linspace(1754460000_000000000, 1754503200_000000000, 100).astype(np.int64),
+                         np.sin(np.linspace(0, 6, 100))])
+        plot.add_signal(signal)
+        canvas.add_plot(plot, 0)
+
+        parser = PyQtGraphParser()
+        parser.process_ipl_canvas(canvas)
+        impl_plot = parser._layout_stacks[(0, 0)][0]
+        top, bottom = impl_plot.getAxis('top'), impl_plot.getAxis('bottom')
+        self.assertIsInstance(top, MirroredAxisItem)
+        self.assertIsInstance(impl_plot.getAxis('right'), MirroredAxisItem)
+        lo, hi = impl_plot.getViewBox().viewRange()[0]
+        self.assertEqual(top.tickValues(lo, hi, 600), bottom.tickValues(lo, hi, 600))
+
+
 if __name__ == '__main__':
     unittest.main()

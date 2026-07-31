@@ -766,7 +766,12 @@ class BackendParserBase(ABC):
 
     @staticmethod
     def _plot_signal_ts_range(plot):
-        """(ts_start, ts_end) of the first numeric-valued signal on ``plot``, or None."""
+        """(ts_start, ts_end) of the first numeric-valued signal on ``plot``, or None.
+
+        Returned as floats: a range restored from the axis 'original' is an exact
+        integer while one that has been through the backend comes back as float64,
+        which past 2**53 cannot hold a nanosecond, and both name the same window.
+        """
         if plot is None or not plot.signals:
             return None
         for stack in plot.signals.values():
@@ -776,7 +781,7 @@ class BackendParserBase(ABC):
                 ts_start = getattr(signal, 'ts_start', None)
                 ts_end = getattr(signal, 'ts_end', None)
                 if isinstance(ts_start, (int, float)) and isinstance(ts_end, (int, float)):
-                    return (ts_start, ts_end)
+                    return (float(ts_start), float(ts_end))
         return None
 
     @staticmethod
@@ -934,6 +939,43 @@ class BackendParserBase(ABC):
                     shared.append(plot_item)
 
         return shared
+
+    def _carry_focus_window_to_hidden_plots(self):
+        """
+        Carry the focused plot's time window to the plots the focus hid.
+
+        Focus builds only the focused plot, so a zoom made there leaves the others
+        behind. Window and signal ts go to their model, which the rebuild on unfocus
+        draws from. Membership is decided on the draw-time window, the only range a
+        zoom in focus leaves untouched.
+        """
+        if not isinstance(self.canvas, Canvas) or not self._pm.get_value(self.canvas, 'shared_x_axis'):
+            return
+        focused = self._focus_plot
+        if focused is None or isinstance(focused, (PlotXYWithSlider, PlotContourWithSlider)):
+            return
+        if not focused.axes or not isinstance(focused.axes[0], RangeAxis):
+            return
+        begin, end = focused.axes[0].get_limits('current')
+        if begin is None or end is None:
+            return
+        drawn = focused.axes[0].get_limits('original')
+
+        for column in self.canvas.plots:
+            for plot in column or []:
+                if plot is None or plot is focused:
+                    continue
+                if isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider)):
+                    continue
+                if not plot.axes or not isinstance(plot.axes[0], RangeAxis):
+                    continue
+                if plot.axes[0].get_limits('original') != drawn:
+                    continue
+                logger.debug(f"Carrying focus window [{begin}, {end}] to plot {id(plot)}")
+                plot.axes[0].set_limits(begin, end, 'current')
+                for stack in plot.signals.values():
+                    for signal in stack:
+                        signal.set_limits((begin, end))
 
     def _ruler_signal_values(self, impl_plot: Any, x: float) -> Dict[str, float]:
         """Value of each signal at the ruler X keyed by its label. Backends with
@@ -1292,7 +1334,10 @@ class BackendParserBase(ABC):
                 if hasattr(signal, 'x_data') and hasattr(signal.x_data, 'unit'):
                     if not (
                             isinstance(ci.plot(), PlotXYWithSlider) or isinstance(ci.plot(), PlotContourWithSlider)):
-                        x_auto = f"[{signal.x_data.unit or '? '}]"
+                        unit = signal.x_data.unit or ''
+                        # The data access reports the time vector's unit as
+                        # 'Time': a name, not a unit, so it is not bracketed.
+                        x_auto = unit if unit.strip().lower() == 'time' else f"[{unit or '? '}]"
             if x_axis.label == "":
                 x_text = ""
             elif x_axis.label:
@@ -1783,7 +1828,14 @@ class BackendParserBase(ABC):
 
     @abstractmethod
     def set_focus_plot(self, impl_plot: Any):
-        """Sets the focus plot."""
+        """
+        Sets the focus plot.
+
+        Implementations must call this before reassigning :attr:`_focus_plot`: leaving
+        focus carries the focused plot's window to the plots it hid.
+        """
+        if self._focus_plot is not None:
+            self._carry_focus_window_to_hidden_plots()
 
     def undo(self):
         """
@@ -2044,9 +2096,15 @@ class BackendParserBase(ABC):
         # the offset-relative signal data does not run and the data stays drawn
         # at the old offset. Detect that around the X set so the re-plot below
         # can compensate.
-        x_before = self.get_impl_x_axis_limits(impl_plot) if impl_plot is not None else None
-        self.set_oaw_axis_limits(impl_plot, 0, (ax_limits[0].begin, ax_limits[0].end))
-        x_view_moved = impl_plot is not None and self.get_impl_x_axis_limits(impl_plot) != x_before
+        has_impl = impl_plot is not None
+        x_before = self.get_impl_x_axis_limits(impl_plot) if has_impl else None
+        if has_impl:
+            self.set_oaw_axis_limits(impl_plot, 0, (ax_limits[0].begin, ax_limits[0].end))
+        else:
+            # A plot hidden by the focus has no implementation plot to set: the ranges
+            # go to its model, which the rebuild on unfocus draws from.
+            self._set_model_plot_limits(plot, ax_limits, signal_limits)
+        x_view_moved = has_impl and self.get_impl_x_axis_limits(impl_plot) != x_before
         # isinstance(plot, PlotXYWithSlider): TODO: test with Slider
 
         # Restore the exact recorded signal-level xrange values.
@@ -2055,12 +2113,13 @@ class BackendParserBase(ABC):
             signal.set_xranges(signal_limit.get_limits())
 
         # Set Y limits
-        self.set_oaw_axis_limits(impl_plot, 1, (ax_limits[1].begin, ax_limits[1].end))
+        if has_impl:
+            self.set_oaw_axis_limits(impl_plot, 1, (ax_limits[1].begin, ax_limits[1].end))
         # isinstance(plot, PlotXYWithSlider): TODO: test with Slider
 
         # Only when the view did not move (so the callback did not re-plot) do we
         # re-plot here, at the restored offset. matplotlib moves the view -> skipped.
-        if impl_plot is not None and not x_view_moved:
+        if has_impl and not x_view_moved:
             for signal_ref in self._impl_plot_cache_table.get_cache_item(impl_plot).signals:
                 signal = signal_ref()
                 if signal is not None:
@@ -2069,6 +2128,27 @@ class BackendParserBase(ABC):
         # Restore slider-specific limits, if the plot has one
         if isinstance(plot, PlotXYWithSlider) and self._pm.get_value(self.canvas, 'shared_x_axis'):
             self.set_impl_plot_slider_limits(plot, *limits.sliders_ranges[0].get_limits())
+
+    def _set_model_plot_limits(self, plot, ax_limits, signal_limits):
+        """
+        Apply recorded ranges to a plot that has no implementation plot to set them on.
+
+        The Y range has to come along or the plot comes back from focus keeping the
+        zoomed one. Only the stack the recorded signals belong to is touched, since a
+        stacked plot holds one Y axis per stack.
+        """
+        if plot is None or not plot.axes or len(ax_limits) < 2:
+            return
+        plot.axes[0].set_limits(ax_limits[0].begin, ax_limits[0].end, 'current')
+
+        signal = signal_limits[0].signal_ref() if signal_limits else None
+        if signal is None or len(plot.axes) < 2:
+            return
+        y_axes = plot.axes[1] if isinstance(plot.axes[1], Collection) else [plot.axes[1]]
+        for (_, stack), y_axis in zip(sorted(plot.signals.items()), y_axes):
+            if any(s is signal for s in stack):
+                y_axis.set_limits(ax_limits[1].begin, ax_limits[1].end, 'current')
+                return
 
     def _draw_time_y_limits(self, plot, begin, end):
         """
