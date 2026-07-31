@@ -1334,7 +1334,10 @@ class BackendParserBase(ABC):
                 if hasattr(signal, 'x_data') and hasattr(signal.x_data, 'unit'):
                     if not (
                             isinstance(ci.plot(), PlotXYWithSlider) or isinstance(ci.plot(), PlotContourWithSlider)):
-                        x_auto = f"[{signal.x_data.unit or '? '}]"
+                        unit = signal.x_data.unit or ''
+                        # The data access reports the time vector's unit as
+                        # 'Time': a name, not a unit, so it is not bracketed.
+                        x_auto = unit if unit.strip().lower() == 'time' else f"[{unit or '? '}]"
             if x_axis.label == "":
                 x_text = ""
             elif x_axis.label:
