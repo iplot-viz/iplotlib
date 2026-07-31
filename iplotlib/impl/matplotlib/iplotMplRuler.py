@@ -25,7 +25,8 @@ class iplotMplRuler:
                  lw: int = 1,
                  font_size: int = 8,
                  animated: bool = False,
-                 value_lines: List = None):
+                 value_lines: List = None,
+                 is_echo: bool = False):
         self.ax = ax
         self.name = name
         self.xy = xy
@@ -33,7 +34,7 @@ class iplotMplRuler:
         # refresh so zoom/pan keep the ruler anchored to its data position.
         self.abs_x = xy[0]
         self.abs_y = xy[1]
-        self.is_echo = False
+        self.is_echo = is_echo
         self.color = color
         self.font_color = font_color
         self.font_size = font_size
@@ -129,7 +130,9 @@ class iplotMplRuler:
         xmin, xmax = sorted(self.ax.get_xlim())
         ymin, ymax = sorted(self.ax.get_ylim())
         in_x = xmin <= x <= xmax
-        in_y = ymin <= y <= ymax
+        # A mirrored copy carries the owner's Y against an unrelated scale, so it
+        # keeps the time line only.
+        in_y = (ymin <= y <= ymax) and not self.is_echo
         self.v_line.set_visible(in_x)
         self.x_label.set_visible(in_x)
         self.h_line.set_visible(in_x and in_y)

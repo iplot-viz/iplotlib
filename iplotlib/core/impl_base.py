@@ -22,7 +22,7 @@ import numpy as np
 from queue import Empty, Queue
 import re
 import threading
-from typing import Any, Callable, Collection, Dict, List, Optional, Union
+from typing import Any, Callable, Collection, Dict, List, Optional, Tuple, Union
 import weakref
 
 from iplotProcessing.core import BufferObject
@@ -982,21 +982,19 @@ class BackendParserBase(ABC):
         ruler support override this; the base has no per-signal resolution."""
         return {}
 
-    def ruler_signal_values_shared(self, impl_plot: Any, x_view: float) -> Dict[str, float]:
-        """Signal values at the ruler X for *impl_plot* extended, when the canvas
-        shares the time axis, with the signals of every shared plot evaluated at
-        the same absolute X — the values the ruler echoes display. The owner
-        plot wins on a label clash."""
-        values: Dict[str, float] = {}
+    def ruler_reach(self, impl_plot: Any, x_view: float) -> List[Tuple[Any, float, Dict[str, float]]]:
+        """Every plot a ruler placed on *impl_plot* draws on, owner first, as
+        (plot, x in that plot's view coordinates, its signals' values there).
+        Merging the values would drop one of two signals sharing a label."""
+        reach = [(impl_plot, x_view, self._ruler_signal_values(impl_plot, x_view))]
         if self._pm.get_value(self.canvas, 'shared_x_axis'):
             x_abs = self.transform_value(impl_plot, 0, x_view)
             for sibling in self._get_all_shared_axes(impl_plot):
                 if sibling is impl_plot:
                     continue
                 x_sibling = self.transform_value(sibling, 0, x_abs, inverse=True)
-                values.update(self._ruler_signal_values(sibling, x_sibling))
-        values.update(self._ruler_signal_values(impl_plot, x_view))
-        return values
+                reach.append((sibling, x_sibling, self._ruler_signal_values(sibling, x_sibling)))
+        return reach
 
     @abstractmethod
     def get_canvas_plots(self):

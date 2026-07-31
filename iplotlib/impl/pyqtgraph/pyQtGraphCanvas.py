@@ -33,7 +33,7 @@ from iplotlib.core import (Axis,
                            SignalContour)
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
-from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter, is_time_label
+from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem, NanosecondDateFormatter, is_time_label
 
 logger = setupLogger.get_logger(__name__)
 
@@ -925,6 +925,8 @@ class PyQtGraphParser(BackendParserBase):
                 axis_items["bottom"] = NanosecondDateFormatter(is_date=False, orientation='bottom')
 
             axis_items["left"] = NanosecondDateFormatter(is_date=False, orientation='left')
+            axis_items["top"] = MirroredAxisItem(axis_items["bottom"], orientation='top')
+            axis_items["right"] = MirroredAxisItem(axis_items["left"], orientation='right')
 
             signals = i_plot.signals.get(key) or list()
 
@@ -941,6 +943,11 @@ class PyQtGraphParser(BackendParserBase):
                 if len(i_plot.signals) <= 1:
                     pi.showAxes((True, True, True, True), showValues=(True, False, False, True))
                     pi.layout.setContentsMargins(0, 0, 0, 0)
+                else:
+                    # PlotItem shows every axis handed to it through axisItems;
+                    # stacked plots keep the default left/bottom pair only.
+                    pi.hideAxis('top')
+                    pi.hideAxis('right')
                 # Add space for expo
                 if stack_id == 0:
                     cell_gl.addItem(axis_items["left"].common_label, row=0, col=0)
@@ -1925,10 +1932,9 @@ class PyQtGraphParser(BackendParserBase):
                   color: str = "#FFFFFF", is_echo: bool = False) -> pyQtRuler:
         font_size = int(self._pm.get_value(self.canvas, 'font_size') or 8)
         ruler = pyQtRuler(plot=impl_plot, name=name, xy=(x, y), color=color, font_size=font_size,
-                          value_lines=self._ruler_value_lines(impl_plot))
+                          value_lines=self._ruler_value_lines(impl_plot), is_echo=is_echo)
         ruler.abs_x = self.transform_value(impl_plot, 0, x)
         ruler.abs_y = self.transform_value(impl_plot, 1, y)
-        ruler.is_echo = is_echo
         self._rulers.append(ruler)
         return ruler
 
