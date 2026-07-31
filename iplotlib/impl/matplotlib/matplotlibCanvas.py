@@ -24,7 +24,6 @@ from pandas.plotting import register_matplotlib_converters
 from iplotLogging import setupLogger
 from iplotlib.core.decimation import minmax_decimate
 from iplotlib.core import (Axis,
-                           RangeAxis,
                            Canvas,
                            BackendParserBase,
                            Plot,
@@ -1371,18 +1370,6 @@ class MatplotlibParser(BackendParserBase):
         self.figure.set_tight_layout("")
 
     def set_focus_plot(self, mpl_axes):
-
-        def get_x_axis_range(focus_plot):
-            if focus_plot is not None and focus_plot.axes is not None and len(focus_plot.axes) > 0 and \
-                    isinstance(focus_plot.axes[0], RangeAxis):
-                return focus_plot.axes[0].begin, focus_plot.axes[0].end
-
-        def set_x_axis_range(focus_plot, x_begin, x_end):
-            if focus_plot is not None and focus_plot.axes is not None and len(focus_plot.axes) > 0 and \
-                    isinstance(focus_plot.axes[0], RangeAxis):
-                focus_plot.axes[0].begin = x_begin
-                focus_plot.axes[0].end = x_end
-
         if isinstance(mpl_axes, MPLAxes):
             ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
             plot = ci.plot()
@@ -1393,22 +1380,7 @@ class MatplotlibParser(BackendParserBase):
 
         logger.debug(f"Focusing on plot: {id(plot)}, stack_key: {stack_key}")
 
-        if self._focus_plot is not None and plot is None:
-            if self._pm.get_value(self.canvas, 'shared_x_axis') and len(self._focus_plot.axes) > 0 and isinstance(
-                    self._focus_plot.axes[0], RangeAxis):
-                begin, end = get_x_axis_range(self._focus_plot)
-
-                for columns in self.canvas.plots:
-                    for plot_temp in columns:
-                        if plot_temp and not isinstance(self._focus_plot,
-                                                        PlotXYWithSlider) and plot_temp != self._focus_plot and not isinstance(
-                            plot_temp, (PlotXYWithSlider, PlotContourWithSlider)):
-                            logger.debug(
-                                f"Setting range on plot {id(plot_temp)} focused= {id(self._focus_plot)} begin={begin}")
-
-                            if plot_temp.axes[0].original_begin == self._focus_plot.axes[0].original_begin and \
-                                    plot_temp.axes[0].original_end == self._focus_plot.axes[0].original_end:
-                                set_x_axis_range(plot_temp, begin, end)
+        super().set_focus_plot(mpl_axes)
 
         self._focus_plot = plot
         self._focus_plot_stack_key = stack_key

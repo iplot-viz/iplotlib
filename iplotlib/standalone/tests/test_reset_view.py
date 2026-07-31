@@ -4,6 +4,8 @@ After a zoom, both actions must restore the axis range captured at draw time,
 reusing the same view-limit plumbing as undo/redo. Home is verified to be a
 single undoable command so one undo reverts the whole reset, and to redraw
 from the draw-time snapshot without issuing any data-access request.
+
+With a shared X axis the per-plot reset is verified over the whole group.
 """
 
 import copy
@@ -14,11 +16,16 @@ from iplotProcessing.core import BufferObject
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
+from iplotlib.core.impl_base import BackendParserBase
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.gui.iplotQtMainWindow import IplotQtMainWindow
 from iplotlib.qt.testing import ensure_qapp
+
+TS_START = 1_754_463_600_000_000_000
+TS_END = 1_754_503_200_000_000_000
+SECOND = 1_000_000_000
 
 
 def _make_canvas() -> Canvas:
@@ -29,6 +36,21 @@ def _make_canvas() -> Canvas:
     signal.set_data([x, np.sin(x)])
     plot.add_signal(signal)
     core.add_plot(plot, 0)
+    return core
+
+
+def _make_shared_time_canvas(shared: bool = True) -> Canvas:
+    """Two time plots, the smallest canvas a shared time group can be formed on."""
+    core = Canvas(2, 1, title="reset_view_shared", shared_x_axis=shared)
+    time = np.linspace(TS_START, TS_END, 200).astype(np.int64)
+    for i in range(2):
+        plot = PlotXY()
+        signal = SignalXY(label=f"s{i}")
+        signal.ts_start = TS_START
+        signal.ts_end = TS_END
+        signal.set_data([time, np.sin(np.linspace(0, 6, 200) + i)])
+        plot.add_signal(signal)
+        core.add_plot(plot, 0)
     return core
 
 
@@ -103,6 +125,121 @@ class ResetViewTest(unittest.TestCase):
                 restored = self._x_range(qt_canvas)
                 self.assertAlmostEqual(restored[0], original[0], places=3)
                 self.assertAlmostEqual(restored[1], original[1], places=3)
+
+    def _build_shared(self, backend: str, shared: bool = True):
+        canvas = _make_shared_time_canvas(shared)
+        qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+        qt_canvas.set_canvas(canvas)
+        qt_canvas.resize(600, 400)
+        self.app.processEvents()
+        return canvas, qt_canvas
+
+    @staticmethod
+    def _impl_plots(canvas, qt_canvas):
+        """Implementation plots in canvas order, re-resolved after every redraw."""
+        lut = qt_canvas._parser._plot_impl_plot_lut
+        return [lut[id(plot)][0] for plot in canvas.plots[0]]
+
+    def _shared_zoom(self, qt_canvas, impl_plot, window):
+        """Zoom the way a mouse gesture does, so the shared-x propagation runs."""
+        parser = qt_canvas._parser
+        parser.set_oaw_axis_limits(impl_plot, 0, window)
+        BackendParserBase._x_axis_update_callback(parser, impl_plot)
+        self.app.processEvents()
+
+    def test_reset_plot_view_restores_the_whole_shared_group(self):
+        window = (TS_START + 100 * SECOND, TS_END - 100 * SECOND)
+        for backend in ('matplotlib', 'pyqt'):
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build_shared(backend)
+                parser = qt_canvas._parser
+                impl_plots = self._impl_plots(canvas, qt_canvas)
+                drawn = [parser.get_oaw_axis_limits(impl, 0) for impl in impl_plots]
+
+                self._shared_zoom(qt_canvas, impl_plots[0], window)
+                for impl in impl_plots:
+                    self.assertAlmostEqual(parser.get_oaw_axis_limits(impl, 0)[0],
+                                           window[0], delta=SECOND)
+
+                # Invoked on the plot the zoom was not made on: the whole group follows.
+                qt_canvas.reset_plot_view(impl_plots[1])
+                self.app.processEvents()
+
+                for impl, (begin, end) in zip(self._impl_plots(canvas, qt_canvas), drawn):
+                    restored = parser.get_oaw_axis_limits(impl, 0)
+                    self.assertAlmostEqual(restored[0], begin, delta=SECOND)
+                    self.assertAlmostEqual(restored[1], end, delta=SECOND)
+
+    def test_reset_plot_view_restores_the_group_without_data_access(self):
+        # Same contract as Home: the restore is served from the draw-time snapshots.
+        window = (TS_START + 100 * SECOND, TS_END - 100 * SECOND)
+        for backend in ('matplotlib', 'pyqt'):
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build_shared(backend)
+                impl_plots = self._impl_plots(canvas, qt_canvas)
+                other_signal = next(iter(canvas.plots[0][0].signals.values()))[0]
+                full_len = len(other_signal.x_data)
+                self._shared_zoom(qt_canvas, impl_plots[0], window)
+
+                calls = {'get_data': 0}
+                original_get_data = other_signal.get_data
+
+                def spied_get_data():
+                    calls['get_data'] += 1
+                    return original_get_data()
+
+                other_signal.get_data = spied_get_data
+
+                qt_canvas.reset_plot_view(impl_plots[1])
+                self.app.processEvents()
+
+                self.assertEqual(calls['get_data'], 0)
+                self.assertEqual(len(other_signal.x_data), full_len)
+
+    def test_reset_plot_view_restores_the_whole_group_y_range(self):
+        # A rubber-band zoom narrows the Y of the plot it is drawn on and leaves the
+        # rest of the group alone, so a reset invoked on any of them has to return
+        # every Y as well: the X comes back on its own, and a plot left holding the Y
+        # of a window it no longer shows is the view Home would have fixed.
+        window = (TS_START + 100 * SECOND, TS_END - 100 * SECOND)
+        zoomed_y = (-5.0, 5.0)
+        for backend in ('matplotlib', 'pyqt'):
+            for clicked in (0, 1):
+                with self.subTest(backend=backend, clicked=clicked):
+                    canvas, qt_canvas = self._build_shared(backend)
+                    parser = qt_canvas._parser
+                    impl_plots = self._impl_plots(canvas, qt_canvas)
+                    drawn_y = [parser.get_oaw_axis_limits(impl, 1) for impl in impl_plots]
+
+                    self._shared_zoom(qt_canvas, impl_plots[0], window)
+                    parser.set_oaw_axis_limits(impl_plots[0], 1, zoomed_y)
+                    self.app.processEvents()
+
+                    qt_canvas.reset_plot_view(impl_plots[clicked])
+                    self.app.processEvents()
+
+                    for impl, (begin, end) in zip(self._impl_plots(canvas, qt_canvas), drawn_y):
+                        restored = parser.get_oaw_axis_limits(impl, 1)
+                        self.assertAlmostEqual(restored[0], begin, places=3)
+                        self.assertAlmostEqual(restored[1], end, places=3)
+
+    def test_reset_plot_view_leaves_the_others_alone_without_shared_x(self):
+        # Without a shared X axis the action stays limited to one plot.
+        window = (TS_START + 100 * SECOND, TS_END - 100 * SECOND)
+        for backend in ('matplotlib', 'pyqt'):
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build_shared(backend, shared=False)
+                parser = qt_canvas._parser
+                impl_plots = self._impl_plots(canvas, qt_canvas)
+                self._shared_zoom(qt_canvas, impl_plots[0], window)
+                zoomed = parser.get_oaw_axis_limits(impl_plots[0], 0)
+
+                qt_canvas.reset_plot_view(impl_plots[1])
+                self.app.processEvents()
+
+                kept = parser.get_oaw_axis_limits(self._impl_plots(canvas, qt_canvas)[0], 0)
+                self.assertAlmostEqual(kept[0], zoomed[0], delta=SECOND)
+                self.assertAlmostEqual(kept[1], zoomed[1], delta=SECOND)
 
     def test_home_is_single_undoable_command(self):
         for backend in ('matplotlib', 'pyqt'):

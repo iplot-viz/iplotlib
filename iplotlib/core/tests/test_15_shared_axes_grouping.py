@@ -62,6 +62,22 @@ class PlotSignalTsRangeTest(unittest.TestCase):
             BackendParserBase._plot_signal_ts_range(plot), (0.0, 60.0)
         )
 
+    def test_same_instant_matches_whichever_representation_it_carries(self):
+        # A reset restores ts from the axis 'original' as exact integers while the rest
+        # of the group holds float64: past 2**53 a nanosecond does not survive that
+        # round trip, and grouping on the raw values would split the two apart.
+        ts_start = 1_785_426_531_924_363_000  # utcnow() in ns, down to the microsecond
+        ts_end = 1_785_430_131_924_363_000
+        self.assertNotEqual(float(ts_start), ts_start)
+
+        exact = PlotXY()
+        exact.add_signal(_signal_with_ts("exact", ts_start, ts_end))
+        rounded = PlotXY()
+        rounded.add_signal(_signal_with_ts("rounded", float(ts_start), float(ts_end)))
+
+        self.assertEqual(BackendParserBase._plot_signal_ts_range(exact),
+                         BackendParserBase._plot_signal_ts_range(rounded))
+
 
 class PlotXIsTimeTest(unittest.TestCase):
     def test_default_x_expr_is_time(self):
