@@ -1769,6 +1769,8 @@ class PyQtGraphParser(BackendParserBase):
             lay.setColumnStretchFactor(c, 1)
 
     def set_focus_plot(self, impl_plot: PlotItem):
+        super().set_focus_plot(impl_plot)
+
         un_focus = self._focus_plot is not None or impl_plot is None
         all_stack = self._pm.get_value(self.canvas, "full_mode_all_stack")
         if un_focus:
