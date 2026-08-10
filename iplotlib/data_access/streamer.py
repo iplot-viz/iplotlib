@@ -242,6 +242,9 @@ class CanvasStreamer:
         return self._unpack_archive(data)
 
     def _fetch_last_archive_value(self, ds, signal, end_ns):
+        ##retrieve last point only if extremeties is true, to speed up as for DB it is slow
+        if getattr(signal, 'extremeties', False)==False:
+            return None, None, None, None, None, None
         try:
             data = self.da.get_archive_window(
                 ds,
