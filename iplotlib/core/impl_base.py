@@ -49,6 +49,9 @@ class ImplementationPlotCacheItem:
     stack_key: str = ''
     signals: List[weakref.ReferenceType] = field(default_factory=list)
     offsets: Dict[int, int] = field(default_factory=lambda: defaultdict(lambda: None))
+    # Units of `scales[ax_idx]` nanoseconds per axis coordinate; 1 keeps the
+    # axis in raw (integer) units. See BackendParserBase.axis_unit_scale.
+    scales: Dict[int, int] = field(default_factory=lambda: defaultdict(lambda: 1))
 
 
 class ImplementationPlotCacheTable:
@@ -95,7 +98,8 @@ class ImplementationPlotCacheTable:
         Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)
         """
-        offset = self.get_cache_item(impl_obj).offsets[ax_idx]
+        ci = self.get_cache_item(impl_obj)
+        offset = ci.offsets[ax_idx]
 
         if offset is None:
             return value
@@ -105,10 +109,11 @@ class ImplementationPlotCacheTable:
             else:
                 return value * offset
         else:
+            scale = ci.scales[ax_idx]
             if inverse:
-                return value - offset
+                return (value - offset) / scale if scale != 1 else value - offset
             else:
-                return value + offset
+                return value * scale + offset if scale != 1 else value + offset
 
     def get_slider_time(self, impl_obj: Any):
         """Return current slider time (ns) if impl_obj belongs to a slider plot, else None."""
@@ -2308,6 +2313,17 @@ class BackendParserBase(ABC):
         Implementations should set the y range
         """
 
+    @staticmethod
+    def axis_unit_scale(limits) -> int:
+        """Nanoseconds per axis coordinate for the given real limits.
+
+        The default of 1 keeps axis coordinates in raw integer units, which
+        preserves nanosecond precision on deep zoom. Backends whose view
+        transform cannot represent very wide raw-unit spans override this to
+        pick a coarser unit (see the pyqtgraph parser).
+        """
+        return 1
+
     def axis_uses_offset(self, impl_plot: Any, ax_idx: int) -> bool:
         """
         An offset may only be applied to an axis whose formatter knows how to add it back,
@@ -2332,6 +2348,10 @@ class BackendParserBase(ABC):
             return
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         ci.offsets[ax_idx] = self.create_offset(limits) if self.axis_uses_offset(impl_plot, ax_idx) else 0
+        # A unit scale only makes sense on top of a midpoint offset; the legacy
+        # 100_000 mode is itself a fixed scale and keeps its own arithmetic.
+        ci.scales[ax_idx] = (self.axis_unit_scale(limits)
+                             if ci.offsets[ax_idx] not in (None, 0, 100_000) else 1)
 
         begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
         end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
@@ -2375,6 +2395,7 @@ class BackendParserBase(ABC):
             if offset == 0 or offset is None:
                 ret.append(d)
             else:
+                scale = ci.scales[ax_idx]
                 arr = np.asarray(d)
                 if np.issubdtype(arr.dtype, np.floating) and not np.isfinite(arr).all():
                     # NaNs (e.g. left-edge extrapolation of realigned expression
@@ -2386,6 +2407,8 @@ class BackendParserBase(ABC):
                     out = np.full(arr.shape, np.nan)
                     if offset == 100_000:
                         out[finite] = arr[finite].astype(np.int64) / offset
+                    elif scale != 1:
+                        out[finite] = (arr[finite].astype(np.int64) - offset) / scale
                     else:
                         out[finite] = arr[finite].astype(np.int64) - offset
                     ret.append(BufferObject(out))
@@ -2393,6 +2416,8 @@ class BackendParserBase(ABC):
                 arr = arr.astype(np.int64)
                 if offset == 100_000:
                     ret.append(BufferObject(arr / offset))
+                elif scale != 1:
+                    ret.append(BufferObject((arr - offset) / scale))
                 else:
                     ret.append(BufferObject(arr - offset))
         return ret

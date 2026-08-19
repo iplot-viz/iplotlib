@@ -344,6 +344,7 @@ class NanosecondDateFormatter(pg.AxisItem):
         self.n_ticks = 7
         self.last_range = 0
         self.offset = 0
+        self.unit_scale = 1
         self.is_date = is_date
         self._spacing = 0.0
         self._date_label_end = self.NANOSECOND
@@ -434,6 +435,11 @@ class NanosecondDateFormatter(pg.AxisItem):
         if offset != self.offset:
             self._tick_cache = None
         self.offset = offset
+
+    def set_unit_scale(self, scale):
+        if scale != self.unit_scale:
+            self._tick_cache = None
+        self.unit_scale = scale
 
     def date_part(self, ts_numeric, part):
         """Extract date part from numerical timestamp"""
@@ -544,10 +550,12 @@ class NanosecondDateFormatter(pg.AxisItem):
             abs_lo = self.get_real_value(minVal)
             abs_hi = self.get_real_value(maxVal)
             step_ns, kind = _pick_interval(abs(abs_hi - abs_lo), n)
-            # In 100 us-unit mode the axis cannot resolve below 100 us, so never
-            # pick a finer step (keeps back-conversion on exact integers).
+            # The axis cannot resolve below its unit (100 us in legacy mode,
+            # the adaptive unit scale otherwise), so never pick a finer step.
             if self.offset == 100_000 and kind == "fixed" and step_ns < 100_000:
                 step_ns, kind = 100_000, "fixed"
+            elif self.unit_scale != 1 and kind == "fixed" and step_ns < self.unit_scale:
+                step_ns, kind = self.unit_scale, "fixed"
             ticks_abs = _generate_ticks(abs_lo, abs_hi, step_ns, kind)
             values = [self._abs_to_axis(t) for t in ticks_abs]
 
@@ -795,6 +803,8 @@ class NanosecondDateFormatter(pg.AxisItem):
         # difference between ticks exact (the constant offset cancels).
         if self.offset == 100_000:
             return int(round(float(value))) * 100_000
+        if self.unit_scale != 1:
+            return int(round(float(value) * self.unit_scale)) + int(self.offset)
         return int(round(float(value))) + int(self.offset)
 
     def _abs_to_axis(self, abs_ns):
@@ -805,6 +815,8 @@ class NanosecondDateFormatter(pg.AxisItem):
         reconstructed tick value, e.g. labelling a 300 us tick as 294/299."""
         if self.offset == 100_000:
             return abs_ns / 100_000
+        elif self.unit_scale != 1:
+            return (abs_ns - int(self.offset)) / self.unit_scale
         else:
             return abs_ns - int(self.offset)
 
