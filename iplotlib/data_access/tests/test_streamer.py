@@ -191,10 +191,13 @@ class ArchiveKwargsTests(unittest.TestCase):
 
 
 class FetchLastArchiveValueTests(unittest.TestCase):
-    """Tests for CanvasStreamer._fetch_last_archive_value (empty-window fallback)."""
+    """Tests for CanvasStreamer._fetch_last_archive_value (empty-window fallback).
+
+    The read is issued only for signals that opt in through the Extremities
+    column; the fixture opts in so the fetch paths are exercised."""
 
     def setUp(self):
-        self.signal = _FakeSignal(name='var')
+        self.signal = _FakeSignal(name='var', extremities=True)
 
     def test_passes_last_value_kwargs_to_data_access(self):
         fake_da = MagicMock()
@@ -223,6 +226,16 @@ class FetchLastArchiveValueTests(unittest.TestCase):
         streamer = CanvasStreamer(da=fake_da)
         result = streamer._fetch_last_archive_value('ds', self.signal, end_ns=999)
         self.assertEqual(result, (None,) * 6)
+
+    def test_without_extremities_no_archive_call_is_made(self):
+        # The last-point read is expensive on a DB back-end: a signal that
+        # did not opt in through the Extremities column must not pay for it.
+        fake_da = MagicMock()
+        streamer = CanvasStreamer(da=fake_da)
+        signal = _FakeSignal(name='var')
+        result = streamer._fetch_last_archive_value('ds', signal, end_ns=999)
+        self.assertEqual(result, (None,) * 6)
+        fake_da.get_archive_window.assert_not_called()
 
 
 class BackfillSignalTests(unittest.TestCase):
@@ -261,6 +274,7 @@ class BackfillSignalTests(unittest.TestCase):
             _FakeArchiveResponse(x=[], y=[]),     # empty window request
             _FakeArchiveResponse(x=[5], y=[99]),  # last-value fallback
         ]
+        self.signal.extremities = True
         streamer = self._mk_streamer(fake_da)
         streamer._archive_backfill({'ds': [self.signal]}, self.WINDOW,
                                    self.callback)
