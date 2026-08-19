@@ -58,6 +58,9 @@ class WideWindowZoomTest(unittest.TestCase):
         parser, impl = self._build('pyqt', 20 * DAY_NS)
         ci = parser._impl_plot_cache_table.get_cache_item(impl)
         self.assertEqual(ci.scales[0], 10_000)
+        # Aligned midpoint: round civil-time ticks must land on exact integer
+        # coordinates or the label path's truncation displays 12:00 as 11:59.
+        self.assertEqual(ci.offsets[0] % ci.scales[0], 0)
         m11 = impl.getViewBox().childGroup.transform().m11()
         self.assertGreater(m11, 1e-10)
 
@@ -96,11 +99,22 @@ class WideWindowZoomTest(unittest.TestCase):
 
     def test_formatter_round_trip_with_unit_scale(self):
         axis = NanosecondDateFormatter(orientation='bottom')
+        scale = 10_000
         midpoint = T0 + 10 * DAY_NS
+        midpoint -= midpoint % scale  # aligned, as set_oaw_axis_limits does
         axis.set_offset(midpoint)
-        axis.set_unit_scale(10_000)
-        for tick_ns in (T0, T0 + DAY_NS, T0 + 19 * DAY_NS + 3_600_000_000_000):
-            self.assertEqual(axis.get_real_value(axis._abs_to_axis(tick_ns)), tick_ns)
+        axis.set_unit_scale(scale)
+        # Round civil-time ticks are multiples of one second, hence of the
+        # scale; with the aligned midpoint their coordinates are exact
+        # integers, so the label path's int() truncation cannot shift a
+        # 12:00:00 tick down to 11:59:59.999... (displayed as 11:59).
+        hour_ns = 3_600_000_000_000
+        for tick_ns in (T0 - T0 % hour_ns, T0 - T0 % hour_ns + DAY_NS,
+                        T0 - T0 % hour_ns + 19 * DAY_NS + hour_ns):
+            coord = axis._abs_to_axis(tick_ns)
+            self.assertEqual(coord, int(coord))
+            self.assertEqual(axis.get_real_value(int(coord)), tick_ns)
+            self.assertEqual(axis.get_real_value(coord), tick_ns)
 
 
 if __name__ == '__main__':

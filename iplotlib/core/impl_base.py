@@ -2352,6 +2352,12 @@ class BackendParserBase(ABC):
         # 100_000 mode is itself a fixed scale and keeps its own arithmetic.
         ci.scales[ax_idx] = (self.axis_unit_scale(limits)
                              if ci.offsets[ax_idx] not in (None, 0, 100_000) else 1)
+        if ci.scales[ax_idx] != 1:
+            # Align the midpoint to the unit so round civil-time ticks land on
+            # exact integer coordinates: the formatter truncates coordinates
+            # when composing labels, and a tick epsilon-below its integer would
+            # otherwise display 12:00 as 11:59.
+            ci.offsets[ax_idx] -= int(ci.offsets[ax_idx]) % ci.scales[ax_idx]
 
         begin = self.transform_value(impl_plot, ax_idx, limits[0], inverse=True)
         end = self.transform_value(impl_plot, ax_idx, limits[1], inverse=True)
