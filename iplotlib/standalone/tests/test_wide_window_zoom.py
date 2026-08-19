@@ -97,6 +97,26 @@ class WideWindowZoomTest(unittest.TestCase):
         self.assertAlmostEqual(begin, T0, delta=1e9)
         self.assertAlmostEqual(end, T0 + 20 * DAY_NS, delta=1e9)
 
+    def test_stats_table_masks_by_the_full_visible_window(self):
+        from PySide6.QtCore import Qt
+        from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
+
+        parser, impl = self._build('pyqt', 20 * DAY_NS)
+        plot = parser.canvas.plots[0][0]
+        signal = next(s for st in plot.signals.values() for s in st)
+
+        stats = IplotQtStatistics()
+        stats.fill_table([(signal, impl, (1, 1))])
+        # The whole buffer is visible: an inverse mapping that ignores the
+        # axis unit scale collapses the window to seconds around the midpoint
+        # and drops every sample.
+        samples = stats.table.item(0, 6).data(Qt.ItemDataRole.UserRole)
+        self.assertEqual(int(samples), 500)
+        first_time = stats.table.item(0, 7).data(Qt.ItemDataRole.UserRole)
+        last_time = stats.table.item(0, 8).data(Qt.ItemDataRole.UserRole)
+        self.assertEqual(int(first_time), T0)
+        self.assertEqual(int(last_time), T0 + 20 * DAY_NS)
+
     def test_formatter_round_trip_with_unit_scale(self):
         axis = NanosecondDateFormatter(orientation='bottom')
         scale = 10_000
