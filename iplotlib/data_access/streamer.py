@@ -33,7 +33,6 @@ _REFRESH_GLOBAL_SPACING_S = 2.0
 _DRAIN_MAX_ROUNDS = 256
 
 
-
 def _refresh_min_interval_s() -> float:
     try:
         return max(5.0, float(os.environ.get('MINT_STREAMING_REFRESH_SECONDS',
@@ -126,9 +125,6 @@ class _StreamJob(QObject):
         finally:
             QThread.currentThread().quit()
 
-
-# CWS-SCSU-0000:CU510{1,2,3,4}-TT-XI, CTRL-SYSM-CUB-4505-61:CU000{1,2,3}-HTH-TT,BUIL-B36-VA-RT-RT1:CL0001-TT02-STATE
-# CTRL-SYSM-CUB-4505-61:CU0001-HTH-TT
 
 class CanvasStreamer:
 
@@ -851,7 +847,6 @@ class CanvasStreamer:
                     # No archive data in the window (maybe a lone live point
                     # arrives later): the signal is not verbose, so the
                     # refresh worker will never re-query the archive for it.
-                    
                     self._backfill_last_value(ds, signal, carrier, end_ns, callback)
                     continue
                 n = self._inject_archive_chunk(

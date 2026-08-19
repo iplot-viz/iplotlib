@@ -1293,7 +1293,9 @@ class ShortWindowArchiveTests(unittest.TestCase):
         streamer = CanvasStreamer(da=fake_da)
         streamer._window_ns = 60 * self.SEC
         streamer._max_points = 10000
-        signal = _FakeSignal(name='fast')
+        # The last-value read is gated behind the Extremities opt-in; opt in
+        # so this test exercises the query.
+        signal = _FakeSignal(name='fast', extremities=True)
         streamer._archive_backfill({'ds': [signal]}, streamer._window_ns,
                                    MagicMock())
         # Only the last-value query is issued; the windowed one, whose range
