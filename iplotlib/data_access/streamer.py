@@ -248,6 +248,11 @@ class CanvasStreamer:
         return self._unpack_archive(data)
 
     def _fetch_last_archive_value(self, ds, signal, end_ns):
+        # The last-point read can be very expensive on a DB back-end, so it
+        # follows the variable table convention: only signals that opt in
+        # through the Extremities column pay for it.
+        if not getattr(signal, 'extremities', False):
+            return None, None, None, None, None, None
         try:
             data = self.da.get_archive_window(
                 ds,
