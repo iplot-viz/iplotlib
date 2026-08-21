@@ -116,6 +116,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                         vb.pressed.connect(self._impl_mouse_press_handler)
                         vb.released.connect(self._impl_mouse_release_handler)
                         vb.dragged.connect(self._impl_mouse_drag_handler)
+                        vb.dragStarted.connect(self._impl_mouse_drag_started_handler)
+                        vb.dragFinished.connect(self._impl_mouse_drag_finished_handler)
                         # Ruler labels are positioned in scene coordinates; a widget
                         # resize moves the axes without a range change, so re-project.
                         vb.sigResized.connect(self._on_viewbox_resized)
@@ -1180,6 +1182,17 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         if impl_plot.getAxis('left').logMode:
             return 10.0 ** min(y_value, 300.0)
         return y_value
+
+    def _impl_mouse_drag_started_handler(self, view_box):
+        # Zoom drags only draw the rubber band, so deferring is pan-specific.
+        if self._mmode == Canvas.MOUSE_MODE_PAN:
+            self._parser.begin_interactive_pan()
+
+    def _impl_mouse_drag_finished_handler(self, view_box):
+        if self._parser.end_interactive_pan():
+            # The finishing move committed the view and computed statistics
+            # before the deferred refresh; recompute them over fresh data.
+            self.stats(self.get_canvas())
 
     def _impl_mouse_drag_handler(self, view_box, event):
         """Handle mouse drag events for ruler drag and drag-shift preview."""

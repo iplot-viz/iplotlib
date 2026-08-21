@@ -89,11 +89,22 @@ class QtViewBox(pg.ViewBox):
     pressed = QtSignal(object, object)
     released = QtSignal(object, object)
     dragged = QtSignal(object, object)  # For drag events during mouse move with button pressed
+    # Drag gesture boundaries. `released` cannot mark the end of a pan: it is
+    # also emitted through sigRangeChangedManually on every intermediate move.
+    dragStarted = QtSignal(object)
+    dragFinished = QtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent=parent, enableMenu=False)
         self.sigRangeChangedManually.connect(self.release_event)
         self._right_click_pan_handled = False
+
+    def mouseDragEvent(self, ev, axis=None):
+        if ev.isStart():
+            self.dragStarted.emit(self)
+        super().mouseDragEvent(ev, axis)
+        if ev.isFinish():
+            self.dragFinished.emit(self)
 
     def mousePressEvent(self, ev):
         self._right_click_pan_handled = False
