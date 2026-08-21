@@ -7,7 +7,7 @@ import time
 import unittest
 from threading import Event
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -116,7 +116,7 @@ class ApplyCapTests(unittest.TestCase):
         signal.inject_external.assert_not_called()
 
     def test_drops_oldest_without_decimating(self):
-        # Over the (safety) threshold we DROP points, no
+        # mint#78 point 5: over the (safety) threshold we DROP points, no
         # local decimation; the refresh restores the window from archive.
         self.streamer._max_points = 1000
         sec = int(1e9)
@@ -191,10 +191,13 @@ class ArchiveKwargsTests(unittest.TestCase):
 
 
 class FetchLastArchiveValueTests(unittest.TestCase):
-    """Tests for CanvasStreamer._fetch_last_archive_value (empty-window fallback)."""
+    """Tests for CanvasStreamer._fetch_last_archive_value (empty-window fallback).
+
+    The read is issued only for signals that opt in through the Extremities
+    column; the fixture opts in so the fetch paths are exercised."""
 
     def setUp(self):
-        self.signal = _FakeSignal(name='var')
+        self.signal = _FakeSignal(name='var', extremities=True)
 
     def test_passes_last_value_kwargs_to_data_access(self):
         fake_da = MagicMock()
@@ -223,6 +226,16 @@ class FetchLastArchiveValueTests(unittest.TestCase):
         streamer = CanvasStreamer(da=fake_da)
         result = streamer._fetch_last_archive_value('ds', self.signal, end_ns=999)
         self.assertEqual(result, (None,) * 6)
+
+    def test_without_extremities_no_archive_call_is_made(self):
+        # The last-point read is expensive on a DB back-end: a signal that
+        # did not opt in through the Extremities column must not pay for it.
+        fake_da = MagicMock()
+        streamer = CanvasStreamer(da=fake_da)
+        signal = _FakeSignal(name='var')
+        result = streamer._fetch_last_archive_value('ds', signal, end_ns=999)
+        self.assertEqual(result, (None,) * 6)
+        fake_da.get_archive_window.assert_not_called()
 
 
 class BackfillSignalTests(unittest.TestCase):
@@ -261,6 +274,7 @@ class BackfillSignalTests(unittest.TestCase):
             _FakeArchiveResponse(x=[], y=[]),     # empty window request
             _FakeArchiveResponse(x=[5], y=[99]),  # last-value fallback
         ]
+        self.signal.extremities = True
         streamer = self._mk_streamer(fake_da)
         streamer._archive_backfill({'ds': [self.signal]}, self.WINDOW,
                                    self.callback)
@@ -392,7 +406,7 @@ class EnvelopeSelectionBackfillTests(unittest.TestCase):
 
 
 class WindowRefreshTests(unittest.TestCase):
-    """Tests for the full-window archive refresh:
+    """Tests for the full-window archive refresh (mint#78 point 5):
     one archive call for [now - window, now - live_retention] at the
     point budget, keeping the newest live_retention span from live."""
 
@@ -445,31 +459,11 @@ class WindowRefreshTests(unittest.TestCase):
         streamer._refresh_signal('ds', signal)
         kwargs = signal.inject_external.call_args.kwargs
         self.assertFalse(kwargs['append'])
-        # The 400 s hole between the archive's real end and the first kept
-        # live sample is a genuine gap, so the line breaks across it.
         self.assertEqual(list(kwargs['d0']),
-                         [arch1, arch2, lagged - 1, lagged, fresh1, fresh2])
-        d1 = np.asarray(kwargs['d1'], dtype=float)
-        self.assertTrue(np.array_equal(
-            d1, [1.0, 2.0, np.nan, 2.5, 3.0, 4.0], equal_nan=True))
+                         [arch1, arch2, lagged, fresh1, fresh2])
+        self.assertEqual(list(kwargs['d1']), [1.0, 2.0, 2.5, 3.0, 4.0])
         self.assertTrue(signal._streaming_has_live)
         streamer._callback.assert_called_once_with(signal)
-
-    def test_contiguous_seam_gets_no_break(self):
-        now_ns = int(time.time() * 1e9)
-        boundary_ns = now_ns - 120 * self.SEC
-        arch_end = boundary_ns - 10 * self.SEC
-        live1 = boundary_ns - 5 * self.SEC   # 5 s after archive end: no hole
-        live2 = boundary_ns + 10 * self.SEC
-        reply = _FakeArchiveResponse(x=[arch_end - self.SEC, arch_end],
-                                     y=[1.0, 2.0])
-        streamer, fake_da, signal = self._mk(
-            reply, data=[_FakeBuf([live1, live2]), _FakeBuf([3.0, 4.0])])
-        streamer._refresh_signal('ds', signal)
-        kwargs = signal.inject_external.call_args.kwargs
-        self.assertEqual(list(kwargs['d0']),
-                         [arch_end - self.SEC, arch_end, live1, live2])
-        self.assertEqual(list(kwargs['d1']), [1.0, 2.0, 3.0, 4.0])
 
     def test_empty_archive_reply_leaves_buffer_untouched(self):
         reply = _FakeArchiveResponse(x=[], y=[])
@@ -1182,3 +1176,162 @@ class LiveBatchReductionTests(unittest.TestCase):
         y = np.zeros(10000)
         self.streamer._window_ns = 0
         self.assertFalse(self.streamer._reduce_live_batch(_FakeSignal(), x, y)[2])
+
+
+class DrainBacklogTests(unittest.TestCase):
+    """The live queues must be drained completely each pass. Taking one chunk
+    per variable per 100 ms caps the drain rate, so a faster feed builds an
+    unbounded backlog and the injected data falls behind the wall clock."""
+
+    def test_drains_every_queued_chunk_before_flushing(self):
+        chunks = [SimpleNamespace(xdata=np.asarray([i]), ydata=np.asarray([1.0]),
+                                  xunit='ns', yunit='V') for i in range(50)]
+        queue = list(chunks)
+        streamer = CanvasStreamer(da=MagicMock())
+        streamer._window_ns = 60 * int(1e9)
+        streamer._max_points = 10000
+
+        def get_next_data(ds, varname):
+            return queue.pop(0) if queue else None
+
+        streamer.da.get_next_data.side_effect = get_next_data
+        received = []
+
+        def callback(varname, dobj):
+            received.append(len(dobj.xdata))
+            streamer.stop_flag = True
+
+        streamer.stream_thread('ds', ['v'], callback)
+        # All 50 chunks land in one batch, not 1 per pass.
+        self.assertEqual(sum(received), 50)
+        self.assertEqual(queue, [])
+
+    def test_sleeps_every_pass_even_under_continuous_data(self):
+        # The idle sleep must be unconditional: skipping it while data keeps
+        # arriving turns the loop into a busy poll that pins a core and
+        # starves the draw thread (observed as 100% CPU and stuttering UI).
+        streamer = CanvasStreamer(da=MagicMock())
+        streamer._window_ns = 60 * int(1e9)
+        streamer._max_points = 10000
+        calls = {'n': 0}
+
+        def get_next_data(ds, varname):
+            calls['n'] += 1
+            # Continuous feed: data for a while, then pause so the drain
+            # pass can end; without the pause the drain loop legitimately
+            # keeps going while data is genuinely available.
+            if calls['n'] % 40 == 0:
+                return None
+            return SimpleNamespace(xdata=np.asarray([calls['n']]),
+                                   ydata=np.asarray([1.0]),
+                                   xunit='ns', yunit='V')
+
+        streamer.da.get_next_data.side_effect = get_next_data
+        slept = {'n': 0}
+        real_sleep = time.sleep
+
+        def counting_sleep(seconds):
+            slept['n'] += 1
+            streamer.stop_flag = True
+            real_sleep(0)
+
+        with patch('iplotlib.data_access.streamer.time.sleep',
+                   side_effect=counting_sleep):
+            streamer.stream_thread('ds', ['v'], MagicMock())
+        self.assertEqual(slept['n'], 1)
+
+    def test_feed_that_never_returns_none_still_flushes_and_sleeps(self):
+        # The exact production failure: a feed handing over something on
+        # every poll (empty heartbeat chunks). An unbounded drain loop never
+        # exits, so nothing is ever flushed (no streaming) while the thread
+        # spins (100% CPU). The drain must be bounded by iteration count.
+        streamer = CanvasStreamer(da=MagicMock())
+        streamer._window_ns = 60 * int(1e9)
+        streamer._max_points = 10000
+        streamer.da.get_next_data.return_value = SimpleNamespace(
+            xdata=np.asarray([]), ydata=np.asarray([]),
+            xunit='ns', yunit='V')
+        flushed = {'n': 0}
+
+        def callback(varname, dobj):
+            flushed['n'] += 1
+
+        real_sleep = time.sleep
+
+        def stopping_sleep(seconds):
+            streamer.stop_flag = True
+            real_sleep(0)
+
+        with patch('iplotlib.data_access.streamer.time.sleep',
+                   side_effect=stopping_sleep):
+            # next_flush is due immediately on the first pass only if the
+            # period already elapsed; force it by zeroing the clock target.
+            streamer.stream_thread('ds', ['v'], callback)
+        # The pass ended (sleep reached => stop_flag set => returned), and
+        # the shutdown flush delivered the drained chunks.
+        self.assertGreater(flushed['n'], 0)
+        # And the drain was bounded, not infinite.
+        self.assertLessEqual(streamer.da.get_next_data.call_count, 257)
+
+    def test_stops_promptly_when_the_queue_is_empty(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        streamer._window_ns = 60 * int(1e9)
+        streamer._max_points = 10000
+        streamer.da.get_next_data.return_value = None
+        streamer.stop_flag = True
+        streamer.stream_thread('ds', ['v'], MagicMock())
+        streamer.da.stop_subscription.assert_called_once_with('ds')
+
+
+class ShortWindowArchiveTests(unittest.TestCase):
+    """A window no wider than the archiver's lag holds nothing archived, and
+    the archive ranges would invert (start after end), so archive work is
+    skipped and live fills the window."""
+
+    SEC = int(1e9)
+
+    def test_sixty_second_window_is_live_only(self):
+        streamer = CanvasStreamer(da=None)
+        streamer._window_ns = 60 * self.SEC
+        self.assertTrue(streamer._window_is_live_only())
+
+    def test_wide_window_is_not_live_only(self):
+        streamer = CanvasStreamer(da=None)
+        streamer._window_ns = 24 * 3600 * self.SEC
+        self.assertFalse(streamer._window_is_live_only())
+
+    def test_backfill_skips_the_windowed_query_and_holds_last_value(self):
+        fake_da = MagicMock()
+        fake_da.get_archive_window.return_value = _FakeArchiveResponse(x=[], y=[])
+        fake_da.get_last_value.return_value = _FakeArchiveResponse(x=[], y=[])
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._window_ns = 60 * self.SEC
+        streamer._max_points = 10000
+        # The last-value read is gated behind the Extremities opt-in; opt in
+        # so this test exercises the query.
+        signal = _FakeSignal(name='fast', extremities=True)
+        streamer._archive_backfill({'ds': [signal]}, streamer._window_ns,
+                                   MagicMock())
+        # Only the last-value query is issued; the windowed one, whose range
+        # would have inverted, is skipped entirely.
+        self.assertEqual(fake_da.get_archive_window.call_count, 1)
+        kwargs = fake_da.get_archive_window.call_args.kwargs
+        self.assertEqual(kwargs['decType'], 'last')
+        self.assertEqual(kwargs['nbp'], 1)
+
+    def test_refresh_is_skipped_for_a_live_only_window(self):
+        fake_da = MagicMock()
+        streamer = CanvasStreamer(da=fake_da)
+        streamer._window_ns = 60 * self.SEC
+        streamer._max_points = 10000
+        streamer._refresh_signal('ds', _FakeSignal(name='fast'))
+        fake_da.get_archive_window.assert_not_called()
+
+    def test_no_window_hole_for_a_live_only_window(self):
+        streamer = CanvasStreamer(da=None)
+        streamer._window_ns = 60 * self.SEC
+        streamer._max_points = 1000
+        now = int(time.time() * 1e9)
+        x = np.asarray([now - 5 * self.SEC, now])
+        signal = _FakeSignal(data=[_FakeBuf(x), _FakeBuf([1.0, 2.0])])
+        self.assertFalse(streamer._has_window_hole(signal))
