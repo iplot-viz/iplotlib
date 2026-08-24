@@ -511,8 +511,9 @@ class InvertXyZoomToTimeTest(unittest.TestCase):
 class _TransformDataHost:
     """Minimal host exposing what ``transform_data`` needs from the parser."""
 
-    def __init__(self, offsets):
-        item = types.SimpleNamespace(offsets=offsets)
+    def __init__(self, offsets, scales=None):
+        item = types.SimpleNamespace(offsets=offsets,
+                                     scales=scales or {i: 1 for i in range(len(offsets))})
         self._impl_plot_cache_table = types.SimpleNamespace(
             get_cache_item=lambda impl: item)
 

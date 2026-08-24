@@ -1,6 +1,7 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 import gc
+import math
 import os
 from datetime import datetime
 from typing import Any, Callable, Collection, Dict, List, Tuple
@@ -356,7 +357,10 @@ class PyQtGraphParser(BackendParserBase):
         """
         vb = impl_plot.getViewBox()
         vb_x_limits = vb.viewRange()[0]
-        ax_window = vb_x_limits[1] - vb_x_limits[0]
+        # View limits are axis coordinates; go through the offset frame so the
+        # window width is in nanoseconds whatever the axis unit scale is.
+        ax_window = (self.transform_value(impl_plot, 0, vb_x_limits[1])
+                     - self.transform_value(impl_plot, 0, vb_x_limits[0]))
 
         # Time window
         now = int(datetime.now().timestamp() * 1e9)
@@ -1346,9 +1350,24 @@ class PyQtGraphParser(BackendParserBase):
             base_height = getattr(axis_item, '_base_height', None) or axis_item.height() or 16
             axis_item.setHeight(int(base_height + label_height + 2))
 
+    @staticmethod
+    def axis_unit_scale(limits) -> int:
+        # Qt 6.9.x treats a view matrix whose horizontal scale falls below its
+        # 1e-12 fuzzy-null epsilon as degenerate: with raw-nanosecond
+        # coordinates that happens once the window spans more than a few days,
+        # breaking the zoom rubber band and the applied ranges. Pick the power
+        # of ten that keeps the coordinate span near 1e12 — orders of magnitude
+        # away from the epsilon — and keep unit 1 (integer nanoseconds) for
+        # narrow windows, where sub-ns zoom precision matters.
+        span = abs(float(limits[1]) - float(limits[0]))
+        if span <= 1e12:
+            return 1
+        return 10 ** math.ceil(math.log10(span / 1e12))
+
     def process_ipl_axis_formatter(self, impl_plot: PlotItem, impl_axis: NanosecondDateFormatter, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
         impl_axis.set_offset(ci.offsets[ax_idx])
+        impl_axis.set_unit_scale(ci.scales[ax_idx])
 
     def process_ipl_signal_impl_plot(self, signal: Signal):
         plot = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))  # type: PlotItem

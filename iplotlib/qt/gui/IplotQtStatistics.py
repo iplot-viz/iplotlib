@@ -17,17 +17,24 @@ from iplotlib.impl.matplotlib.dateFormatter import _fmt_duration
 logger = Sl.get_logger(__name__)
 
 
-def _window_to_data_coords(impl_plot, lo, hi):
-    """Visible-window bounds in the buffer's raw units. The backends shift or
-    scale the painted axis by a per-plot offset for float precision, so the
-    display window must be mapped back before masking raw timestamps."""
+def _axis_to_data(impl_plot, value):
+    """Map one axis-convention value back to the buffer's raw units. The
+    backends shift the painted axis by a per-plot offset — and scale it on
+    wide date windows — for float precision, so display values must be
+    inverted through both before being compared with raw timestamps."""
     ci = getattr(impl_plot, '_ipl_cache_item', None)
     offset = ci.offsets.get(0, 0) if ci is not None and hasattr(ci, 'offsets') else 0
     if offset == 100_000:
-        return lo * offset, hi * offset
-    if offset:
-        return lo + offset, hi + offset
-    return lo, hi
+        return value * offset
+    scale = ci.scales.get(0, 1) if ci is not None and hasattr(ci, 'scales') else 1
+    if scale != 1:
+        value = value * scale
+    return value + offset if offset else value
+
+
+def _window_to_data_coords(impl_plot, lo, hi):
+    """Visible-window bounds in the buffer's raw units."""
+    return _axis_to_data(impl_plot, lo), _axis_to_data(impl_plot, hi)
 
 
 def _line_source_data(line):
@@ -347,17 +354,10 @@ class IplotQtStatistics(QWidget):
 
                             # Buffer timestamps are already raw; only the slider
                             # path reads axis-convention values that still need
-                            # the inverse offset transformation.
-                            if (isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider))
-                                    and hasattr(impl_plot, '_ipl_cache_item')):
-                                ci = impl_plot._ipl_cache_item
-                                offset = ci.offsets.get(0, 0) if hasattr(ci, 'offsets') else 0
-                                if offset == 100_000:
-                                    first_time *= offset
-                                    last_time *= offset
-                                elif offset != 0:
-                                    first_time += offset
-                                    last_time += offset
+                            # the inverse transformation.
+                            if isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider)):
+                                first_time = _axis_to_data(impl_plot, first_time)
+                                last_time = _axis_to_data(impl_plot, last_time)
                         else:
                             first_time = 0
                             last_time = 0
@@ -457,17 +457,10 @@ class IplotQtStatistics(QWidget):
                             # Buffer timestamps are already raw; painted-line
                             # (fallback) and slider values follow the axis
                             # convention and need the inverse transformation.
-                            needs_offset = (not use_buffer or isinstance(
-                                plot, (PlotXYWithSlider, PlotContourWithSlider)))
-                            if needs_offset and hasattr(impl_plot, '_ipl_cache_item'):
-                                ci = impl_plot._ipl_cache_item
-                                offset = ci.offsets.get(0, 0) if hasattr(ci, 'offsets') else 0
-                                if offset == 100_000:
-                                    first_time *= offset
-                                    last_time *= offset
-                                elif offset != 0:
-                                    first_time += offset
-                                    last_time += offset
+                            if (not use_buffer or isinstance(
+                                    plot, (PlotXYWithSlider, PlotContourWithSlider))):
+                                first_time = _axis_to_data(impl_plot, first_time)
+                                last_time = _axis_to_data(impl_plot, last_time)
                         else:
                             first_time = 0
                             last_time = 0
