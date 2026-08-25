@@ -24,7 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "iplotProcessing >= 1.2.1",
-    "iplotDataAccess >= 1.5.0",
+    "iplotDataAccess >= 1.5.1",
     "packaging>=20.0",
     "matplotlib >= 3.5.1",
     "pandas >= 2.2.0",
