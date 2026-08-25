@@ -1132,6 +1132,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 if isinstance(plot, PlotContour) or isinstance(plot, PlotContourWithSlider):
                     return
                 self.stage_view_lim_cmd(event.inaxes)
+                # Zoom drags only draw the rubber band, so deferring is
+                # pan-specific.
+                if self._mmode == Canvas.MOUSE_MODE_PAN and event.button == MouseButton.LEFT:
+                    self._parser.begin_interactive_pan()
                 return
 
             # Handle drag shift in Select mode with left click - use native hit-testing
@@ -1219,6 +1223,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 return
 
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
+                # Re-request the data once for the final pan window before the
+                # view command is committed and statistics recomputed.
+                self._parser.end_interactive_pan()
                 # commit commands from staging.
                 while len(self._staging_cmds):
                     self.commit_view_lim_cmd(self._mouse_impl)

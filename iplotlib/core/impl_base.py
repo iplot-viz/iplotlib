@@ -162,6 +162,8 @@ class BackendParserBase(ABC):
             lambda: defaultdict(dict))  # type: Dict[Any, int] # key is id(impl_plot)
         self._update = False
         self._restoring_view = False
+        self._interactive_pan = False
+        self._interactive_pan_pending = None
         self._streaming_impl_plot_lut = defaultdict(lambda: [None, None])
         self._pending_signal_refs = {}  # type: Dict[Any, weakref.ref]
         self._pending_signal_lock = threading.Lock()
@@ -545,16 +547,54 @@ class BackendParserBase(ABC):
                     signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
                     for signal_ref in signals:
                         signal = signal_ref()
-                        if not isinstance(plot, PlotXYWithSlider):
+                        # A pan in progress leaves the requested range alone: it is
+                        # what feeds the signal's data hash, so not touching it keeps
+                        # get_data() serving the buffers already in memory. The signal
+                        # is still redrawn on every move — skipping the redraw is what
+                        # emptied the plots of sources that hold the whole pulse.
+                        if not isinstance(plot, PlotXYWithSlider) and not self._interactive_pan:
                             signal.set_limits((new_start, new_end))
                         self.process_ipl_signal(signal)
 
-            for impl_plot, plot in reprocess_followers:
-                self._follow_shared_time_window(impl_plot, plot, new_start, new_end)
+            if self._interactive_pan:
+                self._interactive_pan_pending = current_plot
+            else:
+                for impl_plot, plot in reprocess_followers:
+                    self._follow_shared_time_window(impl_plot, plot, new_start, new_end)
         finally:
             # Never leave the re-entrancy guard set: a failure while propagating to
             # one plot must not disable axis synchronization for the whole session.
             self._update = False
+
+    def begin_interactive_pan(self):
+        """Defer per-signal data requests while a pan drag is in progress.
+
+        Every intermediate range of the drag would otherwise trigger one
+        archive request per signal of the shared-time group. Axis limits keep
+        propagating and the signals keep being redrawn from the data already
+        in memory, so the group stays synchronized and nothing empties out;
+        only the requested range waits, and the data is re-requested once for
+        the final window in ``end_interactive_pan``.
+        """
+        self._interactive_pan = True
+        self._interactive_pan_pending = None
+
+    def end_interactive_pan(self) -> bool:
+        """Run the deferred axis propagation once with the final window.
+
+        Returns True when a deferred update was actually flushed, so callers
+        can refresh whatever they derived from the stale buffers meanwhile.
+        """
+        pending = self._interactive_pan_pending
+        self._interactive_pan = False
+        self._interactive_pan_pending = None
+        if pending is None:
+            return False
+        # The backend overrides take their own event object and their
+        # extras (grid label, rulers) already ran during the drag, so the
+        # base propagation is re-driven directly with the impl plot.
+        BackendParserBase._x_axis_update_callback(self, pending)
+        return True
 
     def _find_canvas_signal_by_alias(self, alias: str):
         """Signal registered in the canvas under the given alias, if any."""
