@@ -1407,8 +1407,9 @@ class MatplotlibParser(BackendParserBase):
                 continue
 
             # Check for slider axes
-            filtered_axes_group = [ax for ax in axes_group if ax.get_label() != "slider"]
-
+            filtered_axes_group = [ax for ax in axes_group if ax.get_label() != "slider" and self._impl_plot_cache_table.get_cache_item(ax) is not None]
+            if not filtered_axes_group:
+                continue
             self._cursors.append(
                 IplotMultiCursor(self.figure.canvas, filtered_axes_group,
                                  x_label=self._pm.get_value(self.canvas, 'enable_x_label_crosshair'),
