@@ -5,6 +5,11 @@ import pandas
 from math import ceil, floor, log10
 import numpy as np
 
+from iplotlib.core.date_ticks import (
+    pick_interval as _pick_interval,
+    generate_ticks as _generate_ticks,
+    segments_for_interval as _segments_for_interval,
+)
 import iplotLogging.setupLogger as Sl
 import re as _re
 
@@ -126,156 +131,10 @@ def _rel_time_ticks(lo_ns: int, hi_ns: int, n: int):
     return out
 
 
-# ---------------------------------------------------------------------------
-# Grafana-style "nice" interval ladder, in integer nanoseconds (UTC).
-#
-# Used by NanosecondDateFormatter.tickValues to place ticks on round civil-time
-# boundaries (:00, :15, day, week, month, year) instead of on evenly spaced
-# range/n positions. Sub-day steps use a 1/2/5 ladder anchored to UTC midnight;
-# day/week/month/year steps are stepped on the actual calendar.
-# ---------------------------------------------------------------------------
-_NS = 1
-_US = 1_000
-_MS = 1_000_000
-_SEC = 1_000_000_000
-_MIN = 60 * _SEC
-_HOUR = 60 * _MIN
-_DAY = 24 * _HOUR
-_WEEK = 7 * _DAY
-
-# Segment indices (mirror NanosecondDateFormatter constants).
-_YEAR, _MONTH, _DAY_SEG, _HOUR_SEG, _MINUTE, _SECOND, _MILI, _MICRO, _NANO = range(9)
-
-_LADDER = [
-    (1 * _NS, "fixed"),   (2 * _NS, "fixed"),   (5 * _NS, "fixed"),
-    (10 * _NS, "fixed"),  (20 * _NS, "fixed"),  (50 * _NS, "fixed"),
-    (100 * _NS, "fixed"), (200 * _NS, "fixed"), (500 * _NS, "fixed"),
-    (1 * _US, "fixed"),   (2 * _US, "fixed"),   (5 * _US, "fixed"),
-    (10 * _US, "fixed"),  (20 * _US, "fixed"),  (50 * _US, "fixed"),
-    (100 * _US, "fixed"), (200 * _US, "fixed"), (500 * _US, "fixed"),
-    (1 * _MS, "fixed"),   (2 * _MS, "fixed"),   (5 * _MS, "fixed"),
-    (10 * _MS, "fixed"),  (20 * _MS, "fixed"),  (50 * _MS, "fixed"),
-    (100 * _MS, "fixed"), (200 * _MS, "fixed"), (500 * _MS, "fixed"),
-    (1 * _SEC, "fixed"),  (2 * _SEC, "fixed"),  (5 * _SEC, "fixed"),
-    (10 * _SEC, "fixed"), (15 * _SEC, "fixed"), (30 * _SEC, "fixed"),
-    (1 * _MIN, "fixed"),  (2 * _MIN, "fixed"),  (5 * _MIN, "fixed"),
-    (10 * _MIN, "fixed"), (15 * _MIN, "fixed"), (30 * _MIN, "fixed"),
-    (1 * _HOUR, "fixed"), (2 * _HOUR, "fixed"), (3 * _HOUR, "fixed"),
-    (6 * _HOUR, "fixed"), (12 * _HOUR, "fixed"),
-    (1 * _DAY, "day"),    (2 * _DAY, "day"),
-    (1 * _WEEK, "week"),
-    (1, "month"),         (3, "month"),         (6, "month"),
-    (1, "year"),          (2, "year"),          (5, "year"),
-    (10, "year"),         (20, "year"),         (50, "year"),
-    (100, "year"),
-]
-_APPROX = {"month": 30 * _DAY, "year": 365 * _DAY}
-_LADDER_APPROX_NS = [s * _APPROX[k] if k in _APPROX else s for s, k in _LADDER]
-_UTC = timezone.utc
-
-
-def _utc_dt(ns):
-    return datetime.fromtimestamp(int(ns) // _SEC, tz=_UTC)
-
-
-def _pick_interval(span_ns, target_ticks):
-    span_ns = max(int(span_ns), 1)
-    ideal = span_ns / max(int(target_ticks), 1)
-    for approx, (step, kind) in zip(_LADDER_APPROX_NS, _LADDER):
-        if approx >= ideal:
-            return step, kind
-    return _LADDER[-1]
-
-
-def _gen_fixed(lo, hi, step):
-    midnight = (int(lo) // _DAY) * _DAY
-    k = (lo - midnight + step - 1) // step
-    t = midnight + k * step
-    out = []
-    while t <= hi:
-        out.append(t)
-        t += step
-    return out
-
-
-def _gen_calendar_day(lo, hi, ndays, weekly):
-    anchor = (int(lo) // _DAY) * _DAY
-    if weekly:
-        anchor -= _utc_dt(anchor).weekday() * _DAY
-    step = (7 if weekly else ndays) * _DAY
-    out = []
-    t = anchor
-    while t < lo:
-        t += step
-    while t <= hi:
-        out.append(t)
-        t += step
-    return out
-
-
-def _gen_month(lo, hi, nmonths):
-    d = _utc_dt(lo)
-    y, m = d.year, ((d.month - 1) // nmonths) * nmonths + 1
-    out = []
-    while True:
-        ns = int(datetime(y, m, 1, tzinfo=_UTC).timestamp()) * _SEC
-        if ns > hi:
-            break
-        if ns >= lo:
-            out.append(ns)
-        m += nmonths
-        while m > 12:
-            m -= 12
-            y += 1
-    return out
-
-
-def _gen_year(lo, hi, nyears):
-    y = (_utc_dt(lo).year // nyears) * nyears
-    out = []
-    while True:
-        ns = int(datetime(y, 1, 1, tzinfo=_UTC).timestamp()) * _SEC
-        if ns > hi:
-            break
-        if ns >= lo:
-            out.append(ns)
-        y += nyears
-    return out
-
-
-def _generate_ticks(lo_ns, hi_ns, step, kind):
-    if hi_ns < lo_ns:
-        lo_ns, hi_ns = hi_ns, lo_ns
-    if kind == "fixed":
-        return _gen_fixed(lo_ns, hi_ns, step)
-    if kind == "day":
-        return _gen_calendar_day(lo_ns, hi_ns, step // _DAY, weekly=False)
-    if kind == "week":
-        return _gen_calendar_day(lo_ns, hi_ns, 7, weekly=True)
-    if kind == "month":
-        return _gen_month(lo_ns, hi_ns, step)
-    if kind == "year":
-        return _gen_year(lo_ns, hi_ns, step)
-    return []
-
-
-def _segments_for_interval(step, kind):
-    """Deepest date segment index needed to label this interval."""
-    if kind == "year":
-        return _YEAR
-    if kind == "month":
-        return _MONTH
-    if kind in ("day", "week"):
-        return _DAY_SEG
-    if step >= _MIN:        # hour & minute steps -> HH:MM
-        return _MINUTE
-    if step >= _SEC:
-        return _SECOND
-    if step >= _MS:
-        return _MILI
-    if step >= _US:
-        return _MICRO
-    return _NANO
+# Tick intervals and generators for the date axis are shared with the
+# matplotlib backend (iplotlib.core.date_ticks); tickValues below places
+# ticks on round UTC civil-time boundaries instead of evenly spaced
+# range/n positions.
 
 
 def is_time_label(label) -> bool:
@@ -549,13 +408,15 @@ class NanosecondDateFormatter(pg.AxisItem):
             # absolute nanoseconds; values are returned in axis coordinates.
             abs_lo = self.get_real_value(minVal)
             abs_hi = self.get_real_value(maxVal)
-            step_ns, kind = _pick_interval(abs(abs_hi - abs_lo), n)
             # The axis cannot resolve below its unit (100 us in legacy mode,
             # the adaptive unit scale otherwise), so never pick a finer step.
-            if self.offset == 100_000 and kind == "fixed" and step_ns < 100_000:
-                step_ns, kind = 100_000, "fixed"
-            elif self.unit_scale != 1 and kind == "fixed" and step_ns < self.unit_scale:
-                step_ns, kind = self.unit_scale, "fixed"
+            if self.offset == 100_000:
+                min_step = 100_000
+            elif self.unit_scale != 1:
+                min_step = self.unit_scale
+            else:
+                min_step = 0
+            step_ns, kind = _pick_interval(abs_lo, abs_hi, n, min_step)
             ticks_abs = _generate_ticks(abs_lo, abs_hi, step_ns, kind)
             values = [self._abs_to_axis(t) for t in ticks_abs]
 

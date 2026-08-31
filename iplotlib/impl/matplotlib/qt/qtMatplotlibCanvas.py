@@ -251,7 +251,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 # Previously the minimap reused the main view's label_segments
                 # with matplotlib's default locator, so every tick collapsed to
                 # the hour field (e.g. "15").
-                mm_locator = NiceNanosecondLocator(ax_idx=0, offset_lut=None)
+                # Same tick target as the main axis, so both stay in step when
+                # the user configures the number of ticks.
+                mm_locator = NiceNanosecondLocator(
+                    ax_idx=0, offset_lut=None,
+                    target_ticks=getattr(main_ax.xaxis, '_ipl_tick_number', 6))
                 clone = NanosecondDateFormatter(
                     ax_idx=0,
                     label_segments=main_x_formatter.label_segments,

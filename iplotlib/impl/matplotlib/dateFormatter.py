@@ -5,6 +5,11 @@ from matplotlib.ticker import ScalarFormatter, Locator, MaxNLocator
 from matplotlib.axis import XAxis
 import pandas
 
+from iplotlib.core.date_ticks import (
+    pick_interval as _pick_interval,
+    generate_ticks as _generate_ticks,
+    segments_for_interval as _segments_for_interval,
+)
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
@@ -144,165 +149,11 @@ def _rel_time_ticks(lo_ns: int, hi_ns: int, n: int):
     return out
 
 
-# ---------------------------------------------------------------------------
-# Grafana-style "nice" interval ladder, in integer nanoseconds.
-#
-# All ticks are computed in UTC. The companion locator (NiceNanosecondLocator)
-# snaps tick positions to round civil-time boundaries (:00, :15, day, week,
-# month, year) instead of round *numbers of nanoseconds* the way MaxNLocator
-# would. Sub-day steps follow a 1/2/5 ladder anchored to UTC midnight; day,
-# week, month and year steps are stepped on the actual calendar so they land
-# on real boundaries across leap years.
-# ---------------------------------------------------------------------------
-_NS = 1
-_US = 1_000
-_MS = 1_000_000
-_SEC = 1_000_000_000
-_MIN = 60 * _SEC
-_HOUR = 60 * _MIN
-_DAY = 24 * _HOUR
-_WEEK = 7 * _DAY
-
-# (step, kind). kind drives anchoring: "fixed" steps are a fixed ns count
-# anchored to UTC midnight; "day"/"week"/"month"/"year" step on the calendar.
-_LADDER = [
-    (1 * _NS, "fixed"),   (2 * _NS, "fixed"),   (5 * _NS, "fixed"),
-    (10 * _NS, "fixed"),  (20 * _NS, "fixed"),  (50 * _NS, "fixed"),
-    (100 * _NS, "fixed"), (200 * _NS, "fixed"), (500 * _NS, "fixed"),
-    (1 * _US, "fixed"),   (2 * _US, "fixed"),   (5 * _US, "fixed"),
-    (10 * _US, "fixed"),  (20 * _US, "fixed"),  (50 * _US, "fixed"),
-    (100 * _US, "fixed"), (200 * _US, "fixed"), (500 * _US, "fixed"),
-    (1 * _MS, "fixed"),   (2 * _MS, "fixed"),   (5 * _MS, "fixed"),
-    (10 * _MS, "fixed"),  (20 * _MS, "fixed"),  (50 * _MS, "fixed"),
-    (100 * _MS, "fixed"), (200 * _MS, "fixed"), (500 * _MS, "fixed"),
-    (1 * _SEC, "fixed"),  (2 * _SEC, "fixed"),  (5 * _SEC, "fixed"),
-    (10 * _SEC, "fixed"), (15 * _SEC, "fixed"), (30 * _SEC, "fixed"),
-    (1 * _MIN, "fixed"),  (2 * _MIN, "fixed"),  (5 * _MIN, "fixed"),
-    (10 * _MIN, "fixed"), (15 * _MIN, "fixed"), (30 * _MIN, "fixed"),
-    (1 * _HOUR, "fixed"), (2 * _HOUR, "fixed"), (3 * _HOUR, "fixed"),
-    (6 * _HOUR, "fixed"), (12 * _HOUR, "fixed"),
-    (1 * _DAY, "day"),    (2 * _DAY, "day"),
-    (1 * _WEEK, "week"),
-    (1, "month"),         (3, "month"),         (6, "month"),
-    (1, "year"),          (2, "year"),          (5, "year"),
-    (10, "year"),         (20, "year"),         (50, "year"),
-    (100, "year"),
-]
-
-_APPROX = {"month": 30 * _DAY, "year": 365 * _DAY}
-_LADDER_APPROX_NS = [s * _APPROX[k] if k in _APPROX else s for s, k in _LADDER]
-
-_UTC = datetime.timezone.utc
-
-
-def _utc_dt(ns: int) -> datetime.datetime:
-    """UTC datetime for the whole-seconds part of an absolute-ns timestamp."""
-    return datetime.datetime.fromtimestamp(int(ns) // _SEC, tz=_UTC)
-
-
-def _pick_interval(span_ns: int, target_ticks: int):
-    """Smallest ladder (step, kind) giving roughly <= target_ticks over span."""
-    span_ns = max(int(span_ns), 1)
-    ideal = span_ns / max(int(target_ticks), 1)
-    for approx, (step, kind) in zip(_LADDER_APPROX_NS, _LADDER):
-        if approx >= ideal:
-            return step, kind
-    return _LADDER[-1]
-
-
-def _gen_fixed(lo: int, hi: int, step: int):
-    midnight = (int(lo) // _DAY) * _DAY            # UTC midnight of lo's day
-    k = (lo - midnight + step - 1) // step
-    t = midnight + k * step
-    out = []
-    while t <= hi:
-        out.append(t)
-        t += step
-    return out
-
-
-def _gen_calendar_day(lo: int, hi: int, ndays: int, weekly: bool):
-    anchor = (int(lo) // _DAY) * _DAY
-    if weekly:
-        anchor -= _utc_dt(anchor).weekday() * _DAY  # back up to Monday 00:00
-    step = (7 if weekly else ndays) * _DAY
-    out = []
-    t = anchor
-    while t < lo:
-        t += step
-    while t <= hi:
-        out.append(t)
-        t += step
-    return out
-
-
-def _gen_month(lo: int, hi: int, nmonths: int):
-    d = _utc_dt(lo)
-    y, m = d.year, ((d.month - 1) // nmonths) * nmonths + 1
-    out = []
-    while True:
-        ns = int(datetime.datetime(y, m, 1, tzinfo=_UTC).timestamp()) * _SEC
-        if ns > hi:
-            break
-        if ns >= lo:
-            out.append(ns)
-        m += nmonths
-        while m > 12:
-            m -= 12
-            y += 1
-    return out
-
-
-def _gen_year(lo: int, hi: int, nyears: int):
-    y = (_utc_dt(lo).year // nyears) * nyears
-    out = []
-    while True:
-        ns = int(datetime.datetime(y, 1, 1, tzinfo=_UTC).timestamp()) * _SEC
-        if ns > hi:
-            break
-        if ns >= lo:
-            out.append(ns)
-        y += nyears
-    return out
-
-
-def _generate_ticks(lo_ns: int, hi_ns: int, step: int, kind: str):
-    if hi_ns < lo_ns:
-        lo_ns, hi_ns = hi_ns, lo_ns
-    if kind == "fixed":
-        return _gen_fixed(lo_ns, hi_ns, step)
-    if kind == "day":
-        return _gen_calendar_day(lo_ns, hi_ns, step // _DAY, weekly=False)
-    if kind == "week":
-        return _gen_calendar_day(lo_ns, hi_ns, 7, weekly=True)
-    if kind == "month":
-        return _gen_month(lo_ns, hi_ns, step)
-    if kind == "year":
-        return _gen_year(lo_ns, hi_ns, step)
-    return []
-
-
-def _segments_for_interval(step: int, kind: str):
-    """Deepest NanosecondDateFormatter segment index needed for this interval.
-
-    Mapping uses the formatter's segment constants (YEAR=0 .. NANOSECOND=8).
-    Hour/minute steps go down to MINUTE so labels read HH:MM.
-    """
-    if kind == "year":
-        return NanosecondDateFormatter.YEAR
-    if kind == "month":
-        return NanosecondDateFormatter.MONTH
-    if kind in ("day", "week"):
-        return NanosecondDateFormatter.DAY
-    if step >= _MIN:           # hour and minute steps -> HH:MM
-        return NanosecondDateFormatter.MINUTE
-    if step >= _SEC:
-        return NanosecondDateFormatter.SECOND
-    if step >= _MS:
-        return NanosecondDateFormatter.MILISECOND
-    if step >= _US:
-        return NanosecondDateFormatter.MICROSECOND
-    return NanosecondDateFormatter.NANOSECOND
+# Tick intervals and generators for the date axis are shared with the
+# pyqtgraph backend (iplotlib.core.date_ticks). The companion locator
+# (NiceNanosecondLocator) snaps tick positions to round UTC civil-time
+# boundaries instead of round *numbers of nanoseconds* the way MaxNLocator
+# would.
 
 
 class RelativeTimeLocator(Locator):
@@ -674,11 +525,10 @@ class NiceNanosecondLocator(Locator):
             vmax = vmin + 1
         lo = self._to_abs(min(vmin, vmax))
         hi = self._to_abs(max(vmin, vmax))
-        step, kind = _pick_interval(hi - lo, self.target_ticks)
         # In 100 us-unit mode the axis cannot resolve below 100 us, so never
         # choose a finer step (keeps back-conversion on exact integers).
-        if self.offset_ns == 100_000 and kind == "fixed" and step < 100_000:
-            step, kind = 100_000, "fixed"
+        min_step = 100_000 if self.offset_ns == 100_000 else 0
+        step, kind = _pick_interval(lo, hi, self.target_ticks, min_step)
         self._last_interval = (step, kind)
         ticks_abs = _generate_ticks(lo, hi, step, kind)
         return self.raise_if_exceeds([self._to_axis(t) for t in ticks_abs])
