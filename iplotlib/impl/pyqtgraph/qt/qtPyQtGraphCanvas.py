@@ -253,9 +253,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         # Mirror the main plot's font size so the minimap ticks stay legible and
         # track font-size changes (issue #141). Part of the signature so a change
-        # forces a rebuild that re-applies it.
+        # forces a rebuild that re-applies it; same for the resolved tick
+        # target, or a tick_number change would leave stale minimap ticks.
         fs = self._minimap_font_size(target_plot)
-        signature = (id(target_plot), baseline, fs)
+        ticks = getattr(main_plot.getAxis('bottom'), 'n_ticks', 7)
+        signature = (id(target_plot), baseline, fs, ticks)
         if self._minimap_signature == signature and self._minimap_viewport_item is not None:
             mm_off = getattr(self, '_minimap_offset', 0)
             self._minimap_viewport_item.setRegion((cur_min - mm_off, cur_max - mm_off))

@@ -106,6 +106,12 @@ class TickNumberConfigTest(unittest.TestCase):
         self.app.processEvents()
         mm_axis = qt_canvas._minimap_plot.getAxis('bottom')
         self.assertEqual(mm_axis.n_ticks, impl.getAxis('bottom').n_ticks)
+        # Changing the setting while the minimap is open must rebuild it:
+        # the tick target is part of the rebuild signature.
+        impl.getAxis('bottom').set_ticks_number(9)
+        qt_canvas._update_minimap()
+        self.app.processEvents()
+        self.assertEqual(qt_canvas._minimap_plot.getAxis('bottom').n_ticks, 9)
         qt_canvas.deleteLater()
 
     def test_matplotlib_minimap_inherits_the_configured_tick_number(self):
@@ -117,6 +123,12 @@ class TickNumberConfigTest(unittest.TestCase):
         locator = qt_canvas._minimap_axes.xaxis.get_major_locator()
         self.assertEqual(locator.target_ticks,
                          impl.xaxis.get_major_locator().target_ticks)
+        # A tick_number change while the minimap is open must rebuild it.
+        impl.xaxis._ipl_tick_number = 9
+        qt_canvas._update_minimap()
+        self.app.processEvents()
+        locator = qt_canvas._minimap_axes.xaxis.get_major_locator()
+        self.assertEqual(locator.target_ticks, 9)
         qt_canvas.deleteLater()
 
 
