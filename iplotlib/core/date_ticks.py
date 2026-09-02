@@ -246,14 +246,12 @@ def linear_ticks(lo: float, hi: float, target_ticks: int):
     for m in (2.0, 5.0):
         if m * mag <= limit:
             step = m * mag
-    first = math.ceil(lo / step) * step
-    out = []
-    t = first
-    # small epsilon so the last boundary isn't dropped by float error
-    while t <= hi + step * 1e-9:
-        out.append(t)
-        t += step
-    return out
+    # Multiply the index instead of accumulating the step: a running sum
+    # drifts (0.2 is not exact in binary) and rendered zero as -5.6e-17.
+    eps = step * 1e-9
+    k0 = math.ceil(lo / step - 1e-9)
+    k1 = math.floor(hi / step + 1e-9)
+    return [k * step for k in range(k0, k1 + 1) if lo - eps <= k * step <= hi + eps]
 
 
 def segments_for_interval(step, kind):

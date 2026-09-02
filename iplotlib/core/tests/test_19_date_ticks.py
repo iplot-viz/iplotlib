@@ -178,6 +178,12 @@ class LinearTicksTests(unittest.TestCase):
         self.assertEqual({t for t in a if t >= 2.0},
                          {t for t in b if t <= 10.0})
 
+    def test_zero_is_exact(self):
+        # An accumulated float step rendered zero as -5.6e-17 on the axis.
+        for lo, hi in ((-1.05, 1.05), (-0.3, 0.9), (-7.0, 3.0)):
+            ticks = linear_ticks(lo, hi, 7)
+            self.assertIn(0.0, ticks, (lo, hi))
+
     def test_degenerate_span(self):
         self.assertEqual(linear_ticks(4.2, 4.2, 7), [4.2])
 
