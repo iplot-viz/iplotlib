@@ -185,7 +185,9 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_ticknumber_widget():
-        return IplotPreferencesForm.create_spinbox(min=1, max=7)
+        # The configured count is a minimum, so the old cap of 7 would stop
+        # users from asking for the denser Grafana-like displays.
+        return IplotPreferencesForm.create_spinbox(min=1, max=20)
 
     @staticmethod
     def default_contour_levels_widget():
