@@ -1,19 +1,26 @@
 # Description: Civil-time tick intervals for date axes, shared by the
 #              matplotlib and pyqtgraph date formatters.
 
-"""Grafana-style "nice" interval ladder, in integer nanoseconds (UTC).
+"""Tick ladders shared by the matplotlib and pyqtgraph formatters.
 
-Both backend date formatters place their ticks on round civil-time
-boundaries (:00, :15, day, week, month, year) instead of on evenly spaced
-range/n positions. The ladder, the interval choice and the tick generation
-live here so the two backends cannot drift apart.
+Date axes place their ticks on round civil-time boundaries (:00, :15, day,
+week, month, year), relative-time axes on round durations anchored at zero,
+and plain numeric axes on 1/2/5 decimal positions. The ladders, the
+interval choice and the tick generation live here so the two backends
+cannot drift apart.
 
-Every generator anchors to absolute UTC boundaries (midnight, Monday, the
-calendar) rather than to the view edge, so panning slides ticks in and out
-of the window instead of moving them.
+The configured tick count is a floor: the chosen step is the largest one
+that still yields at least that many ticks, so asking for more ticks always
+gives more, and never fewer than asked (only the axis resolution or a lack
+of room can leave fewer).
+
+Every generator anchors to absolute boundaries (midnight, Monday, the
+calendar, zero, multiples of the step) rather than to the view edge, so
+panning slides ticks in and out of the window instead of moving them.
 """
 
 import datetime
+import math
 
 _NS = 1
 _US = 1_000
@@ -49,6 +56,7 @@ _LADDER = [
     (1 * _HOUR, "fixed"), (2 * _HOUR, "fixed"), (3 * _HOUR, "fixed"),
     (6 * _HOUR, "fixed"), (12 * _HOUR, "fixed"),
     (1 * _DAY, "day"),    (2 * _DAY, "day"),    (3 * _DAY, "day"),
+    (4 * _DAY, "day"),
     (1 * _WEEK, "week"),  (2 * _WEEK, "week"),
     (1, "month"),         (2, "month"),         (3, "month"),
     (6, "month"),
@@ -74,16 +82,16 @@ def _utc_dt(ns: int) -> datetime.datetime:
 
 
 def pick_interval(lo_ns, hi_ns, target_ticks: int, min_step_ns: int = 0):
-    """Ladder (step, kind) whose real tick count over [lo, hi] lands closest
-    to ``target_ticks`` (the coarser rung wins only when strictly closer, so
-    the count leans toward the request rather than below it).
+    """Largest ladder (step, kind) whose real tick count over [lo, hi]
+    reaches ``target_ticks``, so the configured count acts as a minimum.
 
     The count is measured on the generated ticks, not on span/step: calendar
     steps anchor to real boundaries, and e.g. a 16-day window holds only two
     Mondays, far fewer than span/week would suggest.
 
     ``min_step_ns`` floors the choice at the axis resolution (100 us units or
-    the adaptive unit scale), below which the axis cannot address positions.
+    the adaptive unit scale), below which the axis cannot address positions;
+    it is the only reason fewer ticks than asked can come back.
     """
     lo, hi = int(min(lo_ns, hi_ns)), int(max(lo_ns, hi_ns))
     if hi == lo:
@@ -91,18 +99,14 @@ def pick_interval(lo_ns, hi_ns, target_ticks: int, min_step_ns: int = 0):
     # The cap keeps a nonsense request from descending to nanosecond rungs,
     # where generating the candidate ticks over a wide window would not return.
     target = max(1, min(int(target_ticks), 500))
-    coarser = None  # (count, step, kind) of the last rung that fell short
+    finest = None  # last rung the resolution still allows
     for approx, step, kind in _LADDER_DESC:
         if approx < min_step_ns:
             break
-        n = len(generate_ticks(lo, hi, step, kind))
-        if n >= target:
-            if coarser is not None and (target - coarser[0]) < (n - target):
-                return coarser[1], coarser[2]
+        if len(generate_ticks(lo, hi, step, kind)) >= target:
             return step, kind
-        coarser = (n, step, kind)
-    # Every allowed rung fell short of the target; the finest one wins.
-    return coarser[1], coarser[2]
+        finest = (step, kind)
+    return finest
 
 
 def _gen_fixed(lo, hi, step):
@@ -184,6 +188,72 @@ def generate_ticks(lo_ns, hi_ns, step, kind):
     if kind == "year":
         return _gen_year(lo_ns, hi_ns, step)
     return []
+
+
+# Round-duration steps for a relative-time axis, anchored at zero:
+# 1/2/5 decimals up to seconds, then minute/hour/day-based durations.
+_REL_LADDER = [
+    1, 2, 5, 10, 20, 50, 100, 200, 500,
+    1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000,
+    1_000_000, 2_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000,
+    100_000_000, 200_000_000, 500_000_000,
+    1 * _SEC, 2 * _SEC, 5 * _SEC, 10 * _SEC, 15 * _SEC, 30 * _SEC,
+    1 * _MIN, 2 * _MIN, 5 * _MIN, 10 * _MIN, 15 * _MIN, 30 * _MIN,
+    1 * _HOUR, 2 * _HOUR, 3 * _HOUR, 6 * _HOUR, 12 * _HOUR,
+    1 * _DAY, 2 * _DAY, 3 * _DAY, 4 * _DAY, 5 * _DAY, 10 * _DAY,
+    30 * _DAY, 100 * _DAY,
+]
+
+
+def relative_ticks(lo_ns: int, hi_ns: int, target_ticks: int):
+    """Round-duration tick positions (integer ns, anchored at 0) for a
+    relative-time axis: the largest duration step still giving at least
+    ``target_ticks`` over [lo, hi]."""
+    if hi_ns < lo_ns:
+        lo_ns, hi_ns = hi_ns, lo_ns
+    span = hi_ns - lo_ns
+    if span <= 0:
+        return [lo_ns]
+    # A step no larger than span/target guarantees at least target multiples
+    # inside the window, since the anchoring at zero costs at most one.
+    limit = span / max(1, min(int(target_ticks), 500))
+    step = _REL_LADDER[0]
+    for s in _REL_LADDER:
+        if s > limit:
+            break
+        step = s
+    first = -((-lo_ns) // step) * step
+    out = []
+    t = first
+    while t <= hi_ns:
+        out.append(int(t))
+        t += step
+    return out
+
+
+def linear_ticks(lo: float, hi: float, target_ticks: int):
+    """Nice (1/2/5 x 10^k) tick positions within [lo, hi]: the largest such
+    step still giving at least ``target_ticks``. Positions are multiples of
+    the step, so they hold still while the view pans."""
+    if hi < lo:
+        lo, hi = hi, lo
+    span = hi - lo
+    if span <= 0 or not math.isfinite(span):
+        return [lo]
+    limit = span / max(1, min(int(target_ticks), 500))
+    mag = 10.0 ** math.floor(math.log10(limit))
+    step = mag
+    for m in (2.0, 5.0):
+        if m * mag <= limit:
+            step = m * mag
+    first = math.ceil(lo / step) * step
+    out = []
+    t = first
+    # small epsilon so the last boundary isn't dropped by float error
+    while t <= hi + step * 1e-9:
+        out.append(t)
+        t += step
+    return out
 
 
 def segments_for_interval(step, kind):

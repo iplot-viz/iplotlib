@@ -78,6 +78,26 @@ class TickNumberConfigTest(unittest.TestCase):
             canvas_low.deleteLater()
             canvas_high.deleteLater()
 
+    def test_pyqt_y_axis_count_follows_the_setting(self):
+        # The numeric Y axis used to derive its spacing from pyqtgraph's
+        # pixel-based default and then patch the list against cached state,
+        # so the visible count neither followed the setting nor stayed
+        # reproducible across repaints. A narrow band around a large value
+        # (a 24.25..25.55 V supply rail) is where the old spacing overshot.
+        _, qt_canvas, impl = self._build('pyqt', 5)
+        axis = impl.getAxis('left')
+        size = axis.geometry().height()
+        # Same window panned up: the old cached list kept answering
+        # [24.4 .. 25.2] for both, leaving the top of the axis bare.
+        for lo, hi in ((24.25, 25.55), (24.35, 25.65)):
+            levels = axis._compute_tick_values(lo, hi, size)
+            vals = [v for _, grp in levels for v in grp if lo <= v <= hi]
+            self.assertGreaterEqual(len(vals), 5, (lo, hi))
+            step = vals[1] - vals[0]
+            self.assertLessEqual(vals[0] - lo, step, (lo, hi))
+            self.assertLessEqual(hi - vals[-1], step, (lo, hi))
+        qt_canvas.deleteLater()
+
     def test_minimap_inherits_the_configured_tick_number(self):
         core, qt_canvas, impl = self._build('pyqt', 5)
         core.show_minimap = True

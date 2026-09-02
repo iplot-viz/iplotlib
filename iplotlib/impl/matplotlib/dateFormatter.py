@@ -8,6 +8,7 @@ import pandas
 from iplotlib.core.date_ticks import (
     pick_interval as _pick_interval,
     generate_ticks as _generate_ticks,
+    relative_ticks as _rel_time_ticks,
     segments_for_interval as _segments_for_interval,
 )
 import iplotLogging.setupLogger as Sl
@@ -102,51 +103,6 @@ def eng_time_axis_labels(lo_s, hi_s, ticks_s):
             common = _fmt_duration(base, cut_scale) if base else ''
     labels = {tn: _fmt_duration(tn - base, g_scale) for tn in ticks}
     return common, labels, base, g_scale
-
-
-# Fixed-ns "nice" step ladder for a relative-time axis (a duration from 0, so no
-# calendar/leap concerns): 1/2/5 through sub-second, then 1/2/5/10/15/30 s,
-# 1/2/5/10/15/30 m, 1/2/3/6/12 h, then days. Lets a multi-day pulse land on
-# round boundaries ("1d", "12h", "5m") instead of decimal seconds.
-_REL_LADDER = [
-    1, 2, 5, 10, 20, 50, 100, 200, 500,
-    1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000,
-    1_000_000, 2_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000,
-    100_000_000, 200_000_000, 500_000_000,
-    1_000_000_000, 2_000_000_000, 5_000_000_000,
-    10_000_000_000, 15_000_000_000, 30_000_000_000,
-    60_000_000_000, 120_000_000_000, 300_000_000_000,
-    600_000_000_000, 900_000_000_000, 1_800_000_000_000,
-    3_600_000_000_000, 7_200_000_000_000, 10_800_000_000_000,
-    21_600_000_000_000, 43_200_000_000_000,
-    86_400_000_000_000, 172_800_000_000_000, 432_000_000_000_000,
-    864_000_000_000_000, 2_592_000_000_000_000, 8_640_000_000_000_000,
-]
-
-
-def _rel_time_ticks(lo_ns: int, hi_ns: int, n: int):
-    """Nice tick positions (integer ns, anchored at 0) for a relative-time axis,
-    aiming for ~n ticks across [lo, hi]."""
-    if hi_ns < lo_ns:
-        lo_ns, hi_ns = hi_ns, lo_ns
-    span = hi_ns - lo_ns
-    if span <= 0:
-        return [lo_ns]
-    target = span / max(n, 1)
-    step = _REL_LADDER[-1]
-    for s in _REL_LADDER:
-        if s >= target:
-            step = s
-            break
-    import math
-    first = math.ceil(lo_ns / step) * step
-    out = []
-    t = first
-    # small epsilon so the last boundary isn't dropped by float error
-    while t <= hi_ns + step * 1e-9:
-        out.append(int(round(t)))
-        t += step
-    return out
 
 
 # Tick intervals and generators for the date axis are shared with the

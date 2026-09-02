@@ -7,7 +7,9 @@ import unittest
 
 from iplotlib.core.date_ticks import (
     generate_ticks,
+    linear_ticks,
     pick_interval,
+    relative_ticks,
     segments_for_interval,
 )
 
@@ -35,8 +37,18 @@ class PickIntervalTests(unittest.TestCase):
         # ticks no matter what the user asks for; the choice must fall back
         # to a finer rung instead.
         n = _count(T0, T0 + 16 * _DAY, 5)
-        self.assertGreaterEqual(n, 4)
+        self.assertGreaterEqual(n, 5)
         self.assertLessEqual(n, 8)
+
+    def test_configured_count_is_a_minimum(self):
+        # The setting means "at least this many ticks": no span/target
+        # combination may come back under the request.
+        for span in (45 * _SEC, 7 * _MIN, 3 * _HOUR, _DAY, 5 * _DAY,
+                     16 * _DAY, 42 * _DAY, 61 * _DAY, 200 * _DAY,
+                     730 * _DAY):
+            for target in (2, 5, 7, 10):
+                self.assertGreaterEqual(_count(T0, T0 + span, target),
+                                        target, (span, target))
 
     def test_count_tracks_a_growing_target(self):
         counts = [_count(T0, T0 + 16 * _DAY, t) for t in range(2, 16)]
@@ -50,8 +62,10 @@ class PickIntervalTests(unittest.TestCase):
                      183 * _DAY, 548 * _DAY):
             self.assertGreaterEqual(_count(T0, T0 + span, 7), 5, span)
 
-    def test_round_windows_keep_their_step(self):
-        for span, step in ((_HOUR, 10 * _MIN), (5 * _MIN, _MIN),
+    def test_round_windows_pick_the_largest_sufficient_step(self):
+        # 1 h / 7 -> 10 min gives exactly 7; 5 min / 7 -> 1 min gives only 6,
+        # so the guarantee drops one rung to 30 s.
+        for span, step in ((_HOUR, 10 * _MIN), (5 * _MIN, 30 * _SEC),
                            (30 * _SEC, 5 * _SEC)):
             self.assertEqual(pick_interval(T0, T0 + span, 7),
                              (step, "fixed"))
@@ -116,6 +130,56 @@ class GenerateTicksTests(unittest.TestCase):
         b = generate_ticks(T0 + 3 * _DAY, T0 + 3 * _DAY + 6 * _HOUR,
                            _HOUR, "fixed")
         self.assertEqual([t - 3 * _DAY for t in b], a)
+
+
+class RelativeTicksTests(unittest.TestCase):
+
+    def test_configured_count_is_a_minimum(self):
+        # 77 min asking for 5 used to land on 30-minute steps (3 ticks);
+        # the guarantee picks 15 minutes instead.
+        ticks = relative_ticks(0, 77 * _MIN, 5)
+        self.assertGreaterEqual(len(ticks), 5)
+        self.assertEqual(ticks[1] - ticks[0], 15 * _MIN)
+
+    def test_default_target_also_gets_at_least_the_request(self):
+        ticks = relative_ticks(0, 77 * _MIN, 7)
+        self.assertGreaterEqual(len(ticks), 7)
+        self.assertEqual(ticks[1] - ticks[0], 10 * _MIN)
+
+    def test_anchored_at_zero_and_stable_while_panning(self):
+        a = set(relative_ticks(0, 30 * _MIN, 7))
+        b = set(relative_ticks(5 * _MIN, 35 * _MIN, 7))
+        self.assertEqual({t for t in a if t >= 5 * _MIN},
+                         {t for t in b if t <= 30 * _MIN})
+
+    def test_negative_window_keeps_round_positions(self):
+        ticks = relative_ticks(-5 * _SEC, 4 * _SEC, 5)
+        self.assertGreaterEqual(len(ticks), 5)
+        self.assertTrue(all(t % (ticks[1] - ticks[0]) == 0 for t in ticks))
+
+    def test_degenerate_span(self):
+        self.assertEqual(relative_ticks(3 * _SEC, 3 * _SEC, 7), [3 * _SEC])
+
+
+class LinearTicksTests(unittest.TestCase):
+
+    def test_configured_count_is_a_minimum(self):
+        for lo, hi in ((0.0, 1.0), (-3.7, 12.9), (24.25, 25.55),
+                       (1e-6, 5e-6), (-2e9, 7e9)):
+            for target in (3, 5, 7, 10):
+                ticks = linear_ticks(lo, hi, target)
+                self.assertGreaterEqual(len(ticks), target, (lo, hi, target))
+                self.assertTrue(all(lo <= t <= hi + (hi - lo) * 1e-9
+                                    for t in ticks))
+
+    def test_positions_are_step_multiples_and_pan_stable(self):
+        a = set(linear_ticks(0.0, 10.0, 5))
+        b = set(linear_ticks(2.0, 12.0, 5))
+        self.assertEqual({t for t in a if t >= 2.0},
+                         {t for t in b if t <= 10.0})
+
+    def test_degenerate_span(self):
+        self.assertEqual(linear_ticks(4.2, 4.2, 7), [4.2])
 
 
 class SegmentsForIntervalTests(unittest.TestCase):
