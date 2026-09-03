@@ -9,12 +9,14 @@ from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY, PlotContourWith
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.core.ruler import Ruler
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
+from iplotlib.core.date_ticks import (
+    pick_interval,
+    generate_ticks,
+    segments_for_interval,
+)
 from iplotlib.impl.pyqtgraph.dateFormatter import (
     NanosecondDateFormatter,
     is_time_label,
-    _pick_interval,
-    _generate_ticks,
-    _segments_for_interval,
 )
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
@@ -251,9 +253,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         # Mirror the main plot's font size so the minimap ticks stay legible and
         # track font-size changes (issue #141). Part of the signature so a change
-        # forces a rebuild that re-applies it.
+        # forces a rebuild that re-applies it; same for the resolved tick
+        # target, or a tick_number change would leave stale minimap ticks.
         fs = self._minimap_font_size(target_plot)
-        signature = (id(target_plot), baseline, fs)
+        ticks = getattr(main_plot.getAxis('bottom'), 'n_ticks', 7)
+        signature = (id(target_plot), baseline, fs, ticks)
         if self._minimap_signature == signature and self._minimap_viewport_item is not None:
             mm_off = getattr(self, '_minimap_offset', 0)
             self._minimap_viewport_item.setRegion((cur_min - mm_off, cur_max - mm_off))
@@ -276,6 +280,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._minimap_common_label = new_bottom.common_label
         # Keep the minimap axis on the same integer offset as the data we plot.
         self._minimap_plot.getAxis('bottom').set_offset(self._minimap_offset)
+        # Same tick target as the main axis, so both stay in step when the
+        # user configures the number of ticks.
+        self._minimap_plot.getAxis('bottom').set_ticks_number(
+            getattr(main_plot.getAxis('bottom'), 'n_ticks', 7))
         # The minimap builds its own axis without the main plot's 'Time' label,
         # so tell it explicitly whether this is a relative-time axis (only then
         # does it render durations; otherwise plain numeric like the main axis).
@@ -386,14 +394,14 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         offset = int(getattr(self, '_minimap_offset', 0))
         n = getattr(axis, 'n_ticks', 7)
-        step_ns, kind = _pick_interval(abs_hi - abs_lo, n)
-        ticks_abs = _generate_ticks(abs_lo, abs_hi, step_ns, kind)
+        step_ns, kind = pick_interval(abs_lo, abs_hi, n)
+        ticks_abs = generate_ticks(abs_lo, abs_hi, step_ns, kind)
         if not ticks_abs:
             axis.setTicks(None)
             return
 
         cut = axis.lcp(abs_lo, abs_hi)
-        end_seg = max(cut + 1, _segments_for_interval(step_ns, kind))
+        end_seg = max(cut + 1, segments_for_interval(step_ns, kind))
         major = [(t - offset, axis.date_fmt(t, cut + 1, end_seg)) for t in ticks_abs]
 
         # Shared prefix (date) goes in the common label, like the main axis.

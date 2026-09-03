@@ -20,13 +20,18 @@ def compare_pixmap_to_baseline(pixmap, baseline_path: str, tol: float = 5.0) -> 
     compared pixel by pixel; ``tol`` is the RMS tolerance accepted by
     matplotlib's ``compare_images`` (default 5.0, generous enough to absorb
     anti-aliasing differences between platforms).
+
+    Setting ``IPLOT_REGEN_BASELINES`` overwrites the baseline with the
+    rendered image instead of comparing — for deliberately accepting a
+    visual change from the canonical platform. Review the diff before
+    committing what it wrote.
     """
     os.makedirs(os.path.dirname(baseline_path), exist_ok=True)
     actual_path = baseline_path.replace('.png', '_actual.png')
     if not pixmap.save(actual_path, 'PNG'):
         raise RuntimeError(f"pixmap.save failed for {actual_path}")
 
-    if not os.path.exists(baseline_path):
+    if os.environ.get('IPLOT_REGEN_BASELINES') or not os.path.exists(baseline_path):
         shutil.copyfile(actual_path, baseline_path)
     else:
         diff = compare_images(baseline_path, actual_path, tol=tol)

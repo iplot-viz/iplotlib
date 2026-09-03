@@ -185,6 +185,8 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_ticknumber_widget():
+        # The configured count is a minimum, so a conservative cap already
+        # allows dense displays; raising it needs overlap testing first.
         return IplotPreferencesForm.create_spinbox(min=1, max=7)
 
     @staticmethod
