@@ -312,7 +312,14 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 if len(x_data) == 0 or len(y_data) == 0:
                     continue
                 # Plot relative to the minimap offset (keeps coordinates small).
-                x_data = np.asarray(x_data) - self._minimap_offset
+                # Subtract in int64: the unsigned nanosecond timestamps wrap
+                # around for any sample preceding the baseline start (e.g. the
+                # extremity before the window), and the wrapped ~1.8e19 value
+                # floods the ViewBox with numpy overflow warnings.
+                x_data = np.asarray(x_data)
+                if np.issubdtype(x_data.dtype, np.unsignedinteger):
+                    x_data = x_data.astype(np.int64)
+                x_data = x_data - self._minimap_offset
                 color = sig.color or '#1976d2'
                 pen = pg.mkPen(color, width=1)
                 y_max = getattr(sig, '_minimap_y_max_data', None)
