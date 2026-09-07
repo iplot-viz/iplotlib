@@ -10,6 +10,7 @@ from iplotlib.core.date_ticks import (
     generate_ticks as _generate_ticks,
     relative_ticks as _rel_time_ticks,
     segments_for_interval as _segments_for_interval,
+    label_unit as _label_unit,
 )
 import iplotLogging.setupLogger as Sl
 
@@ -321,10 +322,12 @@ class NanosecondDateFormatter(ScalarFormatter):
         super().set_locs(locs)
 
     def __call__(self, x, pos=None):
+        start, end = self.cut_start + 1, self.cut_start + self.label_segments
         if self.offset_ns == 100_000:
-            return self.date_fmt(int(self.offset_ns) * int(x), self.cut_start + 1, self.cut_start + self.label_segments)
+            ts = int(self.offset_ns) * int(x)
         else:
-            return self.date_fmt(int(self.offset_ns) + int(x), self.cut_start + 1, self.cut_start + self.label_segments)
+            ts = int(self.offset_ns) + int(x)
+        return self.date_fmt(ts, start, end) + _label_unit(start, end)
 
     def format_data_short(self, value):
         # Used by the crosshair / coordinate readout (Axes.format_xdata).

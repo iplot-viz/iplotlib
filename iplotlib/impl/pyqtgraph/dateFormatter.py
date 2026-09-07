@@ -11,6 +11,7 @@ from iplotlib.core.date_ticks import (
     generate_ticks as _generate_ticks,
     relative_ticks as _rel_time_ticks,
     segments_for_interval as _segments_for_interval,
+    label_unit as _label_unit,
 )
 import iplotLogging.setupLogger as Sl
 import re as _re
@@ -477,10 +478,10 @@ class NanosecondDateFormatter(pg.AxisItem):
 
     def tickStrings(self, values, scale, spacing):
         if self.is_date:
-            end = max(self.cut_start + 1, getattr(self, '_date_label_end', self.NANOSECOND))
-            values = list(
-                map(lambda v: self.date_fmt(self.get_real_value(int(v)), self.cut_start + 1, end),
-                    values))
+            start = self.cut_start + 1
+            end = max(start, getattr(self, '_date_label_end', self.NANOSECOND))
+            unit = _label_unit(start, end)
+            values = [self.date_fmt(self.get_real_value(int(v)), start, end) + unit for v in values]
             self.common_label.prepareGeometryChange()
             self.common_label.setText(self.offset_str)
         else:

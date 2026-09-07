@@ -110,5 +110,41 @@ class FormatterRoundHourTest(unittest.TestCase):
         self.assertEqual(rounded, '2024-01-15T13:00:00')
 
 
+class FormatterLabelUnitTest(unittest.TestCase):
+    """Tick labels that shrink to a bare number carry the unit of their last
+    digit; clock-formatted labels and the crosshair readout do not."""
+
+    def _formatter(self, cut_start, label_segments):
+        fmt = NanosecondDateFormatter(ax_idx=0, label_segments=label_segments,
+                                      postfix_end=False, postfix_start=False)
+        fmt.cut_start = cut_start
+        return fmt
+
+    def test_single_segment_labels_carry_their_unit(self):
+        self.assertEqual(self._formatter(NanosecondDateFormatter.HOUR, 1)(TS_1), '34min')
+        self.assertEqual(self._formatter(NanosecondDateFormatter.MINUTE, 1)(TS_1), '56s')
+        self.assertEqual(self._formatter(NanosecondDateFormatter.SECOND, 1)(TS_1), '789ms')
+        self.assertEqual(self._formatter(NanosecondDateFormatter.MICROSECOND, 1)(TS_1_NS), '456ns')
+
+    def test_sub_second_groups_read_as_one_integer_in_the_finest_unit(self):
+        self.assertEqual(self._formatter(NanosecondDateFormatter.SECOND, 2)(TS_1_NS), '789123us')
+
+    def test_decimal_seconds_keep_the_second_unit(self):
+        self.assertEqual(self._formatter(NanosecondDateFormatter.MINUTE, 2)(TS_1), '56.789s')
+
+    def test_clock_and_calendar_labels_have_no_unit(self):
+        self.assertEqual(self._formatter(NanosecondDateFormatter.DAY, 2)(TS_1), '12:34')
+        self.assertEqual(self._formatter(NanosecondDateFormatter.HOUR, 2)(TS_1), '34:56')
+        self.assertEqual(self._formatter(NanosecondDateFormatter.MONTH, 1)(TS_1), '15')
+
+    def test_crosshair_readout_is_the_full_timestamp(self):
+        # Axis coordinates are offsets from the per-axis base, as on a real
+        # date axis; the absolute ns value would not survive the float pass.
+        fmt = NanosecondDateFormatter(ax_idx=0, label_segments=1, offset_lut=[TS_1_NS])
+        fmt.cut_start = NanosecondDateFormatter.MINUTE
+        self.assertEqual(fmt(0), '56s')
+        self.assertEqual(fmt.format_data_short(0), '2024-01-15T12:34:56.789123456')
+
+
 if __name__ == '__main__':
     unittest.main()
