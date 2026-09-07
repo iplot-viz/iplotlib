@@ -249,6 +249,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         # and must NOT be shifted, or its labels would show the wrong time
         # (and int() of a negative start would shift the wrong way).
         is_date_axis = bool(target_plot.axes and getattr(target_plot.axes[0], 'is_date', False))
+        if baseline is not None:
+            # Limits derived from data arrive as numpy scalars; a float32 or
+            # uint64 baseline overflows inside the ViewBox once shifted.
+            cast = int if is_date_axis else float
+            baseline = (cast(baseline[0]), cast(baseline[1]))
         self._minimap_offset = int(baseline[0]) if (baseline is not None and is_date_axis) else 0
 
         # Mirror the main plot's font size so the minimap ticks stay legible and

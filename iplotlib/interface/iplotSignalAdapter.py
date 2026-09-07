@@ -107,6 +107,10 @@ class StatusInfo:
                 (f"{self.sep} {self.inf} infinities" if self.inf > 0 else "")
 
 
+def _as_python_number(value):
+    return value.item() if isinstance(value, np.generic) else value
+
+
 @dataclass
 class IplotSignalAdapter(ProcessingSignal):
     """
@@ -332,8 +336,12 @@ class IplotSignalAdapter(ProcessingSignal):
 
     @property
     def data_xrange(self):
-        if len(self.x_data.ravel()) > 1:
-            return self.x_data.ravel()[0], self.x_data.ravel()[-1]
+        x = self.x_data.ravel()
+        if len(x) > 1:
+            # Plain Python numbers: callers store these as axis limits, and a
+            # numpy uint64 wraps (or a float32 overflows) once the plotting
+            # code subtracts the axis offset from them.
+            return _as_python_number(x[0]), _as_python_number(x[-1])
         else:
             return None, None
 

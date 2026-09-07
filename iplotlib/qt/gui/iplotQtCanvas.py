@@ -546,7 +546,11 @@ class IplotQtCanvas(QWidget):
         """commit a view command"""
         cmd = self._staging_cmds.pop()
         cmd.new_lim = self._parser.get_view_cmd_limits(impl_plot)
-        assert len(cmd.new_lim) == len(cmd.old_lim)
+        if len(cmd.new_lim) != len(cmd.old_lim):
+            # The set of plots changed under the gesture (a redraw fired while
+            # dragging), so there is no consistent before/after pair to undo.
+            logger.debug(f"Dropped {cmd}: plots changed during the gesture")
+            return
 
         # Check if any limit actually changed
         if any([lim1 != lim2 for lim1, lim2 in zip(cmd.old_lim, cmd.new_lim)]):
