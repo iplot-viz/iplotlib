@@ -5,6 +5,13 @@ import pandas
 from math import ceil, floor, log10
 import numpy as np
 
+from iplotlib.core.date_ticks import (
+    linear_ticks as _linear_ticks,
+    pick_interval as _pick_interval,
+    generate_ticks as _generate_ticks,
+    relative_ticks as _rel_time_ticks,
+    segments_for_interval as _segments_for_interval,
+)
 import iplotLogging.setupLogger as Sl
 import re as _re
 
@@ -85,197 +92,10 @@ def eng_time_axis_labels(lo_s, hi_s, ticks_s):
     return common, labels, base, g_scale
 
 
-# Fixed-ns "nice" step ladder for a relative-time axis (see matplotlib twin).
-_REL_LADDER = [
-    1, 2, 5, 10, 20, 50, 100, 200, 500,
-    1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000,
-    1_000_000, 2_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000,
-    100_000_000, 200_000_000, 500_000_000,
-    1_000_000_000, 2_000_000_000, 5_000_000_000,
-    10_000_000_000, 15_000_000_000, 30_000_000_000,
-    60_000_000_000, 120_000_000_000, 300_000_000_000,
-    600_000_000_000, 900_000_000_000, 1_800_000_000_000,
-    3_600_000_000_000, 7_200_000_000_000, 10_800_000_000_000,
-    21_600_000_000_000, 43_200_000_000_000,
-    86_400_000_000_000, 172_800_000_000_000, 432_000_000_000_000,
-    864_000_000_000_000, 2_592_000_000_000_000, 8_640_000_000_000_000,
-]
-
-
-def _rel_time_ticks(lo_ns: int, hi_ns: int, n: int):
-    """Nice tick positions (integer ns, anchored at 0) for ~n ticks across the
-    relative-time view [lo, hi]."""
-    if hi_ns < lo_ns:
-        lo_ns, hi_ns = hi_ns, lo_ns
-    span = hi_ns - lo_ns
-    if span <= 0:
-        return [lo_ns]
-    target = span / max(n, 1)
-    step = _REL_LADDER[-1]
-    for s in _REL_LADDER:
-        if s >= target:
-            step = s
-            break
-    import math
-    first = math.ceil(lo_ns / step) * step
-    out = []
-    t = first
-    while t <= hi_ns + step * 1e-9:
-        out.append(int(round(t)))
-        t += step
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Grafana-style "nice" interval ladder, in integer nanoseconds (UTC).
-#
-# Used by NanosecondDateFormatter.tickValues to place ticks on round civil-time
-# boundaries (:00, :15, day, week, month, year) instead of on evenly spaced
-# range/n positions. Sub-day steps use a 1/2/5 ladder anchored to UTC midnight;
-# day/week/month/year steps are stepped on the actual calendar.
-# ---------------------------------------------------------------------------
-_NS = 1
-_US = 1_000
-_MS = 1_000_000
-_SEC = 1_000_000_000
-_MIN = 60 * _SEC
-_HOUR = 60 * _MIN
-_DAY = 24 * _HOUR
-_WEEK = 7 * _DAY
-
-# Segment indices (mirror NanosecondDateFormatter constants).
-_YEAR, _MONTH, _DAY_SEG, _HOUR_SEG, _MINUTE, _SECOND, _MILI, _MICRO, _NANO = range(9)
-
-_LADDER = [
-    (1 * _NS, "fixed"),   (2 * _NS, "fixed"),   (5 * _NS, "fixed"),
-    (10 * _NS, "fixed"),  (20 * _NS, "fixed"),  (50 * _NS, "fixed"),
-    (100 * _NS, "fixed"), (200 * _NS, "fixed"), (500 * _NS, "fixed"),
-    (1 * _US, "fixed"),   (2 * _US, "fixed"),   (5 * _US, "fixed"),
-    (10 * _US, "fixed"),  (20 * _US, "fixed"),  (50 * _US, "fixed"),
-    (100 * _US, "fixed"), (200 * _US, "fixed"), (500 * _US, "fixed"),
-    (1 * _MS, "fixed"),   (2 * _MS, "fixed"),   (5 * _MS, "fixed"),
-    (10 * _MS, "fixed"),  (20 * _MS, "fixed"),  (50 * _MS, "fixed"),
-    (100 * _MS, "fixed"), (200 * _MS, "fixed"), (500 * _MS, "fixed"),
-    (1 * _SEC, "fixed"),  (2 * _SEC, "fixed"),  (5 * _SEC, "fixed"),
-    (10 * _SEC, "fixed"), (15 * _SEC, "fixed"), (30 * _SEC, "fixed"),
-    (1 * _MIN, "fixed"),  (2 * _MIN, "fixed"),  (5 * _MIN, "fixed"),
-    (10 * _MIN, "fixed"), (15 * _MIN, "fixed"), (30 * _MIN, "fixed"),
-    (1 * _HOUR, "fixed"), (2 * _HOUR, "fixed"), (3 * _HOUR, "fixed"),
-    (6 * _HOUR, "fixed"), (12 * _HOUR, "fixed"),
-    (1 * _DAY, "day"),    (2 * _DAY, "day"),
-    (1 * _WEEK, "week"),
-    (1, "month"),         (3, "month"),         (6, "month"),
-    (1, "year"),          (2, "year"),          (5, "year"),
-    (10, "year"),         (20, "year"),         (50, "year"),
-    (100, "year"),
-]
-_APPROX = {"month": 30 * _DAY, "year": 365 * _DAY}
-_LADDER_APPROX_NS = [s * _APPROX[k] if k in _APPROX else s for s, k in _LADDER]
-_UTC = timezone.utc
-
-
-def _utc_dt(ns):
-    return datetime.fromtimestamp(int(ns) // _SEC, tz=_UTC)
-
-
-def _pick_interval(span_ns, target_ticks):
-    span_ns = max(int(span_ns), 1)
-    ideal = span_ns / max(int(target_ticks), 1)
-    for approx, (step, kind) in zip(_LADDER_APPROX_NS, _LADDER):
-        if approx >= ideal:
-            return step, kind
-    return _LADDER[-1]
-
-
-def _gen_fixed(lo, hi, step):
-    midnight = (int(lo) // _DAY) * _DAY
-    k = (lo - midnight + step - 1) // step
-    t = midnight + k * step
-    out = []
-    while t <= hi:
-        out.append(t)
-        t += step
-    return out
-
-
-def _gen_calendar_day(lo, hi, ndays, weekly):
-    anchor = (int(lo) // _DAY) * _DAY
-    if weekly:
-        anchor -= _utc_dt(anchor).weekday() * _DAY
-    step = (7 if weekly else ndays) * _DAY
-    out = []
-    t = anchor
-    while t < lo:
-        t += step
-    while t <= hi:
-        out.append(t)
-        t += step
-    return out
-
-
-def _gen_month(lo, hi, nmonths):
-    d = _utc_dt(lo)
-    y, m = d.year, ((d.month - 1) // nmonths) * nmonths + 1
-    out = []
-    while True:
-        ns = int(datetime(y, m, 1, tzinfo=_UTC).timestamp()) * _SEC
-        if ns > hi:
-            break
-        if ns >= lo:
-            out.append(ns)
-        m += nmonths
-        while m > 12:
-            m -= 12
-            y += 1
-    return out
-
-
-def _gen_year(lo, hi, nyears):
-    y = (_utc_dt(lo).year // nyears) * nyears
-    out = []
-    while True:
-        ns = int(datetime(y, 1, 1, tzinfo=_UTC).timestamp()) * _SEC
-        if ns > hi:
-            break
-        if ns >= lo:
-            out.append(ns)
-        y += nyears
-    return out
-
-
-def _generate_ticks(lo_ns, hi_ns, step, kind):
-    if hi_ns < lo_ns:
-        lo_ns, hi_ns = hi_ns, lo_ns
-    if kind == "fixed":
-        return _gen_fixed(lo_ns, hi_ns, step)
-    if kind == "day":
-        return _gen_calendar_day(lo_ns, hi_ns, step // _DAY, weekly=False)
-    if kind == "week":
-        return _gen_calendar_day(lo_ns, hi_ns, 7, weekly=True)
-    if kind == "month":
-        return _gen_month(lo_ns, hi_ns, step)
-    if kind == "year":
-        return _gen_year(lo_ns, hi_ns, step)
-    return []
-
-
-def _segments_for_interval(step, kind):
-    """Deepest date segment index needed to label this interval."""
-    if kind == "year":
-        return _YEAR
-    if kind == "month":
-        return _MONTH
-    if kind in ("day", "week"):
-        return _DAY_SEG
-    if step >= _MIN:        # hour & minute steps -> HH:MM
-        return _MINUTE
-    if step >= _SEC:
-        return _SECOND
-    if step >= _MS:
-        return _MILI
-    if step >= _US:
-        return _MICRO
-    return _NANO
+# Tick intervals and generators for the date axis are shared with the
+# matplotlib backend (iplotlib.core.date_ticks); tickValues below places
+# ticks on round UTC civil-time boundaries instead of evenly spaced
+# range/n positions.
 
 
 def is_time_label(label) -> bool:
@@ -534,14 +354,18 @@ class NanosecondDateFormatter(pg.AxisItem):
         return [(spacing, list(values)) for spacing, values in self._tick_cache[1]]
 
     def _compute_tick_values(self, minVal, maxVal, size):
-        # Limit tick count to what fits without overlapping labels
+        # Limit tick count to what fits without overlapping labels: label
+        # width along a horizontal axis, line height along a vertical one.
         n = self.n_ticks
         if size > 0:
             font = self.style.get('tickFont') or self.font()
             fm = pg.Qt.QtGui.QFontMetricsF(font)
-            sample = "00:00:00.000" if self.is_date else "0.00000"
-            label_w = fm.horizontalAdvance(sample) + 10
-            n = max(2, min(n, int(size / label_w)))
+            if self.orientation in ('left', 'right'):
+                slot = fm.height() + 6
+            else:
+                sample = "00:00:00.000" if self.is_date else "0.00000"
+                slot = fm.horizontalAdvance(sample) + 10
+            n = max(2, min(n, int(size / slot)))
 
         if self.is_date:
             # Place ticks on round UTC civil-time boundaries (Grafana-style)
@@ -549,13 +373,15 @@ class NanosecondDateFormatter(pg.AxisItem):
             # absolute nanoseconds; values are returned in axis coordinates.
             abs_lo = self.get_real_value(minVal)
             abs_hi = self.get_real_value(maxVal)
-            step_ns, kind = _pick_interval(abs(abs_hi - abs_lo), n)
             # The axis cannot resolve below its unit (100 us in legacy mode,
             # the adaptive unit scale otherwise), so never pick a finer step.
-            if self.offset == 100_000 and kind == "fixed" and step_ns < 100_000:
-                step_ns, kind = 100_000, "fixed"
-            elif self.unit_scale != 1 and kind == "fixed" and step_ns < self.unit_scale:
-                step_ns, kind = self.unit_scale, "fixed"
+            if self.offset == 100_000:
+                min_step = 100_000
+            elif self.unit_scale != 1:
+                min_step = self.unit_scale
+            else:
+                min_step = 0
+            step_ns, kind = _pick_interval(abs_lo, abs_hi, n, min_step)
             ticks_abs = _generate_ticks(abs_lo, abs_hi, step_ns, kind)
             values = [self._abs_to_axis(t) for t in ticks_abs]
 
@@ -576,125 +402,76 @@ class NanosecondDateFormatter(pg.AxisItem):
                 tuple_spacing = maxVal - minVal
             return [(tuple_spacing, values)]
 
-        # Detect range change
+        # Plain numeric axis (Y, or a non-date X): deterministic nice 1/2/5
+        # positions with at least n of them, so the count follows the setting
+        # and repaints cannot drift with the pan/zoom history.
         last_range = maxVal - minVal
-
-        # Recalculate if range changed or tick count changed (e.g. window resize)
-        if len(self.last_values) == 0 or last_range != self.last_range or len(self.last_values) != n:
-            # First time we generate evenly spaced values
-            if self.is_date:
-                spacing = last_range / n
-                values = [minVal + spacing / 2 + i * spacing for i in range(n)]
-            else:
-                spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]  # Major ticks level
-                start = (ceil((minVal - offset) / spacing) * spacing) + offset
-                values = (np.arange(n) * spacing + start).tolist()
-            self.last_range = last_range
-        else:
-            # Adjust previous ticks to new range
-            values = [v for v in self.last_values if minVal <= v <= maxVal]
-
-            # Add new ticks if needed. Derive the step from the surviving ticks,
-            # or from the even spacing when only one survived (avoids IndexError).
-            step = (values[1] - values[0]) if len(values) >= 2 else last_range / max(n, 1)
-            while len(values) < n:
-                # Add to the end or to the beginning
-                if values and values[-1] + step <= maxVal:
-                    values.append(values[-1] + step)
-                elif values and values[0] - step >= minVal:
-                    values.insert(0, values[0] - step)
-                else:
-                    break
-            values = sorted(values)
-
-            # Cache may leave too few ticks to extrapolate; regenerate from scratch.
-            if len(values) < 2:
-                if self.is_date:
-                    spacing = last_range / n
-                    values = [minVal + spacing / 2 + i * spacing for i in range(n)]
-                else:
-                    spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
-                    start = (ceil((minVal - offset) / spacing) * spacing) + offset
-                    values = (np.arange(n) * spacing + start).tolist()
-                self.last_range = last_range
-
-        # Thin out if too many ticks for available space
-        while len(values) > n and len(values) > 2:
-            values = values[::2]
-
-        # Save current state and spacing
+        values = _linear_ticks(minVal, maxVal, n)
         self.last_values = values
+        self.last_range = last_range
         if len(values) >= 2:
             self._spacing = values[1] - values[0]
         elif last_range > 0:
             self._spacing = last_range / max(n, 1)
 
-        if self.is_date:
-            self.cut_start = self.lcp(self.get_real_value(int(values[0])), self.get_real_value(int(values[-1])))
+        spacing = self._spacing if len(values) >= 2 else (maxVal - minVal)
 
-            self.offset_str = 'UTC:' + self.date_fmt(self.get_real_value(values[0]), self.YEAR, self.cut_start,
-                                                     postfix_end=self.postfix_end, postfix_start=self.postfix_start)
-
-            spacing = abs(values[1] - values[0]) if len(values) >= 2 else (maxVal - minVal)
+        if self.orientation == 'bottom' and self._is_rel_time():
+            # Relative time (seconds) X axis. Replace the generic 1/2/5
+            # decimal positions with round-duration ticks (1d, 12h, 5m, ...)
+            # anchored at 0, then factor the constant part into the corner
+            # (e.g. 36ms250us) and label each tick with the changing groups
+            # + unit (e.g. 150ns). Negative views are not offset; units
+            # extend to days for long pulses.
+            rel = _rel_time_ticks(int(round(minVal * 1e9)),
+                                  int(round(maxVal * 1e9)), n)
+            if rel:
+                values = [t / 1e9 for t in rel]
+            common, labels, base, g_scale = eng_time_axis_labels(
+                minVal, maxVal, list(values))
+            self._eng_common = common
+            self._eng_labels = labels
+            self._eng_base = base
+            self._eng_gscale = g_scale
+            self._numeric_offset = 0.0
+            self.autoSIPrefixScale = 1.0
+            self.labelUnit = ''
+            self.offset_str = common
+            if len(values) >= 2:
+                spacing = values[1] - values[0]
+            self._tick_spacing = spacing
+        elif self.orientation == 'bottom':
+            # Non-time relative X axis (some other quantity): keep the plain
+            # evenly spaced positions and plain numeric labels. Crucially we
+            # do NOT apply fn.siScale/set_scale here (that path is for the
+            # vertical axis); doing so on the bottom axis suppressed the
+            # ticks entirely.
+            self._eng_labels = None
+            self._eng_common = ''
+            self._numeric_offset = 0.0
+            self.autoSIPrefixScale = 1.0
+            self.labelUnit = ''
+            self.offset_str = ''
+            if len(values) >= 2:
+                spacing = values[1] - values[0]
+            self._tick_spacing = spacing
         else:
-            spacing, offset = super().tickSpacing(minVal, maxVal, size)[0]
-
-            if self.orientation == 'bottom' and self._is_rel_time():
-                # Relative time (seconds) X axis. Replace the generic 1/2/5
-                # decimal positions with round-duration ticks (1d, 12h, 5m, ...)
-                # anchored at 0, then factor the constant part into the corner
-                # (e.g. 36ms250us) and label each tick with the changing groups
-                # + unit (e.g. 150ns). Negative views are not offset; units
-                # extend to days for long pulses.
-                rel = _rel_time_ticks(int(round(minVal * 1e9)),
-                                      int(round(maxVal * 1e9)), n)
-                if rel:
-                    values = [t / 1e9 for t in rel]
-                common, labels, base, g_scale = eng_time_axis_labels(
-                    minVal, maxVal, list(values))
-                self._eng_common = common
-                self._eng_labels = labels
-                self._eng_base = base
-                self._eng_gscale = g_scale
-                self._numeric_offset = 0.0
-                self.autoSIPrefixScale = 1.0
-                self.labelUnit = ''
-                self.offset_str = common
-                if len(values) >= 2:
-                    spacing = values[1] - values[0]
-                self._tick_spacing = spacing
-            elif self.orientation == 'bottom':
-                # Non-time relative X axis (some other quantity): keep the plain
-                # evenly spaced positions and plain numeric labels. Crucially we
-                # do NOT apply fn.siScale/set_scale here (that path is for the
-                # vertical axis); doing so on the bottom axis suppressed the
-                # ticks entirely.
-                self._eng_labels = None
-                self._eng_common = ''
-                self._numeric_offset = 0.0
+            # Y axis. Clear any stale duration state.
+            self._eng_labels = None
+            self._eng_common = ''
+            self._numeric_offset = 0.0
+            if self.logMode:
+                # Decade ticks plus the minor ticks that give the log its
+                # spacing; no SI prefix or corner factor (see logTickValues).
                 self.autoSIPrefixScale = 1.0
                 self.labelUnit = ''
                 self.offset_str = ''
-                if len(values) >= 2:
-                    spacing = values[1] - values[0]
-                self._tick_spacing = spacing
+                return super().tickValues(minVal, maxVal, size)
             else:
-                # Y axis. Clear any stale duration state.
-                self._eng_labels = None
-                self._eng_common = ''
-                self._numeric_offset = 0.0
-                if self.logMode:
-                    # Decade ticks plus the minor ticks that give the log its
-                    # spacing; no SI prefix or corner factor (see logTickValues).
-                    self.autoSIPrefixScale = 1.0
-                    self.labelUnit = ''
-                    self.offset_str = ''
-                    return super().tickValues(minVal, maxVal, size)
-                else:
-                    # fn.siScale formatting.
-                    _range = self.range
-                    (scale, prefix) = fn.siScale(max(abs(_range[0] * self.scale), abs(_range[1] * self.scale)))
-                    self.set_scale(scale, prefix)
+                # fn.siScale formatting.
+                _range = self.range
+                (scale, prefix) = fn.siScale(max(abs(_range[0] * self.scale), abs(_range[1] * self.scale)))
+                self.set_scale(scale, prefix)
 
         return [(spacing, values)]  # major ticks
 

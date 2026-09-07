@@ -58,7 +58,7 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.create_checkbox()},
             {"label": "Show all ticks", "property": "ticks_position",
              "widget": self.create_checkbox()},
-            {"label": "Number of ticks and labels", "property": "tick_number",
+            {"label": "Number of ticks and labels [minimum]", "property": "tick_number",
              "widget": self.default_ticknumber_widget()},
             {"label": "Background color", "property": "background_color", "widget": ColorPicker("background_color")},
             {"label": "Legend", "property": "legend",
