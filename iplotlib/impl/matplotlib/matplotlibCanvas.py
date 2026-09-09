@@ -15,7 +15,6 @@ from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator
 from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -36,7 +35,7 @@ from iplotlib.core import (Axis,
                            SignalXY,
                            SignalContour)
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter, \
-    NiceNanosecondLocator, RelativeTimeLocator, is_time_label
+    NiceNanosecondLocator, RelativeTimeLocator, LinearTickLocator, is_time_label
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor, get_values_from_line
 from iplotlib.impl.matplotlib.iplotMplRuler import iplotMplRuler
 
@@ -1139,14 +1138,16 @@ class MatplotlibParser(BackendParserBase):
         # (set in process_ipl_axis_formatter). For a non-date X axis we always
         # attach the RelativeTimeLocator, which self-gates: if the axis label is
         # 'Time' it lays ticks on round durations (1d, 12h, 5m, ...), otherwise
-        # it falls back to MaxNLocator. (The 'Time' label is applied later, in
-        # signal processing, so we can't decide here -- the locator and the
-        # ExponentScalarFormatter both read the label live at draw time.)
+        # it falls back to the shared 1/2/5 ladder. (The 'Time' label is applied
+        # later, in signal processing, so we can't decide here -- the locator and
+        # the ExponentScalarFormatter both read the label live at draw time.)
+        # The Y axis takes the same ladder, so the configured count is a minimum
+        # on both backends.
         if not axis.is_date and not is_log_y:
             if getattr(mpl_axis, 'axis_name', None) == 'x':
                 mpl_axis.set_major_locator(RelativeTimeLocator(tick_number))
             else:
-                mpl_axis.set_major_locator(MaxNLocator(tick_number))
+                mpl_axis.set_major_locator(LinearTickLocator(tick_number))
 
     def process_ipl_axis_formatter(self, impl_plot: MPLAxes, mpl_axis: MPLAxis, ax_idx: int):
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)

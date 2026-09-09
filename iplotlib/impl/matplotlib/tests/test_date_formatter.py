@@ -8,7 +8,12 @@ have each been the source of bugs in the past, so we pin them here.
 
 import unittest
 
-from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter
+from matplotlib.ticker import MaxNLocator
+
+from iplotlib.core.date_ticks import linear_ticks
+from iplotlib.impl.matplotlib.dateFormatter import (LinearTickLocator,
+                                                    NanosecondDateFormatter,
+                                                    RelativeTimeLocator)
 
 
 # 2024-01-15 12:34:56.789 UTC in nanoseconds since epoch.
@@ -144,6 +149,35 @@ class FormatterLabelUnitTest(unittest.TestCase):
         fmt.cut_start = NanosecondDateFormatter.MINUTE
         self.assertEqual(fmt(0), '56s')
         self.assertEqual(fmt.format_data_short(0), '2024-01-15T12:34:56.789123456')
+
+
+class LinearTickLocatorTest(unittest.TestCase):
+    """The numeric-axis locator must honour the configured count as a minimum,
+    from the same 1/2/5 ladder the pyqtgraph backend uses."""
+
+    RANGES = ((-0.0045, 0.0028), (24.25, 25.55), (0.0, 1.0), (-7.0, 3.0))
+
+    def test_count_is_at_least_the_target(self):
+        for lo, hi in self.RANGES:
+            for target in (2, 5, 7):
+                ticks = [t for t in LinearTickLocator(target).tick_values(lo, hi) if lo <= t <= hi]
+                self.assertGreaterEqual(len(ticks), target, (lo, hi, target))
+
+    def test_positions_come_from_the_shared_ladder(self):
+        for lo, hi in self.RANGES:
+            self.assertEqual(list(LinearTickLocator(5).tick_values(lo, hi)), linear_ticks(lo, hi, 5))
+
+    def test_without_a_target_it_behaves_like_maxnlocator(self):
+        self.assertEqual(list(LinearTickLocator().tick_values(0.0, 1.0)),
+                         list(MaxNLocator().tick_values(0.0, 1.0)))
+
+    def test_degenerate_range_does_not_raise(self):
+        LinearTickLocator(5).tick_values(1.0, 1.0)
+
+    def test_relative_time_locator_falls_back_to_the_ladder(self):
+        # Without an axis the label check fails and the fallback answers.
+        ticks = [t for t in RelativeTimeLocator(5).tick_values(-0.0045, 0.0028) if -0.0045 <= t <= 0.0028]
+        self.assertGreaterEqual(len(ticks), 5)
 
 
 if __name__ == '__main__':

@@ -98,6 +98,19 @@ class TickNumberConfigTest(unittest.TestCase):
             self.assertLessEqual(hi - vals[-1], step, (lo, hi))
         qt_canvas.deleteLater()
 
+    def test_matplotlib_y_axis_count_follows_the_setting(self):
+        # MaxNLocator reads the count as a ceiling: a -4.5e-3..2.8e-3 range
+        # settled for four ticks with five configured, while the same range
+        # on pyqtgraph gave at least five.
+        _, qt_canvas, impl = self._build('matplotlib', 5)
+        parser = qt_canvas._parser
+        for lo, hi in ((-0.0045, 0.0028), (24.25, 25.55), (24.35, 25.65)):
+            parser.set_oaw_axis_limits(impl, 1, (lo, hi))
+            vmin, vmax = impl.yaxis.get_view_interval()
+            ticks = [t for t in impl.yaxis.get_major_locator()() if vmin <= t <= vmax]
+            self.assertGreaterEqual(len(ticks), 5, (lo, hi))
+        qt_canvas.deleteLater()
+
     def test_minimap_inherits_the_configured_tick_number(self):
         core, qt_canvas, impl = self._build('pyqt', 5)
         core.show_minimap = True

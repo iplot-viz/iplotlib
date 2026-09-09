@@ -1,14 +1,17 @@
 import datetime
+import math
 import re as _re
 
 from matplotlib.ticker import ScalarFormatter, Locator, MaxNLocator
 from matplotlib.axis import XAxis
+import numpy as np
 import pandas
 
 from iplotlib.core.date_ticks import (
     pick_interval as _pick_interval,
     generate_ticks as _generate_ticks,
     relative_ticks as _rel_time_ticks,
+    linear_ticks as _linear_ticks,
     segments_for_interval as _segments_for_interval,
     label_unit as _label_unit,
 )
@@ -113,18 +116,41 @@ def eng_time_axis_labels(lo_s, hi_s, ticks_s):
 # would.
 
 
+class LinearTickLocator(MaxNLocator):
+    """Major-tick locator for a plain numeric axis (Y, or a non-time X).
+
+    Positions come from the 1/2/5 ladder shared with the pyqtgraph backend,
+    on the largest step that still leaves at least ``nbins`` ticks in view.
+    ``MaxNLocator`` reads its count as a ceiling and settles for fewer, so
+    the same range showed four ticks here and five on pyqtgraph while the
+    preferences promise a minimum. Without a count the ``MaxNLocator``
+    behaviour is kept unchanged."""
+
+    def __init__(self, nbins=None):
+        super().__init__(nbins=nbins)
+        self._target = None if nbins is None else max(int(nbins), 2)
+
+    def tick_values(self, vmin, vmax):
+        if (self._target is None or vmin == vmax
+                or not (math.isfinite(vmin) and math.isfinite(vmax))):
+            return super().tick_values(vmin, vmax)
+        lo, hi = (vmin, vmax) if vmin <= vmax else (vmax, vmin)
+        return self.raise_if_exceeds(np.asarray(_linear_ticks(lo, hi, self._target)))
+
+
 class RelativeTimeLocator(Locator):
     """Major-tick locator for a non-date X axis. When the axis is a relative
     *time* axis (label 'Time'), it places ticks on round duration boundaries
     (1d, 12h, 5m, 100ms, ...) anchored at 0 via the shared _rel_time_ticks
-    ladder, so long pulses read '1d'/'2d'. For any other quantity it defers to a
-    plain MaxNLocator. The label is read live at draw time, because it is only
-    applied during signal processing (after this locator is attached)."""
+    ladder, so long pulses read '1d'/'2d'. For any other quantity it defers to
+    the shared 1/2/5 ladder (LinearTickLocator). The label is read live at draw
+    time, because it is only applied during signal processing (after this
+    locator is attached)."""
 
     def __init__(self, nbins: int = 7, force_time: bool = False):
         self.nbins = max(int(nbins), 2)
         self._force_time = bool(force_time)
-        self._fallback = MaxNLocator(self.nbins)
+        self._fallback = LinearTickLocator(self.nbins)
 
     def set_axis(self, axis):
         super().set_axis(axis)
