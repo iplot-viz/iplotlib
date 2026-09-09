@@ -8,13 +8,14 @@ their old range under a new offset, so the shared time visibly stopped
 being shared.
 
 One nanosecond is the floor of what the axis can express, so a drag
-narrower than that has to stop there instead of collapsing.
+narrower than that has to stop above it instead of collapsing.
 """
 
 import unittest
 import warnings
 
 import numpy as np
+from PySide6.QtGui import QImage, QPainter
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
@@ -39,6 +40,21 @@ def _make_canvas() -> Canvas:
         plot.axes[0].is_date = True
         core.add_plot(plot, 0)
     return core
+
+
+def _painted_x_labels(backend: str, impl) -> list:
+    """The tick labels the backend really paints, not the candidates."""
+    if backend == 'pyqt':
+        # The image must outlive the painter, so keep a reference to it.
+        surface = QImage(16, 16, QImage.Format_ARGB32)
+        painter = QPainter(surface)
+        try:
+            specs = impl.getAxis('bottom').generateDrawSpecs(painter)
+        finally:
+            painter.end()
+        return [] if specs is None else [text for _, _, text in specs[2]]
+    impl.figure.canvas.draw()
+    return [t.get_text() for t in impl.get_xticklabels() if t.get_text()]
 
 
 class SharedAxisNanosecondZoomTest(unittest.TestCase):
@@ -101,7 +117,11 @@ class SharedAxisNanosecondZoomTest(unittest.TestCase):
                 windows = {parser.get_oaw_axis_limits(impl, 0) for impl in impls}
                 self.assertEqual(len(windows), 1, backend)
                 begin, end = windows.pop()
-                self.assertEqual(end - begin, 1, backend)
+                self.assertEqual(end - begin, 2, backend)
+                for impl in impls:
+                    # A one-nanosecond window would carry both its ticks on the
+                    # edges, where pyqtgraph paints neither label.
+                    self.assertTrue(_painted_x_labels(backend, impl), backend)
                 for plot in (core.plots[0][0], core.plots[0][1]):
                     self.assertEqual(plot.axes[0].get_limits('current'), (begin, end), backend)
                 qt_canvas.deleteLater()

@@ -470,8 +470,10 @@ class BackendParserBase(ABC):
             # A drag narrower than one nanosecond rounds to begin == end on an
             # axis expressed in nanoseconds. The zoomed plot then loses its
             # scale while the rest of the group keeps the previous window, so
-            # stop at the nanosecond instead of collapsing.
-            new_end = new_start + 1
+            # stop before that. The floor spans a nanosecond either side of
+            # the point: a window of a single nanosecond carries its only two
+            # ticks on the edges, where pyqtgraph drops both labels.
+            new_start, new_end = new_start - 1, new_start + 1
 
         # Reverse direction (mint#120): a zoom made ON an X-versus-Y plot can
         # drive the shared-time group when the X column is invertible — it
