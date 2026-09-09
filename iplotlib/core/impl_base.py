@@ -465,6 +465,14 @@ class BackendParserBase(ABC):
         new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
         current_ipl_plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
 
+        if (new_start is not None and new_start == new_end
+                and current_ipl_plot.axes[0].is_date):
+            # A drag narrower than one nanosecond rounds to begin == end on an
+            # axis expressed in nanoseconds. The zoomed plot then loses its
+            # scale while the rest of the group keeps the previous window, so
+            # stop at the nanosecond instead of collapsing.
+            new_end = new_start + 1
+
         # Reverse direction (mint#120): a zoom made ON an X-versus-Y plot can
         # drive the shared-time group when the X column is invertible — it
         # derives from data (e.g. '${A}.data') and increases monotonically, so

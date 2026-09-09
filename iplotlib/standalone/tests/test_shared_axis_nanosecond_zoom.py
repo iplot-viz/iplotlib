@@ -6,6 +6,9 @@ resolves 256 ns, so an 80 ns window came back with begin == end: matplotlib
 expanded the singular range on its own and pyqtgraph left the siblings on
 their old range under a new offset, so the shared time visibly stopped
 being shared.
+
+One nanosecond is the floor of what the axis can express, so a drag
+narrower than that has to stop there instead of collapsing.
 """
 
 import unittest
@@ -79,6 +82,28 @@ class SharedAxisNanosecondZoomTest(unittest.TestCase):
                 lo, hi = parser.get_oaw_axis_limits(impls[0], 0)
                 self.assertEqual((lo, hi), parser.get_oaw_axis_limits(impls[1], 0), backend)
                 self.assertGreater(hi - lo, 3500 * 10**9, backend)
+                qt_canvas.deleteLater()
+
+    def test_a_drag_below_one_nanosecond_stops_at_the_nanosecond(self):
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                core, qt_canvas, impls = self._build(backend)
+                parser = qt_canvas._parser
+                parser.set_oaw_axis_limits(impls[0], 0, WINDOW)
+                self.app.processEvents()
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    # A rubber band 0.8 ns wide, in the view coordinates the
+                    # backend hands back to the shared-axis callback.
+                    parser.set_impl_x_axis_limits(impls[0], (-0.4, 0.4))
+                    self.app.processEvents()
+                self.assertFalse([w for w in caught if 'singular' in str(w.message)], backend)
+                windows = {parser.get_oaw_axis_limits(impl, 0) for impl in impls}
+                self.assertEqual(len(windows), 1, backend)
+                begin, end = windows.pop()
+                self.assertEqual(end - begin, 1, backend)
+                for plot in (core.plots[0][0], core.plots[0][1]):
+                    self.assertEqual(plot.axes[0].get_limits('current'), (begin, end), backend)
                 qt_canvas.deleteLater()
 
 
