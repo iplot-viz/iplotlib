@@ -268,8 +268,14 @@ class BackendParserBase(ABC):
         if len(y_displayed) > 0 and np.isnan(y_displayed).any():
             y_displayed = y_displayed[~np.isnan(y_displayed)]
         if len(y_displayed) > 0:
-            min_bot = np.min(y_displayed)
-            max_top = np.max(y_displayed)
+            # Plain numbers: the buffer type keeps both its shape and its
+            # dtype through the reduction, and each bites downstream. numpy
+            # refuses to convert a one-element array to a scalar, and
+            # pyqtgraph compares the range it is given against its default
+            # +-1e307 view limits, which do not fit in the float32 the
+            # archive serves (mint#84).
+            min_bot = np.min(y_displayed).item()
+            max_top = np.max(y_displayed).item()
         else:
             min_bot = np.inf
             max_top = -np.inf
@@ -299,11 +305,7 @@ class BackendParserBase(ABC):
         if bot == np.inf and top == -np.inf:
             bot, top = 0, 1
 
-        # Plain floats: a numpy scalar keeps the dtype of the data, and
-        # pyqtgraph compares the range it is given against its default
-        # +-1e307 view limits, which do not fit in a float32 and warn on
-        # every cast (mint#84).
-        return float(bot), float(top)
+        return bot, top
 
     @abstractmethod
     def export_image(self, filename: str, **kwargs):
