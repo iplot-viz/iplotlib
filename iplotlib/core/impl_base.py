@@ -299,7 +299,11 @@ class BackendParserBase(ABC):
         if bot == np.inf and top == -np.inf:
             bot, top = 0, 1
 
-        return bot, top
+        # Plain floats: a numpy scalar keeps the dtype of the data, and
+        # pyqtgraph compares the range it is given against its default
+        # +-1e307 view limits, which do not fit in a float32 and warn on
+        # every cast (mint#84).
+        return float(bot), float(top)
 
     @abstractmethod
     def export_image(self, filename: str, **kwargs):
