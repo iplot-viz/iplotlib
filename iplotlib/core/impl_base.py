@@ -18,6 +18,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import partial, wraps
 import logging
+import math
 import numpy as np
 from queue import Empty, Queue
 import re
@@ -112,8 +113,14 @@ class ImplementationPlotCacheTable:
             scale = ci.scales[ax_idx]
             if inverse:
                 return (value - offset) / scale if scale != 1 else value - offset
-            else:
-                return value * scale + offset if scale != 1 else value + offset
+            if (offset != 0 and isinstance(value, (int, float, np.integer, np.floating))
+                    and math.isfinite(value)):
+                # The backend hands view coordinates back as floats. Added to a
+                # nanosecond offset near 1e18 in float64 the sum only resolves
+                # 256 ns, which turned an 80 ns window into begin == end. Round
+                # to the nanosecond first so the sum stays exact.
+                return int(offset) + int(round(float(value) * scale))
+            return value * scale + offset if scale != 1 else value + offset
 
     def get_slider_time(self, impl_obj: Any):
         """Return current slider time (ns) if impl_obj belongs to a slider plot, else None."""
