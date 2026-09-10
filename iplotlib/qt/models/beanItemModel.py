@@ -49,10 +49,13 @@ class BeanItemModel(QStandardItemModel):
 
         logger.debug(f"PyObject: {self._pyObject}")
 
-        value = PropertyManager().get_value(self._pyObject, property_name)
+        # Raw, not display-scaled: the mapper writes every widget back on
+        # submit, so a scaled font size shown here would be stored as the new
+        # size and scaled again on the next render.
+        value = PropertyManager().get_raw_value(self._pyObject, property_name)
 
         if isinstance(self._pyObject, SignalXY) and property_name == 'color' and value is None:
-            return PropertyManager().get_value(self._pyObject, 'original_color')
+            return PropertyManager().get_raw_value(self._pyObject, 'original_color')
 
         if property_name == 'label' and value is None:
             value = getattr(self._pyObject, '_auto_label', None)
