@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox, QSplitter
 
 import numpy as np
 from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY, PlotContourWithSlider
+from iplotlib.core.display import ScaledPixels
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.core.ruler import Ruler
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
@@ -25,6 +26,10 @@ from pyqtgraph import PlotItem, TextItem
 import pyqtgraph as pg
 
 logger = Sl.get_logger(__name__)
+
+
+#: The mini-map must stay tall enough to read once the UI scale grows.
+MINIMAP_MIN_HEIGHT = ScaledPixels(110)
 
 
 class QtPyQtGraphCanvas(IplotQtCanvas):
@@ -53,7 +58,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._connected_viewboxes = set()
 
         self._minimap_widget = pg.GraphicsLayoutWidget()
-        self._minimap_widget.setMinimumHeight(110)
+        self._minimap_widget.setMinimumHeight(MINIMAP_MIN_HEIGHT.px())
         self._minimap_widget.setVisible(False)
         self._minimap_widget.setBackground('#f5f5f5')
         self._minimap_plot = self._minimap_widget.addPlot(row=0, col=0)
@@ -219,7 +224,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._minimap_widget.setVisible(show)
         if show:
             total = max(self._splitter.height(), 1)
-            minimap_h = max(int(total * 0.22), 110)
+            minimap_h = max(int(total * 0.22), MINIMAP_MIN_HEIGHT.px())
             self._splitter.setSizes([total - minimap_h, minimap_h])
         if not show:
             self._minimap_plot.clear()
@@ -281,7 +286,12 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 except Exception:
                     pass
             self._minimap_widget.ci.addItem(new_bottom.common_label, row=1, col=0)
-            new_bottom.common_label.setMaximumHeight(14)
+            # Grow with the resolved font instead of a literal 14 px, which
+            # clipped the UTC label as soon as the font size went up.
+            _label_font = QFont()
+            _label_font.setPointSize(int(fs))
+            new_bottom.common_label.setMaximumHeight(
+                int(QFontMetricsF(_label_font).height() + 2))
             self._minimap_common_label = new_bottom.common_label
         # Keep the minimap axis on the same integer offset as the data we plot.
         self._minimap_plot.getAxis('bottom').set_offset(self._minimap_offset)

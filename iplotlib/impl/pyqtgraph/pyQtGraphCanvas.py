@@ -1307,10 +1307,11 @@ class PyQtGraphParser(BackendParserBase):
         # Font size for UTC label
         if isinstance(axis_item, NanosecondDateFormatter):
             axis_item.common_label.setText(axis_item.offset_str, size=f'{fs}pt', color=fc)
-            if font_metrics:
-                axis_item.common_label.setMaximumHeight(int(font_metrics.height() + 2))
-            else:
-                axis_item.common_label.setMaximumHeight(14)
+            if not font_metrics:
+                # Derive it rather than falling back to a literal 14 px, which
+                # clipped the label at any scaled or enlarged font size.
+                font_metrics = QFontMetricsF(QFont())
+            axis_item.common_label.setMaximumHeight(int(font_metrics.height() + 2))
 
         axis_item.setStyle(**tick_props)
 

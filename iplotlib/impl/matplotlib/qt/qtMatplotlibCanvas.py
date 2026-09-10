@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.backend_bases import _Mode, DrawEvent, Event, MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from iplotlib.core.display import ScaledPixels
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
@@ -39,6 +40,10 @@ from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
+
+
+#: The mini-map must stay tall enough to read once the UI scale grows.
+MINIMAP_MIN_HEIGHT = ScaledPixels(110)
 
 
 class QtMatplotlibCanvas(IplotQtCanvas):
@@ -74,7 +79,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._minimap_renderer = FigureCanvas(self._minimap_figure)
         self._minimap_renderer.setParent(self)
         self._minimap_renderer.setSizePolicy(self._mpl_size_pol)
-        self._minimap_renderer.setMinimumHeight(110)
+        self._minimap_renderer.setMinimumHeight(MINIMAP_MIN_HEIGHT.px())
         self._minimap_renderer.setVisible(False)
         self._minimap_axes = None
         self._minimap_viewport_patch = None
@@ -176,7 +181,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._minimap_renderer.setVisible(show)
         if show:
             total = max(self._splitter.height(), 1)
-            minimap_h = max(int(total * 0.22), 110)
+            minimap_h = max(int(total * 0.22), MINIMAP_MIN_HEIGHT.px())
             self._splitter.setSizes([total - minimap_h, minimap_h])
         if not show:
             self._disconnect_minimap_xlim()
