@@ -14,11 +14,11 @@ import importlib
 import pkgutil
 import sys
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import (QGuiApplication, QKeySequence, QAction, QActionGroup)
 
 from iplotlib.core import Canvas
+from iplotlib.core.display import DisplayScale, apply_hidpi_policy, screen_pixel_width
 from iplotlib.standalone import examples
 from iplotlib.interface.iplotSignalAdapter import AccessHelper
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
@@ -53,7 +53,10 @@ class QStandaloneCanvas:
         and add canvases.
         """
 
-        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+        # High-DPI scaling is unconditional in Qt 6, so AA_EnableHighDpiScaling is
+        # a no-op there. What still matters is the rounding policy, and it only
+        # has an effect before the QApplication exists.
+        apply_hidpi_policy()
         self.app = QApplication(argv)
         self.main_window = IplotQtMainWindow(show_toolbar=self.use_toolbar)
         self.fileMenu = self.main_window.menuBar().addMenu('&File')
@@ -68,10 +71,12 @@ class QStandaloneCanvas:
         self.canvasActionGroup.setExclusive(True)
 
         logger.debug(f"Detected {len(QGuiApplication.screens())} screen (s)")
-        max_width = 0
-        for screen in QGuiApplication.screens():
-            max_width = max(screen.geometry().width(), max_width)
+        # Physical pixels, not device-independent ones: the sample count should
+        # match what the panel can actually resolve, and QScreen.geometry() is
+        # halved on a 200% scaled 4K display.
+        max_width = screen_pixel_width()
         logger.debug(f"Detected max screen width: {max_width}")
+        logger.info(f"Display scale: {DisplayScale.instance().reason}")
         AccessHelper.num_samples = max_width
         logger.info(f"Fallback dec_samples : {AccessHelper.num_samples}")
 

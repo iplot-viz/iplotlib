@@ -3,11 +3,16 @@ from iplotlib.core.signal import SignalXY, SignalContour
 import unittest
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY, PlotContour
+from iplotlib.core.display import DisplayScale, MODE_FIXED, MODE_OFF
 from iplotlib.core.property_manager import PropertyManager
 
 
 class TestPropertyManager(unittest.TestCase):
     def setUp(self) -> None:
+        DisplayScale.reset()
+        # Pin the scale so the inheritance assertions below do not depend on the
+        # screen the test suite happens to run on.
+        DisplayScale.instance().configure(mode=MODE_OFF, force=True)
         self.pm = PropertyManager()
         self.canvas = Canvas(
             font_size=24,
@@ -45,13 +50,14 @@ class TestPropertyManager(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.canvas.plots[0].clear()
+        DisplayScale.reset()
         return super().tearDown()
 
     def test_plot_xy_inherits_canvas_properties(self):
         plot = PlotXY()
         self.canvas.add_plot(plot)
 
-        f = partial(self.pm.get_value, plot)
+        f = partial(self.pm.get_raw_value, plot)
 
         self.assertEqual(f("font_size"), self.canvas.font_size)
         self.assertEqual(f("font_color"), self.canvas.font_color)
@@ -72,7 +78,7 @@ class TestPropertyManager(unittest.TestCase):
         plot = PlotContour()
         self.canvas.add_plot(plot)
 
-        f = partial(self.pm.get_value, plot)
+        f = partial(self.pm.get_raw_value, plot)
 
         self.assertEqual(f("font_size"), self.canvas.font_size)
         self.assertEqual(f("font_color"), self.canvas.font_color)
@@ -94,7 +100,7 @@ class TestPropertyManager(unittest.TestCase):
         self.canvas.add_plot(plot)
 
         for ax in plot.axes:
-            f = partial(self.pm.get_value, ax[0] if isinstance(ax, list) else ax)
+            f = partial(self.pm.get_raw_value, ax[0] if isinstance(ax, list) else ax)
             self.assertEqual(f("font_color"), self.canvas.font_color)
             self.assertEqual(f("font_size"), self.canvas.font_size)
             self.assertEqual(f("tick_number"), self.canvas.tick_number)
@@ -106,7 +112,7 @@ class TestPropertyManager(unittest.TestCase):
         plot.add_signal(signal)
         self.canvas.add_plot(plot)
 
-        f = partial(self.pm.get_value, signal)
+        f = partial(self.pm.get_raw_value, signal)
 
         self.assertEqual(f("line_style"), self.canvas.line_style)
         self.assertEqual(f("line_size"), self.canvas.line_size)
@@ -120,10 +126,42 @@ class TestPropertyManager(unittest.TestCase):
         plot.add_signal(signal)
         self.canvas.add_plot(plot)
 
-        f = partial(self.pm.get_value, signal)
+        f = partial(self.pm.get_raw_value, signal)
 
         self.assertEqual(f("color_map"), self.canvas.color_map)
         self.assertEqual(f("contour_levels"), self.canvas.contour_levels)
+
+
+class TestPropertyManagerDisplayScale(unittest.TestCase):
+    """get_value renders, get_raw_value persists."""
+
+    def setUp(self) -> None:
+        DisplayScale.reset()
+        self.pm = PropertyManager()
+        self.canvas = Canvas(font_size=8, line_size=1, tick_number=7)
+
+    def tearDown(self) -> None:
+        DisplayScale.reset()
+
+    def test_fonts_are_scaled_for_rendering(self):
+        DisplayScale.instance().configure(mode=MODE_FIXED, value=2.0, force=True)
+        self.assertEqual(self.pm.get_value(self.canvas, "font_size"), 16)
+
+    def test_line_size_is_not_scaled(self):
+        # Its cost grows with the sample count: a pen wider than one pixel
+        # leaves Qt's fast line path and makes large pyqtgraph plots crawl.
+        DisplayScale.instance().configure(mode=MODE_FIXED, value=2.0, force=True)
+        self.assertEqual(self.pm.get_value(self.canvas, "line_size"), 1)
+
+    def test_non_size_properties_are_untouched(self):
+        DisplayScale.instance().configure(mode=MODE_FIXED, value=2.0, force=True)
+        self.assertEqual(self.pm.get_value(self.canvas, "tick_number"), 7)
+
+    def test_raw_value_is_never_scaled(self):
+        # What the preferences form shows and what gets written back to
+        # default_properties.json, so it must stay screen-independent.
+        DisplayScale.instance().configure(mode=MODE_FIXED, value=2.0, force=True)
+        self.assertEqual(self.pm.get_raw_value(self.canvas, "font_size"), 8)
 
 
 if __name__ == "__main__":

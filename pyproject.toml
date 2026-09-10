@@ -58,6 +58,7 @@ include = ["iplotlib*"]
 
 [project.scripts]
 iplotlib-qt-canvas = "iplotlib.standalone.iplotQtStandaloneCanvas:main"
+iplotlib-display-info = "iplotlib.core.display:print_display_info"
 
 [tool.pytest.ini_options]
 addopts = "-rA -s -v --ignore=iplotlib/impl/vtk/tests --cov=iplotlib --cov-report=term-missing --cov-report=xml"
