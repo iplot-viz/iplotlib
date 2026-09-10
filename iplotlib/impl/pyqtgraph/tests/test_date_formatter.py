@@ -145,5 +145,48 @@ class FormatterTickValuesTest(unittest.TestCase):
         self.assertGreater(len(ticks), 1)
 
 
+class FormatterLabelUnitTest(unittest.TestCase):
+    """Tick labels that shrink to a bare number carry the unit of their last
+    digit; clock-formatted labels and the crosshair readout do not."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def _labels(self, cut_start, label_end, ts=TS_1):
+        fmt = _formatter()
+        # The axis coordinate is the offset from ts itself, so 0 maps to ts
+        # exactly (a float ns timestamp would lose its last digits).
+        fmt.set_offset(ts)
+        fmt.cut_start = cut_start
+        fmt._date_label_end = label_end
+        return fmt.tickStrings([0], 1.0, 1.0), fmt
+
+    def test_single_segment_labels_carry_their_unit(self):
+        fmt = _formatter()
+        self.assertEqual(self._labels(fmt.HOUR, fmt.MINUTE)[0], ['34min'])
+        self.assertEqual(self._labels(fmt.MINUTE, fmt.SECOND)[0], ['56s'])
+        self.assertEqual(self._labels(fmt.SECOND, fmt.MILISECOND)[0], ['789ms'])
+        self.assertEqual(self._labels(fmt.MICROSECOND, fmt.NANOSECOND, TS_1_NS)[0], ['456ns'])
+
+    def test_sub_second_groups_read_as_one_integer_in_the_finest_unit(self):
+        fmt = _formatter()
+        self.assertEqual(self._labels(fmt.SECOND, fmt.MICROSECOND, TS_1_NS)[0], ['789123us'])
+
+    def test_decimal_seconds_keep_the_second_unit(self):
+        fmt = _formatter()
+        self.assertEqual(self._labels(fmt.MINUTE, fmt.MILISECOND)[0], ['56.789s'])
+
+    def test_clock_and_calendar_labels_have_no_unit(self):
+        fmt = _formatter()
+        self.assertEqual(self._labels(fmt.DAY, fmt.MINUTE)[0], ['12:34'])
+        self.assertEqual(self._labels(fmt.HOUR, fmt.SECOND)[0], ['34:56'])
+        self.assertEqual(self._labels(fmt.MONTH, fmt.DAY)[0], ['15'])
+
+    def test_crosshair_readout_is_the_full_timestamp(self):
+        _, fmt = self._labels(NanosecondDateFormatter.MINUTE, NanosecondDateFormatter.SECOND, TS_1_NS)
+        self.assertEqual(fmt.format_full(0), '2024-01-15T12:34:56.789123456')
+
+
 if __name__ == '__main__':
     unittest.main()

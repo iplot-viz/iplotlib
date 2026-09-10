@@ -18,6 +18,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import partial, wraps
 import logging
+import math
 import numpy as np
 from queue import Empty, Queue
 import re
@@ -112,8 +113,14 @@ class ImplementationPlotCacheTable:
             scale = ci.scales[ax_idx]
             if inverse:
                 return (value - offset) / scale if scale != 1 else value - offset
-            else:
-                return value * scale + offset if scale != 1 else value + offset
+            if (offset != 0 and isinstance(value, (int, float, np.integer, np.floating))
+                    and math.isfinite(value)):
+                # The backend hands view coordinates back as floats. Added to a
+                # nanosecond offset near 1e18 in float64 the sum only resolves
+                # 256 ns, which turned an 80 ns window into begin == end. Round
+                # to the nanosecond first so the sum stays exact.
+                return int(offset) + int(round(float(value) * scale))
+            return value * scale + offset if scale != 1 else value + offset
 
     def get_slider_time(self, impl_obj: Any):
         """Return current slider time (ns) if impl_obj belongs to a slider plot, else None."""
@@ -261,8 +268,14 @@ class BackendParserBase(ABC):
         if len(y_displayed) > 0 and np.isnan(y_displayed).any():
             y_displayed = y_displayed[~np.isnan(y_displayed)]
         if len(y_displayed) > 0:
-            min_bot = np.min(y_displayed)
-            max_top = np.max(y_displayed)
+            # Plain numbers: the buffer type keeps both its shape and its
+            # dtype through the reduction, and each bites downstream. numpy
+            # refuses to convert a one-element array to a scalar, and
+            # pyqtgraph compares the range it is given against its default
+            # +-1e307 view limits, which do not fit in the float32 the
+            # archive serves (mint#84).
+            min_bot = np.min(y_displayed).item()
+            max_top = np.max(y_displayed).item()
         else:
             min_bot = np.inf
             max_top = -np.inf
@@ -457,6 +470,16 @@ class BackendParserBase(ABC):
 
         new_start, new_end = self.get_oaw_axis_limits(current_plot, 0)
         current_ipl_plot = self._impl_plot_cache_table.get_cache_item(current_plot).plot()
+
+        if (new_start is not None and new_start == new_end
+                and current_ipl_plot.axes[0].is_date):
+            # A drag narrower than one nanosecond rounds to begin == end on an
+            # axis expressed in nanoseconds. The zoomed plot then loses its
+            # scale while the rest of the group keeps the previous window, so
+            # stop before that. The floor spans a nanosecond either side of
+            # the point: a window of a single nanosecond carries its only two
+            # ticks on the edges, where pyqtgraph drops both labels.
+            new_start, new_end = new_start - 1, new_start + 1
 
         # Reverse direction (mint#120): a zoom made ON an X-versus-Y plot can
         # drive the shared-time group when the X column is invertible — it

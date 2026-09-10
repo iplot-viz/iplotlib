@@ -16,6 +16,7 @@ the static rendering tests don't reach.
 
 import os
 import unittest
+import warnings
 
 import numpy as np
 from PySide6.QtCore import Qt
@@ -32,14 +33,15 @@ BACKENDS = ('matplotlib', 'pyqt')
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 
-def _canvas_with_noisy_signal() -> Canvas:
+def _canvas_with_noisy_signal(dtype=None) -> Canvas:
     """Canvas with a single plot whose Y range is non-trivial so autoscale
     / stats have something to work on."""
     core = Canvas(1, 1, title="backend_behaviour")
     x = np.linspace(0, 10, 200)
     plot = PlotXY()
     sig = SignalXY(label="noisy")
-    sig.set_data([x, np.sin(x) + 0.3 * np.cos(7 * x)])
+    y = np.sin(x) + 0.3 * np.cos(7 * x)
+    sig.set_data([x, y if dtype is None else y.astype(dtype)])
     plot.add_signal(sig)
     core.add_plot(plot, 0)
     return core
@@ -323,6 +325,26 @@ class AutoscaleTest(unittest.TestCase):
 
                 qt_canvas.autoscale_all_y()
                 self.app.processEvents()
+
+    def test_autoscale_of_float32_data_does_not_warn(self):
+        """A Y range kept as a numpy scalar reaches the pyqtgraph ViewBox,
+        which compares it against its own +-1e307 view limits: those do not
+        fit in a float32 and warn on every cast (mint#84)."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = _canvas_with_noisy_signal(np.float32)
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(400, 300)
+                self.app.processEvents()
+
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    qt_canvas.autoscale_all_y()
+                    self.app.processEvents()
+
+                self.assertEqual([str(w.message) for w in caught
+                                  if 'overflow' in str(w.message)], [], backend)
 
 
 class MouseModeTest(unittest.TestCase):
