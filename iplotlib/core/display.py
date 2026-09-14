@@ -86,6 +86,9 @@ SCALE_STEP = 0.25
 PLAUSIBLE_DPI = (72.0, 400.0)
 #: Only believe a DPI-derived scale once it is meaningfully above the reference.
 DPI_DEADBAND = 1.15
+#: Pixel width the size defaults were laid out against. A scale factor of N only
+#: makes sense when the panel has roughly N times these pixels to spend on it.
+REFERENCE_WIDTH = 1920
 
 ENV_SCALE = 'IPLOT_UI_SCALE'
 ENV_REFERENCE_DPI = 'IPLOT_UI_REFERENCE_DPI'
@@ -228,11 +231,26 @@ def collect_metrics() -> dict:
     return metrics
 
 
-def _bucket_from_width(width_px: int) -> typing.Optional[float]:
-    """Scale implied by raw pixel width.
+def pixel_ceiling(width_px: int) -> float:
+    """The largest scale the panel has the pixels to justify.
 
-    Pixel counts are the only metric NX, VNC and X2Go report honestly, so this
-    is the fallback when no DPI can be trusted.
+    A reported DPI cannot be taken at face value even on a local session: a
+    monitor whose EDID understates its physical size, or an X server started
+    with the wrong -dpi, makes an ordinary 1920x1080 panel claim 160+ DPI and
+    look exactly like a 4K one. Pixel count is the metric no display server
+    gets wrong, so it is used to corroborate the DPI rather than only as a
+    fallback. A 1920-wide screen is what the size defaults were tuned for, so
+    its ceiling is 1.0 and it is never scaled however high a DPI it reports.
+    """
+    if width_px <= 0:
+        return 1.0
+    return max(1.0, width_px / float(REFERENCE_WIDTH))
+
+
+def _bucket_from_width(width_px: int) -> typing.Optional[float]:
+    """Scale implied by raw pixel width, when no DPI can be trusted at all.
+
+    Pixel counts are the only metric NX, VNC and X2Go report honestly.
     """
     if width_px >= 3840:
         return 2.0
@@ -260,6 +278,9 @@ def scale_from_metrics(metrics: dict,
         # every logical pixel and point size. Scaling again would double-apply.
         return 1.0, f"session already scales (devicePixelRatio={dpr:g}), no extra scaling"
 
+    width = int(metrics.get('width_px') or 0)
+    ceiling = pixel_ceiling(width)
+
     logical = float(metrics.get('logical_dpi') or 0.0)
     if (PLAUSIBLE_DPI[0] <= logical <= PLAUSIBLE_DPI[1]
             and logical >= reference_dpi * DPI_DEADBAND):
@@ -272,11 +293,20 @@ def scale_from_metrics(metrics: dict,
     physical = float(metrics.get('physical_dpi') or 0.0)
     if not remote and PLAUSIBLE_DPI[0] <= physical <= PLAUSIBLE_DPI[1]:
         if physical >= reference_dpi * DPI_DEADBAND:
-            factor = quantize(clamp(physical / reference_dpi, min_scale, max_scale))
+            wanted = physical / reference_dpi
+            if wanted > ceiling:
+                # The DPI asks for more than the panel has pixels for, which is
+                # what an understated EDID looks like. Believe the pixels.
+                factor = quantize(clamp(ceiling, min_scale, max_scale))
+                if factor <= 1.0:
+                    return 1.0, (f"physical DPI {physical:g} wants {wanted:.2f} but the panel is "
+                                 f"only {width}px wide, no scaling")
+                return factor, (f"physical DPI {physical:g} capped by {width}px panel width "
+                                f"-> {factor:g}")
+            factor = quantize(clamp(wanted, min_scale, max_scale))
             return factor, f"physical DPI {physical:g} / {reference_dpi:g}"
         return 1.0, f"physical DPI {physical:g} at or below reference, no scaling"
 
-    width = int(metrics.get('width_px') or 0)
     bucket = _bucket_from_width(width)
     why_dpi = ("remote session (%s), physical DPI not trusted" % ','.join(remote)) if remote \
         else "no usable DPI reported"

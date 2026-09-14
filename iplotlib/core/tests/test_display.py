@@ -12,8 +12,9 @@ from iplotlib.core.display import (DATA_COST_PROPERTIES,
                                    DEFAULT_SCALED_PROPERTIES, DisplayScale,
                                    MODE_FIXED, MODE_OFF, ScaledPixels,
                                    parse_scale_setting,
-                                   parse_scaled_properties, quantize,
-                                   remote_session_markers, scale_from_metrics)
+                                   parse_scaled_properties, pixel_ceiling,
+                                   quantize, remote_session_markers,
+                                   scale_from_metrics)
 
 
 def metrics(**kwargs):
@@ -29,6 +30,27 @@ class ScaleFromMetricsTest(unittest.TestCase):
     def test_fullhd_local_is_unscaled(self):
         factor, _ = scale_from_metrics(metrics(physical_dpi=94.0))
         self.assertEqual(factor, 1.0)
+
+    def test_a_reported_dpi_cannot_exceed_what_the_pixels_justify(self):
+        # A monitor whose EDID understates its physical size, or an X server
+        # started with the wrong -dpi, makes an ordinary 1920x1080 panel claim
+        # 160+ DPI and look exactly like a 4K one. Scaling it enlarges the UI
+        # without any extra pixels to put it on, so the layout simply overflows.
+        factor, why = scale_from_metrics(metrics(physical_dpi=160.0, width_px=1920))
+        self.assertEqual(factor, 1.0)
+        self.assertIn('1920px', why)
+
+    def test_pixel_ceiling_caps_rather_than_rejects(self):
+        # A wider-than-FullHD panel still scales, just not beyond its pixels.
+        factor, why = scale_from_metrics(metrics(physical_dpi=200.0, width_px=2560))
+        self.assertEqual(factor, 1.25)
+        self.assertIn('capped', why)
+
+    def test_pixel_ceiling(self):
+        self.assertEqual(pixel_ceiling(1920), 1.0)
+        self.assertEqual(pixel_ceiling(1366), 1.0)
+        self.assertEqual(pixel_ceiling(3840), 2.0)
+        self.assertEqual(pixel_ceiling(0), 1.0)
 
     def test_unscaled_4k_scales_up(self):
         factor, why = scale_from_metrics(metrics(physical_dpi=163.0, width_px=3840))
