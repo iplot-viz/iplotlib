@@ -263,8 +263,10 @@ def scale_from_metrics(metrics: dict,
     logical = float(metrics.get('logical_dpi') or 0.0)
     if (PLAUSIBLE_DPI[0] <= logical <= PLAUSIBLE_DPI[1]
             and logical >= reference_dpi * DPI_DEADBAND):
-        factor = quantize(clamp(logical / reference_dpi, min_scale, max_scale))
-        return factor, f"logical DPI {logical:g} / {reference_dpi:g}"
+        # Qt converts point sizes with the logical DPI, so QT_FONT_DPI or an
+        # Xft.dpi taken without high-DPI scaling already enlarges every font;
+        # a factor on top would double them.
+        return 1.0, f"logical DPI {logical:g} already scales point sizes, no extra scaling"
 
     remote = metrics.get('remote_markers') or []
     physical = float(metrics.get('physical_dpi') or 0.0)
@@ -413,6 +415,20 @@ class DisplayScale:
             # Keep a non-zero size visible after rounding.
             return max(1, int(round(scaled)))
         return scaled
+
+    def unapply(self, attr_name: str, value):
+        """The configured value that :meth:`apply` renders as ``value``."""
+        if value is None or attr_name not in self._scaled_properties:
+            return value
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return value
+        factor = self.factor()
+        if factor == 1.0:
+            return value
+        raw = value / factor
+        if isinstance(value, int):
+            return max(1, int(round(raw)))
+        return raw
 
     def px(self, value) -> int:
         """Scale a widget pixel constant (minimum heights, margins ...)."""

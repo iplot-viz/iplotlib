@@ -44,11 +44,12 @@ class ScaleFromMetricsTest(unittest.TestCase):
         self.assertEqual(factor, 1.0)
         self.assertIn('devicePixelRatio', why)
 
-    def test_logical_dpi_wins_over_physical(self):
-        # Xft.dpi is an explicit user choice; honour it rather than the panel.
+    def test_logical_dpi_is_already_applied_to_fonts(self):
+        # QT_FONT_DPI (or Xft.dpi without high-DPI scaling) makes Qt render
+        # every point size larger; a factor on top would double the fonts.
         factor, why = scale_from_metrics(
             metrics(logical_dpi=144.0, physical_dpi=163.0, width_px=3840))
-        self.assertEqual(factor, 1.5)
+        self.assertEqual(factor, 1.0)
         self.assertIn('logical DPI', why)
 
     def test_remote_session_ignores_bogus_physical_dpi(self):
@@ -160,6 +161,17 @@ class ApplyTest(unittest.TestCase):
     def test_int_sizes_never_round_to_zero(self):
         self.scale.configure(mode=MODE_FIXED, value=1.0, force=True)
         self.assertEqual(self.scale.apply('line_size', 1), 1)
+
+    def test_unapply_gives_back_the_configured_size(self):
+        scale = DisplayScale.instance()
+        scale.configure(mode=MODE_FIXED, value=1.75, force=True)
+        self.assertEqual(scale.unapply('font_size', 14), 8)
+        self.assertEqual(scale.unapply('font_size', 1), 1)
+        self.assertEqual(scale.unapply('font_size', 3.5), 2.0)
+        # Not a scaled property: nothing to undo.
+        self.assertEqual(scale.unapply('line_size', 14), 14)
+        scale.configure(mode=MODE_OFF, force=True)
+        self.assertEqual(scale.unapply('font_size', 14), 14)
 
     def test_off_mode_is_identity(self):
         self.scale.configure(mode=MODE_OFF, force=True)

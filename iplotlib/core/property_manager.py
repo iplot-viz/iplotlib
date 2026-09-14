@@ -58,9 +58,8 @@ class PropertyManager:
         """Resolve a property without applying the display scale.
 
         This is the value the user set (or the configured default) and is what
-        the preferences forms must show and persist: scaling on the way out and
-        then saving the scaled number would bake the current screen's factor
-        into the configuration file.
+        gets persisted: saving a scaled number would bake the current screen's
+        factor into the configuration file.
         """
         value = getattr(obj, attr_name, None)
         if value is not None:
