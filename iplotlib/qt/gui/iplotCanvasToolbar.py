@@ -74,8 +74,8 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         self.addSeparator()
 
         # Command-history management
-        self.undoAction = QAction(create_icon('undo'), '&Undo', self)
-        self.redoAction = QAction(create_icon('redo'), '&Redo', self)
+        self.undoAction = QAction(create_icon('undo', 'svg'), '&Undo', self)
+        self.redoAction = QAction(create_icon('redo', 'svg'), '&Redo', self)
         self.addAction(self.undoAction)
         self.addAction(self.redoAction)
 
@@ -85,21 +85,21 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         self.addAction(self.homeAction)
 
         # Saving, etc..
-        self.importAction = QAction(create_icon('open_file'), '&Import Workspace', self)
-        self.exportAction = QAction(create_icon('save_as'), '&Export Workspace', self)
-        self.exportDataAction = QAction(create_icon('export'), '&Export Data', self)
+        self.importAction = QAction(create_icon('open_file', 'svg'), '&Import Workspace', self)
+        self.exportAction = QAction(create_icon('save_as', 'svg'), '&Export Workspace', self)
+        self.exportDataAction = QAction(create_icon('export', 'svg'), '&Export Data', self)
         self.addAction(self.importAction)
         self.addAction(self.exportAction)
         self.addAction(self.exportDataAction)
 
         # Save canvas as image
-        self.saveImageAction = QAction(create_icon('screenshot'), '&Save Canvas as Image', self)
+        self.saveImageAction = QAction(create_icon('screenshot', 'svg'), '&Save Canvas as Image', self)
         self.addAction(self.saveImageAction)
 
         # Pulse creation. Hidden by default — the host application decides
         # whether to show it based on data-source capabilities (see
         # MTMainWindow feature-gating against UdaAccess.is_write_capable()).
-        self.createPulseAction = QAction(create_icon('create_pulse'), '&Create Pulse', self)
+        self.createPulseAction = QAction(create_icon('create_pulse', 'svg'), '&Create Pulse', self)
         self.createPulseAction.setToolTip('Create Pulse')
         self.createPulseAction.setStatusTip(
             'Create a UDA pulse from the currently visible time range')
@@ -107,7 +107,7 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         self.addAction(self.createPulseAction)
 
         # Pulse update. Hidden by default; same gating as createPulseAction.
-        self.updatePulseAction = QAction(create_icon('update_pulse'), '&Update Pulse', self)
+        self.updatePulseAction = QAction(create_icon('update_pulse', 'svg'), '&Update Pulse', self)
         self.updatePulseAction.setToolTip('Update Pulse')
         self.updatePulseAction.setStatusTip(
             'Search for an existing UDA pulse and update its time range, status or description')
@@ -115,7 +115,7 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         self.addAction(self.updatePulseAction)
 
         # Draw..
-        self.redrawAction = QAction(create_icon('rotate180'), '&Redraw', self)
+        self.redrawAction = QAction(create_icon('rotate180', 'svg'), '&Redraw', self)
         # self.addAction(self.redrawAction)
 
         # Configuration..
