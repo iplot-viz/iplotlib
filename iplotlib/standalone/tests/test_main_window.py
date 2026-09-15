@@ -19,6 +19,7 @@ from PySide6.QtGui import QStandardItemModel
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
+from iplotlib.core.property_manager import PropertyManager
 from iplotlib.core.signal import SignalXY
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.gui.iplotQtMainWindow import IplotQtMainWindow
@@ -507,7 +508,8 @@ class MinimapFontSizeTest(unittest.TestCase):
                 qt_canvas = self._qt_canvas(backend, core)
                 try:
                     target = core.get_minimap_target_plot()
-                    self.assertEqual(qt_canvas._minimap_font_size(target), 8)
+                    self.assertEqual(qt_canvas._minimap_font_size(target),
+                                     PropertyManager().default['font_size'])
                 finally:
                     qt_canvas.deleteLater()
 

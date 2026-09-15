@@ -139,10 +139,12 @@ class IplotPreferencesForm(QWidget):
         widget = QSpinBox()
         # Override the wheelEvent method using a lambda function to ignore mouse wheel events
         widget.wheelEvent = lambda event: event.ignore()
-        if params.get("min"):
-            widget.setMinimum(params.get("min"))
-        if params.get("max"):
-            widget.setMaximum(params.get("max"))
+        # Membership rather than truthiness: `min=0` is falsy and was silently
+        # dropped, leaving the Qt default in place.
+        if "min" in params:
+            widget.setMinimum(params["min"])
+        if "max" in params:
+            widget.setMaximum(params["max"])
         return widget
 
     @staticmethod
@@ -173,15 +175,17 @@ class IplotPreferencesForm(QWidget):
 
     @staticmethod
     def default_fontsize_widget():
-        return IplotPreferencesForm.create_spinbox(min=0, max=15)
+        # 15 pt is not enough for a 4K panel that the session does not scale;
+        # min 1 rather than 0 so the text cannot be made invisible.
+        return IplotPreferencesForm.create_spinbox(min=1, max=48)
 
     @staticmethod
     def default_linesize_widget():
-        return IplotPreferencesForm.create_spinbox(min=0, max=20)
+        return IplotPreferencesForm.create_spinbox(min=1, max=20)
 
     @staticmethod
     def default_markersize_widget():
-        return IplotPreferencesForm.create_spinbox(min=0, max=20)
+        return IplotPreferencesForm.create_spinbox(min=1, max=20)
 
     @staticmethod
     def default_ticknumber_widget():
