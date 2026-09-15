@@ -131,38 +131,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         finally:
             self._parser.figure.setUpdatesEnabled(True)
 
-    def _repaint_rulers_from_canvas(self):
-        self._clear_preview_ruler()
-        self._preview_ruler_identity = None
-        self._ruler_window.clear_info()
-        canvas = self._parser.canvas
-        if not canvas:
-            return
-        self._ruler_window.set_canvas_columns(len(canvas.plots))
-        with self._ruler_window.bulk_update():
-            for col_idx, col in enumerate(canvas.plots):
-                for row_idx, plot in enumerate(col):
-                    if not plot or not getattr(plot, 'rulers', None):
-                        continue
-                    impl_plot = self._get_impl_plot_for_plot(plot)
-                    if impl_plot is None:
-                        continue
-                    for ruler in plot.rulers:
-                        x_view = self._parser.transform_value(impl_plot, 0, ruler.xy[0], inverse=True)
-                        y_view = self._parser.transform_value(impl_plot, 1, ruler.xy[1], inverse=True)
-                        self._parser.add_ruler(impl_plot, ruler.name, x_view, y_view, ruler.color)
-                        self._parser.create_ruler_echoes(impl_plot, ruler.name,
-                                                         ruler.xy[0], ruler.xy[1], ruler.color)
-                        for entry in self._ruler_window_rows(impl_plot, x_view, ruler.xy):
-                            self._ruler_window.add_row(ruler.name, entry['plot_id'], entry['xy'],
-                                                        ruler.color, ruler.visible, entry['is_date'],
-                                                        ruler.font_color, ruler.show_label,
-                                                        ruler.show_val_label,
-                                                        entry['signal_values'],
-                                                        x_is_time=entry['x_is_time'])
-                        self._apply_ruler_state(ruler)
-                    self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
-
     def _get_main_plot_for_minimap(self) -> PlotItem:
         canvas = self.get_canvas()
         if canvas is None:
@@ -550,37 +518,14 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         return self._plot_at_canvas_position(plot_id)
 
     def _get_impl_plot_for_plot(self, plot):
-        """Return the first impl PlotItem hosting *plot* (lowest stack key).
+        """Return the first impl PlotItem hosting *plot* (lowest stack), or
+        None when the plot is not built (hidden by the focus).
 
-        The layout_stacks key is the 0-indexed (row_idx, col_idx) from the
-        canvas grid iteration, which is not the same as plot.row / plot.col.
+        Resolved by identity rather than by grid position: a focused plot is
+        laid out at (0, 0) whatever its position in the canvas.
         """
-        canvas = self._parser.canvas
-        if canvas is None:
-            return None
-        for col_idx, col in enumerate(canvas.plots):
-            for row_idx, p in enumerate(col):
-                if p is plot:
-                    stack_dict = self._parser._layout_stacks.get((row_idx, col_idx), {})
-                    if not stack_dict:
-                        return None
-                    first_key = min(stack_dict.keys())
-                    return stack_dict[first_key]
-        return None
-
-    def delete_ruler(self, name, plot_id, persist):
-        plot = self._get_plot_by_id(plot_id)
-        if plot is None:
-            return
-        impl_plot = self._get_impl_plot_for_plot(plot)
-        if impl_plot is not None:
-            # Removes the origin and its shared-x echoes across every plot.
-            self._parser.remove_ruler_by_name(name)
-        if persist:
-            plot.remove_ruler(name)
-        # The freed name may change what the next ruler will be called.
-        self._clear_preview_ruler()
-        self._preview_ruler_identity = None
+        impl_plots = self._parser._plot_impl_plot_lut.get(id(plot))
+        return impl_plots[0] if impl_plots else None
 
     def toggle_ruler_visibility(self, name, plot_id, visible):
         plot = self._get_plot_by_id(plot_id)
@@ -695,18 +640,20 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._persist_ruler_position(origin)
 
     def _persist_ruler_position(self, origin):
-        """Write an origin ruler's current (abs_x, y) to its model ruler and to
-        its rows in the Ruler window, one per plot it spans."""
-        ci = self._parser._impl_plot_cache_table.get_cache_item(origin.plot)
-        origin_plot = ci.plot() if ci else None
-        if origin_plot is None:
-            return
-        x_abs, y_abs = origin.abs_x, origin.abs_y
-        core = origin_plot.get_ruler(origin.name)
+        """Write a dragged ruler's current (abs_x, y) to its model ruler and to
+        its rows in the Ruler window, one per plot it spans. A mirror dragged
+        while the focus hides its own plot moves the model along the time axis
+        only: its Y belongs to another plot's scale."""
+        core = self._model_ruler(origin.name)
+        if origin.is_echo:
+            xy = (origin.abs_x, core.xy[1] if core is not None else None)
+        else:
+            xy = (origin.abs_x, origin.abs_y)
         if core is not None:
-            core.xy = (x_abs, y_abs)
+            core.xy = xy
         self._ruler_window.update_ruler_rows(
-            origin.name, self._ruler_window_rows(origin.plot, origin.xy[0], (x_abs, y_abs)))
+            origin.name, self._ruler_window_rows(origin.plot, origin.xy[0],
+                                                 (xy[0], None) if origin.is_echo else xy))
 
     def _on_viewbox_resized(self, view_box):
         impl_plot = view_box.parentItem()

@@ -933,7 +933,8 @@ class IplotQtRuler(QWidget):
             return
 
         # Deltas span plots too (e.g. two stacked plots sharing the time axis):
-        # dx is the time distance between rulers, dy the value difference.
+        # dx is the time distance between rulers, dy the value difference,
+        # signed as in the Columns layout.
         entries = []
         for view_row in self.selection_history:
             name, plot_id = self._row_metadata(view_row)
@@ -949,16 +950,14 @@ class IplotQtRuler(QWidget):
 
         data_rows = []
         for r1, r2 in zip(entries[:-1], entries[1:]):
-            y1, y2 = r1['xy'][1], r2['xy'][1]
             cells = [f"{r1['name']} → {r2['name']}",
                      self._format_dx(r1['xy'][0], r2['xy'][0], r1['is_date'],
                                      r1.get('x_is_time', False)),
-                     '' if y1 is None or y2 is None else f"{abs(y2 - y1):.6g}"]
+                     self._format_delta(r1['xy'][1], r2['xy'][1])]
             values1 = r1.get('signal_values') or {}
             values2 = r2.get('signal_values') or {}
             for label in sig_labels:
-                v1, v2 = values1.get(label), values2.get(label)
-                cells.append(f"{abs(v2 - v1):.6g}" if v1 is not None and v2 is not None else '')
+                cells.append(self._format_delta(values1.get(label), values2.get(label)))
             data_rows.append(cells)
 
         # ASCII-safe log line: cp1252 console handlers choke on Δ/→.

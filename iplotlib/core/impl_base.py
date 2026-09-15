@@ -942,8 +942,12 @@ class BackendParserBase(ABC):
 
     def _get_all_shared_axes(self, base_impl_plot: Any) -> List[Any]:
         cache_item = self._impl_plot_cache_table.get_cache_item(base_impl_plot)
-        base_plot = cache_item.plot()
+        return self._impl_plots_sharing_x(cache_item.plot())
 
+    def _impl_plots_sharing_x(self, base_plot: Any) -> List[Any]:
+        """Implementation plots currently built whose X axis follows the one of
+        *base_plot*, which itself need not be built (a plot hidden by the
+        focus)."""
         if isinstance(base_plot, PlotXYWithSlider) or base_plot is None:
             return []
 
