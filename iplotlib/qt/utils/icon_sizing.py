@@ -1,25 +1,18 @@
 """
 Icon sizes that follow the application font.
 
-Qt derives PM_ToolBarIconSize from the style and the screen's logical DPI, not
-from the font, so it is a constant 24 logical pixels whatever size the text is.
-On a session whose UI font has been enlarged for a high-resolution panel, the
-labels grow and the icons do not: at 26pt the text is 40px tall next to a 24px
-icon, and on a screen reporting 72 DPI that icon shrinks further to 18px.
-
-Deriving the size from font metrics instead makes icons track the text at any
-DPI, point size or scale factor, without depending on the session reporting a
-sensible DPI.
+Qt sizes tool bar icons from the style and the screen DPI, never from the
+font: enlarge the UI font and the labels grow while the icons stay at 24
+logical pixels. Deriving the size from the font metrics keeps them in step at
+any DPI, point size or scale factor.
 """
-
-# Author: added for HiDPI/4K support
 
 from PySide6.QtCore import QEvent, QSize
 
-#: Icon edge as a multiple of the font height. A little larger than the text so
-#: the icon reads as an icon rather than as a glyph beside it.
+#: Icon edge as a multiple of the font height, a little larger than the text
+#: so the icon reads as an icon rather than as a glyph beside it.
 DEFAULT_ICON_FACTOR = 1.3
-#: Never go below what the style would have chosen on an ordinary display.
+#: Floor for tiny fonts.
 MIN_ICON_PX = 16
 
 
@@ -30,18 +23,11 @@ def font_scaled_icon_size(widget, factor: float = DEFAULT_ICON_FACTOR) -> QSize:
 
 
 class FontScaledIcons:
-    """Mixin keeping a tool bar's icon size tied to the current font.
+    """Mixin keeping a tool bar's icon size tied to its font.
 
-    Mix in *before* the Qt class so ``changeEvent`` resolves here first::
-
-        class MyToolBar(FontScaledIcons, QToolBar):
-            ...
-            self.apply_icon_size()   # once the actions are added
-
-    Note this sets the size Qt asks the QIcon for; whether the result is sharp
-    depends on the icon having pixels at that resolution. The packaged bitmap
-    sources are 18x18, so a large size will be an upscale until they are
-    replaced with SVG or higher resolution exports.
+    Mix in before the Qt class so ``changeEvent`` resolves here first, and
+    call ``apply_icon_size`` once the widget is constructed. The size is what
+    Qt asks the QIcon for: an 18x18 bitmap source is upscaled beyond that.
     """
 
     ICON_FACTOR = DEFAULT_ICON_FACTOR

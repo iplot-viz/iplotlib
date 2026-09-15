@@ -3,9 +3,6 @@ A helpful icon loader.
 """
 
 # Author: Jaswant Sai Panchumarti
-# Changelog:
-#   HiDPI: render SVG sources at several sizes so toolbar icons stay sharp on a
-#          4K panel. Bitmap sources are returned untagged, see create_icon.
 
 import pkgutil
 
@@ -41,20 +38,15 @@ def create_icon(name, ext: str = 'png') -> QIcon:
     """Load a packaged icon as a QIcon.
 
     An SVG source is rendered at a range of sizes so Qt can pick the one closest
-    to what it needs instead of scaling a single rasterisation. Bitmap sources
-    are returned as-is; see the comment below for why they are not tagged with
-    the device pixel ratio.
+    to what it needs instead of scaling a single rasterisation. A bitmap source
+    is loaded as is: tagging it with the device pixel ratio adds no detail, it
+    only relabels an 18x18 image as fewer logical pixels, so the icon is drawn
+    smaller rather than sharper.
     """
     data = pkgutil.get_data("iplotlib.qt", f"icons/{name}.{ext}")
     if ext.lower() == 'svg':
         return _icon_from_svg(data)
 
-    # Deliberately left untagged. Setting a device pixel ratio on a single
-    # resolution bitmap does not add detail: it relabels an 18x18 image as
-    # ~10 logical pixels, so the icon is drawn smaller rather than sharper, and
-    # it makes the icon's logical size depend on the screen, which upsets styles
-    # that lay out icon columns (menus in particular). Sharp bitmap icons need
-    # higher resolution sources, not a different label on the same pixels.
     pxmap = QPixmap()
     pxmap.loadFromData(QByteArray(data))
     return QIcon(pxmap)

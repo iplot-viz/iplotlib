@@ -37,8 +37,7 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
 
         self.layout().setContentsMargins(self._margins)
         self.setSizePolicy(self._szPolicy)
-        # Qt sizes tool bar icons from the style and the screen DPI, never from
-        # the font, so they stay at 24 logical pixels beside text of any size.
+        # The style sizes the icons from the screen DPI, not from the font.
         self.apply_icon_size()
 
         # Interactive plot actions.

@@ -37,7 +37,6 @@ class IconSizingTest(unittest.TestCase):
         self.assertGreater(tb.iconSize().width(), small)
 
     def test_icon_is_at_least_as_tall_as_the_text(self):
-        # The regression: at 26pt the style still asked for 24px icons.
         tb = ScaledToolBar()
         font = QFont(tb.font())
         font.setPointSizeF(26.0)

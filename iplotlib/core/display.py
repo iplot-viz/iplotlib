@@ -234,13 +234,10 @@ def collect_metrics() -> dict:
 def pixel_ceiling(width_px: int) -> float:
     """The largest scale the panel has the pixels to justify.
 
-    A reported DPI cannot be taken at face value even on a local session: a
-    monitor whose EDID understates its physical size, or an X server started
-    with the wrong -dpi, makes an ordinary 1920x1080 panel claim 160+ DPI and
-    look exactly like a 4K one. Pixel count is the metric no display server
-    gets wrong, so it is used to corroborate the DPI rather than only as a
-    fallback. A 1920-wide screen is what the size defaults were tuned for, so
-    its ceiling is 1.0 and it is never scaled however high a DPI it reports.
+    A monitor whose EDID understates its size, or an X server started with the
+    wrong -dpi, makes a FullHD panel report the DPI of a 4K one; the pixel
+    count is the metric no display server gets wrong. A 1920-wide panel is
+    what the defaults were tuned for, so its ceiling is 1.0.
     """
     if width_px <= 0:
         return 1.0
@@ -295,8 +292,8 @@ def scale_from_metrics(metrics: dict,
         if physical >= reference_dpi * DPI_DEADBAND:
             wanted = physical / reference_dpi
             if wanted > ceiling:
-                # The DPI asks for more than the panel has pixels for, which is
-                # what an understated EDID looks like. Believe the pixels.
+                # More than the panel has pixels for: an understated EDID.
+                # Believe the pixels.
                 factor = quantize(clamp(ceiling, min_scale, max_scale))
                 if factor <= 1.0:
                     return 1.0, (f"physical DPI {physical:g} wants {wanted:.2f} but the panel is "

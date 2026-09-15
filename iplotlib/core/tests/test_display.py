@@ -32,10 +32,8 @@ class ScaleFromMetricsTest(unittest.TestCase):
         self.assertEqual(factor, 1.0)
 
     def test_a_reported_dpi_cannot_exceed_what_the_pixels_justify(self):
-        # A monitor whose EDID understates its physical size, or an X server
-        # started with the wrong -dpi, makes an ordinary 1920x1080 panel claim
-        # 160+ DPI and look exactly like a 4K one. Scaling it enlarges the UI
-        # without any extra pixels to put it on, so the layout simply overflows.
+        # A FullHD panel reporting the DPI of a 4K one (understated EDID, wrong
+        # X -dpi) has no pixels to scale into.
         factor, why = scale_from_metrics(metrics(physical_dpi=160.0, width_px=1920))
         self.assertEqual(factor, 1.0)
         self.assertIn('1920px', why)
