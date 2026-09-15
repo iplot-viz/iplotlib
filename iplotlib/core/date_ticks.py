@@ -275,3 +275,29 @@ def segments_for_interval(step, kind):
     if step >= _US:
         return _MICRO
     return _NANO
+
+
+# Pulse-style unit of each time-of-day segment; calendar segments have none.
+_SEGMENT_UNITS = {_HOUR_SEG: 'h', _MINUTE: 'min', _SECOND: 's',
+                  _MILI: 'ms', _MICRO: 'us', _NANO: 'ns'}
+
+
+def label_unit(start, end) -> str:
+    """Unit suffix for a tick label showing date segments ``start``..``end``.
+
+    A label reduced to a bare number cannot be told apart from another unit
+    (a "06" may be minutes, seconds or milliseconds), so it carries the
+    pulse-style unit of its last digit: "20min", "06s", "500ms". The groups
+    below the second concatenate without separators, so they read as one
+    integer in the finest unit ("500250us"), while a label starting at the
+    second keeps decimal seconds ("05.500s"). Clock-formatted labels
+    ("14:30", "30:05") and calendar segments are self-describing and stay
+    as they are.
+    """
+    if start == end:
+        return _SEGMENT_UNITS.get(end, '')
+    if start == _SECOND:
+        return _SEGMENT_UNITS[_SECOND]
+    if start > _SECOND:
+        return _SEGMENT_UNITS.get(end, '')
+    return ''

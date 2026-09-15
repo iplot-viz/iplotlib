@@ -7,6 +7,7 @@ import unittest
 
 from iplotlib.core.date_ticks import (
     generate_ticks,
+    label_unit,
     linear_ticks,
     pick_interval,
     relative_ticks,
@@ -200,6 +201,36 @@ class SegmentsForIntervalTests(unittest.TestCase):
         self.assertEqual(segments_for_interval(10 * _MIN, "fixed"), 4)
         self.assertEqual(segments_for_interval(5 * _SEC, "fixed"), 5)
         self.assertEqual(segments_for_interval(200_000, "fixed"), 7)
+
+
+class LabelUnitTests(unittest.TestCase):
+    # Segment indices as the formatters define them (YEAR=0 .. NANOSECOND=8).
+    YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, MILI, MICRO, NANO = range(9)
+
+    def test_bare_numbers_carry_the_unit_of_their_segment(self):
+        self.assertEqual(label_unit(self.HOUR, self.HOUR), 'h')
+        self.assertEqual(label_unit(self.MINUTE, self.MINUTE), 'min')
+        self.assertEqual(label_unit(self.SECOND, self.SECOND), 's')
+        self.assertEqual(label_unit(self.MILI, self.MILI), 'ms')
+        self.assertEqual(label_unit(self.MICRO, self.MICRO), 'us')
+        self.assertEqual(label_unit(self.NANO, self.NANO), 'ns')
+
+    def test_sub_second_groups_take_the_finest_unit(self):
+        # "500250" is milliseconds and microseconds run together: one
+        # integer in microseconds.
+        self.assertEqual(label_unit(self.MILI, self.MICRO), 'us')
+        self.assertEqual(label_unit(self.MILI, self.NANO), 'ns')
+
+    def test_decimal_seconds_stay_in_seconds(self):
+        self.assertEqual(label_unit(self.SECOND, self.MILI), 's')
+        self.assertEqual(label_unit(self.SECOND, self.NANO), 's')
+
+    def test_clock_and_calendar_labels_get_no_unit(self):
+        for start, end in ((self.HOUR, self.MINUTE), (self.MINUTE, self.SECOND),
+                           (self.MINUTE, self.MILI), (self.YEAR, self.HOUR),
+                           (self.YEAR, self.YEAR), (self.MONTH, self.MONTH),
+                           (self.DAY, self.DAY)):
+            self.assertEqual(label_unit(start, end), '', (start, end))
 
 
 if __name__ == "__main__":
