@@ -593,8 +593,19 @@ class RulerComputeDistanceDialogTest(unittest.TestCase):
         self.assertEqual(table.item(0, 0).text(), 'A → B')
         self.assertEqual(table.item(0, 1).text(), '4')
         self.assertEqual(table.item(0, 2).text(), '4')
-        self.assertEqual(table.item(0, 3).text(), '6')
+        self.assertEqual(table.item(0, 3).text(), '-6')
         self.assertEqual(table.item(0, 4).text(), '')  # S2 has no pair
+
+    def test_deltas_are_signed_later_ruler_minus_earlier_one(self):
+        """ΔX is a distance, but ΔY and the signal deltas keep their sign so a
+        drop reads as negative whichever ruler was selected first."""
+        self.window.add_row('B', (1, 1), (5.0, 2.0), '#FFFFFF', signal_values={'S1': 1.0})
+        self.window.add_row('A', (1, 1), (1.0, 6.0), '#FFFFFF', signal_values={'S1': 4.0})
+        table = self._distance_between_first_two()
+        self.assertEqual(table.item(0, 0).text(), 'A → B')
+        self.assertEqual(table.item(0, 1).text(), '4')
+        self.assertEqual(table.item(0, 2).text(), '-4')
+        self.assertEqual(table.item(0, 3).text(), '-3')
 
     def test_distance_dialog_skips_hidden_signals(self):
         self.window.add_row('A', (1, 1), (1.0, 2.0), '#FFFFFF',
@@ -633,7 +644,7 @@ class RulerComputeDistanceDialogTest(unittest.TestCase):
         self.window._copy_whole_qtable(table)
         lines = QApplication.clipboard().text().split('\n')
         self.assertEqual(lines[0], 'Rulers\tΔX\tΔY\tΔ S1')
-        self.assertEqual(lines[1], 'A → B\t4\t4\t6')
+        self.assertEqual(lines[1], 'A → B\t4\t4\t-6')
 
     def test_column_view_delta_x_uses_time_format_for_date_axes(self):
         self.window.add_row('A', (1, 1), (0.0, 0.0), '#FFFFFF', is_date=True)

@@ -345,6 +345,11 @@ class IplotQtCanvas(QWidget):
                     return self._canvas_position_of(plot)
         return None
 
+    def _model_ruler(self, name) -> Optional[Ruler]:
+        """The model ruler called *name*, whichever plot owns it."""
+        owner = self._plot_at_canvas_position(self._ruler_owner_plot_id(name))
+        return owner.get_ruler(name) if owner is not None else None
+
     def _ruler_window_rows(self, impl_plot, x_view, xy_abs) -> List[dict]:
         """One window row per plot a ruler placed on *impl_plot* is drawn on, each
         with that plot's signal values and axis kind."""
@@ -352,24 +357,90 @@ class IplotQtCanvas(QWidget):
         # ruler_reach yields the owner first: the mirrored plots share the time
         # but not the Y scale, so only the owner carries a Y reading.
         for index, (target, _, values) in enumerate(self._parser.ruler_reach(impl_plot, x_view)):
-            cache_item = self._parser._impl_plot_cache_table.get_cache_item(target)
-            plot = cache_item.plot() if cache_item else None
-            plot_id = self._canvas_position_of(plot) if plot is not None else None
-            if plot_id is None:
-                continue
-            rows.append({
-                'plot_id': plot_id,
-                'xy': xy_abs if index == 0 else (xy_abs[0], None),
-                'signal_values': values,
-                'is_date': bool(getattr(plot.axes[0], 'is_date', False)),
-                'x_is_time': self._plot_x_is_time(plot),
-            })
+            row = self._ruler_window_row(target, xy_abs if index == 0 else (xy_abs[0], None), values)
+            if row is not None:
+                rows.append(row)
         return rows
 
+    def _ruler_window_row(self, impl_plot, xy, signal_values) -> Optional[dict]:
+        """Window row of a ruler drawn on *impl_plot*, or None when the plot is
+        not in the canvas grid."""
+        cache_item = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = cache_item.plot() if cache_item else None
+        plot_id = self._canvas_position_of(plot) if plot is not None else None
+        if plot_id is None:
+            return None
+        return {
+            'plot_id': plot_id,
+            'xy': xy,
+            'signal_values': signal_values,
+            'is_date': bool(getattr(plot.axes[0], 'is_date', False)),
+            'x_is_time': self._plot_x_is_time(plot),
+        }
+
+    def _repaint_rulers_from_canvas(self) -> bool:
+        """Rebuild the backend rulers and the window rows from the model rulers
+        of every plot. Returns True when at least one artist was created."""
+        self._clear_preview_ruler()
+        self._preview_ruler_identity = None
+        self._ruler_window.clear_info()
+        canvas = self._parser.canvas
+        if not canvas:
+            return False
+        self._ruler_window.set_canvas_columns(len(canvas.plots))
+        added = False
+        with self._ruler_window.bulk_update():
+            for col in canvas.plots:
+                for plot in col:
+                    if not plot or not getattr(plot, 'rulers', None):
+                        continue
+                    impl_plot = self._get_impl_plot_for_plot(plot)
+                    for ruler in plot.rulers:
+                        if impl_plot is not None:
+                            self._restore_ruler(impl_plot, ruler)
+                            added = True
+                        elif self._restore_ruler_echoes(plot, ruler):
+                            added = True
+                        self._apply_ruler_state(ruler)
+                    self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
+        return added
+
+    def _restore_ruler(self, impl_plot, ruler):
+        """Draw a model ruler on its own plot, mirror it on the plots sharing
+        the time axis and list it in the window."""
+        x_view = self._parser.transform_value(impl_plot, 0, ruler.xy[0], inverse=True)
+        y_view = self._parser.transform_value(impl_plot, 1, ruler.xy[1], inverse=True)
+        self._parser.add_ruler(impl_plot, ruler.name, x_view, y_view, ruler.color)
+        self._parser.create_ruler_echoes(impl_plot, ruler.name, ruler.xy[0], ruler.xy[1], ruler.color)
+        for entry in self._ruler_window_rows(impl_plot, x_view, ruler.xy):
+            self._add_ruler_window_row(ruler, entry)
+
+    def _restore_ruler_echoes(self, plot, ruler) -> int:
+        """Mirror a model ruler whose own plot is not built (hidden by the
+        focus) on the built plots sharing its time axis, as the grid did.
+        Returns the number of echoes drawn."""
+        if not self._parser._pm.get_value(self._parser.canvas, 'shared_x_axis'):
+            return 0
+        count = 0
+        for sibling in self._parser._impl_plots_sharing_x(plot):
+            x_view = self._parser.transform_value(sibling, 0, ruler.xy[0], inverse=True)
+            y_view = self._parser.transform_value(sibling, 1, ruler.xy[1], inverse=True)
+            self._parser.add_ruler(sibling, ruler.name, x_view, y_view, ruler.color, is_echo=True)
+            entry = self._ruler_window_row(sibling, (ruler.xy[0], None),
+                                           self._parser._ruler_signal_values(sibling, x_view))
+            if entry is not None:
+                self._add_ruler_window_row(ruler, entry)
+            count += 1
+        return count
+
+    def _add_ruler_window_row(self, ruler, entry: dict):
+        self._ruler_window.add_row(ruler.name, entry['plot_id'], entry['xy'],
+                                   ruler.color, ruler.visible, entry['is_date'],
+                                   ruler.font_color, ruler.show_label,
+                                   ruler.show_val_label, entry['signal_values'],
+                                   x_is_time=entry['x_is_time'])
+
     def _remove_ruler_from_menu(self, name, plot_id):
-        # The context menu can target a shared-x echo whose model ruler and
-        # window row belong to another plot; route the deletion to the owner.
-        plot_id = self._ruler_owner_plot_id(name) or plot_id
         self.delete_ruler(name, plot_id, True)
         self._ruler_window.remove_row_by_name(name)
 
@@ -396,9 +467,22 @@ class IplotQtCanvas(QWidget):
     def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
         """"""
 
-    @abstractmethod
     def delete_ruler(self, name, plot_id, persist):
-        """Remove a ruler from the backend (and from Plot.rulers when persist=True)."""
+        """Remove a ruler's artists from every plot and, with persist, the model
+        ruler from the plot owning it. The request may name the plot of a
+        shared-x echo (its window row, the context menu), so the owner is
+        looked up rather than taken from *plot_id*."""
+        self._parser.remove_ruler_by_name(name)
+        if persist:
+            owner = self._plot_at_canvas_position(self._ruler_owner_plot_id(name) or plot_id)
+            if owner is not None:
+                owner.remove_ruler(name)
+        # The freed name may change what the next ruler will be called.
+        self._clear_preview_ruler()
+        self._preview_ruler_identity = None
+
+    def _clear_preview_ruler(self):
+        """Drop the ghost previewing the next ruler; backends with one override."""
 
     @abstractmethod
     def toggle_ruler_visibility(self, name, plot_id, visible):

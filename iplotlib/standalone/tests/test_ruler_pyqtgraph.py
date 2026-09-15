@@ -459,5 +459,97 @@ class RulerPyQtGraphRegressionTest(unittest.TestCase):
             widget.deleteLater()
 
 
+class RulerPyQtGraphFocusTest(unittest.TestCase):
+    """Focusing a plot rebuilds the canvas with that plot alone at (0, 0): its
+    rulers must follow it, and with a shared time axis the rulers of the plots
+    the focus hid must stay mirrored on it, as they were in the grid."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def setUp(self):
+        self.widget = None
+
+    def tearDown(self):
+        if self.widget is not None:
+            self.widget._ruler_window.close()
+            self.widget.deleteLater()
+
+    def _stacked_plots_with_a_ruler_each(self, shared: bool):
+        c = Canvas(3, 1, title="focus_pg", shared_x_axis=shared)
+        x = np.linspace(0, 10, 50)
+        for k in range(3):
+            p = PlotXY()
+            s = SignalXY(label=f"s{k}")
+            s.set_data([x, np.sin(x + k)])
+            p.add_signal(s)
+            c.add_plot(p, 0)
+        self.widget = QtPyQtGraphCanvas(canvas=c)
+        plots = list(c.plots[0])
+        for k, plot in enumerate(plots):
+            self.widget._add_ruler_at(self.widget._get_impl_plot_for_plot(plot), plot, 2.0 + k, 0.0)
+        self.assertEqual([p.rulers[0].name for p in plots], ['A', 'B', 'C'])
+        return plots
+
+    def _drawn(self):
+        return sorted((r.name, r.is_echo) for r in self.widget._parser.get_rulers())
+
+    def _rows(self):
+        return [(r['name'], r['plot_id']) for r in self.widget._ruler_window._rows]
+
+    def _focus(self, plot):
+        self.widget._full_screen_mode_on(self.widget._get_impl_plot_for_plot(plot))
+
+    def test_focused_plot_shows_its_own_ruler_whatever_its_position(self):
+        plots = self._stacked_plots_with_a_ruler_each(shared=False)
+        for row, plot in enumerate(plots, start=1):
+            self._focus(plot)
+            name = plot.rulers[0].name
+            self.assertEqual(self._drawn(), [(name, False)])
+            self.assertEqual(self._rows(), [(name, (row, 1))])
+            self.widget._full_screen_mode_off()
+        self.assertEqual(self._drawn(), [('A', False), ('B', False), ('C', False)])
+        self.assertEqual(self._rows(), [('A', (1, 1)), ('B', (2, 1)), ('C', (3, 1))])
+
+    def test_focus_keeps_the_hidden_plots_rulers_mirrored_with_shared_time(self):
+        plots = self._stacked_plots_with_a_ruler_each(shared=True)
+        self._focus(plots[1])
+        self.assertEqual(self._drawn(), [('A', True), ('B', False), ('C', True)])
+        rows = {r['name']: r for r in self.widget._ruler_window._rows}
+        self.assertEqual(sorted(rows), ['A', 'B', 'C'])
+        self.assertTrue(all(r['plot_id'] == (2, 1) for r in rows.values()))
+        # Only the owner carries a Y reading; the mirrored ones share the time alone.
+        self.assertIsNotNone(rows['B']['xy'][1])
+        self.assertIsNone(rows['A']['xy'][1])
+        self.assertIsNone(rows['C']['xy'][1])
+        self.widget._full_screen_mode_off()
+        self.assertEqual(len(self.widget._parser.get_rulers()), 9)
+        self.assertEqual(len(self.widget._ruler_window._rows), 9)
+
+    def test_deleting_a_mirrored_ruler_while_focused_removes_it_from_its_owner(self):
+        plots = self._stacked_plots_with_a_ruler_each(shared=True)
+        self._focus(plots[1])
+        # The window row of the mirror names the focused plot, not the owner.
+        self.widget.delete_ruler('A', (2, 1), True)
+        self.assertEqual(plots[0].rulers, [])
+        self.assertEqual(self._drawn(), [('B', False), ('C', True)])
+        self.widget._full_screen_mode_off()
+        self.assertNotIn('A', [r.name for r in self.widget._parser.get_rulers()])
+
+    def test_dragging_a_mirrored_ruler_while_focused_moves_its_owner(self):
+        plots = self._stacked_plots_with_a_ruler_each(shared=True)
+        self._focus(plots[1])
+        mirror = next(r for r in self.widget._parser.get_rulers() if r.name == 'A')
+        mirror.abs_x, mirror.abs_y = 7.0, 0.3
+        self.widget._persist_ruler_position(mirror)
+        # The mirror only shares the time: the owner keeps its own Y reading.
+        self.assertEqual(plots[0].rulers[0].xy, (7.0, 0.0))
+        self.assertIsNone(self.widget._ruler_window._rows[0]['xy'][1])
+        self.widget._full_screen_mode_off()
+        owner = next(r for r in self.widget._parser.get_rulers() if r.name == 'A' and not r.is_echo)
+        self.assertEqual((owner.abs_x, owner.abs_y), (7.0, 0.0))
+
+
 if __name__ == '__main__':
     unittest.main()
