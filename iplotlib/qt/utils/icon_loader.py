@@ -4,24 +4,17 @@ A helpful icon loader.
 
 # Author: Jaswant Sai Panchumarti
 # Changelog:
-#   HiDPI: render SVG sources at several sizes and tag bitmap sources with the
-#          device pixel ratio, so toolbar icons stay sharp on a 4K panel.
+#   HiDPI: render SVG sources at several sizes so toolbar icons stay sharp on a
+#          4K panel. Bitmap sources are returned untagged, see create_icon.
 
 import pkgutil
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
-from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QIcon, QPainter, QPixmap
 
 #: Logical sizes rendered from an SVG source. Covers 1x/1.5x/2x/3x of the 16-24
 #: px range Qt asks for in tool bars and menus.
 _SVG_RENDER_SIZES = (16, 24, 32, 48, 64)
-
-
-def _device_pixel_ratio() -> float:
-    if QGuiApplication.instance() is None:
-        return 1.0
-    screen = QGuiApplication.primaryScreen()
-    return float(screen.devicePixelRatio()) if screen is not None else 1.0
 
 
 def _icon_from_svg(data: bytes) -> QIcon:
@@ -48,18 +41,20 @@ def create_icon(name, ext: str = 'png') -> QIcon:
     """Load a packaged icon as a QIcon.
 
     An SVG source is rendered at a range of sizes so Qt can pick the one closest
-    to what it needs instead of scaling a single rasterisation. A bitmap source
-    gets its device pixel ratio tagged: without it Qt reads an 18x18 PNG as 18
-    *logical* pixels and upscales it to 36 device pixels on a 200% display,
-    which is what makes the tool bar look soft there.
+    to what it needs instead of scaling a single rasterisation. Bitmap sources
+    are returned as-is; see the comment below for why they are not tagged with
+    the device pixel ratio.
     """
     data = pkgutil.get_data("iplotlib.qt", f"icons/{name}.{ext}")
     if ext.lower() == 'svg':
         return _icon_from_svg(data)
 
+    # Deliberately left untagged. Setting a device pixel ratio on a single
+    # resolution bitmap does not add detail: it relabels an 18x18 image as
+    # ~10 logical pixels, so the icon is drawn smaller rather than sharper, and
+    # it makes the icon's logical size depend on the screen, which upsets styles
+    # that lay out icon columns (menus in particular). Sharp bitmap icons need
+    # higher resolution sources, not a different label on the same pixels.
     pxmap = QPixmap()
     pxmap.loadFromData(QByteArray(data))
-    ratio = _device_pixel_ratio()
-    if ratio > 1.0:
-        pxmap.setDevicePixelRatio(ratio)
     return QIcon(pxmap)
