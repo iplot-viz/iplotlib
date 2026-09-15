@@ -18,13 +18,14 @@ from PySide6.QtGui import QAction, QActionGroup
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.qt.utils.icon_loader import create_icon
+from iplotlib.qt.utils.icon_sizing import FontScaledIcons
 
 from iplotLogging import setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
 
 
-class IplotQtCanvasToolbar(QToolBar):
+class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
     toolActivated = Signal(str)
 
     def __init__(self, parent: typing.Optional[QWidget] = None):
@@ -36,6 +37,9 @@ class IplotQtCanvasToolbar(QToolBar):
 
         self.layout().setContentsMargins(self._margins)
         self.setSizePolicy(self._szPolicy)
+        # Qt sizes tool bar icons from the style and the screen DPI, never from
+        # the font, so they stay at 24 logical pixels beside text of any size.
+        self.apply_icon_size()
 
         # Interactive plot actions.
         self._actions = QActionGroup(self)
