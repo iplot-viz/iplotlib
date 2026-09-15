@@ -107,9 +107,14 @@ class CanvasForm(IplotPreferencesForm):
 
     def get_canvas_properties(self):
         # Get the current canvas properties and returns them as a dictionary
+        # get_raw_value, not get_value: these are written back to
+        # default_properties.json, and persisting display-scaled sizes would
+        # bake the current screen's factor into the configuration, then scale
+        # it again on the next run.
         canvas_properties = {
-            field["property"]: self._pm.get_value(self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole),
-                                                  field["property"]) for field in self.fields}
+            field["property"]: self._pm.get_raw_value(self.widgetModel.data(QModelIndex(),
+                                                                            BeanItemModel.PyObjectRole),
+                                                      field["property"]) for field in self.fields}
 
         extra_properties = {
             "autoscale": True,
@@ -129,9 +134,14 @@ class CanvasForm(IplotPreferencesForm):
         # Define file path
         file_name = path / "default_properties.json"
 
+        # Carry over configuration keys that are not exposed as form fields
+        # (the ui_scale_* family), otherwise exporting preferences drops them.
+        exported = dict(self._pm.default) if isinstance(self._pm.default, dict) else {}
+        exported.update(self.get_canvas_properties())
+
         try:
             with file_name.open(mode="w", encoding="utf-8") as f:
-                json.dump(self.get_canvas_properties(), f, ensure_ascii=False, indent=4)
+                json.dump(exported, f, ensure_ascii=False, indent=4)
                 logger.info(f"Default Canvas preferences updated")
         except Exception as e:
             logger.error(f"Error exporting Canvas preferences: {e}")
