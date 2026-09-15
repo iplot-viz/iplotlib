@@ -16,6 +16,7 @@ from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import QComboBox
 
 from iplotlib.core import PropertyManager, SignalXY, RangeAxis
+from iplotlib.core.display import DisplayScale
 from iplotlib.qt.models.beanItem import BeanItem, BeanPrototype
 from iplotlib.qt.utils.conversions import ConversionHelper
 
@@ -49,13 +50,12 @@ class BeanItemModel(QStandardItemModel):
 
         logger.debug(f"PyObject: {self._pyObject}")
 
-        # Raw, not display-scaled: the mapper writes every widget back on
-        # submit, so a scaled font size shown here would be stored as the new
-        # size and scaled again on the next render.
-        value = PropertyManager().get_raw_value(self._pyObject, property_name)
+        # As rendered on this display: a scaled size is what the user sees
+        # and expects to edit. setData converts it back.
+        value = PropertyManager().get_value(self._pyObject, property_name)
 
         if isinstance(self._pyObject, SignalXY) and property_name == 'color' and value is None:
-            return PropertyManager().get_raw_value(self._pyObject, 'original_color')
+            return PropertyManager().get_value(self._pyObject, 'original_color')
 
         if property_name == 'label' and value is None:
             value = getattr(self._pyObject, '_auto_label', None)
@@ -94,6 +94,17 @@ class BeanItemModel(QStandardItemModel):
                     else:
                         type_func = type(getattr(self._pyObject, property_name))
                         value = ConversionHelper.asType(value, type_func)
+
+                scale = DisplayScale.instance()
+                if property_name in scale.scaled_properties:
+                    # The form shows sizes as rendered. A field the user left
+                    # alone keeps its configured value: the mapper writes every
+                    # widget back on submit, and converting a rounded display
+                    # value would drift it.
+                    raw = PropertyManager().get_raw_value(self._pyObject, property_name)
+                    value = ConversionHelper.asType(value, type(raw))
+                    value = raw if value == scale.apply(property_name, raw) \
+                        else scale.unapply(property_name, value)
 
                 setattr(self._pyObject, property_name, value)
 
