@@ -2,7 +2,7 @@ import csv
 import re
 from contextlib import contextmanager
 from string import ascii_uppercase
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from PySide6.QtCore import QEvent, QItemSelectionModel, Qt, QTimer, Signal
@@ -223,6 +223,11 @@ class IplotQtRuler(QWidget):
         self.signals_button.setToolTip("Choose which signal value columns are shown.")
         self.signals_menu = QMenu(self.signals_button)
         self.signals_button.setMenu(self.signals_menu)
+        self.labels_button = QPushButton("Hide/Show labels")
+        self.labels_button.setToolTip("Turn the name tags or the value tags of every ruler on or off.")
+        self.labels_menu = QMenu(self.labels_button)
+        self.labels_button.setMenu(self.labels_menu)
+        self._build_labels_menu()
 
         view_layout = QHBoxLayout()
         view_layout.addWidget(QLabel("Layout:"))
@@ -230,6 +235,7 @@ class IplotQtRuler(QWidget):
         view_layout.addWidget(self.columns_radio)
         view_layout.addStretch()
         view_layout.addWidget(self.signals_button)
+        view_layout.addWidget(self.labels_button)
 
         self.table = _RulerTable()
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -429,6 +435,7 @@ class IplotQtRuler(QWidget):
             edit_enabled = False
 
         self._apply_signal_visibility()
+        self._sync_labels_menu()
         self.remove_button.setEnabled(edit_enabled)
         self.distance_button.setEnabled(edit_enabled)
 
@@ -468,8 +475,23 @@ class IplotQtRuler(QWidget):
             lines.append(current)
         return '\n'.join(lines)
 
+    @staticmethod
+    def _add_select_all(menu: QMenu, toggle_all) -> QAction:
+        """Leading entry of a check-list menu; its text follows the items."""
+        action = QAction("Select all", menu)
+        action.triggered.connect(toggle_all)
+        menu.addAction(action)
+        menu.addSeparator()
+        return action
+
+    @staticmethod
+    def _sync_select_all(action: QAction, all_on: bool):
+        action.setText("Deselect all" if all_on else "Select all")
+
     def _rebuild_signals_menu(self):
         self.signals_menu.clear()
+        self._signals_all_action = self._add_select_all(self.signals_menu, self._toggle_all_signals)
+        self._signal_actions: Dict[str, QAction] = {}
         for label in self._signal_labels:
             action = QAction(label, self.signals_menu)
             action.setCheckable(True)
@@ -477,6 +499,8 @@ class IplotQtRuler(QWidget):
             action.toggled.connect(
                 lambda checked, lbl=label: self._on_signal_toggled(lbl, checked))
             self.signals_menu.addAction(action)
+            self._signal_actions[label] = action
+        self._sync_select_all(self._signals_all_action, not self._hidden_signals)
         self.signals_button.setEnabled(bool(self._signal_labels))
 
     def _on_signal_toggled(self, label: str, visible: bool):
@@ -485,6 +509,62 @@ class IplotQtRuler(QWidget):
         else:
             self._hidden_signals.add(label)
         self._apply_signal_visibility()
+        self._sync_select_all(self._signals_all_action, not self._hidden_signals)
+
+    def _toggle_all_signals(self):
+        visible = bool(self._hidden_signals)
+        self._hidden_signals = set() if visible else set(self._signal_labels)
+        for action in self._signal_actions.values():
+            self._set_silently(action, lambda a=action: a.setChecked(visible))
+        self._apply_signal_visibility()
+        self._sync_select_all(self._signals_all_action, visible)
+
+    def _build_labels_menu(self):
+        self._labels_all_action = self._add_select_all(self.labels_menu, self._toggle_all_labels)
+        self._label_actions: List[QAction] = []
+        for index, toggle in enumerate(self.LABEL_TOGGLES):
+            action = QAction(toggle, self.labels_menu)
+            action.setCheckable(True)
+            action.toggled.connect(
+                lambda checked, i=index: self._on_labels_menu_toggled(i, checked))
+            self.labels_menu.addAction(action)
+            self._label_actions.append(action)
+        self._sync_labels_menu()
+
+    def _label_flags_of_every_row(self) -> List[bool]:
+        """Per toggle, whether every ruler row has it on."""
+        return [all(r['show_label'] for r in self._rows),
+                all(r['show_val_label'] for r in self._rows)]
+
+    def _sync_labels_menu(self):
+        flags = self._label_flags_of_every_row()
+        for action, on in zip(self._label_actions, flags):
+            self._set_silently(action, lambda a=action, v=on: a.setChecked(v))
+        self._sync_select_all(self._labels_all_action, all(flags))
+        self.labels_button.setEnabled(bool(self._rows))
+
+    def _on_labels_menu_toggled(self, index: int, checked: bool):
+        for entry in self._rows:
+            flags = [entry['show_label'], entry['show_val_label']]
+            flags[index] = checked
+            self._apply_labels(entry, *flags)
+        self._sync_labels_menu()
+
+    def _toggle_all_labels(self):
+        on = not all(self._label_flags_of_every_row())
+        for entry in self._rows:
+            self._apply_labels(entry, on, on)
+        self._sync_labels_menu()
+
+    def _apply_labels(self, entry: Dict, show_label: bool, show_val_label: bool):
+        """Store the label flags of a ruler row, mirror them on its combo and notify the canvas."""
+        entry['show_label'] = show_label
+        entry['show_val_label'] = show_val_label
+        row = self._table_row_of(entry['name'], entry['plot_id'])
+        if row is not None:
+            combo = self.table.cellWidget(row, self.COL_LABEL)
+            self._set_silently(combo, lambda: combo.set_checked_flags([show_label, show_val_label]))
+        self.labelVisibilityRuler.emit(entry['name'], entry['plot_id'], show_label, show_val_label)
 
     def _apply_signal_visibility(self):
         """Show/hide signal columns (rows view) or signal rows (columns view)
@@ -906,6 +986,13 @@ class IplotQtRuler(QWidget):
                 return idx
         return -1
 
+    def _table_row_of(self, name: str, plot_id) -> Optional[int]:
+        """Row of the rows view showing that ruler on that plot, None in the columns view."""
+        for row in range(self.table.rowCount()):
+            if self._row_metadata(row) == (name, tuple(plot_id)):
+                return row
+        return None
+
     def _edited_rows(self, row: int) -> List[int]:
         """Rows an edit of a row control applies to: the whole selection when
         the edited row belongs to it, that row alone otherwise."""
@@ -940,15 +1027,10 @@ class IplotQtRuler(QWidget):
     def _on_label_mode_changed(self, row: int, combo: '_CheckableComboBox'):
         show_label, show_val_label = combo.checked_flags()
         for target in self._edited_rows(row):
-            name, plot_id = self._row_metadata(target)
-            if target != row:
-                other = self.table.cellWidget(target, self.COL_LABEL)
-                self._set_silently(other, lambda: other.set_checked_flags([show_label, show_val_label]))
-            idx = self._find_row_index(name, plot_id)
+            idx = self._find_row_index(*self._row_metadata(target))
             if idx >= 0:
-                self._rows[idx]['show_label'] = show_label
-                self._rows[idx]['show_val_label'] = show_val_label
-            self.labelVisibilityRuler.emit(name, plot_id, show_label, show_val_label)
+                self._apply_labels(self._rows[idx], show_label, show_val_label)
+        self._sync_labels_menu()
 
     def _on_color_clicked(self, row: int, button: QPushButton):
         self._pick_color(row, button, 'color', self.colorRuler)

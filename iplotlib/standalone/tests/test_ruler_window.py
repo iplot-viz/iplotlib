@@ -19,6 +19,15 @@ from iplotlib.qt.testing import ensure_qapp
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 
+def _menu_items(menu):
+    """Checkable entries of a Hide/Show menu, after its Select all entry."""
+    return [a for a in menu.actions() if a.isCheckable()]
+
+
+def _label_flags(window):
+    return [(r['show_label'], r['show_val_label']) for r in window._rows]
+
+
 class IplotQtRulerWindowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -217,7 +226,7 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         self.window.add_row('A', (1, 1), (2.5, 7.5), '#FFFFFF',
                             signal_values={'VAR1': 1.2, 'VAR2': 3.4})
         base = IplotQtRuler.SIG_COL_BASE
-        actions = self.window.signals_menu.actions()
+        actions = _menu_items(self.window.signals_menu)
         self.assertEqual([a.text() for a in actions], ['VAR1', 'VAR2'])
         self.assertTrue(all(a.isChecked() for a in actions))
         actions[0].setChecked(False)
@@ -226,10 +235,79 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         # Hidden signals survive a re-render (e.g. another ruler is added).
         self.window.add_row('B', (1, 1), (3.0, 8.0), '#FFFFFF', signal_values={'VAR1': 2.0})
         self.assertTrue(self.window.table.isColumnHidden(base))
-        actions = self.window.signals_menu.actions()
+        actions = _menu_items(self.window.signals_menu)
         self.assertFalse(actions[0].isChecked())
         actions[0].setChecked(True)
         self.assertFalse(self.window.table.isColumnHidden(base))
+
+    def test_signals_menu_select_all_flips_every_column(self):
+        self.window.add_row('A', (1, 1), (2.5, 7.5), '#FFFFFF',
+                            signal_values={'VAR1': 1.2, 'VAR2': 3.4})
+        base = IplotQtRuler.SIG_COL_BASE
+        toggle = self.window.signals_menu.actions()[0]
+        self.assertEqual(toggle.text(), 'Deselect all')
+        toggle.trigger()
+        self.assertTrue(self.window.table.isColumnHidden(base))
+        self.assertTrue(self.window.table.isColumnHidden(base + 1))
+        self.assertFalse(any(a.isChecked() for a in _menu_items(self.window.signals_menu)))
+        self.assertEqual(toggle.text(), 'Select all')
+        toggle.trigger()
+        self.assertFalse(self.window.table.isColumnHidden(base))
+        self.assertEqual(toggle.text(), 'Deselect all')
+        # Hiding one signal by hand offers Select all again.
+        _menu_items(self.window.signals_menu)[1].setChecked(False)
+        self.assertEqual(toggle.text(), 'Select all')
+
+    def test_labels_button_needs_rulers(self):
+        self.assertFalse(self.window.labels_button.isEnabled())
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.assertTrue(self.window.labels_button.isEnabled())
+
+    def test_labels_menu_turns_one_tag_off_for_every_ruler(self):
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.window.add_row('B', (2, 1), (1.0, 0.0), '#FFFFFF')
+        emitted = []
+        self.window.labelVisibilityRuler.connect(lambda *args: emitted.append(args))
+        ruler_label, val_label = _menu_items(self.window.labels_menu)
+        self.assertEqual([a.text() for a in (ruler_label, val_label)], ['Ruler label', 'Val label'])
+        val_label.setChecked(False)
+        self.assertEqual(_label_flags(self.window), [(True, False), (True, False)])
+        self.assertEqual(sorted(e[0] for e in emitted), ['A', 'B'])
+        combos = [self.window.table.cellWidget(r, self.window.COL_LABEL).currentText() for r in range(2)]
+        self.assertEqual(combos, ['Ruler label', 'Ruler label'])
+
+    def test_labels_menu_follows_the_rows(self):
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.window.add_row('B', (1, 1), (2.0, 0.0), '#FFFFFF')
+        toggle = self.window.labels_menu.actions()[0]
+        self.assertEqual(toggle.text(), 'Deselect all')
+        self.window.table.cellWidget(0, self.window.COL_LABEL).set_checked(0, False)
+        ruler_label, val_label = _menu_items(self.window.labels_menu)
+        self.assertFalse(ruler_label.isChecked())
+        self.assertTrue(val_label.isChecked())
+        self.assertEqual(toggle.text(), 'Select all')
+
+    def test_labels_menu_select_all_and_deselect_all(self):
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.window.add_row('B', (2, 1), (1.0, 0.0), '#FFFFFF')
+        toggle = self.window.labels_menu.actions()[0]
+        toggle.trigger()
+        self.assertEqual(_label_flags(self.window), [(False, False), (False, False)])
+        self.assertEqual(self.window.table.cellWidget(1, self.window.COL_LABEL).currentText(), 'None')
+        self.assertEqual(toggle.text(), 'Select all')
+        toggle.trigger()
+        self.assertEqual(_label_flags(self.window), [(True, True), (True, True)])
+        self.assertEqual(toggle.text(), 'Deselect all')
+
+    def test_labels_menu_works_from_the_columns_layout(self):
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.window.columns_radio.setChecked(True)
+        emitted = []
+        self.window.labelVisibilityRuler.connect(lambda *args: emitted.append(args))
+        _menu_items(self.window.labels_menu)[0].setChecked(False)
+        self.assertEqual(emitted, [('A', (1, 1), False, True)])
+        self.window.rows_radio.setChecked(True)
+        self.assertEqual(self.window.table.cellWidget(0, self.window.COL_LABEL).currentText(), 'Val label')
 
     def test_copy_button_copies_whole_table_with_headers(self):
         self.window.add_row('A', (1, 1), (2.5, 7.5), '#FF0000', signal_values={'VAR1': 1.2})
@@ -744,7 +822,7 @@ class RulerComputeDistanceDialogTest(unittest.TestCase):
                             signal_values={'S1': 10.0, 'S2': 3.0})
         self.window.add_row('B', (1, 1), (5.0, 6.0), '#FFFFFF',
                             signal_values={'S1': 4.0, 'S2': 1.0})
-        self.window.signals_menu.actions()[1].setChecked(False)  # hide S2
+        _menu_items(self.window.signals_menu)[1].setChecked(False)  # hide S2
         table = self._distance_between_first_two()
         headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
         self.assertEqual(headers, ['Rulers', 'ΔX', 'ΔY', 'Δ S1'])
