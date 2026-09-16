@@ -120,13 +120,16 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         backend = self.widget._parser.get_rulers(self.impl_plot)[0]
         self.assertEqual(to_hex(backend.name_label.get_color()).upper(), '#123456')
 
-    def test_toggle_ruler_label_hides_only_the_name_label(self):
-        self.widget._add_ruler_at(self.impl_plot, self.plot, 1.0, 0.1)
+    def test_toggle_ruler_label_hides_the_ruler_tags_but_not_the_lines(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 2.5, 0.5)
         self.widget.toggle_ruler_label('A', (self.plot.col, self.plot.row), False, True)
         self.assertFalse(self.plot.rulers[0].show_label)
         backend = self.widget._parser.get_rulers(self.impl_plot)[0]
-        self.assertFalse(backend.name_label.get_visible())
+        for tag in (backend.name_label, backend.x_label, backend.y_label):
+            self.assertFalse(tag.get_visible())
         self.assertTrue(backend.v_line.get_visible())
+        self.assertTrue(backend.h_line.get_visible())
+        self.assertTrue(backend.value_labels[0].get_visible())
 
     def test_ruler_shows_one_value_label_per_signal(self):
         self.widget._add_ruler_at(self.impl_plot, self.plot, 2.5, 0.5)
@@ -480,6 +483,37 @@ class RulerMatplotlibFocusTest(unittest.TestCase):
 
     def _focus(self, plot):
         self.widget._full_screen_mode_on(self.widget._get_impl_plot_for_plot(plot))
+
+    def _two_plots_with_archived_data_and_a_ruler_each(self):
+        """Shared time; the samples stop short of both ends of the requested
+        range, as archived data does."""
+        ts0, ts1 = 1_778_079_600_000_000_000, 1_778_083_200_000_000_000
+        c = Canvas(2, 1, title="focus_ts_mpl", shared_x_axis=True)
+        t = np.linspace(ts0 + 60 * 10**9, ts1 - 60 * 10**9, 200).astype(np.int64)
+        for k in range(2):
+            p = PlotXY()
+            p.axes[0].is_date = True
+            s = SignalXY(label=f"s{k}")
+            s.ts_start, s.ts_end = ts0, ts1
+            s.set_data([t, np.sin(np.linspace(0, 10, 200) + k)])
+            p.add_signal(s)
+            c.add_plot(p, 0)
+        self.widget = QtMatplotlibCanvas(canvas=c)
+        plots = list(c.plots[0])
+        for k, plot in enumerate(plots):
+            impl = self.widget._get_impl_plot_for_plot(plot)
+            x = self.widget._parser.transform_value(impl, 0, ts0 + (600 + 600 * k) * 10**9, inverse=True)
+            self.widget._add_ruler_at(impl, plot, x, 0.0)
+        return plots
+
+    def test_unfocus_restores_the_mirrored_rulers_with_archived_data(self):
+        plots = self._two_plots_with_archived_data_and_a_ruler_each()
+        mirrored = [('A', False), ('A', True), ('B', False), ('B', True)]
+        self.assertEqual(self._drawn(), mirrored)
+        for plot in plots:
+            self._focus(plot)
+            self.widget._full_screen_mode_off()
+            self.assertEqual(self._drawn(), mirrored)
 
     def test_focused_plot_shows_its_own_ruler_whatever_its_position(self):
         plots = self._stacked_plots_with_a_ruler_each(shared=False)

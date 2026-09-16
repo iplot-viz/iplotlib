@@ -21,6 +21,8 @@ from iplotlib.qt.utils.icon_loader import create_icon
 
 logger = Sl.get_logger(__name__)
 
+_RULER_NAME_ROLE = Qt.ItemDataRole.UserRole + 1
+
 
 class _NumericTableItem(QTableWidgetItem):
     """Sort by the numeric value stored as UserRole, not by the displayed text."""
@@ -31,6 +33,19 @@ class _NumericTableItem(QTableWidgetItem):
         if a is None or b is None:
             return super().__lt__(other)
         return a < b
+
+
+class _PlotTableItem(QTableWidgetItem):
+    """Sort by plot position, then ruler name, not by the displayed text."""
+
+    def __lt__(self, other):
+        if not isinstance(other, _PlotTableItem):
+            return super().__lt__(other)
+        return self._sort_key() < other._sort_key()
+
+    def _sort_key(self):
+        # Qt may demote the stored tuple to a list.
+        return tuple(self.data(Qt.ItemDataRole.UserRole)), self.data(_RULER_NAME_ROLE)
 
 
 class _CheckableComboBox(QComboBox):
@@ -67,6 +82,10 @@ class _CheckableComboBox(QComboBox):
         item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
         self._update_text()
         self.changed.emit()
+
+    def set_checked_flags(self, flags: List[bool]):
+        for index, checked in enumerate(flags):
+            self.set_checked(index, checked)
 
     def showPopup(self):
         # The popup is as wide as the field, which a narrow table column squeezes
@@ -174,7 +193,7 @@ class IplotQtRuler(QWidget):
         self._distance_dialog: QDialog = None
         # Sort criterion chosen by the user. The table is rebuilt on every ruler
         # update, so it must be restored afterwards or the view snaps back.
-        self._sort_column = self.COL_NAME
+        self._sort_column = self.COL_PLOT
         self._sort_order = Qt.SortOrder.AscendingOrder
         self._rendering = False
         self._bulk_depth = 0
@@ -489,7 +508,7 @@ class IplotQtRuler(QWidget):
             self._populate_row_cells(row_idx, row)
 
         self.table.setSortingEnabled(True)
-        column = self._sort_column if self._sort_column < self.table.columnCount() else self.COL_NAME
+        column = self._sort_column if self._sort_column < self.table.columnCount() else self.COL_PLOT
         self.table.sortItems(column, self._sort_order)
         self.table.horizontalHeader().setSortIndicator(column, self._sort_order)
         self.table.resizeColumnsToContents()
@@ -505,8 +524,9 @@ class IplotQtRuler(QWidget):
         name_item.setData(Qt.ItemDataRole.UserRole, row['is_date'])
         self.table.setItem(row_idx, self.COL_NAME, name_item)
 
-        plot_item = QTableWidgetItem(self._format_plot_id(row['plot_id']))
+        plot_item = _PlotTableItem(self._format_plot_id(row['plot_id']))
         plot_item.setData(Qt.ItemDataRole.UserRole, row['plot_id'])
+        plot_item.setData(_RULER_NAME_ROLE, row['name'])
         self.table.setItem(row_idx, self.COL_PLOT, plot_item)
 
         x, y = row['xy']
@@ -875,23 +895,49 @@ class IplotQtRuler(QWidget):
                 return idx
         return -1
 
+    def _edited_rows(self, row: int) -> List[int]:
+        """Rows an edit of a row control applies to: the whole selection when
+        the edited row belongs to it, that row alone otherwise."""
+        selected = sorted({idx.row() for idx in self.table.selectionModel().selectedRows()})
+        return selected if row in selected else [row]
+
+    @staticmethod
+    def _set_silently(widget, apply):
+        widget.blockSignals(True)
+        try:
+            apply()
+        finally:
+            widget.blockSignals(False)
+
     def _on_visibility_changed(self, row: int, state):
         visible = state == Qt.CheckState.Checked.value
-        name, plot_id = self._row_metadata(row)
-        # Visibility belongs to the ruler, not to one of the plots it spans.
-        for r in self._rows:
-            if r['name'] == name:
-                r['visible'] = visible
-        self.visibilityRuler.emit(name, plot_id, visible)
+        done: Set[str] = set()
+        for target in self._edited_rows(row):
+            name, plot_id = self._row_metadata(target)
+            if target != row:
+                checkbox = self.table.cellWidget(target, self.COL_VISIBLE)
+                self._set_silently(checkbox, lambda: checkbox.setChecked(visible))
+            if name in done:
+                continue
+            done.add(name)
+            # Visibility belongs to the ruler, not to one of the plots it spans.
+            for r in self._rows:
+                if r['name'] == name:
+                    r['visible'] = visible
+            self.visibilityRuler.emit(name, plot_id, visible)
 
     def _on_label_mode_changed(self, row: int, combo: '_CheckableComboBox'):
         show_label, show_val_label = combo.checked_flags()
-        name, plot_id = self._row_metadata(row)
-        idx = self._find_row_index(name, plot_id)
-        if idx >= 0:
-            self._rows[idx]['show_label'] = show_label
-            self._rows[idx]['show_val_label'] = show_val_label
-        self.labelVisibilityRuler.emit(name, plot_id, show_label, show_val_label)
+        for target in self._edited_rows(row):
+            name, plot_id = self._row_metadata(target)
+            if target != row:
+                other = self.table.cellWidget(target, self.COL_LABEL)
+                self._set_silently(other, lambda: other.set_checked_flags([show_label, show_val_label]))
+            idx = self._find_row_index(name, plot_id)
+            if idx >= 0:
+                self._rows[idx]['show_label'] = show_label
+                self._rows[idx]['show_val_label'] = show_val_label
+            self.labelVisibilityRuler.emit(name, plot_id, show_label, show_val_label)
 
     def _on_color_clicked(self, row: int, button: QPushButton):
         self._pick_color(row, button, 'color', self.colorRuler)
@@ -904,14 +950,22 @@ class IplotQtRuler(QWidget):
         new_color = QColorDialog.getColor(current, self)
         if not new_color.isValid():
             return
-        color = new_color.name()
-        self._paint_color_button(button, color)
-        name, plot_id = self._row_metadata(row)
-        # Colours belong to the ruler, so they reach every plot it spans.
-        for r in self._rows:
-            if r['name'] == name:
-                r[key] = color
-        signal.emit(name, plot_id, color)
+        self._apply_color(row, key, new_color.name(), signal)
+
+    def _apply_color(self, row: int, key: str, color: str, signal):
+        column = self.COL_COLOR if key == 'color' else self.COL_FONT_COLOR
+        done: Set[str] = set()
+        for target in self._edited_rows(row):
+            name, plot_id = self._row_metadata(target)
+            self._paint_color_button(self.table.cellWidget(target, column), color)
+            if name in done:
+                continue
+            done.add(name)
+            # Colours belong to the ruler, so they reach every plot it spans.
+            for r in self._rows:
+                if r['name'] == name:
+                    r[key] = color
+            signal.emit(name, plot_id, color)
 
     def _remove_selected(self):
         # Resolve identities BEFORE deletion so visual rows stay valid until we drop them.

@@ -465,6 +465,40 @@ class WindowRefreshTests(unittest.TestCase):
         self.assertTrue(signal._streaming_has_live)
         streamer._callback.assert_called_once_with(signal)
 
+    def _dense_reply_with_a_hole(self, boundary_ns):
+        """30 samples every 10 s, then nothing for ~15 min, then one more."""
+        arch = [boundary_ns - (1300 - 10 * i) * self.SEC for i in range(30)]
+        arch.append(boundary_ns - 100 * self.SEC)
+        return arch, [float(i) for i in range(len(arch))]
+
+    def test_live_fills_a_hole_inside_the_archive_reply(self):
+        now_ns = int(time.time() * 1e9)
+        boundary_ns = now_ns - 120 * self.SEC
+        arch_x, arch_y = self._dense_reply_with_a_hole(boundary_ns)
+        covered = boundary_ns - 1105 * self.SEC  # under the archive: replaced
+        in_hole = boundary_ns - 500 * self.SEC   # inside the archive hole: kept
+        after = boundary_ns - 50 * self.SEC      # past the archive end: kept
+        reply = _FakeArchiveResponse(x=arch_x, y=arch_y)
+        streamer, fake_da, signal = self._mk(
+            reply, data=[_FakeBuf([covered, in_hole, after]), _FakeBuf([-1.0, 2.5, 3.5])])
+        streamer._refresh_signal('ds', signal)
+        kwargs = signal.inject_external.call_args.kwargs
+        self.assertEqual(list(kwargs['d0']), arch_x[:30] + [in_hole, after])
+        self.assertEqual(list(kwargs['d1']), arch_y[:30] + [2.5, 3.5])
+
+    def test_archive_hole_without_live_samples_is_kept(self):
+        now_ns = int(time.time() * 1e9)
+        boundary_ns = now_ns - 120 * self.SEC
+        arch_x, arch_y = self._dense_reply_with_a_hole(boundary_ns)
+        after = boundary_ns - 50 * self.SEC
+        reply = _FakeArchiveResponse(x=arch_x, y=arch_y)
+        streamer, fake_da, signal = self._mk(
+            reply, data=[_FakeBuf([after]), _FakeBuf([3.5])])
+        streamer._refresh_signal('ds', signal)
+        kwargs = signal.inject_external.call_args.kwargs
+        self.assertEqual(list(kwargs['d0']), arch_x + [after])
+        self.assertEqual(list(kwargs['d1']), arch_y + [3.5])
+
     def test_empty_archive_reply_leaves_buffer_untouched(self):
         reply = _FakeArchiveResponse(x=[], y=[])
         streamer, fake_da, signal = self._mk(
@@ -1129,6 +1163,40 @@ class RefreshTriggerTests(unittest.TestCase):
         self.streamer._window_ns = 0
         now = int(time.time() * 1e9)
         signal = _FakeSignal(data=[_FakeBuf([now]), _FakeBuf([1.0])])
+        self.assertFalse(self.streamer._has_window_hole(signal))
+
+
+    def _buffer_with_a_live_gap(self, now, gap_start_s, gap_end_s):
+        before = np.arange(now - 3600 * self.SEC, now - gap_start_s * self.SEC, self.SEC)
+        after = np.arange(now - gap_end_s * self.SEC, now, self.SEC)
+        x = np.concatenate([before, after])
+        return _FakeSignal(data=[_FakeBuf(x), _FakeBuf(np.zeros(len(x)))]), int(before[-1])
+
+    def test_closed_gap_in_the_live_span_of_a_verbose_signal_triggers_a_refresh(self):
+        now = int(time.time() * 1e9)
+        signal, _ = self._buffer_with_a_live_gap(now, 1300, 500)
+        self.streamer._verbose.add(signal.uid)
+        self.streamer._archive_end_ns[signal.uid] = now - 3000 * self.SEC
+        self.assertTrue(self.streamer._has_window_hole(signal))
+
+    def test_gap_still_inside_the_archiver_lag_waits(self):
+        now = int(time.time() * 1e9)
+        signal, _ = self._buffer_with_a_live_gap(now, 900, 60)
+        self.streamer._verbose.add(signal.uid)
+        self.streamer._archive_end_ns[signal.uid] = now - 3000 * self.SEC
+        self.assertFalse(self.streamer._has_window_hole(signal))
+
+    def test_seam_between_archive_and_first_live_is_not_a_live_gap(self):
+        now = int(time.time() * 1e9)
+        signal, archive_end = self._buffer_with_a_live_gap(now, 1300, 500)
+        self.streamer._verbose.add(signal.uid)
+        self.streamer._archive_end_ns[signal.uid] = archive_end
+        self.assertFalse(self.streamer._has_window_hole(signal))
+
+    def test_gaps_of_a_sparse_signal_never_trigger(self):
+        now = int(time.time() * 1e9)
+        signal, _ = self._buffer_with_a_live_gap(now, 1300, 500)
+        self.streamer._archive_end_ns[signal.uid] = now - 3000 * self.SEC
         self.assertFalse(self.streamer._has_window_hole(signal))
 
 

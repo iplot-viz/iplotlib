@@ -1042,6 +1042,71 @@ class SharedXAxisTest(unittest.TestCase):
                 self.assertFalse(xy_sig.ts_start > ts_start
                                  and xy_sig.ts_end < ts_end)
 
+    def test_time_plot_with_time_valued_overlay_still_drives_the_group(self):
+        """A time plot carrying an overlay whose X expression yields times (a
+        two-point trend line, 'np.array([${self}.time[0], ${self}.time[-1]])')
+        must still lead the shared-time group: only a data-valued X keeps the
+        zoom local."""
+        ts_start = 1_778_079_600_000_000_000
+        ts_end = 1_778_835_600_000_000_000
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = Canvas(2, 1, title="overlay_leads", shared_x_axis=True)
+                time = np.linspace(ts_start, ts_end, 200).astype(np.int64)
+                values = np.linspace(91.0, 304.0, 200)
+
+                # Plot 1: the measurement plus a two-point trend line overlay.
+                plot_main = PlotXY()
+                main = SignalXY(label="MT2611")
+                main.data_access_enabled = False
+                main.ts_start, main.ts_end = ts_start, ts_end
+                main.set_data([time, values])
+                plot_main.add_signal(main)
+                fit = SignalXY(label="fit", alias="fit",
+                               x_expr="np.array([${self}.time[0],${self}.time[-1]])")
+                fit.data_access_enabled = False
+                fit.ts_start, fit.ts_end = ts_start, ts_end
+                fit.set_data([np.array([time[0], time[-1]], dtype=np.int64),
+                              np.array([values[0], values[-1]])])
+                plot_main.add_signal(fit)
+                canvas.add_plot(plot_main, 0)
+
+                # Plot 2: a derived plot whose X expression also yields times.
+                plot_derived = PlotXY()
+                derived = SignalXY(label="MT2611_bis", alias="MT2611_bis",
+                                   x_expr="mctf.slope(${self}.time,${self}.data,3600)[0]")
+                derived.data_access_enabled = False
+                derived.ts_start, derived.ts_end = ts_start, ts_end
+                derived.set_data([time[:-1], np.diff(values)])
+                plot_derived.add_signal(derived)
+                canvas.add_plot(plot_derived, 0)
+
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(600, 400)
+                self.app.processEvents()
+                parser = qt_canvas._parser
+
+                def logical(impl_plot):
+                    return parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+
+                plots = parser.get_canvas_plots()
+                main_impl = next(p for p in plots if logical(p) is plot_main)
+                derived_impl = next(p for p in plots if logical(p) is plot_derived)
+
+                # The overlay must not disqualify plot 1 from leading the group.
+                self.assertIn(derived_impl, parser._get_all_shared_axes(main_impl))
+
+                new_start = ts_start + 200_000_000_000_000
+                new_end = ts_end - 200_000_000_000_000
+                parser.set_oaw_axis_limits(main_impl, 0, (new_start, new_end))
+                BackendParserBase._x_axis_update_callback(parser, main_impl)
+                self.app.processEvents()
+
+                begin, end = parser.get_oaw_axis_limits(derived_impl, 0)
+                self.assertAlmostEqual(begin, new_start, delta=1e12)
+                self.assertAlmostEqual(end, new_end, delta=1e12)
+
     def test_xy_plot_with_different_ts_stays_out_of_shared_group(self):
         """An X-versus-Y plot requested over a *different* time range than the base
         plot does not share its time base and must stay out of the group."""

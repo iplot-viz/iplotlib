@@ -85,6 +85,11 @@ def _live_retention_s() -> int:
         return _DEFAULT_LIVE_RETENTION_S
 
 
+def _max_gap_ns(window_ns: int) -> int:
+    """Widest sample spacing still read as continuous data within a window."""
+    return max(1, window_ns // 100)
+
+
 # Bucket count requested when an (opt-in) envelope signal is fetched.
 _ENVELOPE_TARGET_POINTS = 1920
 
@@ -143,6 +148,9 @@ class CanvasStreamer:
         self._refresh_pending = set()
         self._last_refresh = {}
         self._verbose = set()
+        # Newest timestamp the archive supplied per signal uid; a closed gap in
+        # the live samples after it is worth one archive request.
+        self._archive_end_ns = {}
         # Signals whose visible content is a held last-known value (archive
         # empty in the window, or the feed re-announcing a stale value).
         # Their buffers are normalized to a zero-order hold so an empty span
@@ -343,7 +351,8 @@ class CanvasStreamer:
         window, and refreshing it then bought nothing: it re-fetched data the
         buffer already had, once per signal per interval, which is the archive
         request storm that made focus changes and autoscale crawl. What
-        actually warrants a round trip is a gap at the left edge.
+        actually warrants a round trip is a gap at the left edge, or a span
+        the live feed skipped once the archive can supply it.
         Caller must hold _signal_lock."""
         if self._max_points <= 0 or self._window_ns <= 0:
             return False
@@ -353,9 +362,26 @@ class CanvasStreamer:
         x, _, _, _ = self._current_arrays(signal)
         if len(x) == 0:
             return False
-        window_start = int(time.time() * 1e9) - self._window_ns
+        x = np.asarray(x).astype(np.int64)
+        now_ns = int(time.time() * 1e9)
         # A tenth of the window of missing history is worth one request.
-        return int(np.asarray(x)[0]) > window_start + self._window_ns // 10
+        if int(x[0]) > now_ns - self._window_ns + self._window_ns // 10:
+            return True
+        return self._has_closed_live_gap(signal, x, now_ns)
+
+    def _has_closed_live_gap(self, signal, x, now_ns: int) -> bool:
+        """Whether the live samples of a verbose signal skip a span the archive
+        can already hold: a gap wider than the continuity threshold that opened
+        after the last archive sample and closed before the archiver's lag."""
+        archive_end = self._archive_end_ns.get(signal.uid)
+        if archive_end is None or signal.uid not in self._verbose or len(x) < 2:
+            return False
+        closed_before = now_ns - _live_retention_s() * int(1e9)
+        gaps = np.diff(x)
+        for i in np.flatnonzero(gaps > _max_gap_ns(self._window_ns)):
+            if x[i] > archive_end and x[i + 1] <= closed_before:
+                return True
+        return False
 
     def _apply_cap(self, signal):
         """Safety valve only: the regular cap enforcement is the refresh
@@ -610,9 +636,7 @@ class CanvasStreamer:
         if y_min is not None:
             # An envelope buffer carries its own band; leave it alone.
             return False
-        # A gap is anything far wider than the visible sample spacing.
-        max_gap_ns = max(1, window_ns // 100)
-        new_x, new_y, changed = self._step_across_gaps(x, y, max_gap_ns)
+        new_x, new_y, changed = self._step_across_gaps(x, y, _max_gap_ns(window_ns))
         if not changed:
             return False
         payload = self._make_payload(
@@ -871,6 +895,8 @@ class CanvasStreamer:
         is_env = getattr(signal, 'envelope', False)
         cx = np.asarray(cx)
         cy = np.asarray(cy)
+        if len(cx):
+            self._archive_end_ns[signal.uid] = int(cx[-1])
         with self._signal_lock(carrier):
             cur_x, cur_y, cur_min, cur_max = self._current_arrays(carrier)
             m_min = m_max = None
@@ -1034,9 +1060,11 @@ class CanvasStreamer:
         discard everything between the archive's real end and that boundary
         — the newest chunks would vanish on every refresh. Anchoring the
         keep-boundary at the archive's own last timestamp loses nothing
-        regardless of the actual lag. No NaN break is inserted here: the
-        two blocks meet at that timestamp (unlike the first fill, where the
-        archive genuinely ends behind the first live sample)."""
+        regardless of the actual lag. A reply with a hole the live feed did
+        cover is cut at that hole, so the live samples stay. No NaN break is
+        inserted here: the two blocks meet at that timestamp (unlike the
+        first fill, where the archive genuinely ends behind the first live
+        sample)."""
         if self._window_is_live_only():
             # Nothing archived inside the window; the query would invert.
             return
@@ -1056,11 +1084,16 @@ class CanvasStreamer:
 
         new_x = np.asarray(ax)
         new_y = np.asarray(ay)
-        # Live samples strictly after the archive's real end are kept; the
-        # archive replaces everything it actually covers.
-        keep_after_ns = int(new_x[-1])
+        new_ymin = np.asarray(ay_min) if ay_min is not None else new_y
+        new_ymax = np.asarray(ay_max) if ay_max is not None else new_y
         with self._signal_lock(carrier):
             cur_x, cur_y, cur_ymin, cur_ymax = self._current_arrays(carrier)
+            # Live samples strictly after the archive's real end are kept; the
+            # archive replaces everything it actually covers.
+            end = self._archive_end_before_live_hole(new_x, cur_x)
+            new_x, new_y, new_ymin, new_ymax = (a[:end] for a in (new_x, new_y, new_ymin, new_ymax))
+            keep_after_ns = int(new_x[-1])
+            self._archive_end_ns[signal.uid] = keep_after_ns
             keep_mask = (np.asarray(cur_x) > keep_after_ns) if len(cur_x) \
                 else np.zeros(0, dtype=bool)
             kept_x = np.asarray(cur_x)[keep_mask]
@@ -1076,8 +1109,6 @@ class CanvasStreamer:
                              if cur_ymin is not None else kept_y)
                 kept_ymax = (np.asarray(cur_ymax)[keep_mask]
                              if cur_ymax is not None else kept_y)
-                new_ymin = np.asarray(ay_min) if ay_min is not None else new_y
-                new_ymax = np.asarray(ay_max) if ay_max is not None else new_y
                 merged_ymin = np.concatenate([new_ymin, kept_ymin])
                 merged_ymax = np.concatenate([new_ymax, kept_ymax])
 
@@ -1096,10 +1127,26 @@ class CanvasStreamer:
                 # and corrupt the derived signal.
                 self._reprocess(signal)
 
-        logger.info(f"Window refresh for {signal.name}: {len(ax)} archive "
+        logger.info(f"Window refresh for {signal.name}: {len(new_x)} archive "
                     f"points, {len(kept_x)} live points retained")
         if self._callback:
             self._callback(signal)
+
+    def _archive_end_before_live_hole(self, archive_x, live_x) -> int:
+        """Number of leading archive samples to keep: all of them, unless a gap
+        far wider than both the continuity threshold and the reply's own
+        spacing has live samples inside it."""
+        count = len(archive_x)
+        if count < 2 or len(live_x) == 0 or self._window_ns <= 0:
+            return count
+        x = np.asarray(archive_x).astype(np.int64)
+        live = np.asarray(live_x).astype(np.int64)
+        gaps = np.diff(x)
+        hole_ns = max(_max_gap_ns(self._window_ns), 10 * int(np.median(gaps)))
+        for i in np.flatnonzero(gaps > hole_ns):
+            if ((live > x[i]) & (live < x[i + 1])).any():
+                return int(i) + 1
+        return count
 
     @staticmethod
     def _unpack_archive(data):
