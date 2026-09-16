@@ -5,7 +5,7 @@ from string import ascii_uppercase
 from typing import Dict, List, Set, Tuple
 
 import pandas as pd
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QItemSelectionModel, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox,
                                 QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QMenu, QMessageBox,
@@ -46,6 +46,17 @@ class _PlotTableItem(QTableWidgetItem):
     def _sort_key(self):
         # Qt may demote the stored tuple to a list.
         return tuple(self.data(Qt.ItemDataRole.UserRole)), self.data(_RULER_NAME_ROLE)
+
+
+class _RulerTable(QTableWidget):
+    """Table whose multi-row selection survives a click on one of its cell widgets."""
+
+    def selectionCommand(self, index, event=None):
+        # When a cell widget takes the focus the view re-selects its row alone,
+        # which would reduce an edit of a selected row to that row.
+        if event is None and self.selectionModel().isRowSelected(index.row(), index.parent()):
+            return QItemSelectionModel.SelectionFlag.NoUpdate
+        return super().selectionCommand(index, event)
 
 
 class _CheckableComboBox(QComboBox):
@@ -220,7 +231,7 @@ class IplotQtRuler(QWidget):
         view_layout.addStretch()
         view_layout.addWidget(self.signals_button)
 
-        self.table = QTableWidget()
+        self.table = _RulerTable()
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.selectionModel().selectionChanged.connect(self._update_selection_history)

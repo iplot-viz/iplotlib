@@ -10,6 +10,7 @@ import os
 import unittest
 
 from PySide6.QtCore import QItemSelectionModel, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QHeaderView
 
 from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
@@ -657,6 +658,39 @@ class RulerBulkEditTest(unittest.TestCase):
         QApplication.processEvents()
         self.assertEqual(emitted, ['A'])
         self.assertFalse(self.window.table.cellWidget(rows[1], self.window.COL_VISIBLE).isChecked())
+
+    def _click_row(self, name, modifier=Qt.KeyboardModifier.NoModifier):
+        table = self.window.table
+        rect = table.visualRect(table.model().index(self._row_of(name), IplotQtRuler.COL_NAME))
+        QTest.mouseClick(table.viewport(), Qt.MouseButton.LeftButton, modifier, rect.center())
+        QApplication.processEvents()
+
+    def test_clicking_a_control_of_a_selected_row_keeps_the_selection(self):
+        """The view moves its current index to a cell widget that takes the
+        focus; with the mouse that used to leave only that row selected."""
+        self._click_row('A')
+        self._click_row('C', Qt.KeyboardModifier.ControlModifier)
+        combo = self._widget('C', self.window.COL_LABEL)
+        QTest.mouseClick(combo, Qt.MouseButton.LeftButton)
+        QApplication.processEvents()
+        combo.hidePopup()
+        selected = sorted(idx.row() for idx in self.window.table.selectionModel().selectedRows())
+        self.assertEqual(selected, sorted([self._row_of('A'), self._row_of('C')]))
+
+        combo.set_checked(0, False)
+        combo.set_checked(1, False)
+        self.assertEqual(self._widget('A', self.window.COL_LABEL).currentText(), 'None')
+        self.assertEqual(self._widget('B', self.window.COL_LABEL).currentText(), 'All')
+
+    def test_clicking_a_control_outside_the_selection_selects_its_row_only(self):
+        self._click_row('A')
+        self._click_row('B', Qt.KeyboardModifier.ControlModifier)
+        combo = self._widget('C', self.window.COL_LABEL)
+        QTest.mouseClick(combo, Qt.MouseButton.LeftButton)
+        QApplication.processEvents()
+        combo.hidePopup()
+        selected = [idx.row() for idx in self.window.table.selectionModel().selectedRows()]
+        self.assertEqual(selected, [self._row_of('C')])
 
 
 class RulerComputeDistanceDialogTest(unittest.TestCase):
