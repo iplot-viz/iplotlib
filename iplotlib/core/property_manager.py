@@ -12,7 +12,24 @@ file_name = os.path.join(data_dir, "default_properties.json")
 
 IPLOT_CANVAS_CONFIG = os.environ.get('IPLOT_CANVAS_CONFIG')
 
-config_path = IPLOT_CANVAS_CONFIG if IPLOT_CANVAS_CONFIG else file_name
+#: Where the preferences form writes when the user exports canvas preferences.
+#: It lives in the user's home directory, so it follows them to whichever
+#: workstation or ssh session they are on -- which an environment variable set
+#: in a login profile does not.
+USER_CONFIG = os.path.join(os.path.expanduser('~'), '.local', '1DPreferences',
+                           'default_properties.json')
+
+
+def _resolve_config_path() -> str:
+    if IPLOT_CANVAS_CONFIG:
+        return IPLOT_CANVAS_CONFIG
+    if os.path.isfile(USER_CONFIG):
+        logger.info(f"Using exported canvas preferences: {USER_CONFIG}")
+        return USER_CONFIG
+    return file_name
+
+
+config_path = _resolve_config_path()
 
 try:
     with open(config_path, "r") as f:
