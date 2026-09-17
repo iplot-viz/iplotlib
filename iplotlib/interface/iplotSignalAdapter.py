@@ -927,7 +927,7 @@ class AccessHelper:
                       extremities=signal.extremities,
                       nbp=AccessHelper.num_samples if AccessHelper.num_samples_override else -1
                       )
-        # retType is UDA-specific; IMASPy has no notion of calibrated data
+        # retType is UDA-specific; IMAS has no notion of calibrated data
         if signal.calibrated:
             ds = AccessHelper.da.get_data_source(signal.data_source) if AccessHelper.da else None
             if ds is None or ds.source_type == 'CODAC_UDA':
