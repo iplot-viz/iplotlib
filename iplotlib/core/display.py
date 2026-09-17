@@ -504,6 +504,8 @@ class DisplayScale:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return value
         factor = self.factor()
+        if attr_name in POINT_PROPERTIES:
+            factor *= self.point_compensation()
         if factor == 1.0:
             return value
         raw = value / factor

@@ -7,14 +7,15 @@ remote-session paths that cannot be reproduced on a build machine.
 """
 
 import unittest
+from unittest.mock import patch
 
 from iplotlib.core.display import (DATA_COST_PROPERTIES,
                                    DEFAULT_SCALED_PROPERTIES, DisplayScale,
                                    MODE_FIXED, MODE_OFF, ScaledPixels,
                                    parse_scale_setting,
                                    parse_scaled_properties, pixel_ceiling,
-                                   quantize, remote_session_markers,
-                                   scale_from_metrics)
+                                   point_compensation, quantize,
+                                   remote_session_markers, scale_from_metrics)
 
 
 def metrics(**kwargs):
@@ -196,6 +197,30 @@ class ApplyTest(unittest.TestCase):
     def test_off_mode_is_identity(self):
         self.scale.configure(mode=MODE_OFF, force=True)
         self.assertEqual(self.scale.apply('font_size', 8), 8)
+
+    def test_point_compensation_only_below_the_reference_dpi(self):
+        self.assertEqual(point_compensation(metrics(logical_dpi=72.0)), 1.35)
+        self.assertEqual(point_compensation(metrics(logical_dpi=96.0)), 1.0)
+        self.assertEqual(point_compensation(metrics(logical_dpi=144.0)), 1.0)
+        # Outside the plausible range or unreadable: no correction.
+        self.assertEqual(point_compensation(metrics(logical_dpi=40.0)), 1.0)
+        self.assertEqual(point_compensation(metrics(available=False, logical_dpi=72.0)), 1.0)
+
+    def test_point_compensation_reaches_point_sizes_only(self):
+        self.scale.configure(mode=MODE_OFF, force=True)
+        with patch.object(DisplayScale, 'point_compensation', lambda self: 1.35):
+            self.assertEqual(self.scale.apply('font_size', 10), 14)
+            self.assertEqual(self.scale.apply('font_size', 10.0), 13.5)
+            self.assertEqual(self.scale.apply('crosshair_line_width', 2), 2)
+
+    def test_unapply_undoes_the_point_compensation(self):
+        # The property forms write unapply(typed value) back; without the
+        # compensation a font size typed as 16 renders as 22.
+        self.scale.configure(mode=MODE_OFF, force=True)
+        with patch.object(DisplayScale, 'point_compensation', lambda self: 1.35):
+            self.assertEqual(self.scale.unapply('font_size', 13.5), 10.0)
+            typed = 16
+            self.assertEqual(self.scale.apply('font_size', self.scale.unapply('font_size', typed)), typed)
 
     def test_scaled_pixels_is_lazy(self):
         constant = ScaledPixels(110)
