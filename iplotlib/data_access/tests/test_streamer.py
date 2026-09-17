@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
+import iplotlib.data_access.streamer as streamer_module
 from iplotlib.data_access.streamer import CanvasStreamer, _inject_period_s
 
 
@@ -578,6 +579,60 @@ class VerboseGatingTests(unittest.TestCase):
         signal = _FakeSignal(envelope=True)
         self.streamer._note_verbosity(signal, np.arange(5), np.arange(5))
         self.assertNotIn(signal.uid, self.streamer._verbose)
+
+
+class PeriodicRefreshTests(unittest.TestCase):
+    """The periodic tick must reach every verbose signal, spread over the
+    following passes by the global spacing, not only the first one."""
+
+    def _run_loop(self, streamer, until_s):
+        """One tick at t+5 s, then passes until ``until_s``: a second tick
+        would skip the just-refreshed signal and let the next one through."""
+        clock = {'t': 1000.0}
+
+        def sleep(seconds):
+            clock['t'] += seconds
+            if clock['t'] >= 1000.0 + until_s:
+                streamer.stop_flag = True
+
+        with patch.object(streamer_module, '_TOPUP_PERIOD_S', 5), \
+                patch.object(streamer_module.time, 'monotonic', lambda: clock['t']), \
+                patch.object(streamer_module.time, 'sleep', sleep):
+            streamer._refresh_loop()
+        return clock
+
+    def _streamer_with(self, names):
+        streamer = CanvasStreamer(da=None)
+        signals = [_FakeSignal(name=name) for name in names]
+        streamer._ds_to_signals = {'ds': signals}
+        streamer._verbose = {s.uid for s in signals}
+        refreshed = []
+        streamer._refresh_signal = lambda ds, s: refreshed.append((s.name, streamer_module.time.monotonic()))
+        return streamer, refreshed
+
+    def test_tick_refreshes_every_verbose_signal(self):
+        streamer, refreshed = self._streamer_with(['s0', 's1', 's2'])
+        self._run_loop(streamer, until_s=10)
+        self.assertEqual(sorted(name for name, _ in refreshed), ['s0', 's1', 's2'])
+
+    def test_tick_keeps_one_round_trip_per_pass(self):
+        streamer, refreshed = self._streamer_with(['s0', 's1', 's2'])
+        self._run_loop(streamer, until_s=10)
+        times = [t for _, t in refreshed]
+        self.assertTrue(all(b - a >= streamer_module._REFRESH_GLOBAL_SPACING_S
+                            for a, b in zip(times, times[1:])), times)
+
+    def test_tick_skips_sparse_signals(self):
+        streamer, refreshed = self._streamer_with(['s0', 's1'])
+        streamer._verbose.discard(streamer._ds_to_signals['ds'][1].uid)
+        self._run_loop(streamer, until_s=10)
+        self.assertEqual([name for name, _ in refreshed], ['s0'])
+
+    def test_tick_skips_a_signal_refreshed_a_moment_ago(self):
+        streamer, refreshed = self._streamer_with(['s0', 's1'])
+        streamer._last_refresh[streamer._ds_to_signals['ds'][1].uid] = 1004.0
+        self._run_loop(streamer, until_s=10)
+        self.assertEqual([name for name, _ in refreshed], ['s0'])
 
 
 class HandlerEmptyPayloadTests(unittest.TestCase):

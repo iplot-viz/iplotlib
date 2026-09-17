@@ -1020,19 +1020,22 @@ class CanvasStreamer:
             time.sleep(1)
             if self.stop_flag:
                 return
-            periodic = time.monotonic() >= period_target
-            if periodic:
-                period_target = time.monotonic() + _TOPUP_PERIOD_S
-            if not periodic and not self._refresh_pending:
+            now = time.monotonic()
+            if now >= period_target:
+                period_target = now + _TOPUP_PERIOD_S
+                # Queued rather than refreshed here: the passes below drain them
+                # one round trip at a time, skipping any refreshed moments ago.
+                self._refresh_pending.update(
+                    uid for uid in set(self._verbose)
+                    if now - self._last_refresh.get(uid, 0.0) >= min_interval)
+            if not self._refresh_pending:
                 continue
             for ds, signals in self._ds_to_signals.items():
                 for signal in signals:
                     if self.stop_flag:
                         return
                     uid = signal.uid
-                    due_pending = uid in self._refresh_pending
-                    due_periodic = periodic and uid in self._verbose
-                    if not (due_pending or due_periodic):
+                    if uid not in self._refresh_pending:
                         continue
                     now = time.monotonic()
                     if now - self._last_refresh_any < _REFRESH_GLOBAL_SPACING_S:
@@ -1041,9 +1044,7 @@ class CanvasStreamer:
                         # draw thread with reinjections.
                         break
                     if now - self._last_refresh.get(uid, 0.0) < min_interval:
-                        # Stays pending; retried on a later pass. Applies to
-                        # periodic refreshes too -- a signal refreshed for a
-                        # hole a moment ago does not need the tick as well.
+                        # Stays pending; retried on a later pass.
                         continue
                     self._refresh_pending.discard(uid)
                     self._last_refresh[uid] = now
