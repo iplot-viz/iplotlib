@@ -120,10 +120,9 @@ class iplotMplRuler:
         self._apply_view_visibility()
 
     def _apply_view_visibility(self):
-        """Show X whenever it is in the time window; show the horizontal line and
-        Y value only when y is in range. The name sits at the X·Y intersection, or
-        drops to the bottom of the plot when y is out of range. Honours a hidden
-        ruler."""
+        """The lines show whenever x is in the window (the horizontal one only when
+        y is in range too); the tags also need show_label. The name sits at the X·Y
+        intersection, or drops to the bottom of the plot when y is out of range."""
         if not self.visible:
             return
         x, y = self.xy
@@ -134,9 +133,9 @@ class iplotMplRuler:
         # keeps the time line only.
         in_y = (ymin <= y <= ymax) and not self.is_echo
         self.v_line.set_visible(in_x)
-        self.x_label.set_visible(in_x)
+        self.x_label.set_visible(in_x and self.show_label)
         self.h_line.set_visible(in_x and in_y)
-        self.y_label.set_visible(in_x and in_y)
+        self.y_label.set_visible(in_x and in_y and self.show_label)
         self.name_label.set_visible(in_x and self.show_label)
         name_y = y if in_y else ymin
         self.name_label.xy = (x, name_y)

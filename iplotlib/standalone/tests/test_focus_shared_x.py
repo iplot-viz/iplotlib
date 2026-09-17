@@ -28,9 +28,11 @@ class FocusSharedXTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = ensure_qapp()
 
-    def _build(self, backend: str):
+    def _build(self, backend: str, data_margin: int = 0):
+        """``data_margin`` keeps the samples that far inside the requested range,
+        as archived data usually is."""
         canvas = Canvas(2, 1, title="focus_shared_x", shared_x_axis=True)
-        time = np.linspace(TS_START, TS_END, 200).astype(np.int64)
+        time = np.linspace(TS_START + data_margin, TS_END - data_margin, 200).astype(np.int64)
         for i in range(2):
             plot = PlotXY()
             sig = SignalXY(label=f"s{i}")
@@ -122,6 +124,23 @@ class FocusSharedXTest(unittest.TestCase):
                 shared = parser._get_all_shared_axes(self._impl_of(qt_canvas, focused))
                 self.assertEqual(len(shared), 2, "sibling dropped out of the shared group")
 
+
+    def test_unfocus_without_zoom_keeps_the_group_together(self):
+        """Leaving the focus untouched must not rewrite the hidden plots' request
+        range with the drawn window, which only spans the samples."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build(backend, data_margin=60 * SECOND)
+                focused, sibling = canvas.plots[0][0], canvas.plots[0][1]
+
+                qt_canvas._full_screen_mode_on(self._impl_of(qt_canvas, focused))
+                self.app.processEvents()
+                qt_canvas._full_screen_mode_off()
+                self.app.processEvents()
+
+                self.assertEqual(self._ts_window(sibling), (TS_START, TS_END))
+                shared = qt_canvas._parser._get_all_shared_axes(self._impl_of(qt_canvas, focused))
+                self.assertEqual(len(shared), 2, "sibling dropped out of the shared group")
 
     def test_reset_after_unfocus_restores_the_whole_group(self):
         """mint#153: the reset following a zoom made in focus must reach the group."""

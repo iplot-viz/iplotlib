@@ -833,13 +833,8 @@ class BackendParserBase(ABC):
             self.process_ipl_signal(signal)
 
     @staticmethod
-    def _plot_signal_ts_range(plot):
-        """(ts_start, ts_end) of the first numeric-valued signal on ``plot``, or None.
-
-        Returned as floats: a range restored from the axis 'original' is an exact
-        integer while one that has been through the backend comes back as float64,
-        which past 2**53 cannot hold a nanosecond, and both name the same window.
-        """
+    def _plot_signal_ts(plot):
+        """(ts_start, ts_end) of the first numeric-valued signal on ``plot``, as stored, or None."""
         if plot is None or not plot.signals:
             return None
         for stack in plot.signals.values():
@@ -849,8 +844,19 @@ class BackendParserBase(ABC):
                 ts_start = getattr(signal, 'ts_start', None)
                 ts_end = getattr(signal, 'ts_end', None)
                 if isinstance(ts_start, (int, float)) and isinstance(ts_end, (int, float)):
-                    return (float(ts_start), float(ts_end))
+                    return ts_start, ts_end
         return None
+
+    @classmethod
+    def _plot_signal_ts_range(cls, plot):
+        """(ts_start, ts_end) of the first numeric-valued signal on ``plot``, or None.
+
+        Returned as floats: a range restored from the axis 'original' is an exact
+        integer while one that has been through the backend comes back as float64,
+        which past 2**53 cannot hold a nanosecond, and both name the same window.
+        """
+        ts = cls._plot_signal_ts(plot)
+        return None if ts is None else (float(ts[0]), float(ts[1]))
 
     @staticmethod
     def _plot_x_is_time(plot):
@@ -870,6 +876,20 @@ class BackendParserBase(ABC):
 
     #: An X expression that reads a time buffer of some alias, e.g. '${T}.time'.
     _X_EXPR_TIME_ACCESSOR = re.compile(r'\$\{[^}]+\}\.time\b')
+
+    @staticmethod
+    def _plot_has_time_signal(plot):
+        """Whether at least one signal of ``plot`` draws its own time on X, whatever
+        the other signals overlay on it (e.g. a trend line over the measurement)."""
+        if plot is None or not plot.signals:
+            return False
+        for stack in plot.signals.values():
+            for signal in stack:
+                if signal is None:
+                    continue
+                if getattr(signal, 'x_expr', '${self}.time') == '${self}.time':
+                    return True
+        return False
 
     @classmethod
     def _plot_x_expr_yields_time(cls, plot):
@@ -951,8 +971,9 @@ class BackendParserBase(ABC):
         if isinstance(base_plot, PlotXYWithSlider) or base_plot is None:
             return []
 
-        # An X-versus-Y plot does not follow the shared time; keep it on its own.
-        if not self._plot_x_is_time(base_plot):
+        # A plot drawing time on X for at least one signal leads the group even under a
+        # time-valued overlay; a plot whose X only comes from expressions never drives it.
+        if not (self._plot_x_is_time(base_plot) or self._plot_has_time_signal(base_plot)):
             return self._plot_impl_plot_lut.get(id(base_plot), [])
 
         base_ts = self._plot_signal_ts_range(base_plot)
@@ -1032,6 +1053,9 @@ class BackendParserBase(ABC):
         if begin is None or end is None:
             return
         drawn = focused.axes[0].get_limits('original')
+        # The signals share the request range, which the axis window only matches
+        # after a zoom: carrying the window at draw time would split the group.
+        ts_window = self._plot_signal_ts(focused) or (begin, end)
 
         for column in self.canvas.plots:
             for plot in column or []:
@@ -1047,7 +1071,7 @@ class BackendParserBase(ABC):
                 plot.axes[0].set_limits(begin, end, 'current')
                 for stack in plot.signals.values():
                     for signal in stack:
-                        signal.set_limits((begin, end))
+                        signal.set_limits(ts_window)
 
     def _ruler_signal_values(self, impl_plot: Any, x: float) -> Dict[str, float]:
         """Value of each signal at the ruler X keyed by its label. Backends with
