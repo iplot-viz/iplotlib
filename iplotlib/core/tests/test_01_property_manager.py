@@ -4,7 +4,9 @@ import unittest
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY, PlotContour
 from iplotlib.core.display import DisplayScale, MODE_FIXED, MODE_OFF
+from iplotlib.core import property_manager
 from iplotlib.core.property_manager import PropertyManager
+from unittest.mock import patch
 
 
 class TestPropertyManager(unittest.TestCase):
@@ -130,6 +132,27 @@ class TestPropertyManager(unittest.TestCase):
 
         self.assertEqual(f("color_map"), self.canvas.color_map)
         self.assertEqual(f("contour_levels"), self.canvas.contour_levels)
+
+
+class TestConfigPathResolution(unittest.TestCase):
+    """IPLOT_CANVAS_CONFIG first, then the preferences the user exported to
+    the home directory, then the packaged defaults."""
+
+    def test_environment_variable_wins(self):
+        with patch.object(property_manager, 'IPLOT_CANVAS_CONFIG', '/site/canvas.json'), \
+                patch.object(property_manager.os.path, 'isfile', lambda p: True):
+            self.assertEqual(property_manager._resolve_config_path(), '/site/canvas.json')
+
+    def test_exported_preferences_are_read_back(self):
+        with patch.object(property_manager, 'IPLOT_CANVAS_CONFIG', None), \
+                patch.object(property_manager.os.path, 'isfile',
+                             lambda p: p == property_manager.USER_CONFIG):
+            self.assertEqual(property_manager._resolve_config_path(), property_manager.USER_CONFIG)
+
+    def test_packaged_defaults_otherwise(self):
+        with patch.object(property_manager, 'IPLOT_CANVAS_CONFIG', None), \
+                patch.object(property_manager.os.path, 'isfile', lambda p: False):
+            self.assertEqual(property_manager._resolve_config_path(), property_manager.file_name)
 
 
 class TestPropertyManagerDisplayScale(unittest.TestCase):
