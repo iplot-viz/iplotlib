@@ -2,10 +2,10 @@ import csv
 import re
 from contextlib import contextmanager
 from string import ascii_uppercase
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QItemSelectionModel, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox,
                                 QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QMenu, QMessageBox,
@@ -21,6 +21,8 @@ from iplotlib.qt.utils.icon_loader import create_icon
 
 logger = Sl.get_logger(__name__)
 
+_RULER_NAME_ROLE = Qt.ItemDataRole.UserRole + 1
+
 
 class _NumericTableItem(QTableWidgetItem):
     """Sort by the numeric value stored as UserRole, not by the displayed text."""
@@ -31,6 +33,30 @@ class _NumericTableItem(QTableWidgetItem):
         if a is None or b is None:
             return super().__lt__(other)
         return a < b
+
+
+class _PlotTableItem(QTableWidgetItem):
+    """Sort by plot position, then ruler name, not by the displayed text."""
+
+    def __lt__(self, other):
+        if not isinstance(other, _PlotTableItem):
+            return super().__lt__(other)
+        return self._sort_key() < other._sort_key()
+
+    def _sort_key(self):
+        # Qt may demote the stored tuple to a list.
+        return tuple(self.data(Qt.ItemDataRole.UserRole)), self.data(_RULER_NAME_ROLE)
+
+
+class _RulerTable(QTableWidget):
+    """Table whose multi-row selection survives a click on one of its cell widgets."""
+
+    def selectionCommand(self, index, event=None):
+        # When a cell widget takes the focus the view re-selects its row alone,
+        # which would reduce an edit of a selected row to that row.
+        if event is None and self.selectionModel().isRowSelected(index.row(), index.parent()):
+            return QItemSelectionModel.SelectionFlag.NoUpdate
+        return super().selectionCommand(index, event)
 
 
 class _CheckableComboBox(QComboBox):
@@ -67,6 +93,10 @@ class _CheckableComboBox(QComboBox):
         item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
         self._update_text()
         self.changed.emit()
+
+    def set_checked_flags(self, flags: List[bool]):
+        for index, checked in enumerate(flags):
+            self.set_checked(index, checked)
 
     def showPopup(self):
         # The popup is as wide as the field, which a narrow table column squeezes
@@ -174,7 +204,7 @@ class IplotQtRuler(QWidget):
         self._distance_dialog: QDialog = None
         # Sort criterion chosen by the user. The table is rebuilt on every ruler
         # update, so it must be restored afterwards or the view snaps back.
-        self._sort_column = self.COL_NAME
+        self._sort_column = self.COL_PLOT
         self._sort_order = Qt.SortOrder.AscendingOrder
         self._rendering = False
         self._bulk_depth = 0
@@ -193,6 +223,11 @@ class IplotQtRuler(QWidget):
         self.signals_button.setToolTip("Choose which signal value columns are shown.")
         self.signals_menu = QMenu(self.signals_button)
         self.signals_button.setMenu(self.signals_menu)
+        self.labels_button = QPushButton("Hide/Show labels")
+        self.labels_button.setToolTip("Turn the name tags or the value tags of every ruler on or off.")
+        self.labels_menu = QMenu(self.labels_button)
+        self.labels_button.setMenu(self.labels_menu)
+        self._build_labels_menu()
 
         view_layout = QHBoxLayout()
         view_layout.addWidget(QLabel("Layout:"))
@@ -200,8 +235,9 @@ class IplotQtRuler(QWidget):
         view_layout.addWidget(self.columns_radio)
         view_layout.addStretch()
         view_layout.addWidget(self.signals_button)
+        view_layout.addWidget(self.labels_button)
 
-        self.table = QTableWidget()
+        self.table = _RulerTable()
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.selectionModel().selectionChanged.connect(self._update_selection_history)
@@ -399,6 +435,7 @@ class IplotQtRuler(QWidget):
             edit_enabled = False
 
         self._apply_signal_visibility()
+        self._sync_labels_menu()
         self.remove_button.setEnabled(edit_enabled)
         self.distance_button.setEnabled(edit_enabled)
 
@@ -438,8 +475,23 @@ class IplotQtRuler(QWidget):
             lines.append(current)
         return '\n'.join(lines)
 
+    @staticmethod
+    def _add_select_all(menu: QMenu, toggle_all) -> QAction:
+        """Leading entry of a check-list menu; its text follows the items."""
+        action = QAction("Select all", menu)
+        action.triggered.connect(toggle_all)
+        menu.addAction(action)
+        menu.addSeparator()
+        return action
+
+    @staticmethod
+    def _sync_select_all(action: QAction, all_on: bool):
+        action.setText("Deselect all" if all_on else "Select all")
+
     def _rebuild_signals_menu(self):
         self.signals_menu.clear()
+        self._signals_all_action = self._add_select_all(self.signals_menu, self._toggle_all_signals)
+        self._signal_actions: Dict[str, QAction] = {}
         for label in self._signal_labels:
             action = QAction(label, self.signals_menu)
             action.setCheckable(True)
@@ -447,6 +499,8 @@ class IplotQtRuler(QWidget):
             action.toggled.connect(
                 lambda checked, lbl=label: self._on_signal_toggled(lbl, checked))
             self.signals_menu.addAction(action)
+            self._signal_actions[label] = action
+        self._sync_select_all(self._signals_all_action, not self._hidden_signals)
         self.signals_button.setEnabled(bool(self._signal_labels))
 
     def _on_signal_toggled(self, label: str, visible: bool):
@@ -455,6 +509,62 @@ class IplotQtRuler(QWidget):
         else:
             self._hidden_signals.add(label)
         self._apply_signal_visibility()
+        self._sync_select_all(self._signals_all_action, not self._hidden_signals)
+
+    def _toggle_all_signals(self):
+        visible = bool(self._hidden_signals)
+        self._hidden_signals = set() if visible else set(self._signal_labels)
+        for action in self._signal_actions.values():
+            self._set_silently(action, lambda a=action: a.setChecked(visible))
+        self._apply_signal_visibility()
+        self._sync_select_all(self._signals_all_action, visible)
+
+    def _build_labels_menu(self):
+        self._labels_all_action = self._add_select_all(self.labels_menu, self._toggle_all_labels)
+        self._label_actions: List[QAction] = []
+        for index, toggle in enumerate(self.LABEL_TOGGLES):
+            action = QAction(toggle, self.labels_menu)
+            action.setCheckable(True)
+            action.toggled.connect(
+                lambda checked, i=index: self._on_labels_menu_toggled(i, checked))
+            self.labels_menu.addAction(action)
+            self._label_actions.append(action)
+        self._sync_labels_menu()
+
+    def _label_flags_of_every_row(self) -> List[bool]:
+        """Per toggle, whether every ruler row has it on."""
+        return [all(r['show_label'] for r in self._rows),
+                all(r['show_val_label'] for r in self._rows)]
+
+    def _sync_labels_menu(self):
+        flags = self._label_flags_of_every_row()
+        for action, on in zip(self._label_actions, flags):
+            self._set_silently(action, lambda a=action, v=on: a.setChecked(v))
+        self._sync_select_all(self._labels_all_action, all(flags))
+        self.labels_button.setEnabled(bool(self._rows))
+
+    def _on_labels_menu_toggled(self, index: int, checked: bool):
+        for entry in self._rows:
+            flags = [entry['show_label'], entry['show_val_label']]
+            flags[index] = checked
+            self._apply_labels(entry, *flags)
+        self._sync_labels_menu()
+
+    def _toggle_all_labels(self):
+        on = not all(self._label_flags_of_every_row())
+        for entry in self._rows:
+            self._apply_labels(entry, on, on)
+        self._sync_labels_menu()
+
+    def _apply_labels(self, entry: Dict, show_label: bool, show_val_label: bool):
+        """Store the label flags of a ruler row, mirror them on its combo and notify the canvas."""
+        entry['show_label'] = show_label
+        entry['show_val_label'] = show_val_label
+        row = self._table_row_of(entry['name'], entry['plot_id'])
+        if row is not None:
+            combo = self.table.cellWidget(row, self.COL_LABEL)
+            self._set_silently(combo, lambda: combo.set_checked_flags([show_label, show_val_label]))
+        self.labelVisibilityRuler.emit(entry['name'], entry['plot_id'], show_label, show_val_label)
 
     def _apply_signal_visibility(self):
         """Show/hide signal columns (rows view) or signal rows (columns view)
@@ -489,7 +599,7 @@ class IplotQtRuler(QWidget):
             self._populate_row_cells(row_idx, row)
 
         self.table.setSortingEnabled(True)
-        column = self._sort_column if self._sort_column < self.table.columnCount() else self.COL_NAME
+        column = self._sort_column if self._sort_column < self.table.columnCount() else self.COL_PLOT
         self.table.sortItems(column, self._sort_order)
         self.table.horizontalHeader().setSortIndicator(column, self._sort_order)
         self.table.resizeColumnsToContents()
@@ -505,8 +615,9 @@ class IplotQtRuler(QWidget):
         name_item.setData(Qt.ItemDataRole.UserRole, row['is_date'])
         self.table.setItem(row_idx, self.COL_NAME, name_item)
 
-        plot_item = QTableWidgetItem(self._format_plot_id(row['plot_id']))
+        plot_item = _PlotTableItem(self._format_plot_id(row['plot_id']))
         plot_item.setData(Qt.ItemDataRole.UserRole, row['plot_id'])
+        plot_item.setData(_RULER_NAME_ROLE, row['name'])
         self.table.setItem(row_idx, self.COL_PLOT, plot_item)
 
         x, y = row['xy']
@@ -875,23 +986,51 @@ class IplotQtRuler(QWidget):
                 return idx
         return -1
 
+    def _table_row_of(self, name: str, plot_id) -> Optional[int]:
+        """Row of the rows view showing that ruler on that plot, None in the columns view."""
+        for row in range(self.table.rowCount()):
+            if self._row_metadata(row) == (name, tuple(plot_id)):
+                return row
+        return None
+
+    def _edited_rows(self, row: int) -> List[int]:
+        """Rows an edit of a row control applies to: the whole selection when
+        the edited row belongs to it, that row alone otherwise."""
+        selected = sorted({idx.row() for idx in self.table.selectionModel().selectedRows()})
+        return selected if row in selected else [row]
+
+    @staticmethod
+    def _set_silently(widget, apply):
+        widget.blockSignals(True)
+        try:
+            apply()
+        finally:
+            widget.blockSignals(False)
+
     def _on_visibility_changed(self, row: int, state):
         visible = state == Qt.CheckState.Checked.value
-        name, plot_id = self._row_metadata(row)
-        # Visibility belongs to the ruler, not to one of the plots it spans.
-        for r in self._rows:
-            if r['name'] == name:
-                r['visible'] = visible
-        self.visibilityRuler.emit(name, plot_id, visible)
+        done: Set[str] = set()
+        for target in self._edited_rows(row):
+            name, plot_id = self._row_metadata(target)
+            if target != row:
+                checkbox = self.table.cellWidget(target, self.COL_VISIBLE)
+                self._set_silently(checkbox, lambda: checkbox.setChecked(visible))
+            if name in done:
+                continue
+            done.add(name)
+            # Visibility belongs to the ruler, not to one of the plots it spans.
+            for r in self._rows:
+                if r['name'] == name:
+                    r['visible'] = visible
+            self.visibilityRuler.emit(name, plot_id, visible)
 
     def _on_label_mode_changed(self, row: int, combo: '_CheckableComboBox'):
         show_label, show_val_label = combo.checked_flags()
-        name, plot_id = self._row_metadata(row)
-        idx = self._find_row_index(name, plot_id)
-        if idx >= 0:
-            self._rows[idx]['show_label'] = show_label
-            self._rows[idx]['show_val_label'] = show_val_label
-        self.labelVisibilityRuler.emit(name, plot_id, show_label, show_val_label)
+        for target in self._edited_rows(row):
+            idx = self._find_row_index(*self._row_metadata(target))
+            if idx >= 0:
+                self._apply_labels(self._rows[idx], show_label, show_val_label)
+        self._sync_labels_menu()
 
     def _on_color_clicked(self, row: int, button: QPushButton):
         self._pick_color(row, button, 'color', self.colorRuler)
@@ -904,14 +1043,22 @@ class IplotQtRuler(QWidget):
         new_color = QColorDialog.getColor(current, self)
         if not new_color.isValid():
             return
-        color = new_color.name()
-        self._paint_color_button(button, color)
-        name, plot_id = self._row_metadata(row)
-        # Colours belong to the ruler, so they reach every plot it spans.
-        for r in self._rows:
-            if r['name'] == name:
-                r[key] = color
-        signal.emit(name, plot_id, color)
+        self._apply_color(row, key, new_color.name(), signal)
+
+    def _apply_color(self, row: int, key: str, color: str, signal):
+        column = self.COL_COLOR if key == 'color' else self.COL_FONT_COLOR
+        done: Set[str] = set()
+        for target in self._edited_rows(row):
+            name, plot_id = self._row_metadata(target)
+            self._paint_color_button(self.table.cellWidget(target, column), color)
+            if name in done:
+                continue
+            done.add(name)
+            # Colours belong to the ruler, so they reach every plot it spans.
+            for r in self._rows:
+                if r['name'] == name:
+                    r[key] = color
+            signal.emit(name, plot_id, color)
 
     def _remove_selected(self):
         # Resolve identities BEFORE deletion so visual rows stay valid until we drop them.

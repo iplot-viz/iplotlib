@@ -139,9 +139,9 @@ class pyQtRuler:
         x_scene = vr.left()
         self.y_label.setPos(axis_l.mapFromScene(QPointF(x_scene, y_scene)))
 
-        # X shows whenever it is in the time window; the horizontal line and Y
-        # value only when y is in range. The name sits at the X·Y intersection, or
-        # drops to the bottom when y is out of range. Honour a hidden ruler.
+        # The lines show whenever x is in the window (the horizontal one only when
+        # y is in range too); the tags also need show_label. The name sits at the
+        # X·Y intersection, or drops to the bottom when y is out of range.
         # Inclusive bounds match the matplotlib backend (iplotMplRuler); bool()
         # because view range / xy may be numpy and setVisible rejects numpy.bool.
         in_x = bool(xmin <= x <= xmax)
@@ -154,9 +154,9 @@ class pyQtRuler:
         self.name_label.setAnchor((name_anchor_x, 1.0))
         self.name_label.setPos(x, y if in_y else ymin)
         self.v_line.setVisible(self.visible and in_x)
-        self.x_label.setVisible(self.visible and in_x)
+        self.x_label.setVisible(self.visible and in_x and self.show_label)
         self.h_line.setVisible(self.visible and in_x and in_y)
-        self.y_label.setVisible(self.visible and in_x and in_y)
+        self.y_label.setVisible(self.visible and in_x and in_y and self.show_label)
         self.name_label.setVisible(self.visible and in_x and self.show_label)
         self._refresh_value_labels(in_x, xmin, xmax, ymin, ymax)
 

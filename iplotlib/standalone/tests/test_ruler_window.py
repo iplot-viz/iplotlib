@@ -9,13 +9,23 @@ own any plot data, so the tests stay at the widget level.
 import os
 import unittest
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QItemSelectionModel, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QHeaderView
 
 from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
 from iplotlib.qt.testing import ensure_qapp
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+
+
+def _menu_items(menu):
+    """Checkable entries of a Hide/Show menu, after its Select all entry."""
+    return [a for a in menu.actions() if a.isCheckable()]
+
+
+def _label_flags(window):
+    return [(r['show_label'], r['show_val_label']) for r in window._rows]
 
 
 class IplotQtRulerWindowTest(unittest.TestCase):
@@ -96,8 +106,9 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         self.window.set_canvas_columns(2)
         self.window.add_row('A', (3, 1), (1.0, 2.0), '#FFFFFF')
         self.window.add_row('B', (1, 2), (3.0, 4.0), '#FFFFFF')
-        self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_PLOT).text(), '3.1')
-        self.assertEqual(self.window.table.item(1, IplotQtRuler.COL_PLOT).text(), '1.2')
+        # Rows come out in plot order.
+        self.assertEqual(self.window.table.item(0, IplotQtRuler.COL_PLOT).text(), '1.2')
+        self.assertEqual(self.window.table.item(1, IplotQtRuler.COL_PLOT).text(), '3.1')
 
     def test_set_canvas_columns_re_renders_existing_rows(self):
         self.window.add_row('A', (2, 1), (1.0, 2.0), '#FFFFFF')
@@ -215,7 +226,7 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         self.window.add_row('A', (1, 1), (2.5, 7.5), '#FFFFFF',
                             signal_values={'VAR1': 1.2, 'VAR2': 3.4})
         base = IplotQtRuler.SIG_COL_BASE
-        actions = self.window.signals_menu.actions()
+        actions = _menu_items(self.window.signals_menu)
         self.assertEqual([a.text() for a in actions], ['VAR1', 'VAR2'])
         self.assertTrue(all(a.isChecked() for a in actions))
         actions[0].setChecked(False)
@@ -224,10 +235,79 @@ class IplotQtRulerWindowTest(unittest.TestCase):
         # Hidden signals survive a re-render (e.g. another ruler is added).
         self.window.add_row('B', (1, 1), (3.0, 8.0), '#FFFFFF', signal_values={'VAR1': 2.0})
         self.assertTrue(self.window.table.isColumnHidden(base))
-        actions = self.window.signals_menu.actions()
+        actions = _menu_items(self.window.signals_menu)
         self.assertFalse(actions[0].isChecked())
         actions[0].setChecked(True)
         self.assertFalse(self.window.table.isColumnHidden(base))
+
+    def test_signals_menu_select_all_flips_every_column(self):
+        self.window.add_row('A', (1, 1), (2.5, 7.5), '#FFFFFF',
+                            signal_values={'VAR1': 1.2, 'VAR2': 3.4})
+        base = IplotQtRuler.SIG_COL_BASE
+        toggle = self.window.signals_menu.actions()[0]
+        self.assertEqual(toggle.text(), 'Deselect all')
+        toggle.trigger()
+        self.assertTrue(self.window.table.isColumnHidden(base))
+        self.assertTrue(self.window.table.isColumnHidden(base + 1))
+        self.assertFalse(any(a.isChecked() for a in _menu_items(self.window.signals_menu)))
+        self.assertEqual(toggle.text(), 'Select all')
+        toggle.trigger()
+        self.assertFalse(self.window.table.isColumnHidden(base))
+        self.assertEqual(toggle.text(), 'Deselect all')
+        # Hiding one signal by hand offers Select all again.
+        _menu_items(self.window.signals_menu)[1].setChecked(False)
+        self.assertEqual(toggle.text(), 'Select all')
+
+    def test_labels_button_needs_rulers(self):
+        self.assertFalse(self.window.labels_button.isEnabled())
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.assertTrue(self.window.labels_button.isEnabled())
+
+    def test_labels_menu_turns_one_tag_off_for_every_ruler(self):
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.window.add_row('B', (2, 1), (1.0, 0.0), '#FFFFFF')
+        emitted = []
+        self.window.labelVisibilityRuler.connect(lambda *args: emitted.append(args))
+        ruler_label, val_label = _menu_items(self.window.labels_menu)
+        self.assertEqual([a.text() for a in (ruler_label, val_label)], ['Ruler label', 'Val label'])
+        val_label.setChecked(False)
+        self.assertEqual(_label_flags(self.window), [(True, False), (True, False)])
+        self.assertEqual(sorted(e[0] for e in emitted), ['A', 'B'])
+        combos = [self.window.table.cellWidget(r, self.window.COL_LABEL).currentText() for r in range(2)]
+        self.assertEqual(combos, ['Ruler label', 'Ruler label'])
+
+    def test_labels_menu_follows_the_rows(self):
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.window.add_row('B', (1, 1), (2.0, 0.0), '#FFFFFF')
+        toggle = self.window.labels_menu.actions()[0]
+        self.assertEqual(toggle.text(), 'Deselect all')
+        self.window.table.cellWidget(0, self.window.COL_LABEL).set_checked(0, False)
+        ruler_label, val_label = _menu_items(self.window.labels_menu)
+        self.assertFalse(ruler_label.isChecked())
+        self.assertTrue(val_label.isChecked())
+        self.assertEqual(toggle.text(), 'Select all')
+
+    def test_labels_menu_select_all_and_deselect_all(self):
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.window.add_row('B', (2, 1), (1.0, 0.0), '#FFFFFF')
+        toggle = self.window.labels_menu.actions()[0]
+        toggle.trigger()
+        self.assertEqual(_label_flags(self.window), [(False, False), (False, False)])
+        self.assertEqual(self.window.table.cellWidget(1, self.window.COL_LABEL).currentText(), 'None')
+        self.assertEqual(toggle.text(), 'Select all')
+        toggle.trigger()
+        self.assertEqual(_label_flags(self.window), [(True, True), (True, True)])
+        self.assertEqual(toggle.text(), 'Deselect all')
+
+    def test_labels_menu_works_from_the_columns_layout(self):
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.window.columns_radio.setChecked(True)
+        emitted = []
+        self.window.labelVisibilityRuler.connect(lambda *args: emitted.append(args))
+        _menu_items(self.window.labels_menu)[0].setChecked(False)
+        self.assertEqual(emitted, [('A', (1, 1), False, True)])
+        self.window.rows_radio.setChecked(True)
+        self.assertEqual(self.window.table.cellWidget(0, self.window.COL_LABEL).currentText(), 'Val label')
 
     def test_copy_button_copies_whole_table_with_headers(self):
         self.window.add_row('A', (1, 1), (2.5, 7.5), '#FF0000', signal_values={'VAR1': 1.2})
@@ -493,7 +573,7 @@ class RulerLeftToRightDeltaTest(unittest.TestCase):
             window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
             window.add_row('C', (1, 1), (9.0, 0.0), '#FFFFFF')
 
-            # Default sort orders by Ruler name (A, B, C), so visual rows hold xs [1, 5, 9].
+            # Default sort orders by plot, then ruler name (A, B, C), so visual rows hold xs [1, 5, 9].
             xs_visual = [window.table.item(r, IplotQtRuler.COL_X).data(Qt.ItemDataRole.UserRole)
                          for r in range(window.table.rowCount())]
             self.assertEqual(xs_visual, [1.0, 5.0, 9.0])
@@ -547,8 +627,19 @@ class RulerSortPersistenceTest(unittest.TestCase):
 
         self.assertEqual(self._names(), ['B', 'D', 'C', 'A'])
 
-    def test_default_sort_is_by_ruler_name(self):
+    def test_default_sort_is_by_plot_then_ruler_name(self):
+        self.assertEqual(self._names(), ['A', 'C', 'B'])
+
+    def test_plots_order_by_row_then_column(self):
+        self.window.set_canvas_columns(2)
+        self.window.add_row('D', (1, 2), (3.0, 0.0), '#FFFFFF')
+        self.assertEqual(self._names(), ['A', 'C', 'D', 'B'])
+
+    def test_sort_by_name_is_still_available(self):
+        self.window.table.sortByColumn(IplotQtRuler.COL_NAME, Qt.SortOrder.AscendingOrder)
         self.assertEqual(self._names(), ['A', 'B', 'C'])
+        self.window.add_row('D', (1, 1), (7.0, 0.0), '#FFFFFF')
+        self.assertEqual(self._names(), ['A', 'B', 'C', 'D'])
 
     def test_columns_leave_room_for_the_sort_indicator(self):
         """The arrow is drawn inside the section, so a column fitted to its
@@ -559,6 +650,125 @@ class RulerSortPersistenceTest(unittest.TestCase):
         narrow = [col for col in range(table.columnCount())
                   if table.columnWidth(col) < header.defaultSectionSize()]
         self.assertEqual(narrow, [])
+
+
+class RulerBulkEditTest(unittest.TestCase):
+    """Editing a control of a selected row applies to every selected row."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def setUp(self):
+        self.window = IplotQtRuler()
+        self.window.add_row('A', (1, 1), (1.0, 0.0), '#FFFFFF')
+        self.window.add_row('B', (1, 1), (5.0, 0.0), '#FFFFFF')
+        self.window.add_row('C', (2, 1), (9.0, 0.0), '#FFFFFF')
+        self.window.show()
+        QApplication.processEvents()
+
+    def tearDown(self):
+        self.window.close()
+
+    def _select(self, *rows):
+        model = self.window.table.selectionModel()
+        model.clearSelection()
+        flags = QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
+        for row in rows:
+            model.select(self.window.table.model().index(row, 0), flags)
+
+    def _row_of(self, name):
+        return next(r for r in range(self.window.table.rowCount())
+                    if self.window.table.item(r, IplotQtRuler.COL_NAME).text() == name)
+
+    def _widget(self, name, column):
+        return self.window.table.cellWidget(self._row_of(name), column)
+
+    def test_visibility_edit_reaches_every_selected_row(self):
+        emitted = []
+        self.window.visibilityRuler.connect(lambda name, pid, vis: emitted.append((name, vis)))
+        self._select(self._row_of('A'), self._row_of('C'))
+        self._widget('A', self.window.COL_VISIBLE).setChecked(False)
+        QApplication.processEvents()
+        self.assertEqual(emitted, [('A', False), ('C', False)])
+        self.assertFalse(self._widget('C', self.window.COL_VISIBLE).isChecked())
+        self.assertTrue(self._widget('B', self.window.COL_VISIBLE).isChecked())
+        self.assertEqual([r['visible'] for r in self.window._rows], [False, True, False])
+
+    def test_edit_outside_the_selection_touches_its_row_only(self):
+        emitted = []
+        self.window.visibilityRuler.connect(lambda name, pid, vis: emitted.append((name, vis)))
+        self._select(self._row_of('A'))
+        self._widget('C', self.window.COL_VISIBLE).setChecked(False)
+        QApplication.processEvents()
+        self.assertEqual(emitted, [('C', False)])
+        self.assertTrue(self._widget('A', self.window.COL_VISIBLE).isChecked())
+
+    def test_label_edit_reaches_every_selected_row(self):
+        emitted = []
+        self.window.labelVisibilityRuler.connect(
+            lambda name, pid, show, show_val: emitted.append((name, show, show_val)))
+        self._select(self._row_of('A'), self._row_of('B'))
+        self._widget('A', self.window.COL_LABEL).set_checked(0, False)
+        QApplication.processEvents()
+        self.assertEqual(emitted, [('A', False, True), ('B', False, True)])
+        self.assertEqual(self._widget('B', self.window.COL_LABEL).checked_flags(), [False, True])
+        self.assertEqual([r['show_label'] for r in self.window._rows], [False, False, True])
+
+    def test_color_edit_reaches_every_selected_row(self):
+        emitted = []
+        self.window.colorRuler.connect(lambda name, pid, color: emitted.append((name, color)))
+        self._select(self._row_of('A'), self._row_of('C'))
+        self.window._apply_color(self._row_of('A'), 'color', '#123456', self.window.colorRuler)
+        self.assertEqual(emitted, [('A', '#123456'), ('C', '#123456')])
+        self.assertEqual(self._widget('C', self.window.COL_COLOR).property('color'), '#123456')
+        self.assertEqual([r['color'] for r in self.window._rows], ['#123456', '#FFFFFF', '#123456'])
+
+    def test_same_ruler_on_two_plots_is_notified_once(self):
+        self.window.add_row('A', (2, 1), (1.0, None), '#FFFFFF')
+        QApplication.processEvents()
+        emitted = []
+        self.window.visibilityRuler.connect(lambda name, pid, vis: emitted.append(name))
+        rows = [r for r in range(self.window.table.rowCount())
+                if self.window.table.item(r, IplotQtRuler.COL_NAME).text() == 'A']
+        self._select(*rows)
+        self.window.table.cellWidget(rows[0], self.window.COL_VISIBLE).setChecked(False)
+        QApplication.processEvents()
+        self.assertEqual(emitted, ['A'])
+        self.assertFalse(self.window.table.cellWidget(rows[1], self.window.COL_VISIBLE).isChecked())
+
+    def _click_row(self, name, modifier=Qt.KeyboardModifier.NoModifier):
+        table = self.window.table
+        rect = table.visualRect(table.model().index(self._row_of(name), IplotQtRuler.COL_NAME))
+        QTest.mouseClick(table.viewport(), Qt.MouseButton.LeftButton, modifier, rect.center())
+        QApplication.processEvents()
+
+    def test_clicking_a_control_of_a_selected_row_keeps_the_selection(self):
+        """The view moves its current index to a cell widget that takes the
+        focus; with the mouse that used to leave only that row selected."""
+        self._click_row('A')
+        self._click_row('C', Qt.KeyboardModifier.ControlModifier)
+        combo = self._widget('C', self.window.COL_LABEL)
+        QTest.mouseClick(combo, Qt.MouseButton.LeftButton)
+        QApplication.processEvents()
+        combo.hidePopup()
+        selected = sorted(idx.row() for idx in self.window.table.selectionModel().selectedRows())
+        self.assertEqual(selected, sorted([self._row_of('A'), self._row_of('C')]))
+
+        combo.set_checked(0, False)
+        combo.set_checked(1, False)
+        self.assertEqual(self._widget('A', self.window.COL_LABEL).currentText(), 'None')
+        self.assertEqual(self._widget('B', self.window.COL_LABEL).currentText(), 'All')
+
+    def test_clicking_a_control_outside_the_selection_selects_its_row_only(self):
+        self._click_row('A')
+        self._click_row('B', Qt.KeyboardModifier.ControlModifier)
+        combo = self._widget('C', self.window.COL_LABEL)
+        QTest.mouseClick(combo, Qt.MouseButton.LeftButton)
+        QApplication.processEvents()
+        combo.hidePopup()
+        selected = [idx.row() for idx in self.window.table.selectionModel().selectedRows()]
+        self.assertEqual(selected, [self._row_of('C')])
 
 
 class RulerComputeDistanceDialogTest(unittest.TestCase):
@@ -612,7 +822,7 @@ class RulerComputeDistanceDialogTest(unittest.TestCase):
                             signal_values={'S1': 10.0, 'S2': 3.0})
         self.window.add_row('B', (1, 1), (5.0, 6.0), '#FFFFFF',
                             signal_values={'S1': 4.0, 'S2': 1.0})
-        self.window.signals_menu.actions()[1].setChecked(False)  # hide S2
+        _menu_items(self.window.signals_menu)[1].setChecked(False)  # hide S2
         table = self._distance_between_first_two()
         headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
         self.assertEqual(headers, ['Rulers', 'ΔX', 'ΔY', 'Δ S1'])
