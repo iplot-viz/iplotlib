@@ -64,6 +64,15 @@ SCALABLE_PROPERTIES = frozenset({
     'marker_size',
 })
 
+#: Properties whose value is a *point* size, and therefore rendered by Qt
+#: through the session's logical DPI. Only these are compensated for a session
+#: that reports a non-standard logical DPI; a pen width is already in pixels.
+POINT_PROPERTIES = frozenset({'font_size'})
+
+#: Largest point-size compensation applied. 96/48 -- beyond that a session is
+#: better fixed than worked around.
+MAX_POINT_COMPENSATION = 2.0
+
 #: Properties whose rendering cost grows with the sample count. Naming one of
 #: these in ui_scale_properties is a deliberate trade of performance for size.
 DATA_COST_PROPERTIES = frozenset({'line_size', 'marker_size'})
@@ -256,6 +265,34 @@ def _bucket_from_width(width_px: int) -> typing.Optional[float]:
     return None
 
 
+def point_compensation(metrics: dict, reference_dpi: float = REFERENCE_DPI) -> float:
+    """How much to enlarge a point size so it renders as the defaults intend.
+
+    Qt converts points to pixels through the screen's logical DPI. The size
+    defaults were chosen against 96, so a session reporting 72 renders every
+    point size at three quarters of the intended height -- and that applies to
+    the plot text whether or not the display is being scaled, since scaling
+    multiplies device pixels and leaves the point-to-pixel conversion alone.
+
+    This is deliberately per session rather than configuration: the same user
+    reaching the same workspace locally and over ssh gets whatever their current
+    session reports, and the stored font_size stays a screen-independent number.
+
+    Returns 1.0 when the logical DPI is at or above the reference (Qt is already
+    rendering points at least as large as intended) or cannot be read.
+    """
+    if not metrics.get('available'):
+        return 1.0
+    logical = float(metrics.get('logical_dpi') or 0.0)
+    if not (PLAUSIBLE_DPI[0] <= logical <= PLAUSIBLE_DPI[1]):
+        return 1.0
+    if logical >= reference_dpi:
+        return 1.0
+    # Finer step than the UI scale: this is a correction, not a preference, and
+    # rounding it to quarters would throw away a third of the correction at 72.
+    return quantize(min(MAX_POINT_COMPENSATION, reference_dpi / logical), step=0.05)
+
+
 def scale_from_metrics(metrics: dict,
                        reference_dpi: float = REFERENCE_DPI,
                        min_scale: float = MIN_SCALE,
@@ -332,6 +369,7 @@ class DisplayScale:
         self._reason = 'not resolved yet'
         self._env_locked = False
         self._scaled_properties = DEFAULT_SCALED_PROPERTIES
+        self._point_compensation = None  # type: typing.Optional[float]
         self._apply_env()
 
     @classmethod
@@ -393,8 +431,22 @@ class DisplayScale:
         return self.factor()
 
     def invalidate(self):
-        """Forget the cached factor. Call when the window changes screen."""
+        """Forget the cached factors. Call when the window changes screen."""
         self._cached = None
+        self._point_compensation = None
+
+    def point_compensation(self) -> float:
+        """Correction for a session whose logical DPI is below the reference."""
+        if self._point_compensation is not None:
+            return self._point_compensation
+        metrics = collect_metrics()
+        value = point_compensation(metrics, self._reference_dpi)
+        if metrics.get('available'):
+            self._point_compensation = value
+            if value != 1.0:
+                logger.info(f"Point sizes compensated by {value:g} for a session "
+                            f"reporting {metrics.get('logical_dpi'):g} logical DPI")
+        return value
 
     @property
     def mode(self) -> str:
@@ -435,6 +487,8 @@ class DisplayScale:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return value
         factor = self.factor()
+        if attr_name in POINT_PROPERTIES:
+            factor *= self.point_compensation()
         if factor == 1.0:
             return value
         scaled = value * factor
@@ -471,6 +525,7 @@ class DisplayScale:
         info['reason'] = self._reason
         info['env_locked'] = self._env_locked
         info['scaled_properties'] = ','.join(sorted(self._scaled_properties))
+        info['point_compensation'] = self.point_compensation()
         return info
 
 
