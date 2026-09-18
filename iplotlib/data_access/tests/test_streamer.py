@@ -5,9 +5,9 @@ and the _streaming_has_live flag set during backfill."""
 import os
 import time
 import unittest
-from threading import Event
+from threading import Event, Thread
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 
@@ -1458,3 +1458,102 @@ class ShortWindowArchiveTests(unittest.TestCase):
         x = np.asarray([now - 5 * self.SEC, now])
         signal = _FakeSignal(data=[_FakeBuf(x), _FakeBuf([1.0, 2.0])])
         self.assertFalse(streamer._has_window_hole(signal))
+
+
+class ReceiverLoopTests(unittest.TestCase):
+    """The receiver reopens a dropped subscription by itself, backing off
+    between attempts, and queues an archive refresh for the hole it left."""
+
+    def _run(self, sessions, window_ns=0, names=()):
+        """Drive _receiver_loop on a fake clock. ``sessions`` scripts each
+        start_subscription call: a number is a session of that many seconds
+        that then drops, an exception is raised at once; the call after the
+        last one is the stop. Returns the streamer and the (start, end)
+        clock times of every call, the stop included."""
+        clock = {'t': 1000.0}
+        streamer = CanvasStreamer(da=MagicMock())
+        streamer._ds_to_signals = {'ds': [_FakeSignal(name=name) for name in names]}
+        streamer._window_ns = window_ns
+        script, log = list(sessions), []
+
+        def start_subscription(ds, params=None):
+            started = clock['t']
+            if not script:
+                log.append((started, started))
+                streamer.stop_flag = True
+                return
+            outcome = script.pop(0)
+            if isinstance(outcome, Exception):
+                log.append((started, started))
+                raise outcome
+            clock['t'] += outcome
+            log.append((started, clock['t']))
+
+        def sleep(seconds):
+            clock['t'] += seconds
+
+        streamer.da.start_subscription.side_effect = start_subscription
+        with patch.object(streamer_module.time, 'monotonic', lambda: clock['t']), \
+                patch.object(streamer_module.time, 'sleep', sleep):
+            streamer._receiver_loop('ds', ['v'])
+        return streamer, log
+
+    @staticmethod
+    def _delays(log):
+        return [round(b[0] - a[1]) for a, b in zip(log, log[1:])]
+
+    def test_a_dropped_subscription_is_reopened(self):
+        streamer, log = self._run([0, RuntimeError('boom')])
+        self.assertEqual(streamer.da.start_subscription.call_count, 3)
+        self.assertEqual(self._delays(log), [1, 2])
+
+    def test_the_handler_is_released_before_each_attempt(self):
+        streamer, _ = self._run([0, 0])
+        self.assertEqual(streamer.da.stop_subscription.call_args_list, [call('ds'), call('ds')])
+
+    def test_backoff_grows_and_settles_on_its_last_step(self):
+        _, log = self._run([0] * 6)
+        self.assertEqual(self._delays(log), [1, 2, 5, 10, 30, 30])
+
+    def test_a_working_session_resets_the_backoff(self):
+        _, log = self._run([0, 0, streamer_module._RECONNECT_GOOD_SESSION_S, 0])
+        self.assertEqual(self._delays(log), [1, 2, 1, 2])
+
+    def test_each_drop_queues_a_full_window_refresh(self):
+        streamer, _ = self._run([0], window_ns=3600 * int(1e9), names=('a', 'b'))
+        uids = {s.uid for s in streamer._ds_to_signals['ds']}
+        self.assertEqual(streamer._refresh_pending, uids)
+        self.assertEqual(streamer._last_refresh, {})
+
+    def test_the_refresh_skips_the_rate_limit(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        signal = _FakeSignal(name='a')
+        streamer._ds_to_signals = {'ds': [signal]}
+        streamer._window_ns = 3600 * int(1e9)
+        streamer._last_refresh[signal.uid] = 999.0
+        streamer._request_gap_refresh()
+        self.assertNotIn(signal.uid, streamer._last_refresh)
+        self.assertIn(signal.uid, streamer._refresh_pending)
+
+    def test_no_window_means_nothing_to_refresh(self):
+        streamer, _ = self._run([0], window_ns=0, names=('a',))
+        self.assertEqual(streamer._refresh_pending, set())
+
+    def test_stop_during_the_backoff_returns_at_once(self):
+        streamer = CanvasStreamer(da=MagicMock())  # every session drops at once
+        with patch.object(streamer_module, '_RECONNECT_BACKOFF_S', (30,)):
+            thread = Thread(target=streamer._receiver_loop, args=('ds', ['v']), daemon=True)
+            thread.start()
+            time.sleep(0.3)
+            streamer.stop_flag = True
+            thread.join(2)
+        self.assertFalse(thread.is_alive())
+
+    def test_start_stream_runs_the_receiver_inside_the_loop(self):
+        streamer = CanvasStreamer(da=MagicMock())
+        spawned = {}
+        streamer._spawn = lambda name, target: spawned.setdefault(name, target)
+        streamer.start_stream('ds', ['v'], callback=None)
+        receiver = spawned['receiver']
+        self.assertIs(receiver.func.__func__, CanvasStreamer._receiver_loop)
+        self.assertEqual(receiver.args, ('ds', ['v']))
