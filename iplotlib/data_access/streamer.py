@@ -28,6 +28,16 @@ _DEFAULT_REFRESH_MIN_INTERVAL_S = 300
 # on the draw thread, which is what makes focus changes and autoscale crawl.
 _REFRESH_GLOBAL_SPACING_S = 2.0
 
+# Reconnect backoff for the SSE receiver, in seconds; the last value is the
+# steady-state retry period. A subscription is one-shot and blocking, so it
+# returns as soon as the connection drops (network switch, VPN, server
+# restart) and the receiver must resubscribe by itself.
+_RECONNECT_BACKOFF_S = (1, 2, 5, 10, 30)
+
+# A subscription that lived at least this long counts as a working session:
+# the backoff restarts from the beginning after it.
+_RECONNECT_GOOD_SESSION_S = 30.0
+
 # Hard bound on drain rounds per 100 ms pass of the stream thread. Guarantees
 # the loop reaches its flush and its sleep no matter what the feed returns.
 _DRAIN_MAX_ROUNDS = 256
@@ -465,14 +475,81 @@ class CanvasStreamer:
 
     def start_stream(self, ds, varnames, callback):
         logger.debug(F"Subscribing to {ds} for {len(varnames)} variables: {varnames}")
-        # Receiver: blocking SSE subscription loop feeding per-variable queues.
+        # Receiver: blocking SSE subscription loop feeding per-variable queues,
+        # kept alive across connection drops by _receiver_loop.
         receive_thread = self._spawn(
-            "receiver", partial(self.da.start_subscription, ds, params=varnames))
+            "receiver", partial(self._receiver_loop, ds, varnames))
         self.streamers.append(receive_thread)
 
         collect_thread = self._spawn(
             "collector", partial(self.stream_thread, ds, varnames, callback))
         self.collectors.append(collect_thread)
+
+    def _sleep_until_stop(self, seconds: float) -> bool:
+        """Sleep in short steps. Returns False as soon as a stop is asked for,
+        so a pending reconnect never delays Stop by its backoff."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if self.stop_flag:
+                return False
+            time.sleep(0.1)
+        return not self.stop_flag
+
+    def _receiver_loop(self, ds, varnames):
+        """Keep a subscription to ``ds`` alive until the user stops streaming.
+
+        ``da.start_subscription`` is one-shot: it blocks on the SSE socket and
+        returns (or raises) the moment the connection breaks -- a switch from
+        the corporate network to wifi/VPN, a VPN re-key, a suspend/resume, a
+        gateway restart. Without this loop the receiver thread simply ended
+        there: the collector kept polling queues nobody filled any more, the
+        plots stayed frozen with no error, and only a manual stop/start
+        recovered. Here the drop is just the end of one session; the next
+        one is opened after a backoff.
+        """
+        attempt = 0
+        while not self.stop_flag:
+            started = time.monotonic()
+            try:
+                self.da.start_subscription(ds, params=varnames)
+            except Exception:
+                # start_subscription already maps a connection failure to an
+                # ERROR status; anything else must not kill the receiver.
+                logger.exception(f"Subscription to {ds} ended with an error")
+            if self.stop_flag:
+                return
+            session_s = time.monotonic() - started
+            # Best effort: make sure the handler is out of STARTED/STOPPING,
+            # otherwise the next start is refused and we would spin on the
+            # backoff forever.
+            try:
+                self.da.stop_subscription(ds)
+            except Exception:
+                logger.debug("stop before resubscribe raised", exc_info=True)
+            if session_s >= _RECONNECT_GOOD_SESSION_S:
+                attempt = 0
+            delay = _RECONNECT_BACKOFF_S[min(attempt, len(_RECONNECT_BACKOFF_S) - 1)]
+            attempt += 1
+            logger.warning(
+                f"Stream {ds} disconnected after {session_s:.0f}s; "
+                f"resubscribing in {delay}s")
+            # The feed was down for session-end..now, so the live buffers have
+            # a hole the archive can fill once the window refreshes.
+            self._request_gap_refresh()
+            if not self._sleep_until_stop(delay):
+                return
+
+    def _request_gap_refresh(self):
+        """Queue a full-window archive refresh for every streamed signal and
+        drop the per-signal rate limit, so the hole left by a disconnection is
+        filled instead of waiting out the normal refresh interval. No-op when
+        no window is configured: there is no refresh worker then."""
+        if self._window_ns <= 0:
+            return
+        for signals in self._ds_to_signals.values():
+            for signal in signals:
+                self._last_refresh.pop(signal.uid, None)
+                self._refresh_pending.add(signal.uid)
 
     def stream_thread(self, ds, varnames, callback):
         pending = {varname: [] for varname in varnames}
