@@ -253,10 +253,13 @@ class PyQtGraphParser(BackendParserBase):
 
     def remove_signal_lines(self, signal):
         """Remove signal lines from the plot."""
-        if hasattr(signal, 'lines') and signal.lines:
-            for line in signal.lines:
-                if hasattr(line, 'scene') and line.scene():
-                    line.scene().removeItem(line)
+        plot_item = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))
+        for line in getattr(signal, 'lines', None) or []:
+            # Off the PlotItem too, not only the scene: its data items still count for the autoscale.
+            if isinstance(plot_item, PlotItem) and line in plot_item.items:
+                plot_item.removeItem(line)
+            elif hasattr(line, 'scene') and line.scene():
+                line.scene().removeItem(line)
 
     def remove_signal_from_legend(self, impl_plot: PlotItem, signal):
         """Remove signal from legend."""
