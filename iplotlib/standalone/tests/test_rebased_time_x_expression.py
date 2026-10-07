@@ -170,7 +170,7 @@ class RebasedTimeXExpressionTest(unittest.TestCase):
                 _, _, _, _, signal = self._build(backend, envelope=True)
                 self.assertGreater(len(signal.x_data), 0)
                 self.assertEqual(len(signal.x_data), len(signal.data_store[0]))
-                self.assertLess(float(np.max(signal.x_data)), 2 * SECOND)
+                self.assertLess(np.asarray(signal.x_data).max(), 2 * SECOND)
 
 
 if __name__ == '__main__':
