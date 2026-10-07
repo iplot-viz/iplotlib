@@ -1376,6 +1376,10 @@ class BackendParserBase(ABC):
                 return
             self.do_impl_line_plot(signal, impl_plot, data)
 
+        if getattr(signal, 'hidden', False):
+            # Lines drawn anew start visible; a signal hidden from its legend stays hidden.
+            self.set_signal_visible(signal, False)
+
         self.update_axis_labels_with_units(impl_plot, signal)
 
         # Check for annotations if the marker labels are visible
@@ -1615,6 +1619,76 @@ class BackendParserBase(ABC):
     def rebuild_legend(self, impl_plot: Any, plot: Plot):
         """Rebuild legend for the given plot. Default implementation does nothing."""
         pass
+
+    def legend_anchor(self, impl_plot: Any) -> Optional[Tuple[float, float]]:
+        """Where the user dragged the legend of `impl_plot`: its top-left corner as
+        fractions of the plot area, from the left and from the top. None when it
+        keeps the legend position."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci else None
+        anchor = self._legend_anchors(plot).get(str(ci.stack_key)) if plot else None
+        return (float(anchor[0]), float(anchor[1])) if anchor else None
+
+    @staticmethod
+    def _legend_anchors(plot: Plot) -> Dict[str, List[float]]:
+        # A workspace read back may key the stacks by number rather than by name.
+        return {str(stack): anchor for stack, anchor in (getattr(plot, 'legend_anchor', None) or {}).items()}
+
+    def set_legend_anchor(self, impl_plot: Any, x: float, y: float):
+        """Keep the legend of `impl_plot` where it was dragged, see `legend_anchor`.
+        Each stack of a plot has a legend of its own, so each keeps its own place."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci else None
+        if plot is None:
+            return
+        anchors = self._legend_anchors(plot)
+        anchors[str(ci.stack_key)] = [round(float(x), 4), round(float(y), 4)]
+        plot.legend_anchor = anchors
+
+    def legend_collapsed(self, impl_plot: Any) -> bool:
+        """Whether the legend of `impl_plot` is folded away behind its eye button."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci else None
+        return plot is not None and str(ci.stack_key) in {str(s) for s in plot.legend_collapsed or []}
+
+    def set_legend_collapsed(self, impl_plot: Any, collapsed: bool):
+        """Fold the legend of `impl_plot` away behind its eye button, or unfold it."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci else None
+        if plot is None:
+            return
+        stacks = [str(s) for s in plot.legend_collapsed or [] if str(s) != str(ci.stack_key)]
+        if collapsed:
+            stacks.append(str(ci.stack_key))
+        plot.legend_collapsed = stacks or None
+
+    @staticmethod
+    def legend_width_fraction(plot: Plot) -> Optional[float]:
+        """The widest the legend of `plot` may be, as a fraction of the plot area
+        width, or None when it has no limit."""
+        width = getattr(plot, 'legend_width', 0) or 0
+        return width / 100 if 0 < width < 100 else None
+
+    @staticmethod
+    def legend_shift_clear_of_eye(legend: Tuple[float, float, float, float],
+                                  eye: Tuple[float, float, float, float], gap: float) -> Tuple[float, float]:
+        """How far to move a legend to leave alone the eye button in the top right corner
+        of the plot: leftwards, or downwards when the plot has no room for it on the left.
+        Boxes are (left, top, right, bottom) in pixels from the top-left corner of the
+        plot area; the shift is (rightwards, downwards)."""
+        left, top, right, bottom = legend
+        eye_left, eye_top, eye_right, eye_bottom = eye
+        if right <= eye_left - gap or left >= eye_right + gap or top >= eye_bottom + gap or bottom <= eye_top - gap:
+            return 0.0, 0.0
+        if left - (right - eye_left + gap) >= 0:
+            return eye_left - gap - right, 0.0
+        return 0.0, eye_bottom + gap - top
+
+    def set_signal_hidden(self, signal: Signal, hidden: bool):
+        """Record that `signal` was hidden or shown from its legend entry, so the
+        choice survives a redraw and is saved with the workspace."""
+        if isinstance(signal, SignalXY):
+            signal.hidden = bool(hidden)
 
     def register_dynamic_signal(self, impl_plot: Any, plot: Plot, signal: Signal):
         """Register a dynamically added signal and update legend. Default implementation does nothing."""

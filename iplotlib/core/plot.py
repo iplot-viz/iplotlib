@@ -46,6 +46,15 @@ class Plot(ABC):
         indicate the location of the plot legend
     legend_layout : str
         indicate the layout of the plot legend
+    legend_anchor : Dict[str, List[float]]
+        per stack, where the user dragged the legend: its top-left corner as fractions
+        of the stack's plot area, from the left and from the top. It replaces the
+        legend position for that stack
+    legend_width : int
+        widest the legend may be, in % of the plot area width; the names that do not
+        fit are cut in the middle. 0 sets no limit
+    legend_collapsed : List[str]
+        the stacks whose legend is folded away behind its eye button
     grid : bool
         indicate if the grid must be drawn
     log_scale : bool
@@ -64,6 +73,9 @@ class Plot(ABC):
     legend: bool = None
     legend_position: str = None
     legend_layout: str = None
+    legend_anchor: Dict[str, List[float]] = None
+    legend_width: int = 0
+    legend_collapsed: List[str] = None
     background_color: str = None
     grid: bool = None
     grid_spacing_label: bool = None
@@ -109,6 +121,9 @@ class Plot(ABC):
         self.legend = Plot.legend
         self.legend_position = Plot.legend_position
         self.legend_layout = Plot.legend_layout
+        self.legend_anchor = Plot.legend_anchor
+        self.legend_width = Plot.legend_width
+        self.legend_collapsed = Plot.legend_collapsed
         self.background_color = Plot.background_color
         self.grid = Plot.grid
         self.grid_spacing_label = Plot.grid_spacing_label
@@ -131,6 +146,9 @@ class Plot(ABC):
         self.legend = old_plot['legend']
         self.legend_position = old_plot['legend_position']
         self.legend_layout = old_plot['legend_layout']
+        self.legend_anchor = old_plot.get('legend_anchor', Plot.legend_anchor)
+        self.legend_width = old_plot.get('legend_width', Plot.legend_width)
+        self.legend_collapsed = old_plot.get('legend_collapsed', Plot.legend_collapsed)
         self.font_size = old_plot['font_size']
         self.font_color = old_plot['font_color']
         self.background_color = old_plot['background_color']

@@ -437,15 +437,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         """Gets current iplotlib canvas"""
         return self._parser.canvas
 
-    def _is_signal_visible(self, signal) -> bool:
-        """Check if signal is visible (PyQtGraph implementation)."""
-        if not hasattr(signal, 'lines') or not signal.lines:
-            return True  # Assume visible if no lines yet (signal being processed)
-        try:
-            return signal.lines[0].isVisible()
-        except (IndexError, AttributeError):
-            return True
-
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: PlotItem
 
@@ -911,6 +902,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         """Handle mouse press events in PyQtGraph."""
         impl_plot = view_box.parentItem()
         if not impl_plot:
+            return
+        if self._parser.legend_at(impl_plot, event.scenePos()):
+            # Left alone, the legend takes its own clicks and drags, in every mouse mode:
+            # a shift or a ruler grabbing the press would swallow them.
             return
 
         ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
