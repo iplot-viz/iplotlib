@@ -459,6 +459,14 @@ class IplotQtCanvas(QWidget):
             if not ruler.visible:
                 r.set_visible(False)
 
+    def _apply_new_ruler_labels(self, preview):
+        """Show on the preview ghost only the tags the ruler it previews will get."""
+        show_label, show_val_label = self._ruler_window.labels_for_new_ruler()
+        if preview.show_label != show_label:
+            preview.set_show_label(show_label)
+        if preview.show_val_label != show_val_label:
+            preview.set_show_val_label(show_val_label)
+
     @abstractmethod
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         """"""

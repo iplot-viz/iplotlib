@@ -689,11 +689,13 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             existing.abs_x = self._parser.transform_value(impl_plot, 0, x)
             existing.abs_y = self._parser.transform_value(impl_plot, 1, y)
             existing.xy = (x, y)
+            self._apply_new_ruler_labels(existing)
             existing.refresh_labels()
             return
         self._clear_preview_ruler()
         ruler = self._parser.add_ruler(impl_plot, self._PREVIEW_RULER_NAME, x, y, ident['color'])
         ruler.set_label_text(ident['name'])
+        self._apply_new_ruler_labels(ruler)
         self._preview_ruler_plot = impl_plot
         self._preview_ruler_identity = ident
 

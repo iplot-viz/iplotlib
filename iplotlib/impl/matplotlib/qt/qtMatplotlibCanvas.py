@@ -506,6 +506,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             existing.abs_x = self._parser.transform_value(impl_plot, 0, x)
             existing.abs_y = self._parser.transform_value(impl_plot, 1, y)
             existing.xy = (x, y)
+            self._apply_new_ruler_labels(existing)
             existing.refresh_labels()
             self._blit_preview()
             return
@@ -514,6 +515,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         ruler = self._parser.add_ruler(impl_plot, self._PREVIEW_RULER_NAME,
                                         x, y, ident['color'], animated=True)
         ruler.set_label_text(ident['name'])
+        self._apply_new_ruler_labels(ruler)
         self._preview_ruler_ax = impl_plot
         self._preview_ruler_identity = ident
         if self._preview_cid_draw is None:

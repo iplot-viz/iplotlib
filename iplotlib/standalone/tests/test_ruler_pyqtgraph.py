@@ -211,6 +211,22 @@ class RulerPyQtGraphEndToEndTest(unittest.TestCase):
         self.assertEqual(self.plot.rulers, [])
         self.assertEqual(self.widget._ruler_window.table.rowCount(), 0)
 
+    def test_preview_ruler_shows_only_the_labels_the_new_ruler_will_get(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 2.0, 0.2)
+        self._hide_from_labels_menu('Val label')
+        self.widget._show_preview_ruler(self.impl_plot, 6.0, 0.6)
+        ghost = self._backend_ruler(self.widget, self.impl_plot, self.widget._PREVIEW_RULER_NAME)
+        self.assertFalse(ghost.value_labels[0].isVisible())
+        self.assertTrue(ghost.name_label.isVisible())
+        # A ghost already on the plot follows the menu as it moves.
+        self._hide_from_labels_menu('Ruler label')
+        self.widget._show_preview_ruler(self.impl_plot, 7.0, 0.7)
+        self.assertIs(self._backend_ruler(self.widget, self.impl_plot,
+                                          self.widget._PREVIEW_RULER_NAME), ghost)
+        for tag in (ghost.name_label, ghost.x_label, ghost.y_label):
+            self.assertFalse(tag.isVisible())
+        self.assertTrue(ghost.v_line.isVisible())
+
     def test_add_ruler_clears_preview_and_takes_its_identity(self):
         self.widget._show_preview_ruler(self.impl_plot, 2.0, 0.2)
         self.widget._add_ruler_at(self.impl_plot, self.plot, 2.0, 0.2)
