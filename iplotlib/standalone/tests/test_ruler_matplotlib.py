@@ -149,6 +149,50 @@ class RulerMatplotlibEndToEndTest(unittest.TestCase):
         self.assertFalse(backend.value_labels[0].get_visible())
         self.assertTrue(backend.name_label.get_visible())
 
+    def _hide_from_labels_menu(self, toggle):
+        window = self.widget._ruler_window
+        window._label_actions[window.LABEL_TOGGLES.index(toggle)].setChecked(False)
+
+    @staticmethod
+    def _backend_ruler(widget, impl_plot, name):
+        return next(r for r in widget._parser.get_rulers(impl_plot) if r.name == name)
+
+    def test_new_ruler_keeps_the_value_tags_hidden_from_the_labels_menu(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 2.0, 0.2)
+        self._hide_from_labels_menu('Val label')
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 6.0, 0.6)
+        ruler = self.plot.get_ruler('B')
+        self.assertTrue(ruler.show_label)
+        self.assertFalse(ruler.show_val_label)
+        backend = self._backend_ruler(self.widget, self.impl_plot, 'B')
+        self.assertFalse(backend.value_labels[0].get_visible())
+        self.assertTrue(backend.name_label.get_visible())
+        window = self.widget._ruler_window
+        self.assertEqual([(r['show_label'], r['show_val_label']) for r in window._rows],
+                         [(True, False), (True, False)])
+        self.assertFalse(window._label_actions[1].isChecked())
+
+    def test_new_ruler_keeps_the_ruler_tags_hidden_from_the_labels_menu(self):
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 2.0, 0.2)
+        self._hide_from_labels_menu('Ruler label')
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 6.0, 0.6)
+        self.assertFalse(self.plot.get_ruler('B').show_label)
+        backend = self._backend_ruler(self.widget, self.impl_plot, 'B')
+        for tag in (backend.name_label, backend.x_label, backend.y_label):
+            self.assertFalse(tag.get_visible())
+        self.assertTrue(backend.value_labels[0].get_visible())
+
+    def test_new_ruler_follows_the_labels_of_a_reloaded_canvas(self):
+        c2 = _build_canvas()
+        plot2 = c2.plots[0][0]
+        plot2.add_ruler(Ruler(name='A', xy=(2.0, 0.2), color='#00FF00', show_val_label=False))
+        self.widget.set_canvas(c2)
+        impl_plot = self.widget._get_impl_plot_for_plot(plot2)
+        self.widget._add_ruler_at(impl_plot, plot2, 6.0, 0.6)
+        self.assertFalse(plot2.get_ruler('B').show_val_label)
+        backend = self._backend_ruler(self.widget, impl_plot, 'B')
+        self.assertFalse(backend.value_labels[0].get_visible())
+
     def test_preview_ruler_shows_next_identity_without_touching_the_model(self):
         self.widget._show_preview_ruler(self.impl_plot, 2.0, 0.2)
         ghost = next(r for r in self.widget._parser.get_rulers(self.impl_plot)
