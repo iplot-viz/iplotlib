@@ -355,6 +355,29 @@ class ResetViewTest(unittest.TestCase):
         for i in range(4):
             self.assertEqual(len(signal.data_store[i]), 200)
 
+    def test_restore_minimap_snapshot_restores_the_time_behind_an_x_expression(self):
+        # X shows time since T0, so it cannot stand for the time buffer: the
+        # restore must bring back the drawn time samples and request window,
+        # or the next zoom maps X to a time window from the zoomed buffers.
+        time = np.arange(TS_START, TS_START + 200 * SECOND, SECOND, dtype=np.int64)
+        signal = SignalXY(label="rel", x_expr="${self}.time - np.int64(%d)" % TS_START)
+        signal.ts_start, signal.ts_end = TS_START, TS_START + 200 * SECOND
+        signal.data_store[0] = time
+        signal.data_store[1] = np.sin(np.arange(200.0))
+        signal._finalize_xyz_data([(time - TS_START).astype(float), np.sin(np.arange(200.0)), np.zeros(0)])
+        # A zoom refetched a sub-window.
+        signal.data_store[0] = time[50:70]
+        signal.data_store[1] = signal.data_store[1][50:70]
+        signal.x_data = signal.x_data[50:70]
+        signal.ts_start, signal.ts_end = int(time[50]), int(time[69])
+
+        data = signal.restore_minimap_snapshot()
+
+        self.assertEqual(len(data[0]), 200)
+        np.testing.assert_array_equal(np.asarray(signal.data_store[0]), time)
+        self.assertEqual((signal.ts_start, signal.ts_end), (TS_START, TS_START + 200 * SECOND))
+        self.assertEqual(signal.draw_time_request_window(), (TS_START, TS_START + 200 * SECOND))
+
     def test_restore_minimap_snapshot_restores_downsampled_state(self):
         # A deep zoom can refetch raw data and clear the downsampled flag. The
         # restore must bring back the draw-time state, so the next zoom fetches

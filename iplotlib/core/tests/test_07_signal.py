@@ -1,6 +1,7 @@
 """Unit tests for SignalXY and SignalContour."""
 
 import unittest
+from unittest import mock
 
 import numpy as np
 from iplotlib.core.signal import SignalXY, SignalContour
@@ -93,6 +94,111 @@ class SetLimitsTest(unittest.TestCase):
         s.set_limits((1111, 1999))
         self.assertEqual(s.ts_start, 1111)
         self.assertEqual(s.ts_end, 1999)
+
+
+class RebasedTimeLimitsTest(unittest.TestCase):
+    """X re-bases time ('${self}.time - T0'): its view maps back to a time
+    window through the samples in memory, which must not stop a wider view
+    (zoom out, undo) from bringing the rest of the data back."""
+
+    START, END, STEP = 1000, 2000, 10
+
+    def _drawn_signal(self):
+        """Signal drawn over [START, END], its draw-time snapshot taken."""
+        time = np.arange(self.START, self.END + 1, self.STEP, dtype=np.int64)
+        s = SignalXY(label="rel", x_expr="${self}.time - 1000")
+        s.ts_start, s.ts_end = self.START, self.END
+        s.data_store[0] = time
+        s.data_store[1] = np.ones(time.size)
+        s._finalize_xyz_data([(time - self.START).astype(float), np.ones(time.size), np.zeros(0)])
+        return s
+
+    def _load(self, s, begin, end):
+        """Replace the buffers with what a zoom over [begin, end] would fetch."""
+        time = np.arange(begin, end + 1, self.STEP, dtype=np.int64)
+        s.data_store[0] = time
+        s.data_store[1] = np.ones(time.size)
+        s.x_data = (time - self.START).astype(float)
+        s.ts_start, s.ts_end = begin, end
+
+    def test_wider_view_extends_the_window_past_the_loaded_samples(self):
+        s = self._drawn_signal()
+        self._load(s, 1300, 1500)
+        s.set_limits((0, 1000))
+        self.assertEqual((s.ts_start, s.ts_end), (self.START, self.END))
+
+    def test_extension_stops_at_the_window_drawn(self):
+        s = self._drawn_signal()
+        self._load(s, 1300, 1500)
+        s.set_limits((-5000, 9000))
+        self.assertEqual((s.ts_start, s.ts_end), (self.START, self.END))
+
+    def test_narrower_view_still_snaps_to_the_samples(self):
+        s = self._drawn_signal()
+        s.set_limits((200, 400))
+        self.assertEqual((s.ts_start, s.ts_end), (1190, 1400))
+
+    def test_view_of_the_requested_window_keeps_the_request(self):
+        # Re-deriving the same window only changes the data hash (a refetch of
+        # the same samples); within a sampling step at each edge it is the same.
+        s = self._drawn_signal()
+        for view in ((0, 1000), (3, 997)):
+            with self.subTest(view=view), mock.patch.object(s, 'set_xranges') as set_xranges:
+                s.set_limits(view)
+                set_xranges.assert_not_called()
+
+    def test_non_monotonic_x_is_not_extended(self):
+        s = self._drawn_signal()
+        self._load(s, 1300, 1500)
+        s.x_data = s.x_data[::-1].copy()
+        s.set_limits((0, 1000))
+        self.assertEqual((s.ts_start, s.ts_end), (1300, 1500))
+
+    def test_no_extension_without_a_draw_time_snapshot(self):
+        time = np.arange(1300, 1501, self.STEP, dtype=np.int64)
+        s = SignalXY(label="rel", x_expr="${self}.time - 1000")
+        s.data_store[0] = time
+        s.data_store[1] = np.ones(time.size)
+        s.x_data = (time - self.START).astype(float)
+        s.set_limits((0, 1000))
+        self.assertEqual((s.ts_start, s.ts_end), (1300, 1500))
+
+    def test_restore_keeps_an_equivalent_request(self):
+        s = self._drawn_signal()
+        s.ts_start, s.ts_end = self.START + 3, self.END - 3
+        with mock.patch.object(s, 'set_xranges') as set_xranges:
+            s.restore_xranges((self.START, self.END))
+            set_xranges.assert_not_called()
+
+    def test_restore_applies_a_different_request(self):
+        s = self._drawn_signal()
+        self._load(s, 1300, 1500)
+        s.restore_xranges((self.START, self.END))
+        self.assertEqual((s.ts_start, s.ts_end), (self.START, self.END))
+
+    def test_whole_pulse_request_counts_as_what_was_drawn(self):
+        # Pulse mode without start/end: the request names no bounds ('', '').
+        time = np.arange(0.0, 10.01, 0.01)
+        s = SignalXY(label="rel", x_expr="${self}.time - 2", pulse_nb="ITER:TEST/1")
+        s.data_store[0] = time
+        s.data_store[1] = np.ones(time.size)
+        s._finalize_xyz_data([time - 2, np.ones(time.size), np.zeros(0)])
+        self.assertEqual((s.ts_start, s.ts_end), ('', ''))
+        with mock.patch.object(s, 'set_xranges') as set_xranges:
+            s.set_limits((-2.0, 8.0))
+            s.restore_xranges(('', ''))
+            set_xranges.assert_not_called()
+        s.set_limits((1.0, 3.0))
+        s.restore_xranges(('', ''))
+        self.assertEqual((s.ts_start, s.ts_end), ('', ''))
+
+    def test_restore_of_a_time_signal_applies_the_request(self):
+        time = np.arange(self.START, self.END + 1, self.STEP, dtype=np.int64)
+        s = SignalXY(label="t")
+        s.set_data([time, np.ones(time.size)])
+        s.ts_start, s.ts_end = self.START + 3, self.END - 3
+        s.restore_xranges((self.START, self.END))
+        self.assertEqual((s.ts_start, s.ts_end), (self.START, self.END))
 
 
 if __name__ == '__main__':
