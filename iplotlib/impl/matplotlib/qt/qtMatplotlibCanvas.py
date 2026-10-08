@@ -16,8 +16,8 @@ from collections.abc import Collection
 
 import numpy as np
 from PySide6.QtCore import QMargins, Qt, Slot, Signal
-from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QMessageBox, QSizePolicy, QSplitter, QVBoxLayout, QMenu
+from PySide6.QtGui import QCursor, QKeyEvent
+from PySide6.QtWidgets import QApplication, QMessageBox, QSizePolicy, QSplitter, QToolTip, QVBoxLayout, QMenu
 
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes as MPLAxes
@@ -37,6 +37,7 @@ from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, Nice
     ExponentScalarFormatter, RelativeTimeLocator, is_time_label
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
+from iplotlib.qt.utils.icon_loader import svg_icon_image
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
@@ -44,6 +45,12 @@ logger = Sl.get_logger(__name__)
 
 #: The mini-map must stay tall enough to read once the UI scale grows.
 MINIMAP_MIN_HEIGHT = ScaledPixels(110)
+
+
+def _rgba_array(image) -> np.ndarray:
+    """An RGBA8888 QImage as the array matplotlib draws."""
+    rows = np.frombuffer(image.constBits(), dtype=np.uint8).reshape(image.height(), image.bytesPerLine())
+    return rows[:, :image.width() * 4].reshape(image.height(), image.width(), 4).copy()
 
 
 class QtMatplotlibCanvas(IplotQtCanvas):
@@ -66,9 +73,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._preview_ruler_identity = None
         self._preview_background = None
         self._preview_cid_draw = None
+        # A left press on a legend: a drag moves it (or resizes it from its left or right
+        # side), a click hides or shows the signal of the entry pressed.
+        self._legend_gesture = None
+        self._legend_cursor = None
+        self._legend_tip_shown = False
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
+        self._parser.legend_eye_images = {state: _rgba_array(svg_icon_image(name, 48))
+                                          for state, name in (('open', 'eye'), ('closed', 'eye_closed'))}
         self._mpl_renderer = FigureCanvas(self._parser.figure)
         self._mpl_renderer.setParent(self)
         self._mpl_renderer.setSizePolicy(self._mpl_size_pol)
@@ -106,7 +120,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_renderer.mpl_connect('button_press_event', self._mpl_mouse_press_handler)
         self._mpl_renderer.mpl_connect('button_release_event', self._mpl_mouse_release_handler)
         self._mpl_renderer.mpl_connect('motion_notify_event', self._mpl_mouse_motion_handler)
-        self._mpl_renderer.mpl_connect('pick_event', self.on_pick_legend)
+        self._mpl_renderer.mpl_connect('figure_leave_event', lambda _: self._reset_legend_hover())
 
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
@@ -322,19 +336,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         rect.set_width(x_hi - x_lo)
         self._minimap_renderer.draw_idle()
 
-    def _is_signal_visible(self, signal) -> bool:
-        """Check if signal is visible (Matplotlib implementation)."""
-        if not hasattr(signal, 'lines') or not signal.lines:
-            return True  # Assume visible if no lines yet (signal being processed)
-        try:
-            lines = signal.lines
-            if isinstance(lines[0], Collection):
-                return lines[0][0].get_visible()  # visibility min data
-            else:
-                return lines[0].get_visible()
-        except (IndexError, AttributeError):
-            return True
-
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: MPLAxes
 
@@ -468,18 +469,22 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             color = self._ruler_window.next_color(name)
         x_abs = self._parser.transform_value(impl_plot, 0, x)
         y_abs = self._parser.transform_value(impl_plot, 1, y)
-        ruler = Ruler(name=name, xy=(x_abs, y_abs), color=color, visible=True)
+        show_label, show_val_label = self._ruler_window.labels_for_new_ruler()
+        ruler = Ruler(name=name, xy=(x_abs, y_abs), color=color, visible=True,
+                      show_label=show_label, show_val_label=show_val_label)
         plot.add_ruler(ruler)
         # The ghost previewing this ruler is superseded by the real one.
         self._clear_preview_ruler()
         self._preview_ruler_identity = None
         self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
         self._parser.create_ruler_echoes(impl_plot, name, x_abs, y_abs, ruler.color)
+        self._apply_ruler_state(ruler)
         self._ruler_window.set_canvas_columns(len(self._parser.canvas.plots))
         with self._ruler_window.bulk_update():
             for entry in self._ruler_window_rows(impl_plot, x, (x_abs, y_abs)):
                 self._ruler_window.add_row(name, entry['plot_id'], entry['xy'], ruler.color,
                                             visible=True, is_date=entry['is_date'],
+                                            show_label=show_label, show_val_label=show_val_label,
                                             signal_values=entry['signal_values'],
                                             x_is_time=entry['x_is_time'])
         if not self._ruler_window.isVisible():
@@ -502,6 +507,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             existing.abs_x = self._parser.transform_value(impl_plot, 0, x)
             existing.abs_y = self._parser.transform_value(impl_plot, 1, y)
             existing.xy = (x, y)
+            self._apply_new_ruler_labels(existing)
             existing.refresh_labels()
             self._blit_preview()
             return
@@ -510,6 +516,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         ruler = self._parser.add_ruler(impl_plot, self._PREVIEW_RULER_NAME,
                                         x, y, ident['color'], animated=True)
         ruler.set_label_text(ident['name'])
+        self._apply_new_ruler_labels(ruler)
         self._preview_ruler_ax = impl_plot
         self._preview_ruler_identity = ident
         if self._preview_cid_draw is None:
@@ -730,6 +737,16 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         # Redraw canvas to reflect changes
         self._parser.figure.canvas.draw()
 
+    def save_canvas_image(self, filename: str):
+        # The eye buttons of the legends are for the screen, not for the image.
+        self._parser.show_legend_eyes(False)
+        self._parser.figure.canvas.draw()
+        try:
+            super().save_canvas_image(filename)
+        finally:
+            self._parser.show_legend_eyes(True)
+            self._parser.figure.canvas.draw_idle()
+
     def _save_svg(self, filename: str):
         self._parser.figure.savefig(filename, format='svg', bbox_inches='tight')
 
@@ -801,17 +818,171 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._draw_call_counter += 1
         self._debug_log_event(event, f"Draw call {self._draw_call_counter}")
 
-    def on_pick_legend(self, event):
-        # Right-click on legend → open signal preferences
-        if hasattr(event, 'mouseevent') and event.mouseevent.button == MouseButton.RIGHT:
-            self._show_signal_prefs_menu(event.artist, event.mouseevent)
-            return
+    #: How close to the left or the right side of a legend, in pixels, a press resizes
+    #: it instead of moving it.
+    LEGEND_EDGE_PX = 5
+    #: How far, in pixels, the mouse moves before a press on a legend becomes a drag.
+    LEGEND_DRAG_PX = 3
 
-        legend_line = event.artist
-        ax_lines = self._parser.map_legend_to_ax.get(legend_line)
-        if ax_lines is None:
+    def _legend_px(self, px: float) -> float:
+        # Mouse events and window extents count physical pixels.
+        return px * getattr(self._mpl_renderer, 'device_pixel_ratio', 1)
+
+    def _legend_under(self, event):
+        """The axes whose shown legend is under the mouse, or None."""
+        ax = event.inaxes
+        legend = ax.get_legend() if isinstance(ax, MPLAxes) else None
+        if legend is None or not legend.get_visible() or not legend.contains(event)[0]:
+            return None
+        return ax
+
+    def _legend_entry_at(self, ax, event):
+        """The legend line of the entry under the mouse, by its line or by its name."""
+        legend = ax.get_legend()
+        for legend_line, text in zip(legend.get_lines(), legend.get_texts()):
+            if legend_line in self._parser.map_legend_to_ax and \
+                    (legend_line.contains(event)[0] or text.contains(event)[0]):
+                return legend_line
+        return None
+
+    def _legend_edge_at(self, ax, event):
+        """'left' or 'right' when the mouse is on that side of the legend of `ax`, else None."""
+        box = ax.get_legend().get_window_extent()
+        tolerance = self._legend_px(self.LEGEND_EDGE_PX)
+        if abs(event.x - box.x0) <= tolerance:
+            return 'left'
+        if abs(event.x - box.x1) <= tolerance:
+            return 'right'
+        return None
+
+    def _press_legend(self, event) -> bool:
+        """Take a press on a legend or on its eye button, in any mouse mode. True when it
+        was on one of them."""
+        eye_ax = self._parser.legend_eye_under(event)
+        ax = self._legend_under(event) if eye_ax is None else None
+        if eye_ax is None and ax is None:
+            return False
+        # No zoom or pan starts from the legend.
+        if getattr(self._mpl_toolbar, '_zoom_info', None) is not None:
+            self._mpl_toolbar.release_zoom(event)
+        if getattr(self._mpl_toolbar, '_pan_info', None) is not None:
+            self._mpl_toolbar.release_pan(event)
+        edge = self._legend_edge_at(ax, event) if ax is not None else None
+        entry = self._legend_entry_at(ax, event) if ax is not None else None
+        if event.button == MouseButton.RIGHT and entry is not None:
+            self._show_signal_prefs_menu(entry, event)
+        elif event.button == MouseButton.LEFT and not event.dblclick:
+            self._legend_gesture = dict(ax=eye_ax or ax, eye=eye_ax is not None, entry=entry, edge=edge,
+                                        x=event.x, y=event.y, dragging=False)
+        return True
+
+    def _drag_legend(self, event):
+        g = self._legend_gesture
+        dx, dy = event.x - g['x'], event.y - g['y']
+        if not g['dragging']:
+            if max(abs(dx), abs(dy)) < self._legend_px(self.LEGEND_DRAG_PX):
+                return
+            g['dragging'] = True
+            # A drag from the eye button does nothing: it is a button.
+            g['inert'] = g['eye'] or not self._start_legend_drag(g)
+        if g['inert']:
             return
-        self._toggle_legend_line(legend_line, ax_lines)
+        ax_box = g['ax'].get_window_extent()
+        if g['edge'] is None:
+            self._parser.move_legend(g['ax'], g['corner'][0] + dx / ax_box.width,
+                                     g['corner'][1] - dy / ax_box.height)
+        else:
+            width = g['box'].width + (dx if g['edge'] == 'right' else -dx) / ax_box.width
+            self._parser.set_legend_width(g['ax'], g['plot'], 1.0 if width >= g['full_width'] else width)
+            # Resized from the left, the legend keeps its right side where it was.
+            box = self._parser.legend_box(g['ax'])
+            x = g['box'].x1 - box.width if g['edge'] == 'left' else g['corner'][0]
+            self._parser.move_legend(g['ax'], x, g['corner'][1])
+        # Only the legend is drawn again, on top of the picture of the rest.
+        self._mpl_renderer.restore_region(g['background'])
+        g['ax'].draw_artist(g['legend'])
+        self._mpl_renderer.blit(self._parser.figure.bbox)
+
+    def _start_legend_drag(self, g) -> bool:
+        """Pin the legend where it is and take a picture of the figure without it, as
+        matplotlib does to drag its own legends (blitting): each move of the drag then
+        draws the legend alone, on top of that picture. False with nothing to drag."""
+        ci = self._parser._impl_plot_cache_table.get_cache_item(g['ax'])
+        plot = ci.plot() if ci else None
+        corner = self._parser.pin_legend(g['ax'], plot) if plot is not None else None
+        if corner is None:
+            return False
+        legend = g['ax'].get_legend()
+        g.update(plot=plot, corner=corner, legend=legend, box=self._parser.legend_box(g['ax']),
+                 full_width=self._parser.legend_full_width(g['ax']))
+        legend.set_animated(True)
+        self._mpl_renderer.draw()
+        g['background'] = self._mpl_renderer.copy_from_bbox(self._parser.figure.bbox)
+        return True
+
+    def _release_legend(self, event):
+        g, self._legend_gesture = self._legend_gesture, None
+        if g['dragging']:
+            # A drag is never a click, wherever it started.
+            if g.get('legend') is not None:
+                g['legend'].set_animated(False)
+                if g['edge'] is not None:
+                    # The other stacks of the plot take the new width.
+                    for impl_plot in self._parser._plot_impl_plot_lut.get(id(g['plot'])) or []:
+                        if impl_plot is not g['ax']:
+                            self._parser.rebuild_legend(impl_plot, g['plot'])
+                self._parser.figure.canvas.draw_idle()
+        elif event.button == MouseButton.LEFT:
+            if g['eye']:
+                self._parser.toggle_legend_collapsed(g['ax'])
+            elif g['entry'] is not None:
+                ax_lines = self._parser.map_legend_to_ax.get(g['entry'])
+                if ax_lines is not None:
+                    self._toggle_legend_line(g['entry'], ax_lines)
+
+    def _set_legend_cursor(self, shape):
+        # An override, above the cursor the navigation toolbar sets on every move.
+        if shape == self._legend_cursor:
+            return
+        if shape is None:
+            QApplication.restoreOverrideCursor()
+        elif self._legend_cursor is None:
+            QApplication.setOverrideCursor(shape)
+        else:
+            QApplication.changeOverrideCursor(shape)
+        self._legend_cursor = shape
+
+    def _hover_legend(self, event):
+        """Resize cursor on the left and right sides of a legend; tips for the eye button
+        and for the whole name of a cut one."""
+        if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
+            return
+        eye_ax = self._parser.legend_eye_under(event)
+        ax = self._legend_under(event) if eye_ax is None else None
+        tip = None
+        if eye_ax is not None:
+            self._set_legend_cursor(Qt.CursorShape.PointingHandCursor)
+            tip = 'Show the legend' if self._parser.legend_collapsed(eye_ax) else 'Hide the legend'
+        elif ax is not None and self._legend_edge_at(ax, event) is not None:
+            self._set_legend_cursor(Qt.CursorShape.SizeHorCursor)
+        else:
+            self._set_legend_cursor(None)
+            if ax is not None:
+                for text in ax.get_legend().get_texts():
+                    if text.contains(event)[0]:
+                        tip = self._parser.legend_full_name(text)
+                        break
+        if tip:
+            QToolTip.showText(QCursor.pos(), tip, self)
+        elif self._legend_tip_shown:
+            QToolTip.hideText()
+        self._legend_tip_shown = bool(tip)
+
+    def _reset_legend_hover(self):
+        self._set_legend_cursor(None)
+        if self._legend_tip_shown:
+            QToolTip.hideText()
+            self._legend_tip_shown = False
 
     def _show_signal_prefs_menu(self, legend_line, event):
         signal = self._parser._legend_signal_lut.get(legend_line)
@@ -832,6 +1003,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             visible = not ax_lines.get_visible()
             ax_lines.set_visible(visible)
         legend_line.set_alpha(1.0 if visible else 0.2)
+        signal = self._parser._legend_signal_lut.get(legend_line)
+        if signal is not None:
+            self._parser.set_signal_hidden(signal, not visible)
         self._parser.figure.canvas.draw()
 
     def _full_screen_mode_on(self, impl_plot):
@@ -937,6 +1111,10 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _mpl_mouse_motion_handler(self, event: MouseEvent):
         """Handle mouse motion for ruler drag, ruler ghost preview and drag shift."""
+        if self._legend_gesture is not None:
+            self._drag_legend(event)
+            return
+        self._hover_legend(event)
         if self._ruler_drag is not None:
             impl_plot = self._ruler_drag[0]
             if (event.inaxes is impl_plot
@@ -969,26 +1147,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
 
-        on_legend = (event.inaxes and event.inaxes.get_legend()
-                     and event.inaxes.get_legend().contains(event)[0])
-
-        if (on_legend and event.button in (MouseButton.LEFT, MouseButton.RIGHT)
-                and self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]):
-            for legend_line, ax_lines in self._parser.map_legend_to_ax.items():
-                contains, _ = legend_line.contains(event)
-                if contains:
-                    if getattr(self._mpl_toolbar, '_zoom_info', None) is not None:
-                        self._mpl_toolbar.release_zoom(event)
-                    if getattr(self._mpl_toolbar, '_pan_info', None) is not None:
-                        self._mpl_toolbar.release_pan(event)
-                    if event.button == MouseButton.LEFT:
-                        self._toggle_legend_line(legend_line, ax_lines)
-                    else:
-                        self._show_signal_prefs_menu(legend_line, event)
-                    return
-
-        # If the mouse is over the legend it ignores it
-        if on_legend:
+        if self._press_legend(event):
             return
 
         if event.dblclick:
@@ -1179,6 +1338,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _mpl_mouse_release_handler(self, event: MouseEvent):
         self._debug_log_event(event, "Mouse released")
+        if self._legend_gesture is not None:
+            self._release_legend(event)
+            return
         if self._ruler_drag is not None:
             self._end_ruler_drag()
             return

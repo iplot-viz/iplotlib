@@ -4,13 +4,13 @@ import gc
 import math
 import os
 from datetime import datetime
-from typing import Any, Callable, Collection, Dict, List, Tuple
+from typing import Any, Callable, Collection, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import Signal as QtSignal
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontMetricsF, QTransform
+from PySide6.QtGui import QFont, QFontMetricsF, QPixmap, QTransform
 from pyqtgraph import PlotItem, AxisItem, PlotDataItem, IsocurveItem, ViewBox, LegendItem, PColorMeshItem
 from pyqtgraph.Qt import OpenGLConstants as GLC
 from pyqtgraph.Qt import QtCore, QtWidgets
@@ -35,6 +35,7 @@ from iplotlib.core import (Axis,
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
 from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem, NanosecondDateFormatter, is_time_label
+from iplotlib.qt.utils.icon_loader import svg_icon_image
 
 logger = setupLogger.get_logger(__name__)
 
@@ -145,6 +146,287 @@ class QtViewBox(pg.ViewBox):
         ev.ignore()
 
 
+class _LegendEye(QtWidgets.QGraphicsRectItem):
+    """The eye button that folds the legend of a plot away and unfolds it. It stays in
+    the top right corner of the plot, where an upper right legend begins, whether the
+    legend is shown or folded, and the legend keeps clear of it. It is a button for the
+    screen: exported images leave it out."""
+
+    PAD = 2  # pixels of frame around the icon
+    GAP = 2  # pixels between the button and a legend
+
+    def __init__(self, parent, size: float, on_click: Callable):
+        super().__init__(0, 0, size + 2 * self.PAD, size + 2 * self.PAD, parent)
+        self._on_click = on_click
+        self._exporting = False
+        ratio = 2.0  # sharp on high density screens
+        self._pixmaps = {}
+        for collapsed, name in ((False, 'eye'), (True, 'eye_closed')):
+            self._pixmaps[collapsed] = QPixmap.fromImage(svg_icon_image(name, round(size * ratio)))
+            self._pixmaps[collapsed].setDevicePixelRatio(ratio)
+        self._icon = QtWidgets.QGraphicsPixmapItem(self)
+        self._icon.setPos(self.PAD, self.PAD)
+        # The look of the legend frame.
+        self.setPen(pg.mkPen(color='k'))
+        self.setBrush(pg.mkBrush(255, 255, 255, 120))
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setZValue(1000)  # above the legend and the curves
+        self.set_collapsed(False)
+
+    def set_collapsed(self, collapsed: bool):
+        self._icon.setPixmap(self._pixmaps[collapsed])
+        self.setToolTip('Show the legend' if collapsed else 'Hide the legend')
+
+    def setExportMode(self, export: bool, opts=None):
+        if export and self.isVisible():
+            self._exporting = True
+            self.hide()
+        elif not export and self._exporting:
+            self._exporting = False
+            self.show()
+
+    def paint(self, painter, option, widget=None):
+        # The SVG export paints each item it found shown, after setting its export mode.
+        if not self._exporting:
+            super().paint(painter, option, widget)
+
+    def mouseClickEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            ev.accept()
+            self._on_click()
+
+    def mouseDragEvent(self, ev):
+        # A button: dragging it neither moves the legend nor the plot.
+        ev.accept()
+
+
+class _Legend(LegendItem):
+    """The legend of a plot, worked with the mouse. A drag moves it, or resizes it from
+    its left or right side; narrower than its names, it cuts them in the middle. A click
+    on a name hides or shows the signal, as a click on its line does. The eye button in
+    the top right corner of the plot folds it away, and the legend keeps clear of the
+    eye. The plot keeps where the legend was dragged, its width and whether it is folded.
+    """
+
+    EDGE = 5  # pixels by the left or the right side where a drag resizes the legend
+
+    def __init__(self, parser: 'PyQtGraphParser', plot: PlotItem, i_plot: Plot, **kwargs):
+        super().__init__(**kwargs)
+        self._parser, self._plot, self._i_plot = parser, plot, i_plot
+        self.full_text = {}  # LabelItem -> its name before a cut to the legend width
+        self.eye = None
+        self._anchors = None  # (item anchor, parent anchor), as anchor() takes them
+        self._shift = (0.0, 0.0)  # off the anchors, to keep clear of the eye
+        self._gesture = {}
+        plot.getViewBox().sigResized.connect(self._plot_resized)
+        self.geometryChanged.connect(self.keep_clear_of_eye)
+
+    def _plot_resized(self, *_):
+        # The plot area is laid out after the draw and follows the window: lay the legend
+        # out again for the size it ends up with, and put the eye back in its corner.
+        if self._plot.legend is self and self.items:
+            self._parser._lay_out_legend(self._plot, self._i_plot)
+        self._place_eye()
+
+    def add_eye(self, size: float):
+        """The eye button that folds the legend away and unfolds it, `size` pixels high."""
+        self.eye = _LegendEye(self.parentItem(), size, self.toggle)
+        self.eye.set_collapsed(self._parser.legend_collapsed(self._plot))
+        self._place_eye()
+
+    def _place_eye(self):
+        if self.eye is not None:
+            self.eye.setPos(self.parentItem().width() - self.eye.rect().width(), 0)
+            self.keep_clear_of_eye()
+
+    def toggle(self):
+        """Fold the legend away, or unfold it."""
+        collapsed = not self._parser.legend_collapsed(self._plot)
+        self._parser.set_legend_collapsed(self._plot, collapsed)
+        self.setVisible(not collapsed)
+        self.eye.set_collapsed(collapsed)
+
+    def under(self, scene_pos) -> bool:
+        """Whether `scene_pos` falls on the shown legend or on its eye button."""
+        if self.isVisible() and self.sceneBoundingRect().contains(scene_pos):
+            return True
+        return self.eye is not None and self.eye.isVisible() and self.eye.sceneBoundingRect().contains(scene_pos)
+
+    def place(self, item_pos, parent_pos):
+        """Place the legend as anchor() does, clear of its eye button."""
+        self._anchors, self._shift = (item_pos, parent_pos), (0.0, 0.0)
+        self.anchor(itemPos=item_pos, parentPos=parent_pos)
+        self.keep_clear_of_eye()
+
+    def keep_clear_of_eye(self, *_):
+        """Move the legend out of the way of its eye button, leftwards or else downwards."""
+        if self.eye is None or self._anchors is None:
+            return
+        (item_x, item_y), (parent_x, parent_y) = self._anchors
+        vb = self.parentItem()
+        # Where the anchors alone put the legend.
+        shift = self._shift_clear_of_eye(parent_x * vb.width() - item_x * self.width(),
+                                         parent_y * vb.height() - item_y * self.height())
+        if shift != self._shift:
+            self._shift = shift
+            self.anchor(itemPos=(item_x, item_y), parentPos=(parent_x, parent_y), offset=shift)
+
+    def _shift_clear_of_eye(self, left: float, top: float):
+        """How far to move the legend, with its top-left corner at (`left`, `top`) in the
+        plot area, to keep clear of the eye."""
+        eye = self.eye.mapRectToItem(self.parentItem(), self.eye.rect())
+        return self._parser.legend_shift_clear_of_eye(
+            (left, top, left + self.width(), top + self.height()),
+            (eye.left(), eye.top(), eye.right(), eye.bottom()), _LegendEye.GAP)
+
+    def corner(self):
+        """Top-left corner of the legend as fractions of the plot area."""
+        vb = self.parentItem()
+        pos = self.mapToItem(vb, QtCore.QPointF(0, 0))
+        return pos.x() / vb.width(), pos.y() / vb.height()
+
+    def move_to(self, x: float, y: float):
+        """Anchor the top-left corner of the legend at (x, y), see `legend_anchor`, keeping
+        the legend inside the plot area and clear of its eye button."""
+        vb = self.parentItem()
+        x = min(max(x, 0.0), max(0.0, 1 - self.width() / vb.width()))
+        y = min(max(y, 0.0), max(0.0, 1 - self.height() / vb.height()))
+        if self.eye is not None:
+            dx, dy = self._shift_clear_of_eye(x * vb.width(), y * vb.height())
+            x, y = x + dx / vb.width(), y + dy / vb.height()
+        self._parser.set_legend_anchor(self._plot, x, y)
+        self.place((0, 0), (x, y))
+
+    def fit_width(self):
+        """Cut in the middle the names that do not fit in the width set for the legend, the
+        whole name shown as a tip. The font keeps its size: a smaller one would be hard to
+        read."""
+        labels = [label for _, label in self.items if label in self.full_text]
+        for label in labels:
+            if label.text != self.full_text[label]:
+                label.setText(self.full_text[label])
+                label.resize(label.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None))
+            label.setToolTip('')
+        self.updateSize()
+        fraction = self._parser.legend_width_fraction(self._i_plot)
+        if fraction is None or not labels:
+            return
+        widths = [label.item.boundingRect().width() for label in labels]
+        ncol = max(1, self.columnCount)
+        target = fraction * self.parentItem().width()
+        # What the legend spends on anything but the names: line samples and spacing.
+        overhead = self.width() - ncol * max(widths)
+        budget = (target - overhead) / ncol
+        # The columns are not all as wide as the widest name: measure and cut again.
+        for _ in range(3):
+            for label, width in zip(labels, widths):
+                if width > budget:
+                    self._cut(label, width, budget)
+            self.updateSize()
+            excess = self.width() - target
+            if excess <= 0.5:
+                break
+            budget -= excess / ncol
+
+    def _cut(self, label, width: float, budget: float):
+        """Shorten the name of `label`, `width` pixels long uncut, to `budget` pixels,
+        replacing its middle with '…'."""
+        full = self.full_text[label]
+        font = QFont(label.item.font())
+        size = str(label.opts.get('size', '')).replace('pt', '')
+        if size:
+            font.setPointSizeF(float(size))
+        # The text item adds its document margins around the text.
+        margins = width - QFontMetricsF(font).horizontalAdvance(full)
+        label.setText(QFontMetricsF(font).elidedText(full, Qt.TextElideMode.ElideMiddle,
+                                                     max(1.0, budget - margins)))
+        label.resize(label.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None))
+        label.setToolTip(full)
+
+    def rename(self, label, name: str):
+        """Give the entry of `label` a new name, cut as the others are."""
+        self.full_text[label] = name
+        label.setText(name)
+        label.resize(label.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None))
+        self.fit_width()
+
+    def full_width(self) -> float:
+        """Width of the legend with no name cut, in pixels."""
+        cut = [(label, label.text) for _, label in self.items if self.full_text.get(label, label.text) != label.text]
+        for label, _ in cut:
+            label.setText(self.full_text[label])
+            label.resize(label.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None))
+        self.updateSize()
+        width = self.width()
+        for label, shown in cut:
+            label.setText(shown)
+            label.resize(label.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None))
+        self.updateSize()
+        return width
+
+    def set_width(self, fraction: float):
+        """Let the legends of the plot be `fraction` of the plot width wide at most; a
+        fraction of 1 or more lifts the limit."""
+        width = 0 if fraction >= 1 else max(10, min(99, round(fraction * 100)))
+        if width != self._i_plot.legend_width:
+            self._i_plot.legend_width = width
+            self.fit_width()
+
+    def _edge_at(self, pos) -> Optional[str]:
+        """'left' or 'right' when `pos`, in legend coordinates, is on that side, else None."""
+        if abs(pos.x()) <= self.EDGE:
+            return 'left'
+        if abs(pos.x() - self.width()) <= self.EDGE:
+            return 'right'
+        return None
+
+    def hoverEvent(self, ev):
+        super().hoverEvent(ev)
+        if not ev.isExit() and self._edge_at(ev.pos()) is not None:
+            self.setCursor(QtCore.Qt.CursorShape.SizeHorCursor)
+        else:
+            self.unsetCursor()
+
+    def mouseClickEvent(self, ev):
+        # A name takes the click of its line sample, as its own.
+        for sample, label in self.items:
+            if label.geometry().contains(ev.pos()):
+                sample.mouseClickEvent(ev)
+                return
+
+    def mouseDragEvent(self, ev):
+        if ev.button() != QtCore.Qt.MouseButton.LeftButton:
+            return
+        ev.accept()
+        vb = self.parentItem()
+        if ev.isStart():
+            corner = self.corner()
+            self._gesture = dict(edge=self._edge_at(ev.buttonDownPos()), corner=corner, width=self.width(),
+                                 right=corner[0] * vb.width() + self.width())
+            if self._gesture['edge'] is not None:
+                self._gesture['full'] = self.full_width()
+        g = self._gesture
+        if not g:
+            return
+        # Scene positions: resizing from the left moves the legend under the mouse.
+        delta = ev.scenePos() - ev.buttonDownScenePos()
+        x, y = g['corner']
+        if g['edge'] is None:
+            self.move_to(x + delta.x() / vb.width(), y + delta.y() / vb.height())
+            return
+        width = g['width'] + (delta.x() if g['edge'] == 'right' else -delta.x())
+        self.set_width(1.0 if width >= g['full'] else width / vb.width())
+        # Resized from the left, the legend keeps its right side where it was.
+        if g['edge'] == 'left':
+            x = (g['right'] - self.width()) / vb.width()
+        self.move_to(x, y)
+        if ev.isFinish():
+            # The other stacks of the plot take the new width.
+            for impl_plot in self._parser._plot_impl_plot_lut.get(id(self._i_plot)) or []:
+                if impl_plot is not self._plot:
+                    self._parser.rebuild_legend(impl_plot, self._i_plot)
+
+
 class PyQtGraphParser(BackendParserBase):
     def __init__(self,
                  canvas: Canvas = None,
@@ -154,8 +436,11 @@ class PyQtGraphParser(BackendParserBase):
                  impl_flush_method: Callable = None) -> None:
         # Initialize before super().__init__() because it calls clear() via process_ipl_canvas
         self.map_legend_to_ax = {}
-        self._legend_signal_lut = {}  # id(ItemSample/LabelItem) -> Signal
+        self._legend_signal_lut = {}  # id(ItemSample/LabelItem/curve) -> Signal
         self._on_legend_right_click = None  # callback(Signal) set by Qt canvas
+        # Whether legends get the eye button that folds them; an interactive canvas
+        # turns it on, an image export draws no buttons.
+        self.legend_eyes = False
         self.legend_size = 8
         self._cursors = []
         self._cursor_active = False
@@ -238,25 +523,29 @@ class PyQtGraphParser(BackendParserBase):
             return
         pos = lines.index(plot_lines.name())
         legend_label = legend.items[pos][1]
-        legend_text = legend.items[pos][1].text
+        legend_text = legend.full_text.get(legend_label, legend_label.text)
 
         if legend_text.endswith('*') and not signal.isDownsampled:
-            legend_label.setText(legend_text[:-1])
+            legend.rename(legend_label, legend_text[:-1])
         elif not legend_text.endswith('*') and signal.isDownsampled:
-            legend_label.setText(legend_text + '*')
+            legend.rename(legend_label, legend_text + '*')
 
     def set_signal_visible(self, signal, visible: bool):
         """Set visibility of signal lines."""
-        if hasattr(signal, 'lines') and signal.lines:
-            for line in signal.lines:
+        for shape in getattr(signal, 'lines', None) or []:
+            # An envelope is drawn as a group of curves.
+            for line in shape if isinstance(shape, Collection) else [shape]:
                 line.setVisible(visible)
 
     def remove_signal_lines(self, signal):
         """Remove signal lines from the plot."""
-        if hasattr(signal, 'lines') and signal.lines:
-            for line in signal.lines:
-                if hasattr(line, 'scene') and line.scene():
-                    line.scene().removeItem(line)
+        plot_item = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))
+        for line in getattr(signal, 'lines', None) or []:
+            # Off the PlotItem too, not only the scene: its data items still count for the autoscale.
+            if isinstance(plot_item, PlotItem) and line in plot_item.items:
+                plot_item.removeItem(line)
+            elif hasattr(line, 'scene') and line.scene():
+                line.scene().removeItem(line)
 
     def remove_signal_from_legend(self, impl_plot: PlotItem, signal):
         """Remove signal from legend."""
@@ -282,29 +571,96 @@ class PyQtGraphParser(BackendParserBase):
             impl_plot.legend.addItem(signal.lines[0], label)
 
     def rebuild_legend(self, impl_plot: PlotItem, plot):
-        """Rebuild legend for PyQtGraph based on visible signals."""
-        if not impl_plot.legend:
+        """
+        Rebuild the legend of the given plot after its signals changed (a new label, a new
+        signal), the same way the draw builds it.
+        """
+        legend = impl_plot.legend
+        if not legend:
             return
-
-        # Clear existing legend items
-        impl_plot.legend.clear()
-
-        # Get cache item to find signals
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        if not ci or not hasattr(ci, 'signals'):
-            return
+        signals = [ref() for ref in getattr(ci, 'signals', None) or []]
+        signals = [signal for signal in signals if signal is not None]
 
-        # Add visible signals to legend
-        for sig_ref in ci.signals:
-            sig = sig_ref() if sig_ref else None
-            if sig and hasattr(sig, 'lines') and sig.lines:
-                # Check if signal is visible and still in scene
-                line = sig.lines[0]
-                in_scene = hasattr(line, 'scene') and line.scene() is not None
-                if in_scene and hasattr(line, 'isVisible') and line.isVisible():
-                    label = getattr(sig, 'label', '') or getattr(sig, 'name', '')
-                    if label:
-                        impl_plot.legend.addItem(line, label)
+        legend.clear()
+        for signal in signals:
+            shapes = self._signal_impl_shape_lut.get(id(signal)) or []
+            for ix, line in enumerate(shapes):
+                curve = line[0] if isinstance(line, Collection) else line
+                if not isinstance(curve, PlotDataItem):
+                    continue
+                if signal.label:
+                    curve.opts['name'] = signal.label if len(shapes) == 1 else f"{signal.label}[{ix}]"
+                # The draw lists the named curves in the order they are plotted.
+                if curve.name() is not None and curve.scene() is not None:
+                    legend.addItem(curve, curve.name())
+        self._finish_legend(impl_plot, plot, signals)
+
+    def _finish_legend(self, plot: PlotItem, i_plot: Plot, signals):
+        """Map, size and label the legend entries of `signals`, which the curves add to
+        the legend as they are plotted."""
+        legend = plot.legend
+        if not legend or not legend.items:
+            return
+        fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
+        legend.full_text.clear()
+
+        shape_of = {}
+        for signal in signals:
+            # A signal not drawn yet (e.g. an envelope awaiting its first
+            # streaming batch) has no shapes and no legend entry.
+            for line in self._signal_impl_shape_lut.get(id(signal)) or []:
+                curve = line[0] if isinstance(line, Collection) else line
+                shape_of[id(curve)] = (line, signal)
+
+        for sample, label_item in legend.items:
+            if id(sample.item) not in shape_of:
+                continue
+            line, signal = shape_of[id(sample.item)]
+            self.map_legend_to_ax[sample.item] = line
+            self._legend_signal_lut[id(sample)] = signal
+            self._legend_signal_lut[id(label_item)] = signal
+            self._legend_signal_lut[id(sample.item)] = signal
+            # Patch ItemSample to handle right-click for signal preferences
+            orig_handler = sample.mouseClickEvent
+            def _patched_click(ev, orig=orig_handler, sig=signal, parser=self):
+                if ev.button() == QtCore.Qt.MouseButton.RightButton:
+                    if parser._on_legend_right_click:
+                        parser._on_legend_right_click(sig, ev.screenPos())
+                    ev.accept()
+                    return
+                orig(ev)
+            sample.mouseClickEvent = _patched_click
+            label_item.setAttr(attr='size', value=f'{fs}pt')
+            legend_label = line.name() if not isinstance(line, Collection) else line[0].name()
+            if signal.isDownsampled:
+                legend_label += '*'
+            label_item.setText(legend_label)
+            legend.full_text[label_item] = legend_label
+            size = label_item.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None)
+            label_item.resize(size)
+        legend.updateSize()
+        self._lay_out_legend(plot, i_plot, signals)
+
+    def _lay_out_legend(self, plot: PlotItem, i_plot: Plot, signals=None):
+        """The columns of the legend for what fits in the plot, then its names cut to the
+        width set for it."""
+        if signals is None:
+            ci = self._impl_plot_cache_table.get_cache_item(plot)
+            signals = [signal for signal in (ref() for ref in getattr(ci, 'signals', None) or []) if signal is not None]
+        self._auto_adjust_legend_layout(plot, i_plot, signals)
+        plot.legend.fit_width()
+
+    def _on_legend_sample_clicked(self, item):
+        if item in self.map_legend_to_ax:
+            self.check_envelope_signal(item)
+        signal = self._legend_signal_lut.get(id(item))
+        if signal is not None:
+            self.set_signal_hidden(signal, not item.isVisible())
+
+    def legend_at(self, plot: PlotItem, scene_pos) -> bool:
+        """Whether `scene_pos` falls on the legend of `plot` or on its eye button."""
+        return isinstance(plot.legend, _Legend) and plot.legend.under(scene_pos)
 
     def register_dynamic_signal(self, impl_plot: PlotItem, plot, signal):
         """Register a dynamically added signal and update legend."""
@@ -1017,53 +1373,7 @@ class PyQtGraphParser(BackendParserBase):
                 self.process_ipl_signal(signal)
 
             # Legend processing for downsampled data when drawing
-            fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
-            ix_legend = 0
-
-            if plot.legend and plot.legend.items:
-                # Set legend_lines and build legend → signal mapping
-                legend_samples = [sample
-                                  for item in plot.legend.items
-                                  for sample in item
-                                  if isinstance(sample, pg.ItemSample)]
-                legend_lines = [sample.item for sample in legend_samples]
-
-                for signal in signals:
-                    # A signal not drawn yet (e.g. an envelope awaiting its
-                    # first streaming batch) has no shapes and no legend entry;
-                    # skip it so the mapping stays aligned instead of iterating
-                    # over None.
-                    shapes = self._signal_impl_shape_lut.get(id(signal))
-                    if not shapes:
-                        continue
-                    for line in shapes:
-                        if ix_legend >= len(legend_lines):
-                            break
-                        self.map_legend_to_ax[legend_lines[ix_legend]] = line
-                        self._legend_signal_lut[id(legend_samples[ix_legend])] = signal
-                        label_item = plot.legend.items[ix_legend][1]
-                        self._legend_signal_lut[id(label_item)] = signal
-                        # Patch ItemSample to handle right-click for signal preferences
-                        sample = legend_samples[ix_legend]
-                        orig_handler = sample.mouseClickEvent
-                        def _patched_click(ev, orig=orig_handler, sig=signal, parser=self):
-                            if ev.button() == QtCore.Qt.MouseButton.RightButton:
-                                if parser._on_legend_right_click:
-                                    parser._on_legend_right_click(sig, ev.screenPos())
-                                ev.accept()
-                                return
-                            orig(ev)
-                        sample.mouseClickEvent = _patched_click
-                        label_item.setAttr(attr='size', value=f'{fs}pt')
-                        legend_label = line.name() if not isinstance(line, Collection) else line[0].name()
-                        if signal.isDownsampled:
-                            legend_label += '*'
-                        label_item.setText(legend_label)
-                        size = label_item.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None)
-                        label_item.resize(size)
-                        ix_legend += 1
-                plot.legend.updateSize()
-                self._auto_adjust_legend_layout(plot, i_plot, signals)
+            self._finish_legend(plot, i_plot, signals)
 
             # Observe the axis limit change events
             vb = plot.getViewBox()
@@ -1112,7 +1422,7 @@ class PyQtGraphParser(BackendParserBase):
         plot.getViewBox().setBackgroundColor(background_color)
 
     def process_legend_plot(self, plot: PlotItem, i_plot: Plot, signals):
-        def set_legend_position(legend: LegendItem, position: str):
+        def position_anchors(position: str):
             pos_map = {
                 'upper left': ((0, 0), (0, 0)),
                 'upper center': ((0.5, 0), (0.5, 0)),
@@ -1124,7 +1434,7 @@ class PyQtGraphParser(BackendParserBase):
                 'lower center': ((0.5, 1), (0.5, 1)),
                 'lower right': ((1, 1), (1, 1)),
             }
-            legend.anchor(pos_map[position][0], pos_map[position][1])
+            return pos_map[position]
 
         # Show the plot legend if enabled
         show_legend = self._pm.get_value(i_plot, 'legend')
@@ -1147,17 +1457,24 @@ class PyQtGraphParser(BackendParserBase):
         else:
             col_count = 1
 
-        plot.addLegend(horSpacing=25, colCount=col_count)
-        legend = plot.legend
+        legend = _Legend(self, plot, i_plot, horSpacing=25, colCount=col_count)
+        legend.setParentItem(plot.getViewBox())
+        plot.legend = legend
         legend.layout.setContentsMargins(3, 0, 0, 0)
 
         # Set legend event
-        legend.sigSampleClicked.connect(self.check_envelope_signal)
+        legend.sigSampleClicked.connect(self._on_legend_sample_clicked)
 
         # Set aspect legend
-        set_legend_position(legend, plot_leg_position)
         legend.setBrush(pg.mkBrush(255, 255, 255, 120))
         legend.setPen(pg.mkPen(color='k'))
+        legend.setVisible(not self.legend_collapsed(plot))
+        if self.legend_eyes:
+            font = QFont()
+            font.setPointSizeF(float(self._pm.get_value(i_plot, 'font_size')))
+            legend.add_eye(QFontMetricsF(font).height())
+        anchor = self.legend_anchor(plot)
+        legend.place(*(((0, 0), anchor) if anchor is not None else position_anchors(plot_leg_position)))
 
     def check_envelope_signal(self, item: PlotDataItem):
         ax_lines = self.map_legend_to_ax[item]
@@ -1331,6 +1648,11 @@ class PyQtGraphParser(BackendParserBase):
         if fs and fs > 0:
             label_props['font-size'] = f'{int(fs)}pt'
         axis_item.setLabel(text, **label_props)
+        if axis_item.orientation == 'bottom' and not axis_item.style.get('showValues', True):
+            # The stacks of a plot share the X axis drawn under the bottom one
+            # (set_bottom_axis_stacked); setLabel shows the label again each
+            # time the signals are reprocessed, e.g. on a zoom or an undo.
+            axis_item.label.setVisible(False)
 
         # Authoritatively flag a relative-time bottom axis at the moment its
         # 'Time' label is applied (here, during signal processing), rather than
@@ -1449,6 +1771,8 @@ class PyQtGraphParser(BackendParserBase):
                         plot.clean_slider()
 
         self.map_legend_to_ax.clear()
+        # Keyed by id(): a later item may reuse the id of a deleted one.
+        self._legend_signal_lut.clear()
         self._grid_spacing_labels.clear()
         self._impl_plot_ranges_hash.clear()
         self._slider_placeholders.clear()

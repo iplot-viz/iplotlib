@@ -410,6 +410,46 @@ class MinimapToolbarTest(unittest.TestCase):
             win.close()
 
 
+class LegendPreferenceChangeTest(unittest.TestCase):
+    """Choosing a legend position in the preferences puts back there a legend that
+    was dragged; other preferences leave it where the mouse left it."""
+
+    @staticmethod
+    def _canvas_with_a_dragged_legend() -> Canvas:
+        canvas = Canvas(2, 1, legend=True, legend_position='upper right', legend_layout='vertical')
+        x = np.linspace(0, 10, 50)
+        for k in range(2):
+            plot = PlotXY()
+            sig = SignalXY(label=f"s{k}")
+            sig.set_data([x, np.sin(x) + k])
+            plot.add_signal(sig)
+            canvas.add_plot(plot, 0)
+        canvas.plots[0][0].legend_anchor = {'1': [0.2, 0.3]}
+        return canvas
+
+    def _moved(self, canvas, prev):
+        return [id(p) for p in IplotQtMainWindow._plots_with_legend_moved(canvas, prev)]
+
+    def test_other_preferences_leave_the_legend_where_it_was_dragged(self):
+        canvas = self._canvas_with_a_dragged_legend()
+        prev = canvas.to_dict()
+        canvas.plots[0][0].grid = True
+        canvas.legend_layout = 'horizontal'
+        self.assertEqual(self._moved(canvas, prev), [])
+
+    def test_a_new_plot_position_flags_the_dragged_plot(self):
+        canvas = self._canvas_with_a_dragged_legend()
+        prev = canvas.to_dict()
+        canvas.plots[0][0].legend_position = 'lower left'
+        self.assertEqual(self._moved(canvas, prev), [id(canvas.plots[0][0])])
+
+    def test_a_new_canvas_position_flags_only_dragged_plots_that_follow_it(self):
+        canvas = self._canvas_with_a_dragged_legend()
+        prev = canvas.to_dict()
+        canvas.legend_position = 'lower left'
+        self.assertEqual(self._moved(canvas, prev), [id(canvas.plots[0][0])])
+
+
 class LogScaleInvalidationTest(unittest.TestCase):
     """A log<->linear toggle must invalidate the affected plots' retained Y view so
     the refresh re-autoscales them. ``_plots_with_log_scale_change`` is what decides

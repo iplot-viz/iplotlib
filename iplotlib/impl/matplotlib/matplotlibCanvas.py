@@ -1,7 +1,7 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 from datetime import datetime
-from typing import Any, Callable, Collection, Dict, List
+from typing import Any, Callable, Collection, Dict, List, Optional
 import pandas
 import gc
 import numpy as np
@@ -15,6 +15,8 @@ from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
+from matplotlib.transforms import offset_copy
 from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -54,6 +56,33 @@ _STREAM_DECIMATE_THRESHOLD = 4000
 _STREAM_DECIMATE_TARGET_PAIRS = 2000
 
 
+class _LegendEye(AnnotationBbox):
+    """The eye button that folds the legend of a plot away and unfolds it.
+
+    It stays in the top right corner of the plot, where an upper right legend begins,
+    whether the legend is shown or folded, and the legend keeps clear of it. It is a
+    button for the screen: saved images leave it out.
+    """
+
+    PAD = 0.2  # of the frame around the icon, in font sizes
+    GAP = 2  # points between the button and a legend
+
+    def __init__(self, image: np.ndarray, fontsize: float, inset: float):
+        # `inset`, in points, is how far from the corner the frame starts.
+        inset += self.PAD * fontsize
+        super().__init__(OffsetImage(image, zoom=1.2 * fontsize / image.shape[0]), (1, 1),
+                         xycoords='axes fraction', xybox=(-inset, -inset), boxcoords='offset points',
+                         box_alignment=(1, 1), fontsize=fontsize, annotation_clip=False,
+                         bboxprops=dict(boxstyle=f'round,pad={self.PAD},rounding_size=0.2'))
+        # The look of the legend frame.
+        self.patch.set(facecolor='white', edgecolor='0.8', alpha=0.8)
+        self.set_in_layout(False)
+
+    def draw(self, renderer):
+        if not self.figure.canvas.is_saving():
+            super().draw(renderer)
+
+
 class MatplotlibParser(BackendParserBase):
     def __init__(self,
                  canvas: Canvas = None,
@@ -67,6 +96,17 @@ class MatplotlibParser(BackendParserBase):
         self._tight_layout_requested = tight_layout
         self.map_legend_to_ax = {}
         self._legend_signal_lut = {}  # legend_line -> Signal
+        self._legend_full_text = {}  # legend name -> its text before a cut to the legend width
+        self._legends_to_fit = {}  # MPLAxes -> (Plot, columns) of the legends with a width limit
+        self._legend_fit_canvas = None
+        self._legend_columns = {}  # MPLAxes -> columns of its legend
+        # MPLAxes -> where its legend was dragged, (x, y) in axes fractions of its top-left
+        # corner, y up; None for a legend at its position.
+        self._legend_drops = {}
+        # {'open': RGBA, 'closed': RGBA} of the eye button that folds a legend; an
+        # interactive canvas sets it, an image export draws no buttons.
+        self.legend_eye_images = None
+        self._legend_eyes = {}  # MPLAxes -> the eye button of its legend
         self.legend_size = 8
         self._cursors = []
         self._rulers = []  # type: List[iplotMplRuler]
@@ -125,16 +165,22 @@ class MatplotlibParser(BackendParserBase):
             return
         legend_label = texts[pos]
         legend_text = texts[pos].get_text()
+        full = self._legend_full_text.get(legend_label)
 
         if legend_text.endswith('*') and not signal.isDownsampled:
             legend_label.set_text(legend_text[:-1])
+            if full is not None and full.endswith('*'):
+                self._legend_full_text[legend_label] = full[:-1]
         elif not legend_text.endswith('*') and signal.isDownsampled:
             legend_label.set_text(legend_text + '*')
+            if full is not None and not full.endswith('*'):
+                self._legend_full_text[legend_label] = full + '*'
 
     def set_signal_visible(self, signal, visible: bool):
         """Set visibility of signal lines."""
-        if hasattr(signal, 'lines') and signal.lines:
-            for line in signal.lines:
+        for shape in getattr(signal, 'lines', None) or []:
+            # An envelope is drawn as a group of artists.
+            for line in shape if isinstance(shape, Collection) else [shape]:
                 line.set_visible(visible)
 
     def remove_signal_lines(self, signal):
@@ -235,42 +281,341 @@ class MatplotlibParser(BackendParserBase):
 
     def rebuild_legend(self, mpl_axes: MPLAxes, plot: Plot):
         """
-        Rebuild the legend for the given matplotlib axes with currently visible lines.
+        Rebuild the legend of the given matplotlib axes after its signals changed (a new
+        label, a new signal), the same way the draw builds it.
         """
-        # Get visible lines for legend (exclude hidden and internal lines)
-        visible_lines = [line for line in mpl_axes.get_lines()
-                         if line.get_visible() and not line.get_label().startswith(('_', 'CrossX', 'CrossY'))]
+        self._rebuild_legend(mpl_axes, plot)
+        self.figure.canvas.draw_idle()
 
-        show_legend = self._pm.get_value(plot, 'legend')
-        if show_legend and visible_lines:
-            plot_leg_position = self._pm.get_value(plot, 'legend_position')
-            canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
-            plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
-            canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
+    def _rebuild_legend(self, mpl_axes: MPLAxes, plot: Plot):
+        ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
+        signals = [ref() for ref in getattr(ci, 'signals', None) or []]
+        signals = [signal for signal in signals if signal is not None]
+        for signal in signals:
+            self._label_legend_lines(signal)
 
-            plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' else plot_leg_position
-            plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' else plot_leg_layout
+        if self._pm.get_value(plot, 'legend') and signals and mpl_axes.get_lines():
+            self._draw_legend(mpl_axes, plot, signals)
+        else:
+            if mpl_axes.get_legend() is not None:
+                mpl_axes.get_legend().remove()
+            self._remove_legend_eye(mpl_axes)
 
-            legend_props = dict(size=self.legend_size)
-            col = len(visible_lines) if plot_leg_layout == 'horizontal' else 1
+    def _label_legend_lines(self, signal):
+        """Name the legend lines of `signal` after its current label, as the draw does."""
+        shapes = self._signal_impl_shape_lut.get(id(signal))
+        if not signal.label or not isinstance(shapes, list):
+            return
+        for ix, shape in enumerate(shapes):
+            line = shape[0] if isinstance(shape, Collection) else shape
+            if isinstance(line, Line2D):
+                line.set_label(signal.label if len(shapes) == 1 else f"{signal.label}[{ix}]")
 
-            leg = mpl_axes.legend(handles=visible_lines, prop=legend_props, loc=plot_leg_position, ncol=col)
+    def _legend_entries(self, signals):
+        """
+        (legend handle, shape, signal) for each legend entry of `signals`, in their order.
+        The handle is the labelled line of the shape, the one matplotlib picks for the
+        legend; the rulers and the crosshair draw lines of their own on the same axes.
+        """
+        entries = []
+        for signal in signals:
+            # A signal not drawn yet (e.g. an envelope awaiting its first
+            # streaming batch) has no shapes and no legend entry.
+            shapes = self._signal_impl_shape_lut.get(id(signal))
+            if not isinstance(shapes, list):
+                continue
+            for shape in shapes:
+                line = shape[0] if isinstance(shape, Collection) else shape
+                label = line.get_label() if isinstance(line, Line2D) else ''
+                if label and not label.startswith('_'):
+                    entries.append((line, shape, signal))
+        return entries
+
+    def _draw_legend(self, mpl_axes: MPLAxes, plot: Plot, signals):
+        plot_leg_position = self._pm.get_value(plot, 'legend_position')
+        canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
+        plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
+        canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
+
+        plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' \
+            else plot_leg_position
+        plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' \
+            else plot_leg_layout
+
+        legend_props = dict(size=self.legend_size)
+        entries = self._legend_entries(signals)
+        handles = [handle for handle, _, _ in entries]
+        fs = self._pm.get_value(plot, 'font_size')  # Font size fot legend lines
+
+        placement = dict(loc=plot_leg_position)
+        anchor = self.legend_anchor(mpl_axes)
+        self._legend_drops[mpl_axes] = None if anchor is None else (anchor[0], 1 - anchor[1])
+        if anchor is not None:
+            # Without the pad, the corner of the box lands where it was dropped.
+            placement = dict(loc='upper left', bbox_to_anchor=self._legend_drops[mpl_axes], borderaxespad=0)
+
+        # Legend creation process:
+        #   - Vertical legend: it has one column, which will be increased until there is no overlapping of
+        #   lines up to a maximum of 3 columns, (1, 3).
+        #   - Horizontal legend: the number of columns corresponds to the number of signals contained in the
+        #   plot. If there is line overlapping, the number of columns will be reduced, (len(signals), 1).
+        leg_ver = (1, 3)
+        leg_hor = (len(signals), 1)
+        # The case is established as follows
+        case = leg_ver if plot_leg_layout == 'vertical' else leg_hor
+        start, stop = case
+        step = 1 if start < stop else -1
+        leg = None
+        for col in range(start, stop + step, step):
+            leg = mpl_axes.legend(handles=handles, prop=legend_props, ncol=col, **placement)
             if self.figure.get_tight_layout():
                 leg.set_in_layout(False)
+            # Check if the legend's edges are outside the axes' bounds in the figure
+            legend_bbox = leg.get_window_extent()
+            axes_bbox = mpl_axes.get_window_extent()
+            legend_bbox = legend_bbox.transformed(self.figure.transFigure.inverted())
+            axes_bbox = axes_bbox.transformed(self.figure.transFigure.inverted())
+            legend_outside = (
+                    legend_bbox.xmin < axes_bbox.xmin or
+                    legend_bbox.xmax > axes_bbox.xmax or
+                    legend_bbox.ymin < axes_bbox.ymin or
+                    legend_bbox.ymax > axes_bbox.ymax
+            )
+            if not legend_outside:
+                break
 
-            # Update map_legend_to_ax for legend click handling
-            legend_lines = leg.get_lines()
-            for ix, line in enumerate(visible_lines):
-                if ix < len(legend_lines):
-                    self.map_legend_to_ax[legend_lines[ix]] = line
-                    legend_lines[ix].set_picker(3)
-        elif not visible_lines:
-            # No visible lines, remove legend
-            existing_legend = mpl_axes.get_legend()
-            if existing_legend:
-                existing_legend.remove()
+        # Check the text of the legend lines in case there is a '$' to be escaped
+        for line in leg.texts:
+            current_text = line.get_text()
+            if '$' in current_text:
+                new_text = current_text.replace("$", r"\$")
+                line.set_text(new_text)
 
+        for legend_line, legend_text, (_, shape, signal) in zip(leg.get_lines(), leg.get_texts(), entries):
+            self.map_legend_to_ax[legend_line] = shape
+            self._legend_signal_lut[legend_line] = signal
+            alpha = 1 if legend_line.get_visible() else 0.2
+            legend_line.set_picker(3)
+            legend_line.set_visible(True)
+            legend_line.set_alpha(alpha)
+            # Check if signal is downsampled at the start
+            if signal.isDownsampled:
+                legend_text.set_text(legend_text.get_text() + '*')
+            legend_text.set_fontsize(fs)
+            self._legend_full_text[legend_text] = legend_text.get_text()
+        self._legend_columns[mpl_axes] = col
+        self._fit_legend_width(mpl_axes, plot, leg, col)
+        self._add_legend_eye(mpl_axes, leg, fs)
+        self._keep_legend_clear_of_eye(mpl_axes)
+
+    def _add_legend_eye(self, mpl_axes: MPLAxes, leg, fs):
+        """The eye button of the legend, which folds it away and unfolds it."""
+        self._remove_legend_eye(mpl_axes)
+        collapsed = self.legend_collapsed(mpl_axes)
+        leg.set_visible(not collapsed)
+        if not self.legend_eye_images:
+            return
+        # In from the corner as far as an upper right legend is.
+        inset = mpl.rcParams['legend.borderaxespad'] * leg.prop.get_size_in_points()
+        eye = _LegendEye(self.legend_eye_images['closed' if collapsed else 'open'], fs, inset)
+        eye.set_zorder(leg.get_zorder() + 1)
+        mpl_axes.add_artist(eye)
+        self._legend_eyes[mpl_axes] = eye
+        self._refit_legends_after_draws()
+
+    @staticmethod
+    def _from_top_left(box, area):
+        """`box`, in display pixels, as (left, top, right, bottom) from the top-left corner
+        of `area`."""
+        return box.x0 - area.x0, area.y1 - box.y1, box.x1 - area.x0, area.y1 - box.y0
+
+    def _keep_legend_clear_of_eye(self, mpl_axes: MPLAxes) -> bool:
+        """Move the legend of `mpl_axes` out of the way of its eye button, leftwards or
+        else downwards. True when it moved."""
+        leg, eye = mpl_axes.get_legend(), self._legend_eyes.get(mpl_axes)
+        if leg is None or eye is None:
+            return False
+        before = leg.get_window_extent()
+        drop = self._legend_drops.get(mpl_axes)
+        leg.set_bbox_to_anchor(drop, transform=mpl_axes.transAxes)
+        area = mpl_axes.get_window_extent()
+        dx, dy = self.legend_shift_clear_of_eye(self._from_top_left(leg.get_window_extent(), area),
+                                                self._from_top_left(eye.get_window_extent(), area),
+                                                _LegendEye.GAP * self.figure.dpi / 72)
+        if dx or dy:
+            # In points, so that the shift keeps its size whatever the size of the plot.
+            to_points = 72 / self.figure.dpi
+            leg.set_bbox_to_anchor(drop or (0, 0, 1, 1), transform=offset_copy(
+                mpl_axes.transAxes, fig=self.figure, x=dx * to_points, y=-dy * to_points, units='points'))
+        after = leg.get_window_extent()
+        return abs(after.x0 - before.x0) > 0.5 or abs(after.y1 - before.y1) > 0.5
+
+    def _remove_legend_eye(self, mpl_axes: MPLAxes):
+        eye = self._legend_eyes.pop(mpl_axes, None)
+        if eye is not None and eye.axes is not None:
+            eye.remove()
+
+    def legend_eye_under(self, event) -> Optional[MPLAxes]:
+        """The axes whose legend eye button is under the mouse `event`, or None."""
+        for mpl_axes, eye in self._legend_eyes.items():
+            if eye.axes is mpl_axes and eye.get_visible() and eye.contains(event)[0]:
+                return mpl_axes
+        return None
+
+    def toggle_legend_collapsed(self, mpl_axes: MPLAxes):
+        """Fold the legend of `mpl_axes` away, or unfold it."""
+        collapsed = not self.legend_collapsed(mpl_axes)
+        self.set_legend_collapsed(mpl_axes, collapsed)
+        leg, eye = mpl_axes.get_legend(), self._legend_eyes.get(mpl_axes)
+        if leg is not None:
+            leg.set_visible(not collapsed)
+        if eye is not None:
+            eye.offsetbox.set_data(self.legend_eye_images['closed' if collapsed else 'open'])
         self.figure.canvas.draw_idle()
+
+    def show_legend_eyes(self, shown: bool):
+        """Show or hide the eye buttons of the legends, which a picture of the canvas
+        leaves out."""
+        for eye in self._legend_eyes.values():
+            eye.set_visible(shown)
+
+    def _fit_legend_width(self, mpl_axes: MPLAxes, plot: Plot, leg, ncol: int):
+        """Cut in the middle the names that do not fit in the legend width set for `plot`.
+        The font keeps its size: a smaller one would be hard to read."""
+        fraction = self.legend_width_fraction(plot)
+        texts = leg.get_texts()
+        for text in texts:
+            text.set_text(self._legend_full_text.get(text, text.get_text()))
+        if fraction is None or not texts:
+            self._legends_to_fit.pop(mpl_axes, None)
+            return
+        self._legends_to_fit[mpl_axes] = (plot, ncol)
+        self._refit_legends_after_draws()
+        widths = [text.get_window_extent().width for text in texts]
+        target = fraction * mpl_axes.get_window_extent().width
+        # What the legend spends on anything but the names: frame, pads, line samples.
+        overhead = leg.get_window_extent().width - ncol * max(widths)
+        budget = (target - overhead) / ncol
+        # The columns are not all as wide as the widest name: measure and cut again.
+        for _ in range(3):
+            for text, width in zip(texts, widths):
+                if width > budget:
+                    self._cut_legend_text(text, budget)
+            excess = leg.get_window_extent().width - target
+            if excess <= 0.5:
+                break
+            budget -= excess / ncol
+
+    def _refit_legends_after_draws(self):
+        # The layout runs at draw time and changes the axes the legends are fitted to:
+        # fit them again once the figure is drawn.
+        if self._legend_fit_canvas is not self.figure.canvas:
+            self._legend_fit_canvas = self.figure.canvas
+            self._legend_fit_canvas.mpl_connect('draw_event', self._refit_legends)
+
+    def _refit_legends(self, _event):
+        changed = False
+        for mpl_axes, (plot, ncol) in list(self._legends_to_fit.items()):
+            leg = mpl_axes.get_legend()
+            if leg is None or mpl_axes.figure is not self.figure:
+                self._legends_to_fit.pop(mpl_axes, None)
+                continue
+            shown = [text.get_text() for text in leg.get_texts()]
+            self._fit_legend_width(mpl_axes, plot, leg, ncol)
+            changed = changed or shown != [text.get_text() for text in leg.get_texts()]
+        for mpl_axes in list(self._legend_eyes):
+            if mpl_axes.figure is self.figure:
+                changed = self._keep_legend_clear_of_eye(mpl_axes) or changed
+        if changed:
+            self.figure.canvas.draw_idle()
+
+    def _cut_legend_text(self, text, budget: float):
+        """Shorten `text` to `budget` pixels, replacing its middle with '…': the start and
+        the end of a signal name are what tell signals apart."""
+        full = self._legend_full_text.get(text, text.get_text()).replace(r'\$', '$')
+
+        def fits(candidate):
+            text.set_text(candidate.replace('$', r'\$'))
+            return text.get_window_extent().width <= budget
+
+        if fits(full):
+            return
+        best = '…'
+        lo, hi = 1, len(full) - 1  # characters kept
+        while lo <= hi:
+            keep = (lo + hi) // 2
+            head = (keep + 1) // 2
+            candidate = full[:head] + '…' + full[len(full) - (keep - head):]
+            if fits(candidate):
+                best, lo = candidate, keep + 1
+            else:
+                hi = keep - 1
+        text.set_text(best.replace('$', r'\$'))
+
+    def legend_full_name(self, text) -> Optional[str]:
+        """The whole name behind a legend name cut to the legend width, None when uncut."""
+        full = self._legend_full_text.get(text)
+        return full.replace(r'\$', '$') if full is not None and full != text.get_text() else None
+
+    def legend_box(self, mpl_axes: MPLAxes):
+        """The legend of `mpl_axes` in fractions of the axes, or None."""
+        leg = mpl_axes.get_legend()
+        if leg is None:
+            return None
+        return leg.get_window_extent().transformed(mpl_axes.transAxes.inverted())
+
+    def pin_legend(self, mpl_axes: MPLAxes, plot: Plot):
+        """Anchor the legend of `mpl_axes` by its top-left corner where it is now, so a
+        drag moves or resizes it from there. Returns that corner, see `legend_anchor`.
+        The figure is not drawn again: the drag draws."""
+        box = self.legend_box(mpl_axes)
+        if box is None:
+            return None
+        self.set_legend_anchor(mpl_axes, box.x0, 1 - box.y1)
+        self._rebuild_legend(mpl_axes, plot)
+        return self.legend_anchor(mpl_axes)
+
+    def move_legend(self, mpl_axes: MPLAxes, x: float, y: float):
+        """Move the top-left corner of the pinned legend of `mpl_axes` to (x, y), see
+        `legend_anchor`, keeping the legend inside the axes and clear of its eye button.
+        The figure is not drawn again: the drag draws."""
+        box = self.legend_box(mpl_axes)
+        if box is None:
+            return
+        x = min(max(x, 0.0), max(0.0, 1 - box.width))
+        y = min(max(y, 0.0), max(0.0, 1 - box.height))
+        eye = self._legend_eyes.get(mpl_axes)
+        if eye is not None:
+            area = mpl_axes.get_window_extent()
+            legend = (x * area.width, y * area.height, (x + box.width) * area.width, (y + box.height) * area.height)
+            dx, dy = self.legend_shift_clear_of_eye(legend, self._from_top_left(eye.get_window_extent(), area),
+                                                    _LegendEye.GAP * self.figure.dpi / 72)
+            x, y = x + dx / area.width, y + dy / area.height
+        self.set_legend_anchor(mpl_axes, x, y)
+        self._legend_drops[mpl_axes] = (x, 1 - y)
+        mpl_axes.get_legend().set_bbox_to_anchor((x, 1 - y), transform=mpl_axes.transAxes)
+
+    def legend_full_width(self, mpl_axes: MPLAxes) -> float:
+        """Width of the legend of `mpl_axes` with no name cut, as a fraction of the axes."""
+        leg = mpl_axes.get_legend()
+        cut = [(text, text.get_text()) for text in leg.get_texts() if self.legend_full_name(text) is not None]
+        for text, _ in cut:
+            text.set_text(self._legend_full_text[text])
+        width = self.legend_box(mpl_axes).width
+        for text, shown in cut:
+            text.set_text(shown)
+        return width
+
+    def set_legend_width(self, mpl_axes: MPLAxes, plot: Plot, fraction: float):
+        """Let the legends of `plot` be `fraction` of the plot width wide at most; a
+        fraction of 1 or more lifts the limit. The legend of `mpl_axes` takes it at once,
+        cutting its names again; the figure is not drawn again: the drag draws."""
+        width = 0 if fraction >= 1 else max(10, min(99, round(fraction * 100)))
+        leg = mpl_axes.get_legend()
+        if width == plot.legend_width or leg is None:
+            return
+        plot.legend_width = width
+        self._fit_legend_width(mpl_axes, plot, leg, self._legend_columns.get(mpl_axes, 1))
 
     def refresh_streaming_legend(self, impl_plot: MPLAxes, plot: Plot):
         # matplotlib builds the legend once, so an envelope drawn on its first
@@ -643,6 +988,12 @@ class MatplotlibParser(BackendParserBase):
                         signal.lines.clear()
 
         self.map_legend_to_ax.clear()
+        self._legend_signal_lut.clear()
+        self._legend_full_text.clear()
+        self._legends_to_fit.clear()
+        self._legend_columns.clear()
+        self._legend_drops.clear()
+        self._legend_eyes.clear()
         self._grid_spacing_annotations.clear()
         self._impl_plot_ranges_hash.clear()
 
@@ -951,81 +1302,7 @@ class MatplotlibParser(BackendParserBase):
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value(plot, 'legend')
                 if show_legend and mpl_axes.get_lines():  # TODO improve
-                    plot_leg_position = self._pm.get_value(plot, 'legend_position')
-                    canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
-                    plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
-                    canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
-
-                    plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' \
-                        else plot_leg_position
-                    plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' \
-                        else plot_leg_layout
-
-                    legend_props = dict(size=self.legend_size)
-
-                    # Legend creation process:
-                    #   - Vertical legend: it has one column, which will be increased until there is no overlapping of
-                    #   lines up to a maximum of 3 columns, (1, 3).
-                    #   - Horizontal legend: the number of columns corresponds to the number of signals contained in the
-                    #   plot. If there is line overlapping, the number of columns will be reduced, (len(signals), 1).
-                    leg_ver = (1, 3)
-                    leg_hor = (len(signals), 1)
-                    # The case is established as follows
-                    case = leg_ver if plot_leg_layout == 'vertical' else leg_hor
-                    start, stop = case
-                    step = 1 if start < stop else -1
-                    leg = None
-                    for col in range(start, stop + step, step):
-                        leg = mpl_axes.legend(prop=legend_props, loc=plot_leg_position, ncol=col)
-                        if self.figure.get_tight_layout():
-                            leg.set_in_layout(False)
-                        # Check if the legend's edges are outside the axes' bounds in the figure
-                        legend_bbox = leg.get_window_extent()
-                        axes_bbox = mpl_axes.get_window_extent()
-                        legend_bbox = legend_bbox.transformed(self.figure.transFigure.inverted())
-                        axes_bbox = axes_bbox.transformed(self.figure.transFigure.inverted())
-                        legend_outside = (
-                                legend_bbox.xmin < axes_bbox.xmin or
-                                legend_bbox.xmax > axes_bbox.xmax or
-                                legend_bbox.ymin < axes_bbox.ymin or
-                                legend_bbox.ymax > axes_bbox.ymax
-                        )
-                        if not legend_outside:
-                            break
-
-                    # Check the text of the legend lines in case there is a '$' to be escaped
-                    for line in leg.texts:
-                        current_text = line.get_text()
-                        if '$' in current_text:
-                            new_text = current_text.replace("$", r"\$")
-                            line.set_text(new_text)
-
-                    fs = self._pm.get_value(plot, 'font_size')  # Font size fot legend lines
-                    legend_lines = leg.get_lines()
-                    ix_legend = 0
-                    for signal in signals:
-                        # A signal not drawn yet (e.g. an envelope awaiting its
-                        # first streaming batch) has no shapes and no legend
-                        # entry; skip it so the mapping stays aligned instead of
-                        # iterating over None.
-                        shapes = self._signal_impl_shape_lut.get(id(signal))
-                        if not shapes:
-                            continue
-                        for line in shapes:
-                            if ix_legend >= len(legend_lines):
-                                break
-                            self.map_legend_to_ax[legend_lines[ix_legend]] = line
-                            self._legend_signal_lut[legend_lines[ix_legend]] = signal
-                            alpha = 1 if legend_lines[ix_legend].get_visible() else 0.2
-                            legend_lines[ix_legend].set_picker(3)
-                            legend_lines[ix_legend].set_visible(True)
-                            legend_lines[ix_legend].set_alpha(alpha)
-                            # Check if signal is downsampled at the start
-                            if signal.isDownsampled:
-                                legend_label = leg.texts[ix_legend].get_text() + '*'
-                                leg.texts[ix_legend].set_text(legend_label)
-                            leg.get_texts()[ix_legend].set_fontsize(fs)
-                            ix_legend += 1
+                    self._draw_legend(mpl_axes, plot, signals)
 
             # Observe the axis limit change events
             if not self.canvas.streaming:

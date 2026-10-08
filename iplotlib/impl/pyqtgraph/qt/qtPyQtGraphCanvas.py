@@ -53,6 +53,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         self._parser = PyQtGraphParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
         self._parser._on_legend_right_click = self._on_legend_right_click
+        self._parser.legend_eyes = True
 
         # Track connected ViewBoxes to avoid duplicate connections
         self._connected_viewboxes = set()
@@ -437,15 +438,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         """Gets current iplotlib canvas"""
         return self._parser.canvas
 
-    def _is_signal_visible(self, signal) -> bool:
-        """Check if signal is visible (PyQtGraph implementation)."""
-        if not hasattr(signal, 'lines') or not signal.lines:
-            return True  # Assume visible if no lines yet (signal being processed)
-        try:
-            return signal.lines[0].isVisible()
-        except (IndexError, AttributeError):
-            return True
-
     def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
         signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: PlotItem
 
@@ -594,18 +586,22 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             color = self._ruler_window.next_color(name)
         x_abs = self._parser.transform_value(impl_plot, 0, x)
         y_abs = self._parser.transform_value(impl_plot, 1, y)
-        ruler = Ruler(name=name, xy=(x_abs, y_abs), color=color, visible=True)
+        show_label, show_val_label = self._ruler_window.labels_for_new_ruler()
+        ruler = Ruler(name=name, xy=(x_abs, y_abs), color=color, visible=True,
+                      show_label=show_label, show_val_label=show_val_label)
         plot.add_ruler(ruler)
         # The ghost previewing this ruler is superseded by the real one.
         self._clear_preview_ruler()
         self._preview_ruler_identity = None
         self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
         self._parser.create_ruler_echoes(impl_plot, name, x_abs, y_abs, ruler.color)
+        self._apply_ruler_state(ruler)
         self._ruler_window.set_canvas_columns(len(self._parser.canvas.plots))
         with self._ruler_window.bulk_update():
             for entry in self._ruler_window_rows(impl_plot, x, (x_abs, y_abs)):
                 self._ruler_window.add_row(name, entry['plot_id'], entry['xy'], ruler.color,
                                             visible=True, is_date=entry['is_date'],
+                                            show_label=show_label, show_val_label=show_val_label,
                                             signal_values=entry['signal_values'],
                                             x_is_time=entry['x_is_time'])
         if not self._ruler_window.isVisible():
@@ -685,11 +681,13 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             existing.abs_x = self._parser.transform_value(impl_plot, 0, x)
             existing.abs_y = self._parser.transform_value(impl_plot, 1, y)
             existing.xy = (x, y)
+            self._apply_new_ruler_labels(existing)
             existing.refresh_labels()
             return
         self._clear_preview_ruler()
         ruler = self._parser.add_ruler(impl_plot, self._PREVIEW_RULER_NAME, x, y, ident['color'])
         ruler.set_label_text(ident['name'])
+        self._apply_new_ruler_labels(ruler)
         self._preview_ruler_plot = impl_plot
         self._preview_ruler_identity = ident
 
@@ -911,6 +909,10 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         """Handle mouse press events in PyQtGraph."""
         impl_plot = view_box.parentItem()
         if not impl_plot:
+            return
+        if self._parser.legend_at(impl_plot, event.scenePos()):
+            # Left alone, the legend takes its own clicks and drags, in every mouse mode:
+            # a shift or a ruler grabbing the press would swallow them.
             return
 
         ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)

@@ -898,7 +898,7 @@ class BackendParserBase(ABC):
         A data-valued expression (e.g. '${T}.data') never yields times, no matter
         where its samples happen to fall; a time-valued expression (e.g. '${T}.time',
         the ECH case) is a shared-time candidate, to be confirmed against the shared
-        interval with :meth:`_plot_first_x_in_range`.
+        interval with :meth:`_plot_first_x_near_range`.
         """
         if plot is None or not plot.signals:
             return False
@@ -936,6 +936,22 @@ class BackendParserBase(ABC):
                     continue
                 return bool(begin <= finite[0] <= end)
         return False
+
+    def _plot_first_x_near_range(self, plot, begin, end):
+        """:meth:`_plot_first_x_in_range` widened by the canvas time-range
+        difference ('max_diff'), the tolerance time plots are grouped with.
+
+        A plot admitted this way takes the shared window on its X axis, so its X
+        must live in the same time domain: an expression that re-bases time
+        (e.g. '${self}.time - T0') lands far outside and keeps its own axis.
+        """
+        if begin is None or end is None:
+            return False
+        # Nanoseconds when the interval encodes absolute dates.
+        is_date = bool(min(begin, end) > (1 << 53) and max(begin, end) < (1 << 62))
+        max_diff = self._pm.get_value(self.canvas, 'max_diff')
+        tolerance = max_diff * 1e9 if is_date else max_diff
+        return self._plot_first_x_in_range(plot, begin - tolerance, end + tolerance)
 
     def _plot_shares_time_base(self, plot, base_ts):
         """Whether a plot whose X axis is not time still shares the base plot's time base.
@@ -1002,13 +1018,15 @@ class BackendParserBase(ABC):
 
             # An X-versus-Y plot joins the shared-time group only when its X expression
             # yields times (e.g. '${T}.time', the ECH case) AND its first sample falls
-            # inside the shared interval. Both are required: samples alone can collide
-            # numerically with the window while the expression is data-valued. It still
+            # within the shared interval. Both are required: samples alone can collide
+            # numerically with the window while the expression is data-valued. A
+            # time-valued expression outside it re-bases time (e.g. '${self}.time - T0')
+            # and stays out: the window it would be given is not in its units. It still
             # never drives the group: zooming on it stays local (base-plot check above).
             if not self._plot_x_is_time(plot):
-                if self._plot_x_expr_yields_time(plot) and \
-                        self._plot_first_x_in_range(plot, base_begin, base_end):
-                    shared.append(plot_item)
+                if self._plot_x_expr_yields_time(plot):
+                    if self._plot_first_x_near_range(plot, base_begin, base_end):
+                        shared.append(plot_item)
                 elif self._plot_shares_time_base(plot, base_ts):
                     # Data-valued X: the plot cannot share axis limits with the time
                     # plots, but its signals are still time-indexed, so it follows a
@@ -1376,6 +1394,10 @@ class BackendParserBase(ABC):
                 return
             self.do_impl_line_plot(signal, impl_plot, data)
 
+        if getattr(signal, 'hidden', False):
+            # Lines drawn anew start visible; a signal hidden from its legend stays hidden.
+            self.set_signal_visible(signal, False)
+
         self.update_axis_labels_with_units(impl_plot, signal)
 
         # Check for annotations if the marker labels are visible
@@ -1615,6 +1637,109 @@ class BackendParserBase(ABC):
     def rebuild_legend(self, impl_plot: Any, plot: Plot):
         """Rebuild legend for the given plot. Default implementation does nothing."""
         pass
+
+    def legend_anchor(self, impl_plot: Any) -> Optional[Tuple[float, float]]:
+        """Where the user dragged the legend of `impl_plot`: its top-left corner as
+        fractions of the plot area, from the left and from the top. None when it
+        keeps the legend position."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci else None
+        anchor = self._legend_anchors(plot).get(str(ci.stack_key)) if plot else None
+        return (float(anchor[0]), float(anchor[1])) if anchor else None
+
+    @staticmethod
+    def _legend_anchors(plot: Plot) -> Dict[str, List[float]]:
+        # A workspace read back may key the stacks by number rather than by name.
+        return {str(stack): anchor for stack, anchor in (getattr(plot, 'legend_anchor', None) or {}).items()}
+
+    def set_legend_anchor(self, impl_plot: Any, x: float, y: float):
+        """Keep the legend of `impl_plot` where it was dragged, see `legend_anchor`.
+        Each stack of a plot has a legend of its own, so each keeps its own place."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci else None
+        if plot is None:
+            return
+        anchors = self._legend_anchors(plot)
+        anchors[str(ci.stack_key)] = [round(float(x), 4), round(float(y), 4)]
+        plot.legend_anchor = anchors
+
+    def legend_collapsed(self, impl_plot: Any) -> bool:
+        """Whether the legend of `impl_plot` is folded away behind its eye button."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci else None
+        return plot is not None and str(ci.stack_key) in {str(s) for s in plot.legend_collapsed or []}
+
+    def set_legend_collapsed(self, impl_plot: Any, collapsed: bool):
+        """Fold the legend of `impl_plot` away behind its eye button, or unfold it."""
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = ci.plot() if ci else None
+        if plot is None:
+            return
+        stacks = [str(s) for s in plot.legend_collapsed or [] if str(s) != str(ci.stack_key)]
+        if collapsed:
+            stacks.append(str(ci.stack_key))
+        plot.legend_collapsed = stacks or None
+
+    @staticmethod
+    def legend_width_fraction(plot: Plot) -> Optional[float]:
+        """The widest the legend of `plot` may be, as a fraction of the plot area
+        width, or None when it has no limit."""
+        width = getattr(plot, 'legend_width', 0) or 0
+        return width / 100 if 0 < width < 100 else None
+
+    @staticmethod
+    def legend_shift_clear_of_eye(legend: Tuple[float, float, float, float],
+                                  eye: Tuple[float, float, float, float], gap: float) -> Tuple[float, float]:
+        """How far to move a legend to leave alone the eye button in the top right corner
+        of the plot: leftwards, or downwards when the plot has no room for it on the left.
+        Boxes are (left, top, right, bottom) in pixels from the top-left corner of the
+        plot area; the shift is (rightwards, downwards)."""
+        left, top, right, bottom = legend
+        eye_left, eye_top, eye_right, eye_bottom = eye
+        if right <= eye_left - gap or left >= eye_right + gap or top >= eye_bottom + gap or bottom <= eye_top - gap:
+            return 0.0, 0.0
+        if left - (right - eye_left + gap) >= 0:
+            return eye_left - gap - right, 0.0
+        return 0.0, eye_bottom + gap - top
+
+    def set_signal_hidden(self, signal: Signal, hidden: bool):
+        """Record that `signal` was hidden or shown from its legend entry, so the
+        choice survives a redraw and is saved with the workspace."""
+        if isinstance(signal, SignalXY):
+            signal.hidden = bool(hidden)
+
+    def register_dynamic_signal(self, impl_plot: Any, plot: Plot, signal: Signal):
+        """Register a dynamically added signal and update legend. Default implementation does nothing."""
+        pass
+
+    def add_signal(self, impl_plot: Any, plot: Plot, signal: Signal, stack_key):
+        """
+        Draw `signal` on `impl_plot`, a stack of `plot` already drawn, without
+        redrawing the rest of the canvas.
+        """
+        plot.add_signal(signal, stack_key)
+        self._signal_impl_plot_lut[self.signal_lut_key(signal)] = impl_plot
+        self.process_ipl_signal(signal)
+        self.register_dynamic_signal(impl_plot, plot, signal)
+
+    def remove_signal(self, signal: Signal):
+        """Take `signal` off the plot it is drawn on, the reverse of `add_signal`."""
+        key = self.signal_lut_key(signal)
+        impl_plot = self._signal_impl_plot_lut.get(key)
+        plot = signal.parent() if callable(signal.parent) else None
+        self.remove_signal_lines(signal)
+        self._signal_impl_plot_lut.pop(key, None)
+        self._signal_impl_shape_lut.pop(id(signal), None)
+        signal.lines = []
+        if plot is not None:
+            # By identity: comparing signals compares their data arrays.
+            for stack in plot.signals.values():
+                stack[:] = [s for s in stack if s is not signal]
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if ci is not None and hasattr(ci, 'signals'):
+            ci.signals[:] = [ref for ref in ci.signals if ref() is not signal]
+        if impl_plot is not None and plot is not None:
+            self.rebuild_legend(impl_plot, plot)
 
     def refresh_streaming_legend(self, impl_plot: Any, plot: Plot):
         """Bring an envelope drawn on its first streaming batch into the legend.
@@ -2203,10 +2328,16 @@ class BackendParserBase(ABC):
         x_view_moved = has_impl and self.get_impl_x_axis_limits(impl_plot) != x_before
         # isinstance(plot, PlotXYWithSlider): TODO: test with Slider
 
-        # Restore the exact recorded signal-level xrange values.
+        # Restore the exact recorded signal-level xrange values. A signal whose X
+        # is an expression re-derived its window from the view just restored, and
+        # restore_xranges keeps it when both name the same request (no refetch).
         for signal_limit in signal_limits:
             signal = signal_limit.signal_ref()
-            signal.set_xranges(signal_limit.get_limits())
+            restore = getattr(signal, 'restore_xranges', None)
+            if restore is not None:
+                restore(signal_limit.get_limits())
+            else:
+                signal.set_xranges(signal_limit.get_limits())
 
         # Set Y limits
         if has_impl:
@@ -2287,9 +2418,12 @@ class BackendParserBase(ABC):
         target.axes_ranges[0].set_limits(x_begin, x_end)
         target.axes_ranges[1].set_limits(y_begin, y_end)
         # Signals inherit the plot's X range; realign them to the draw-time window
-        # so their cached samples are reused on redraw.
+        # so their cached samples are reused on redraw. A signal whose X is an
+        # expression was requested over a time window its X range does not show.
         for signal_range in target.signals_ranges:
-            signal_range.set_limits(x_begin, x_end)
+            draw_time_window = getattr(signal_range.signal_ref(), 'draw_time_request_window', None)
+            window = draw_time_window() if draw_time_window is not None else None
+            signal_range.set_limits(*(window or (x_begin, x_end)))
 
         self._restoring_view = True
         try:

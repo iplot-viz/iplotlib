@@ -27,6 +27,7 @@
 #  Feb 2023:   Changes by Alberto Luengo
 #              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
 from dataclasses import dataclass, field, fields
+import numbers
 import numpy as np
 import os
 import typing
@@ -175,6 +176,11 @@ class IplotSignalAdapter(ProcessingSignal):
         self._minimap_y_max_data = None
         self._minimap_y_avg_data = None
         self._minimap_is_downsampled = False
+        # Draw-time buffers and request window of a signal whose X is an
+        # expression: its X no longer carries the time, so they are what maps
+        # a restored view back to time.
+        self._minimap_store = None
+        self._minimap_ts = None
 
         # 2. Post-initialize ArraySignal's properties and our name.
         self._init_label()
@@ -308,11 +314,14 @@ class IplotSignalAdapter(ProcessingSignal):
     def compute(self, **kwargs) -> dict:
         data_arrays = dict()
         correspondance = {"x": 0, "y": 1, "z": 2}
+        defaults = {"x": IplotSignalAdapter.x_expr, "y": IplotSignalAdapter.y_expr, "z": IplotSignalAdapter.z_expr}
 
         # Evaluate each expression.
         for key, expr in kwargs.items():
             try:
-                if self.x_expr == '${self}.time' and self.y_expr == '${self}.data' and self.z_expr == '${self}.data_store[2]':
+                # An expression left at its default reads its buffer as is, whatever
+                # the other axes do: an envelope signal has no 'data' alias to evaluate.
+                if expr == defaults.get(key):
                     logger.debug(f"No processing needed to compute key={key} expr={expr}")
                     data_arrays.update({key: self.data_store[correspondance[key]]})
                 else:
@@ -609,6 +618,9 @@ class IplotSignalAdapter(ProcessingSignal):
                     and len(self.data_store[3]) == len(self.x_data)):
                 self._minimap_y_max_data = self.z_data.copy()
                 self._minimap_y_avg_data = self.data_store[3].copy()
+            if self.x_expr != IplotSignalAdapter.x_expr and len(self.data_store[0]) == len(self.x_data):
+                self._minimap_store = [buffer.copy() for buffer in self.data_store]
+                self._minimap_ts = (self.ts_start, self.ts_end)
 
         self._report_xyz_data()
 
@@ -619,6 +631,25 @@ class IplotSignalAdapter(ProcessingSignal):
         self._minimap_y_max_data = None
         self._minimap_y_avg_data = None
         self._minimap_is_downsampled = False
+        self._minimap_store = None
+        self._minimap_ts = None
+
+    def draw_time_request_window(self):
+        """Time window requested when the signal was drawn, or None when its X
+        axis carries the time itself (the X range is then that window)."""
+        return self._minimap_ts
+
+    def draw_time_bounds(self):
+        """Time bounds of what was drawn for an X expression: the requested
+        window, or the drawn samples when the request named no bounds (a whole
+        pulse). None when the X axis carries the time itself."""
+        window = self._minimap_ts
+        if window is None:
+            return None
+        if all(isinstance(value, numbers.Real) for value in window):
+            return window
+        time = self._minimap_store[0]
+        return (time[0], time[-1]) if len(time) > 1 else None
 
     def restore_minimap_snapshot(self):
         """
@@ -639,7 +670,14 @@ class IplotSignalAdapter(ProcessingSignal):
 
         self.x_data = x_data.copy()
         self.y_data = y_data.copy()
-        if envelope:
+        if self._minimap_store is not None:
+            # X is an expression, so the time buffer is not the displayed X: the
+            # draw-time buffers and request window come back as they were.
+            self.data_store[:] = [buffer.copy() for buffer in self._minimap_store]
+            self.set_xranges(self._minimap_ts)
+            if envelope:
+                self.z_data = self._minimap_y_max_data.copy()
+        elif envelope:
             self.z_data = self._minimap_y_max_data.copy()
             # Realign the raw envelope store: statistics index min/max/avg by the displayed data.
             self.data_store[0] = self.x_data

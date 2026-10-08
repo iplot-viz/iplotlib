@@ -7,7 +7,7 @@ A helpful icon loader.
 import pkgutil
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtGui import QIcon, QImage, QPainter, QPixmap
 
 #: Logical sizes rendered from an SVG source. Covers 1x/1.5x/2x/3x of the 16-24
 #: px range Qt asks for in tool bars and menus.
@@ -50,3 +50,18 @@ def create_icon(name, ext: str = 'png') -> QIcon:
     pxmap = QPixmap()
     pxmap.loadFromData(QByteArray(data))
     return QIcon(pxmap)
+
+
+def svg_icon_image(name: str, size: int) -> QImage:
+    """A packaged SVG icon drawn on a transparent `size` x `size` pixel image, for
+    canvases that draw icons themselves rather than through a QIcon."""
+    from PySide6.QtSvg import QSvgRenderer
+
+    image = QImage(size, size, QImage.Format.Format_RGBA8888)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    QSvgRenderer(QByteArray(pkgutil.get_data("iplotlib.qt", f"icons/{name}.svg"))).render(
+        painter, QRectF(0, 0, size, size))
+    painter.end()
+    return image
