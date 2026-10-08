@@ -536,6 +536,13 @@ class IplotQtRuler(QWidget):
         return [all(r['show_label'] for r in self._rows),
                 all(r['show_val_label'] for r in self._rows)]
 
+    def labels_for_new_ruler(self) -> Tuple[bool, bool]:
+        """(show_label, show_val_label) for a ruler about to be placed: what the
+        Hide/Show labels menu shows, so tags turned off for every ruler stay
+        off for the rulers added afterwards."""
+        show_label, show_val_label = self._label_flags_of_every_row()
+        return show_label, show_val_label
+
     def _sync_labels_menu(self):
         flags = self._label_flags_of_every_row()
         for action, on in zip(self._label_actions, flags):

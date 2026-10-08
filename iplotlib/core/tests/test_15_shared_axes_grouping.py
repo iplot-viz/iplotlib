@@ -172,6 +172,58 @@ class PlotFirstXInRangeTest(unittest.TestCase):
         self.assertFalse(BackendParserBase._plot_first_x_in_range(plot, 100, None))
 
 
+class _NearRangeHost:
+    """Minimal stand-in exposing what ``_plot_first_x_near_range`` reads from the parser."""
+
+    def __init__(self, max_diff):
+        self.canvas = object()
+        self._pm = types.SimpleNamespace(get_value=lambda obj, key: max_diff)
+
+    _plot_first_x_in_range = staticmethod(BackendParserBase._plot_first_x_in_range)
+    _plot_first_x_near_range = BackendParserBase._plot_first_x_near_range
+
+
+class PlotFirstXNearRangeTest(unittest.TestCase):
+    """A time-valued X expression takes the shared window on its axis, so it may
+    only join when its X lives in the base's time domain."""
+
+    BASE = (1_790_181_946_767_360_892, 1_790_181_953_407_599_253)
+
+    @staticmethod
+    def _plot_with_x_data(x_data, x_expr="${T}.time"):
+        plot = PlotXY()
+        s = SignalXY(label="x", x_expr=x_expr)
+        x = np.asarray(x_data, dtype=float)
+        s.set_data([x, np.zeros_like(x)])
+        plot.add_signal(s)
+        return plot
+
+    def test_time_rebased_to_an_origin_stays_out(self):
+        # '${self}.time - T0' reads the time buffer but shows time since T0.
+        plot = self._plot_with_x_data([76_582.0, 999_676_582.0], x_expr="${self}.time-np.int64(1)")
+        self.assertFalse(_NearRangeHost(max_diff=3600)._plot_first_x_near_range(plot, *self.BASE))
+
+    def test_absolute_time_inside_the_window_joins(self):
+        plot = self._plot_with_x_data([self.BASE[0] + 1e9, self.BASE[1]])
+        self.assertTrue(_NearRangeHost(max_diff=3600)._plot_first_x_near_range(plot, *self.BASE))
+
+    def test_absolute_time_within_the_time_range_difference_joins(self):
+        # Rows drawn over their own time range start before the base window.
+        plot = self._plot_with_x_data([self.BASE[0] - 5e9, self.BASE[1]])
+        self.assertTrue(_NearRangeHost(max_diff=3600)._plot_first_x_near_range(plot, *self.BASE))
+        self.assertFalse(_NearRangeHost(max_diff=1)._plot_first_x_near_range(plot, *self.BASE))
+
+    def test_relative_seconds_use_the_raw_tolerance(self):
+        plot = self._plot_with_x_data([-5.0, 60.0])
+        self.assertTrue(_NearRangeHost(max_diff=10)._plot_first_x_near_range(plot, 0.0, 120.0))
+        self.assertFalse(_NearRangeHost(max_diff=1)._plot_first_x_near_range(plot, 0.0, 120.0))
+
+    def test_missing_bounds_are_out(self):
+        plot = self._plot_with_x_data([150.0])
+        self.assertFalse(_NearRangeHost(max_diff=3600)._plot_first_x_near_range(plot, None, 400))
+        self.assertFalse(_NearRangeHost(max_diff=3600)._plot_first_x_near_range(plot, 100, None))
+
+
 class _SharedTimeBaseHost:
     """Minimal stand-in exposing what ``_plot_shares_time_base`` reads from the parser."""
 

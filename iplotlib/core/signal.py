@@ -8,6 +8,7 @@ plotting XY or XYZ data.
 for when you wish to take over the data customization.
 """
 
+import numbers
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List
@@ -144,14 +145,7 @@ class SignalXY(Signal, IplotSignalAdapter):
         self.markers_list.pop(index)
 
     def set_limits(self, ranges):
-        # Snap only when x_data maps 1:1 to data_store[0]; sparse x_data
-        # (e.g. [time[0], time[-1]]) would collapse the range to two samples.
-        snap_eligible = (
-            self.x_expr != '${self}.time'
-            and len(self.data_store[0]) > 0
-            and len(self.x_data) == len(self.data_store[0])
-        )
-        if snap_eligible:
+        if self._x_maps_samples_to_time():
             x_data = self.x_data[~np.isnan(self.x_data)]
             x_data_sorted = np.sort(x_data)
 
@@ -165,10 +159,88 @@ class SignalXY(Signal, IplotSignalAdapter):
 
             signal_begin = self.data_store[0][idx1:idx2][0]
             signal_end = self.data_store[0][idx1:idx2][-1]
+            signal_begin, signal_end = self._extend_beyond_samples(ranges, signal_begin, signal_end)
 
+            if self._is_requested_window(signal_begin, signal_end):
+                return
             self.set_xranges([signal_begin, signal_end])
         else:
             self.set_xranges(ranges)
+
+    def restore_xranges(self, ranges):
+        """Restore a recorded request window.
+
+        Restoring a view already re-derived the window of an X expression from
+        its samples; when both name the same request, keeping it avoids fetching
+        the same data twice.
+        """
+        if self._x_maps_samples_to_time() and self._is_requested_window(*ranges):
+            return
+        self.set_xranges(ranges)
+
+    def _x_maps_samples_to_time(self):
+        """Whether X is an expression evaluated sample by sample over the time
+        buffer. Sparse x_data (e.g. [time[0], time[-1]]) does not map back to time."""
+        return (self.x_expr != '${self}.time'
+                and len(self.data_store[0]) > 0
+                and len(self.x_data) == len(self.data_store[0]))
+
+    def _extend_beyond_samples(self, ranges, begin, end):
+        """Extend [begin, end] where the X range reaches past the samples in memory.
+
+        Snapping only selects samples already loaded, so a wider view (zoom out,
+        undo, pan) could never bring the rest back. Along a strictly increasing X
+        the window follows the slope of the edge segment, bounded by what was
+        drawn at first so a shallow edge cannot blow up the request.
+        """
+        bounds = self.draw_time_bounds()
+        if bounds is None:
+            return begin, end
+        x = np.asarray(self.x_data, dtype=float)
+        if x.size < 2 or not np.all(np.isfinite(x)) or not np.all(np.diff(x) > 0):
+            return begin, end
+
+        time = self.data_store[0]
+        exact = np.issubdtype(np.asarray(time).dtype, np.integer)
+        cast = int if exact else float
+
+        def along_edge(edge, inner, x_target):
+            slope = (cast(time[edge]) - cast(time[inner])) / (x[edge] - x[inner])
+            shift = (float(x_target) - x[edge]) * slope
+            # Nanosecond timestamps exceed what a float holds exactly.
+            return cast(time[edge]) + (int(round(shift)) if exact else shift)
+
+        lower, upper = cast(bounds[0]), cast(bounds[1])
+        if ranges[0] < x[0]:
+            begin = min(max(along_edge(0, 1, ranges[0]), lower), cast(time[0]))
+        if ranges[1] > x[-1]:
+            end = max(min(along_edge(-1, -2, ranges[1]), upper), cast(time[-1]))
+        return begin, end
+
+    def _is_requested_window(self, begin, end):
+        """Whether [begin, end] is the window already requested, up to the
+        sampling step at each edge: the data server returns the samples inside
+        the window, so the first and last ones lie less than a step within it."""
+        time = self.data_store[0]
+        candidate = self._numeric_window(begin, end)
+        requested = self._numeric_window(self.ts_start, self.ts_end)
+        if len(time) < 2 or candidate is None or requested is None:
+            return False
+
+        cast = int if np.issubdtype(np.asarray(time).dtype, np.integer) else float
+        first_step = abs(cast(time[1]) - cast(time[0]))
+        last_step = abs(cast(time[-1]) - cast(time[-2]))
+        return (abs(cast(candidate[0]) - cast(requested[0])) <= first_step
+                and abs(cast(candidate[1]) - cast(requested[1])) <= last_step)
+
+    def _numeric_window(self, begin, end):
+        """(begin, end) as numbers, or None. A request without bounds (a whole
+        pulse) spans what was drawn."""
+        if begin == '' and end == '':
+            return self.draw_time_bounds()
+        if all(isinstance(value, numbers.Real) for value in (begin, end)):
+            return begin, end
+        return None
 
 
 @dataclass
