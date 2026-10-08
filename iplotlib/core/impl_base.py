@@ -898,7 +898,7 @@ class BackendParserBase(ABC):
         A data-valued expression (e.g. '${T}.data') never yields times, no matter
         where its samples happen to fall; a time-valued expression (e.g. '${T}.time',
         the ECH case) is a shared-time candidate, to be confirmed against the shared
-        interval with :meth:`_plot_first_x_in_range`.
+        interval with :meth:`_plot_first_x_near_range`.
         """
         if plot is None or not plot.signals:
             return False
@@ -936,6 +936,22 @@ class BackendParserBase(ABC):
                     continue
                 return bool(begin <= finite[0] <= end)
         return False
+
+    def _plot_first_x_near_range(self, plot, begin, end):
+        """:meth:`_plot_first_x_in_range` widened by the canvas time-range
+        difference ('max_diff'), the tolerance time plots are grouped with.
+
+        A plot admitted this way takes the shared window on its X axis, so its X
+        must live in the same time domain: an expression that re-bases time
+        (e.g. '${self}.time - T0') lands far outside and keeps its own axis.
+        """
+        if begin is None or end is None:
+            return False
+        # Nanoseconds when the interval encodes absolute dates.
+        is_date = bool(min(begin, end) > (1 << 53) and max(begin, end) < (1 << 62))
+        max_diff = self._pm.get_value(self.canvas, 'max_diff')
+        tolerance = max_diff * 1e9 if is_date else max_diff
+        return self._plot_first_x_in_range(plot, begin - tolerance, end + tolerance)
 
     def _plot_shares_time_base(self, plot, base_ts):
         """Whether a plot whose X axis is not time still shares the base plot's time base.
@@ -1002,13 +1018,15 @@ class BackendParserBase(ABC):
 
             # An X-versus-Y plot joins the shared-time group only when its X expression
             # yields times (e.g. '${T}.time', the ECH case) AND its first sample falls
-            # inside the shared interval. Both are required: samples alone can collide
-            # numerically with the window while the expression is data-valued. It still
+            # within the shared interval. Both are required: samples alone can collide
+            # numerically with the window while the expression is data-valued. A
+            # time-valued expression outside it re-bases time (e.g. '${self}.time - T0')
+            # and stays out: the window it would be given is not in its units. It still
             # never drives the group: zooming on it stays local (base-plot check above).
             if not self._plot_x_is_time(plot):
-                if self._plot_x_expr_yields_time(plot) and \
-                        self._plot_first_x_in_range(plot, base_begin, base_end):
-                    shared.append(plot_item)
+                if self._plot_x_expr_yields_time(plot):
+                    if self._plot_first_x_near_range(plot, base_begin, base_end):
+                        shared.append(plot_item)
                 elif self._plot_shares_time_base(plot, base_ts):
                     # Data-valued X: the plot cannot share axis limits with the time
                     # plots, but its signals are still time-indexed, so it follows a
@@ -2310,10 +2328,16 @@ class BackendParserBase(ABC):
         x_view_moved = has_impl and self.get_impl_x_axis_limits(impl_plot) != x_before
         # isinstance(plot, PlotXYWithSlider): TODO: test with Slider
 
-        # Restore the exact recorded signal-level xrange values.
+        # Restore the exact recorded signal-level xrange values. A signal whose X
+        # is an expression re-derived its window from the view just restored, and
+        # restore_xranges keeps it when both name the same request (no refetch).
         for signal_limit in signal_limits:
             signal = signal_limit.signal_ref()
-            signal.set_xranges(signal_limit.get_limits())
+            restore = getattr(signal, 'restore_xranges', None)
+            if restore is not None:
+                restore(signal_limit.get_limits())
+            else:
+                signal.set_xranges(signal_limit.get_limits())
 
         # Set Y limits
         if has_impl:
@@ -2394,9 +2418,12 @@ class BackendParserBase(ABC):
         target.axes_ranges[0].set_limits(x_begin, x_end)
         target.axes_ranges[1].set_limits(y_begin, y_end)
         # Signals inherit the plot's X range; realign them to the draw-time window
-        # so their cached samples are reused on redraw.
+        # so their cached samples are reused on redraw. A signal whose X is an
+        # expression was requested over a time window its X range does not show.
         for signal_range in target.signals_ranges:
-            signal_range.set_limits(x_begin, x_end)
+            draw_time_window = getattr(signal_range.signal_ref(), 'draw_time_request_window', None)
+            window = draw_time_window() if draw_time_window is not None else None
+            signal_range.set_limits(*(window or (x_begin, x_end)))
 
         self._restoring_view = True
         try:

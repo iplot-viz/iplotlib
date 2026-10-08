@@ -1648,6 +1648,11 @@ class PyQtGraphParser(BackendParserBase):
         if fs and fs > 0:
             label_props['font-size'] = f'{int(fs)}pt'
         axis_item.setLabel(text, **label_props)
+        if axis_item.orientation == 'bottom' and not axis_item.style.get('showValues', True):
+            # The stacks of a plot share the X axis drawn under the bottom one
+            # (set_bottom_axis_stacked); setLabel shows the label again each
+            # time the signals are reprocessed, e.g. on a zoom or an undo.
+            axis_item.label.setVisible(False)
 
         # Authoritatively flag a relative-time bottom axis at the moment its
         # 'Time' label is applied (here, during signal processing), rather than

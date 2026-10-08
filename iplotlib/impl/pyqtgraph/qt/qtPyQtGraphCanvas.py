@@ -586,18 +586,22 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             color = self._ruler_window.next_color(name)
         x_abs = self._parser.transform_value(impl_plot, 0, x)
         y_abs = self._parser.transform_value(impl_plot, 1, y)
-        ruler = Ruler(name=name, xy=(x_abs, y_abs), color=color, visible=True)
+        show_label, show_val_label = self._ruler_window.labels_for_new_ruler()
+        ruler = Ruler(name=name, xy=(x_abs, y_abs), color=color, visible=True,
+                      show_label=show_label, show_val_label=show_val_label)
         plot.add_ruler(ruler)
         # The ghost previewing this ruler is superseded by the real one.
         self._clear_preview_ruler()
         self._preview_ruler_identity = None
         self._parser.add_ruler(impl_plot, name, x, y, ruler.color)
         self._parser.create_ruler_echoes(impl_plot, name, x_abs, y_abs, ruler.color)
+        self._apply_ruler_state(ruler)
         self._ruler_window.set_canvas_columns(len(self._parser.canvas.plots))
         with self._ruler_window.bulk_update():
             for entry in self._ruler_window_rows(impl_plot, x, (x_abs, y_abs)):
                 self._ruler_window.add_row(name, entry['plot_id'], entry['xy'], ruler.color,
                                             visible=True, is_date=entry['is_date'],
+                                            show_label=show_label, show_val_label=show_val_label,
                                             signal_values=entry['signal_values'],
                                             x_is_time=entry['x_is_time'])
         if not self._ruler_window.isVisible():
@@ -677,11 +681,13 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             existing.abs_x = self._parser.transform_value(impl_plot, 0, x)
             existing.abs_y = self._parser.transform_value(impl_plot, 1, y)
             existing.xy = (x, y)
+            self._apply_new_ruler_labels(existing)
             existing.refresh_labels()
             return
         self._clear_preview_ruler()
         ruler = self._parser.add_ruler(impl_plot, self._PREVIEW_RULER_NAME, x, y, ident['color'])
         ruler.set_label_text(ident['name'])
+        self._apply_new_ruler_labels(ruler)
         self._preview_ruler_plot = impl_plot
         self._preview_ruler_identity = ident
 
