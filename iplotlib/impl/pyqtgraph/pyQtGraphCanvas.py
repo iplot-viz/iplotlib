@@ -158,7 +158,7 @@ class _LegendEye(QtWidgets.QGraphicsRectItem):
     def __init__(self, parent, size: float, on_click: Callable):
         super().__init__(0, 0, size + 2 * self.PAD, size + 2 * self.PAD, parent)
         self._on_click = on_click
-        self._shown = True
+        self._exporting = False
         ratio = 2.0  # sharp on high density screens
         self._pixmaps = {}
         for collapsed, name in ((False, 'eye'), (True, 'eye_closed')):
@@ -178,11 +178,17 @@ class _LegendEye(QtWidgets.QGraphicsRectItem):
         self.setToolTip('Show the legend' if collapsed else 'Hide the legend')
 
     def setExportMode(self, export: bool, opts=None):
-        if export:
-            self._shown = self.isVisible()
+        if export and self.isVisible():
+            self._exporting = True
             self.hide()
-        else:
-            self.setVisible(self._shown)
+        elif not export and self._exporting:
+            self._exporting = False
+            self.show()
+
+    def paint(self, painter, option, widget=None):
+        # The SVG export paints each item it found shown, after setting its export mode.
+        if not self._exporting:
+            super().paint(painter, option, widget)
 
     def mouseClickEvent(self, ev):
         if ev.button() == Qt.MouseButton.LeftButton:
@@ -225,9 +231,7 @@ class _Legend(LegendItem):
     def add_eye(self, size: float):
         """The eye button that folds the legend away and unfolds it, `size` pixels high."""
         self.eye = _LegendEye(self.parentItem(), size, self.toggle)
-        collapsed = self._parser.legend_collapsed(self._plot)
-        self.eye.set_collapsed(collapsed)
-        self.setVisible(not collapsed)
+        self.eye.set_collapsed(self._parser.legend_collapsed(self._plot))
         self._place_eye()
 
     def _place_eye(self):
@@ -434,6 +438,9 @@ class PyQtGraphParser(BackendParserBase):
         self.map_legend_to_ax = {}
         self._legend_signal_lut = {}  # id(ItemSample/LabelItem/curve) -> Signal
         self._on_legend_right_click = None  # callback(Signal) set by Qt canvas
+        # Whether legends get the eye button that folds them; an interactive canvas
+        # turns it on, an image export draws no buttons.
+        self.legend_eyes = False
         self.legend_size = 8
         self._cursors = []
         self._cursor_active = False
@@ -1461,9 +1468,11 @@ class PyQtGraphParser(BackendParserBase):
         # Set aspect legend
         legend.setBrush(pg.mkBrush(255, 255, 255, 120))
         legend.setPen(pg.mkPen(color='k'))
-        font = QFont()
-        font.setPointSizeF(float(self._pm.get_value(i_plot, 'font_size')))
-        legend.add_eye(QFontMetricsF(font).height())
+        legend.setVisible(not self.legend_collapsed(plot))
+        if self.legend_eyes:
+            font = QFont()
+            font.setPointSizeF(float(self._pm.get_value(i_plot, 'font_size')))
+            legend.add_eye(QFontMetricsF(font).height())
         anchor = self.legend_anchor(plot)
         legend.place(*(((0, 0), anchor) if anchor is not None else position_anchors(plot_leg_position)))
 

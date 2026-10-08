@@ -15,10 +15,12 @@ import unittest
 from unittest import mock
 
 import numpy as np
+import shiboken6
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from PIL import Image
 from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -26,7 +28,7 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
 from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
-from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import _Legend
+from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser, _Legend
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.testing import ensure_qapp
 
@@ -34,6 +36,21 @@ BACKENDS = ('matplotlib', 'pyqt')
 NAMES = ['EC-GN-P5C:R_T2_USC_AI_0_MHVPS_Voltage', 'EC-GN-P5C:R_T3_DBG_AO_1_BPS1_Feedback',
          'EC-GN-P5C:P_T4_WMAi2_EXP_BPS2_Expected', 'EC-GN-P5C:R_T2_USC_AI_1_BPS1_Voltage']
 FONT_SIZE = 12
+
+
+def _picture(path):
+    """The pixels of a saved image; an SVG is drawn as QtSvg draws it."""
+    if not path.endswith('.svg'):
+        with Image.open(path) as image:
+            return np.asarray(image.convert('RGB'), dtype=int)
+    renderer = QSvgRenderer(path)
+    image = QImage(renderer.defaultSize(), QImage.Format.Format_RGBA8888)
+    image.fill(QColor('white'))
+    painter = QPainter(image)
+    renderer.render(painter)
+    painter.end()
+    rows = np.frombuffer(image.constBits(), dtype=np.uint8).reshape(image.height(), image.bytesPerLine())
+    return rows[:, :image.width() * 4].reshape(image.height(), image.width(), 4)[..., :3].astype(int)
 
 
 class _MatplotlibMouse:
@@ -183,7 +200,8 @@ class LegendInteractionTest(unittest.TestCase):
     def setUpClass(cls):
         cls.app = ensure_qapp()
 
-    def _draw(self, backend, plot=None, mode=None, names=NAMES):
+    @staticmethod
+    def _canvas(plot=None, names=NAMES):
         canvas = Canvas(1, 1, legend=True)
         canvas.font_size = FONT_SIZE
         plot = plot or PlotXY()
@@ -193,6 +211,10 @@ class LegendInteractionTest(unittest.TestCase):
             signal.set_data([x, np.sin(x) + k])
             plot.add_signal(signal)
         canvas.add_plot(plot, 0)
+        return canvas, plot
+
+    def _draw(self, backend, plot=None, mode=None, names=NAMES):
+        canvas, plot = self._canvas(plot, names)
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
         qt_canvas.set_canvas(canvas)
         qt_canvas.resize(900, 600)
@@ -402,28 +424,57 @@ class LegendInteractionTest(unittest.TestCase):
                 self.assertEqual(qt_canvas._parser.get_oaw_axis_limits(impl, 0), limits)
 
     def test_saved_images_leave_the_eye_out(self):
+        """In every format the screenshot button offers."""
         for backend in BACKENDS:
-            with self.subTest(backend=backend):
-                qt_canvas, _, mouse = self._draw(backend)
-                impl = self._impl(qt_canvas)
-                eye = mouse.eye_button(impl)
-                path = os.path.join(tempfile.mkdtemp(), 'canvas.png')
-                self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+            for ext in ('png', 'jpg', 'svg'):
+                with self.subTest(backend=backend, format=ext):
+                    qt_canvas, _, mouse = self._draw(backend)
+                    eye = mouse.eye_button(self._impl(qt_canvas))
+                    folder = tempfile.TemporaryDirectory()
+                    self.addCleanup(folder.cleanup)
+                    path = os.path.join(folder.name, f'canvas.{ext}')
 
-                qt_canvas.save_canvas_image(path)
-                saved = np.asarray(Image.open(path).convert('RGB'), dtype=int)
-                self.assertTrue(eye.get_visible() if backend == 'matplotlib' else eye.isVisible())
+                    qt_canvas.save_canvas_image(path)
+                    saved = _picture(path)
+                    self.assertTrue(eye.get_visible() if backend == 'matplotlib' else eye.isVisible())
 
-                # The same picture with the eye hidden by hand.
-                if backend == 'matplotlib':
-                    eye.set_visible(False)
-                    qt_canvas._mpl_renderer.draw()
-                else:
-                    eye.hide()
-                qt_canvas.save_canvas_image(path)
-                without_eye = np.asarray(Image.open(path).convert('RGB'), dtype=int)
-                self.assertEqual(saved.shape, without_eye.shape)
-                self.assertEqual(np.abs(saved - without_eye).max(), 0)
+                    # The same picture with the eye hidden by hand.
+                    if backend == 'matplotlib':
+                        eye.set_visible(False)
+                        qt_canvas._mpl_renderer.draw()
+                    else:
+                        eye.hide()
+                    qt_canvas.save_canvas_image(path)
+                    without_eye = _picture(path)
+                    self.assertEqual(saved.shape, without_eye.shape)
+                    self.assertEqual(np.abs(saved - without_eye).max(), 0)
+
+    def test_an_image_exported_without_the_qt_canvas_has_no_eye(self):
+        """As the command line exports one: no eye to leave out, so the legend keeps its
+        place, and a folded legend stays folded."""
+        for backend, parser_class in (('matplotlib', MatplotlibParser), ('pyqt', PyQtGraphParser)):
+            for folded in (False, True):
+                with self.subTest(backend=backend, folded=folded):
+                    canvas, plot = self._canvas()
+                    plot.legend_collapsed = ['1'] if folded else None
+                    parser = parser_class()
+                    folder = tempfile.TemporaryDirectory()
+                    self.addCleanup(folder.cleanup)
+                    if backend == 'pyqt':
+                        # Deleted here rather than at exit, when Python has already torn
+                        # down its items while Qt still asks them for their size.
+                        self.addCleanup(shiboken6.delete, parser.figure)
+
+                    parser.export_image(os.path.join(folder.name, 'canvas.png'), canvas=canvas,
+                                        dpi=100, width=1920, height=1080)
+
+                    impl = parser._signal_impl_plot_lut['uid-0']
+                    if backend == 'matplotlib':
+                        self.assertEqual(parser._legend_eyes, {})
+                        self.assertEqual(impl.get_legend().get_visible(), not folded)
+                    else:
+                        self.assertIsNone(impl.legend.eye)
+                        self.assertEqual(impl.legend.isVisible(), not folded)
 
     def test_matplotlib_files_leave_the_eye_out(self):
         qt_canvas, _, _ = self._draw('matplotlib')
