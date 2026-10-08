@@ -15,14 +15,16 @@ import unittest
 from unittest import mock
 
 import numpy as np
+import pyqtgraph as pg
 import shiboken6
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from PIL import Image
+from pyqtgraph.exporters import SVGExporter
 from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPainterPath
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QGraphicsPathItem
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
@@ -51,6 +53,22 @@ def _picture(path):
     painter.end()
     rows = np.frombuffer(image.constBits(), dtype=np.uint8).reshape(image.height(), image.bytesPerLine())
     return rows[:, :image.width() * 4].reshape(image.height(), image.width(), 4)[..., :3].astype(int)
+
+
+def _pyqtgraph_writes_svg():
+    """Whether pyqtgraph exports SVG with this Qt: pyqtgraph 0.14.0 cannot read the
+    closed paths that Qt 6.12 writes (pyqtgraph#3495, fixed after that release)."""
+    view = pg.GraphicsView()
+    path = QPainterPath()
+    path.addRect(0, 0, 10, 10)
+    view.scene().addItem(QGraphicsPathItem(path))
+    try:
+        SVGExporter(view.scene()).export(toBytes=True)
+    except ValueError:
+        return False
+    finally:
+        shiboken6.delete(view)
+    return True
 
 
 class _MatplotlibMouse:
@@ -428,6 +446,8 @@ class LegendInteractionTest(unittest.TestCase):
         for backend in BACKENDS:
             for ext in ('png', 'jpg', 'svg'):
                 with self.subTest(backend=backend, format=ext):
+                    if backend == 'pyqt' and ext == 'svg' and not _pyqtgraph_writes_svg():
+                        self.skipTest('pyqtgraph cannot export SVG with this Qt (pyqtgraph#3495)')
                     qt_canvas, _, mouse = self._draw(backend)
                     eye = mouse.eye_button(self._impl(qt_canvas))
                     folder = tempfile.TemporaryDirectory()
