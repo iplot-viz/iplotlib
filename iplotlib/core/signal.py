@@ -95,6 +95,8 @@ class SignalXY(Signal, IplotSignalAdapter):
         dependent
     step : str
         default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
+    hidden : bool
+        hidden from the plot by a click on its legend entry
     """
     lines = []
     color: str = None
@@ -106,6 +108,7 @@ class SignalXY(Signal, IplotSignalAdapter):
     marker_size: int = None
     step: str = None
     markers_list: List[Marker] = field(default_factory=list)
+    hidden: bool = False
 
     def __post_init__(self):
         super().__post_init__()
@@ -137,6 +140,7 @@ class SignalXY(Signal, IplotSignalAdapter):
         self.marker = old_signal['marker']
         self.marker_size = old_signal['marker_size']
         self.step = old_signal['step']
+        self.hidden = old_signal.get('hidden', SignalXY.hidden)
 
     def add_marker(self, marker: Marker):
         self.markers_list.append(marker)

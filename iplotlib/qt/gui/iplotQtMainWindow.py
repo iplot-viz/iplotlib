@@ -277,6 +277,9 @@ class IplotQtMainWindow(QMainWindow):
             y_axes = plot.axes[1] if isinstance(plot.axes[1], (list, tuple)) else [plot.axes[1]]
             for y_axis in y_axes:
                 y_axis.set_limits(None, None, 'current')
+        # Choosing a legend position puts back there a legend the mouse dragged elsewhere.
+        for plot in self._plots_with_legend_moved(canvas, prev) if canvas is not None else []:
+            plot.legend_anchor = type(plot).legend_anchor
         if x_toggled or log_changed:
             w.refresh()
         else:
@@ -307,6 +310,25 @@ class IplotQtMainWindow(QMainWindow):
                 if prev_log is None:
                     prev_log = prev_canvas_log
                 if bool(cur_log) != bool(prev_log):
+                    changed.append(plot)
+        return changed
+
+    @staticmethod
+    def _plots_with_legend_moved(canvas, prev: dict) -> list:
+        """
+        Plots whose legend the mouse dragged elsewhere and whose effective legend
+        position differs from the last applied preferences, at plot or at canvas level.
+        """
+        prev_plots = prev.get('plots') or []
+        changed = []
+        for i, col in enumerate(canvas.plots):
+            prev_col = prev_plots[i] if i < len(prev_plots) else []
+            for j, plot in enumerate(col):
+                if plot is None or not getattr(plot, 'legend_anchor', None):
+                    continue
+                prev_plot = prev_col[j] if j < len(prev_col) else None
+                prev_position = prev_plot.get('legend_position') if isinstance(prev_plot, dict) else None
+                if (plot.legend_position or canvas.legend_position) != (prev_position or prev.get('legend_position')):
                     changed.append(plot)
         return changed
 

@@ -540,11 +540,9 @@ class IplotQtCanvas(QWidget):
                     visible_signals.append(signal)
         return visible_signals
 
-    @abstractmethod
     def _is_signal_visible(self, signal: SignalXY) -> bool:
         """
         Check if a signal is currently visible (not hidden via legend).
-        Backend-specific implementations must override this method.
 
         Args:
             signal: The signal to check
@@ -552,6 +550,7 @@ class IplotQtCanvas(QWidget):
         Returns:
             True if visible, False if hidden
         """
+        return not getattr(signal, 'hidden', False)
 
     def check_markers(self, canvas: Canvas):
         # Check if there are signals in the table that are no longer used
