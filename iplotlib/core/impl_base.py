@@ -1634,6 +1634,39 @@ class BackendParserBase(ABC):
         """Rebuild legend for the given plot. Default implementation does nothing."""
         pass
 
+    def register_dynamic_signal(self, impl_plot: Any, plot: Plot, signal: Signal):
+        """Register a dynamically added signal and update legend. Default implementation does nothing."""
+        pass
+
+    def add_signal(self, impl_plot: Any, plot: Plot, signal: Signal, stack_key):
+        """
+        Draw `signal` on `impl_plot`, a stack of `plot` already drawn, without
+        redrawing the rest of the canvas.
+        """
+        plot.add_signal(signal, stack_key)
+        self._signal_impl_plot_lut[self.signal_lut_key(signal)] = impl_plot
+        self.process_ipl_signal(signal)
+        self.register_dynamic_signal(impl_plot, plot, signal)
+
+    def remove_signal(self, signal: Signal):
+        """Take `signal` off the plot it is drawn on, the reverse of `add_signal`."""
+        key = self.signal_lut_key(signal)
+        impl_plot = self._signal_impl_plot_lut.get(key)
+        plot = signal.parent() if callable(signal.parent) else None
+        self.remove_signal_lines(signal)
+        self._signal_impl_plot_lut.pop(key, None)
+        self._signal_impl_shape_lut.pop(id(signal), None)
+        signal.lines = []
+        if plot is not None:
+            # By identity: comparing signals compares their data arrays.
+            for stack in plot.signals.values():
+                stack[:] = [s for s in stack if s is not signal]
+        ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
+        if ci is not None and hasattr(ci, 'signals'):
+            ci.signals[:] = [ref for ref in ci.signals if ref() is not signal]
+        if impl_plot is not None and plot is not None:
+            self.rebuild_legend(impl_plot, plot)
+
     def refresh_streaming_legend(self, impl_plot: Any, plot: Plot):
         """Bring an envelope drawn on its first streaming batch into the legend.
 

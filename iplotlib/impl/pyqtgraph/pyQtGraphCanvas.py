@@ -253,10 +253,13 @@ class PyQtGraphParser(BackendParserBase):
 
     def remove_signal_lines(self, signal):
         """Remove signal lines from the plot."""
-        if hasattr(signal, 'lines') and signal.lines:
-            for line in signal.lines:
-                if hasattr(line, 'scene') and line.scene():
-                    line.scene().removeItem(line)
+        plot_item = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))
+        for line in getattr(signal, 'lines', None) or []:
+            # Off the PlotItem too, not only the scene: its data items still count for the autoscale.
+            if isinstance(plot_item, PlotItem) and line in plot_item.items:
+                plot_item.removeItem(line)
+            elif hasattr(line, 'scene') and line.scene():
+                line.scene().removeItem(line)
 
     def remove_signal_from_legend(self, impl_plot: PlotItem, signal):
         """Remove signal from legend."""
@@ -282,29 +285,73 @@ class PyQtGraphParser(BackendParserBase):
             impl_plot.legend.addItem(signal.lines[0], label)
 
     def rebuild_legend(self, impl_plot: PlotItem, plot):
-        """Rebuild legend for PyQtGraph based on visible signals."""
-        if not impl_plot.legend:
+        """
+        Rebuild the legend of the given plot after its signals changed (a new label, a new
+        signal), the same way the draw builds it.
+        """
+        legend = impl_plot.legend
+        if not legend:
             return
-
-        # Clear existing legend items
-        impl_plot.legend.clear()
-
-        # Get cache item to find signals
         ci = self._impl_plot_cache_table.get_cache_item(impl_plot)
-        if not ci or not hasattr(ci, 'signals'):
-            return
+        signals = [ref() for ref in getattr(ci, 'signals', None) or []]
+        signals = [signal for signal in signals if signal is not None]
 
-        # Add visible signals to legend
-        for sig_ref in ci.signals:
-            sig = sig_ref() if sig_ref else None
-            if sig and hasattr(sig, 'lines') and sig.lines:
-                # Check if signal is visible and still in scene
-                line = sig.lines[0]
-                in_scene = hasattr(line, 'scene') and line.scene() is not None
-                if in_scene and hasattr(line, 'isVisible') and line.isVisible():
-                    label = getattr(sig, 'label', '') or getattr(sig, 'name', '')
-                    if label:
-                        impl_plot.legend.addItem(line, label)
+        legend.clear()
+        for signal in signals:
+            shapes = self._signal_impl_shape_lut.get(id(signal)) or []
+            for ix, line in enumerate(shapes):
+                curve = line[0] if isinstance(line, Collection) else line
+                if not isinstance(curve, PlotDataItem):
+                    continue
+                if signal.label:
+                    curve.opts['name'] = signal.label if len(shapes) == 1 else f"{signal.label}[{ix}]"
+                # The draw lists the named curves in the order they are plotted.
+                if curve.name() is not None and curve.scene() is not None:
+                    legend.addItem(curve, curve.name())
+        self._finish_legend(impl_plot, plot, signals)
+
+    def _finish_legend(self, plot: PlotItem, i_plot: Plot, signals):
+        """Map, size and label the legend entries of `signals`, which the curves add to
+        the legend as they are plotted."""
+        legend = plot.legend
+        if not legend or not legend.items:
+            return
+        fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
+
+        shape_of = {}
+        for signal in signals:
+            # A signal not drawn yet (e.g. an envelope awaiting its first
+            # streaming batch) has no shapes and no legend entry.
+            for line in self._signal_impl_shape_lut.get(id(signal)) or []:
+                curve = line[0] if isinstance(line, Collection) else line
+                shape_of[id(curve)] = (line, signal)
+
+        for sample, label_item in legend.items:
+            if id(sample.item) not in shape_of:
+                continue
+            line, signal = shape_of[id(sample.item)]
+            self.map_legend_to_ax[sample.item] = line
+            self._legend_signal_lut[id(sample)] = signal
+            self._legend_signal_lut[id(label_item)] = signal
+            # Patch ItemSample to handle right-click for signal preferences
+            orig_handler = sample.mouseClickEvent
+            def _patched_click(ev, orig=orig_handler, sig=signal, parser=self):
+                if ev.button() == QtCore.Qt.MouseButton.RightButton:
+                    if parser._on_legend_right_click:
+                        parser._on_legend_right_click(sig, ev.screenPos())
+                    ev.accept()
+                    return
+                orig(ev)
+            sample.mouseClickEvent = _patched_click
+            label_item.setAttr(attr='size', value=f'{fs}pt')
+            legend_label = line.name() if not isinstance(line, Collection) else line[0].name()
+            if signal.isDownsampled:
+                legend_label += '*'
+            label_item.setText(legend_label)
+            size = label_item.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None)
+            label_item.resize(size)
+        legend.updateSize()
+        self._auto_adjust_legend_layout(plot, i_plot, signals)
 
     def register_dynamic_signal(self, impl_plot: PlotItem, plot, signal):
         """Register a dynamically added signal and update legend."""
@@ -1017,53 +1064,7 @@ class PyQtGraphParser(BackendParserBase):
                 self.process_ipl_signal(signal)
 
             # Legend processing for downsampled data when drawing
-            fs = self._pm.get_value(i_plot, 'font_size')  # Font size fot legend lines
-            ix_legend = 0
-
-            if plot.legend and plot.legend.items:
-                # Set legend_lines and build legend → signal mapping
-                legend_samples = [sample
-                                  for item in plot.legend.items
-                                  for sample in item
-                                  if isinstance(sample, pg.ItemSample)]
-                legend_lines = [sample.item for sample in legend_samples]
-
-                for signal in signals:
-                    # A signal not drawn yet (e.g. an envelope awaiting its
-                    # first streaming batch) has no shapes and no legend entry;
-                    # skip it so the mapping stays aligned instead of iterating
-                    # over None.
-                    shapes = self._signal_impl_shape_lut.get(id(signal))
-                    if not shapes:
-                        continue
-                    for line in shapes:
-                        if ix_legend >= len(legend_lines):
-                            break
-                        self.map_legend_to_ax[legend_lines[ix_legend]] = line
-                        self._legend_signal_lut[id(legend_samples[ix_legend])] = signal
-                        label_item = plot.legend.items[ix_legend][1]
-                        self._legend_signal_lut[id(label_item)] = signal
-                        # Patch ItemSample to handle right-click for signal preferences
-                        sample = legend_samples[ix_legend]
-                        orig_handler = sample.mouseClickEvent
-                        def _patched_click(ev, orig=orig_handler, sig=signal, parser=self):
-                            if ev.button() == QtCore.Qt.MouseButton.RightButton:
-                                if parser._on_legend_right_click:
-                                    parser._on_legend_right_click(sig, ev.screenPos())
-                                ev.accept()
-                                return
-                            orig(ev)
-                        sample.mouseClickEvent = _patched_click
-                        label_item.setAttr(attr='size', value=f'{fs}pt')
-                        legend_label = line.name() if not isinstance(line, Collection) else line[0].name()
-                        if signal.isDownsampled:
-                            legend_label += '*'
-                        label_item.setText(legend_label)
-                        size = label_item.sizeHint(QtCore.Qt.SizeHint.PreferredSize, None)
-                        label_item.resize(size)
-                        ix_legend += 1
-                plot.legend.updateSize()
-                self._auto_adjust_legend_layout(plot, i_plot, signals)
+            self._finish_legend(plot, i_plot, signals)
 
             # Observe the axis limit change events
             vb = plot.getViewBox()

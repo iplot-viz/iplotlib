@@ -235,42 +235,116 @@ class MatplotlibParser(BackendParserBase):
 
     def rebuild_legend(self, mpl_axes: MPLAxes, plot: Plot):
         """
-        Rebuild the legend for the given matplotlib axes with currently visible lines.
+        Rebuild the legend of the given matplotlib axes after its signals changed (a new
+        label, a new signal), the same way the draw builds it.
         """
-        # Get visible lines for legend (exclude hidden and internal lines)
-        visible_lines = [line for line in mpl_axes.get_lines()
-                         if line.get_visible() and not line.get_label().startswith(('_', 'CrossX', 'CrossY'))]
+        ci = self._impl_plot_cache_table.get_cache_item(mpl_axes)
+        signals = [ref() for ref in getattr(ci, 'signals', None) or []]
+        signals = [signal for signal in signals if signal is not None]
+        for signal in signals:
+            self._label_legend_lines(signal)
 
-        show_legend = self._pm.get_value(plot, 'legend')
-        if show_legend and visible_lines:
-            plot_leg_position = self._pm.get_value(plot, 'legend_position')
-            canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
-            plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
-            canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
-
-            plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' else plot_leg_position
-            plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' else plot_leg_layout
-
-            legend_props = dict(size=self.legend_size)
-            col = len(visible_lines) if plot_leg_layout == 'horizontal' else 1
-
-            leg = mpl_axes.legend(handles=visible_lines, prop=legend_props, loc=plot_leg_position, ncol=col)
-            if self.figure.get_tight_layout():
-                leg.set_in_layout(False)
-
-            # Update map_legend_to_ax for legend click handling
-            legend_lines = leg.get_lines()
-            for ix, line in enumerate(visible_lines):
-                if ix < len(legend_lines):
-                    self.map_legend_to_ax[legend_lines[ix]] = line
-                    legend_lines[ix].set_picker(3)
-        elif not visible_lines:
-            # No visible lines, remove legend
-            existing_legend = mpl_axes.get_legend()
-            if existing_legend:
-                existing_legend.remove()
+        if self._pm.get_value(plot, 'legend') and signals and mpl_axes.get_lines():
+            self._draw_legend(mpl_axes, plot, signals)
+        elif mpl_axes.get_legend() is not None:
+            mpl_axes.get_legend().remove()
 
         self.figure.canvas.draw_idle()
+
+    def _label_legend_lines(self, signal):
+        """Name the legend lines of `signal` after its current label, as the draw does."""
+        shapes = self._signal_impl_shape_lut.get(id(signal))
+        if not signal.label or not isinstance(shapes, list):
+            return
+        for ix, shape in enumerate(shapes):
+            line = shape[0] if isinstance(shape, Collection) else shape
+            if isinstance(line, Line2D):
+                line.set_label(signal.label if len(shapes) == 1 else f"{signal.label}[{ix}]")
+
+    def _legend_entries(self, signals):
+        """
+        (legend handle, shape, signal) for each legend entry of `signals`, in their order.
+        The handle is the labelled line of the shape, the one matplotlib picks for the
+        legend; the rulers and the crosshair draw lines of their own on the same axes.
+        """
+        entries = []
+        for signal in signals:
+            # A signal not drawn yet (e.g. an envelope awaiting its first
+            # streaming batch) has no shapes and no legend entry.
+            shapes = self._signal_impl_shape_lut.get(id(signal))
+            if not isinstance(shapes, list):
+                continue
+            for shape in shapes:
+                line = shape[0] if isinstance(shape, Collection) else shape
+                label = line.get_label() if isinstance(line, Line2D) else ''
+                if label and not label.startswith('_'):
+                    entries.append((line, shape, signal))
+        return entries
+
+    def _draw_legend(self, mpl_axes: MPLAxes, plot: Plot, signals):
+        plot_leg_position = self._pm.get_value(plot, 'legend_position')
+        canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
+        plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
+        canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
+
+        plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' \
+            else plot_leg_position
+        plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' \
+            else plot_leg_layout
+
+        legend_props = dict(size=self.legend_size)
+        entries = self._legend_entries(signals)
+        handles = [handle for handle, _, _ in entries]
+
+        # Legend creation process:
+        #   - Vertical legend: it has one column, which will be increased until there is no overlapping of
+        #   lines up to a maximum of 3 columns, (1, 3).
+        #   - Horizontal legend: the number of columns corresponds to the number of signals contained in the
+        #   plot. If there is line overlapping, the number of columns will be reduced, (len(signals), 1).
+        leg_ver = (1, 3)
+        leg_hor = (len(signals), 1)
+        # The case is established as follows
+        case = leg_ver if plot_leg_layout == 'vertical' else leg_hor
+        start, stop = case
+        step = 1 if start < stop else -1
+        leg = None
+        for col in range(start, stop + step, step):
+            leg = mpl_axes.legend(handles=handles, prop=legend_props, loc=plot_leg_position, ncol=col)
+            if self.figure.get_tight_layout():
+                leg.set_in_layout(False)
+            # Check if the legend's edges are outside the axes' bounds in the figure
+            legend_bbox = leg.get_window_extent()
+            axes_bbox = mpl_axes.get_window_extent()
+            legend_bbox = legend_bbox.transformed(self.figure.transFigure.inverted())
+            axes_bbox = axes_bbox.transformed(self.figure.transFigure.inverted())
+            legend_outside = (
+                    legend_bbox.xmin < axes_bbox.xmin or
+                    legend_bbox.xmax > axes_bbox.xmax or
+                    legend_bbox.ymin < axes_bbox.ymin or
+                    legend_bbox.ymax > axes_bbox.ymax
+            )
+            if not legend_outside:
+                break
+
+        # Check the text of the legend lines in case there is a '$' to be escaped
+        for line in leg.texts:
+            current_text = line.get_text()
+            if '$' in current_text:
+                new_text = current_text.replace("$", r"\$")
+                line.set_text(new_text)
+
+        fs = self._pm.get_value(plot, 'font_size')  # Font size fot legend lines
+        for legend_line, legend_text, (_, shape, signal) in zip(leg.get_lines(), leg.get_texts(), entries):
+            self.map_legend_to_ax[legend_line] = shape
+            self._legend_signal_lut[legend_line] = signal
+            alpha = 1 if legend_line.get_visible() else 0.2
+            legend_line.set_picker(3)
+            legend_line.set_visible(True)
+            legend_line.set_alpha(alpha)
+            # Check if signal is downsampled at the start
+            if signal.isDownsampled:
+                legend_text.set_text(legend_text.get_text() + '*')
+            legend_text.set_fontsize(fs)
 
     def refresh_streaming_legend(self, impl_plot: MPLAxes, plot: Plot):
         # matplotlib builds the legend once, so an envelope drawn on its first
@@ -951,81 +1025,7 @@ class MatplotlibParser(BackendParserBase):
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value(plot, 'legend')
                 if show_legend and mpl_axes.get_lines():  # TODO improve
-                    plot_leg_position = self._pm.get_value(plot, 'legend_position')
-                    canvas_leg_position = self._pm.get_value(self.canvas, 'legend_position')
-                    plot_leg_layout = self._pm.get_value(plot, 'legend_layout')
-                    canvas_leg_layout = self._pm.get_value(self.canvas, 'legend_layout')
-
-                    plot_leg_position = canvas_leg_position if plot_leg_position == 'same as canvas' \
-                        else plot_leg_position
-                    plot_leg_layout = canvas_leg_layout if plot_leg_layout == 'same as canvas' \
-                        else plot_leg_layout
-
-                    legend_props = dict(size=self.legend_size)
-
-                    # Legend creation process:
-                    #   - Vertical legend: it has one column, which will be increased until there is no overlapping of
-                    #   lines up to a maximum of 3 columns, (1, 3).
-                    #   - Horizontal legend: the number of columns corresponds to the number of signals contained in the
-                    #   plot. If there is line overlapping, the number of columns will be reduced, (len(signals), 1).
-                    leg_ver = (1, 3)
-                    leg_hor = (len(signals), 1)
-                    # The case is established as follows
-                    case = leg_ver if plot_leg_layout == 'vertical' else leg_hor
-                    start, stop = case
-                    step = 1 if start < stop else -1
-                    leg = None
-                    for col in range(start, stop + step, step):
-                        leg = mpl_axes.legend(prop=legend_props, loc=plot_leg_position, ncol=col)
-                        if self.figure.get_tight_layout():
-                            leg.set_in_layout(False)
-                        # Check if the legend's edges are outside the axes' bounds in the figure
-                        legend_bbox = leg.get_window_extent()
-                        axes_bbox = mpl_axes.get_window_extent()
-                        legend_bbox = legend_bbox.transformed(self.figure.transFigure.inverted())
-                        axes_bbox = axes_bbox.transformed(self.figure.transFigure.inverted())
-                        legend_outside = (
-                                legend_bbox.xmin < axes_bbox.xmin or
-                                legend_bbox.xmax > axes_bbox.xmax or
-                                legend_bbox.ymin < axes_bbox.ymin or
-                                legend_bbox.ymax > axes_bbox.ymax
-                        )
-                        if not legend_outside:
-                            break
-
-                    # Check the text of the legend lines in case there is a '$' to be escaped
-                    for line in leg.texts:
-                        current_text = line.get_text()
-                        if '$' in current_text:
-                            new_text = current_text.replace("$", r"\$")
-                            line.set_text(new_text)
-
-                    fs = self._pm.get_value(plot, 'font_size')  # Font size fot legend lines
-                    legend_lines = leg.get_lines()
-                    ix_legend = 0
-                    for signal in signals:
-                        # A signal not drawn yet (e.g. an envelope awaiting its
-                        # first streaming batch) has no shapes and no legend
-                        # entry; skip it so the mapping stays aligned instead of
-                        # iterating over None.
-                        shapes = self._signal_impl_shape_lut.get(id(signal))
-                        if not shapes:
-                            continue
-                        for line in shapes:
-                            if ix_legend >= len(legend_lines):
-                                break
-                            self.map_legend_to_ax[legend_lines[ix_legend]] = line
-                            self._legend_signal_lut[legend_lines[ix_legend]] = signal
-                            alpha = 1 if legend_lines[ix_legend].get_visible() else 0.2
-                            legend_lines[ix_legend].set_picker(3)
-                            legend_lines[ix_legend].set_visible(True)
-                            legend_lines[ix_legend].set_alpha(alpha)
-                            # Check if signal is downsampled at the start
-                            if signal.isDownsampled:
-                                legend_label = leg.texts[ix_legend].get_text() + '*'
-                                leg.texts[ix_legend].set_text(legend_label)
-                            leg.get_texts()[ix_legend].set_fontsize(fs)
-                            ix_legend += 1
+                    self._draw_legend(mpl_axes, plot, signals)
 
             # Observe the axis limit change events
             if not self.canvas.streaming:
