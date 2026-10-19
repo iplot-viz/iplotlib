@@ -1,6 +1,7 @@
 """Tests for the requests a signal makes and for serving them from data read ahead
 (AccessHelper.data_requests, AccessHelper.prefetched)."""
 
+import threading
 import unittest
 from types import SimpleNamespace
 
@@ -54,6 +55,19 @@ class DataRequestsTests(unittest.TestCase):
         self.assertNotEqual(AccessHelper.request_key(params), AccessHelper.request_key(dict(params, tsE=T1 + 1)))
         hash(AccessHelper.request_key(params))
 
+    def test_request_key_tells_every_parameter_apart(self):
+        params = AccessHelper.construct_da_params(_signal())
+        changes = dict(data_s_name='other', varname='VAR-B', tsS=T0 + 1, tsE=T1 + 1, tsFormat='relative',
+                       pulse='ITER:MCTB-TEST/222', envelope=True, extremities=True, nbp=1920,
+                       retType='doubleCalibrated')
+        # Every parameter construct_da_params() makes, and the calibration it may add.
+        self.assertEqual(set(changes) - {'retType'}, set(params))
+
+        for name, value in changes.items():
+            with self.subTest(parameter=name):
+                self.assertNotEqual(AccessHelper.request_key(params),
+                                    AccessHelper.request_key(dict(params, **{name: value})))
+
     def test_a_signal_asks_for_its_range_until_it_is_read(self):
         signal = _signal()
         self.assertEqual(AccessHelper.data_requests(signal), [AccessHelper.construct_da_params(signal)])
@@ -84,6 +98,21 @@ class DataRequestsTests(unittest.TestCase):
         read.get_data()
 
         self.assertEqual(AccessHelper.data_requests(expression), [AccessHelper.construct_da_params(unread)])
+
+    def test_an_alias_used_in_y_is_asked_for_over_the_signal_range(self):
+        alias = SignalXY(name='VAR-B', alias='b', data_source='uda', ts_start=T0 + 10, ts_end=T1 - 10)
+        alias.get_data()
+        signal = _signal(y_expr='${b}.data * 2')
+        AccessHelper.da.reads.clear()
+
+        requests = AccessHelper.data_requests(signal)
+        with AccessHelper.prefetched({AccessHelper.request_key(params): _result([1.0, 2.0, 3.0])
+                                      for params in requests}):
+            signal.get_data()
+
+        self.assertEqual(AccessHelper.da.reads, [])
+        self.assertIn(dict(AccessHelper.construct_da_params(alias), tsS=T0, tsE=T1), requests)
+        np.testing.assert_array_equal(np.asarray(signal.y_data), [2.0, 4.0, 6.0])
 
 
 class PrefetchedTests(unittest.TestCase):
@@ -140,6 +169,16 @@ class PrefetchedTests(unittest.TestCase):
 
         self.assertEqual(self.stub.reads, ['VAR-B'])
         self.assertEqual(other.status_info.result, Result.SUCCESS)
+
+    def test_reads_of_another_thread_are_not_served(self):
+        signal = _signal()
+
+        with AccessHelper.prefetched(self._results(signal, _result([5.0]))):
+            reader = threading.Thread(target=signal.get_data)
+            reader.start()
+            reader.join()
+
+        self.assertEqual(self.stub.reads, ['VAR-A'])
 
     def test_results_are_not_served_after_the_block(self):
         before, after = _signal(), _signal()

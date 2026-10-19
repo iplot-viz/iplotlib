@@ -6,17 +6,25 @@ made from a worker thread still stalls the GUI thread. Worker processes leave th
 thread free and let independent requests run at the same time.
 """
 
+import faulthandler
 import logging
 import logging.handlers
 import multiprocessing
+import multiprocessing.connection
 import os
+import queue
+import signal
+import threading
+import time
 from collections import OrderedDict, defaultdict
-from concurrent.futures import Future, ProcessPoolExecutor, wait
+from concurrent.futures import CancelledError, Future, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
+from functools import partial
 from typing import Callable, Dict, Iterable, Optional
 
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
 
+from iplotDataAccess.dataSource import DS_CODAC_TYPE
 from iplotLogging import setupLogger
 from iplotlib.interface.iplotSignalAdapter import AccessHelper, DataAccessError
 
@@ -24,7 +32,7 @@ logger = setupLogger.get_logger(__name__)
 
 #: Data source types whose requests may run in several worker processes at once. Requests to
 #: other sources share a single worker: an IMAS HDF5 entry cannot be opened by two processes.
-PARALLEL_SOURCE_TYPES = frozenset({'CODAC_UDA'})
+PARALLEL_SOURCE_TYPES = frozenset({DS_CODAC_TYPE})
 
 _POLL_INTERVAL_MS = 50
 
@@ -34,8 +42,19 @@ _SERIAL_SLOT = -1
 # Requests whose worker is remembered: far more than the data access caches hold.
 _REMEMBERED_REQUESTS = 4096
 
-# Cache generation this worker process last cleared its data access cache for.
+# Requests a worker may have to read more than another before it gets no more of those it read before.
+_AFFINITY_MAX_EXCESS = 2
+
+# Seconds a worker may be stopped before its executor counts as waiting for the rest of a result.
+_STUCK_AFTER_S = 2.0
+
+_STOPPED = "The data access process stopped while reading the data"
+
+# State of a worker process: what sets its data access up, the cache generation it last cleared
+# its data access cache for, and the data sources it tried to connect to again.
+_worker_data_access_factory = None
 _worker_cache_epoch = 0
+_worker_reconnected = set()
 
 
 def app_data_access():
@@ -47,27 +66,46 @@ def app_data_access():
 
 
 def _init_worker(log_queue, parent_log_file, data_access_factory, num_samples, num_samples_override):
+    global _worker_data_access_factory
+    # Ctrl+C is the application's to handle, and a worker stops when the application does.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    threading.Thread(target=_watch_parent, daemon=True).start()
+    # A crash of a compiled data access client leaves its Python traceback on stderr.
+    faulthandler.enable()
     _forward_logging(log_queue, parent_log_file)
     AccessHelper.num_samples = num_samples
     AccessHelper.num_samples_override = num_samples_override
-    # A failure here would stop the worker and fail every request with no reason given;
-    # instead it is logged and the worker's requests report it (see _read).
+    _worker_data_access_factory = data_access_factory
+    _set_up_data_access()
+    # The modules imported to set up data access made loggers of their own.
+    _drop_log_handlers()
+
+
+def _watch_parent():
+    # A worker left behind by an application that was killed would keep its connections open.
+    multiprocessing.connection.wait([multiprocessing.parent_process().sentinel])
+    os._exit(0)
+
+
+def _set_up_data_access() -> bool:
+    # A failure here would stop the worker with no reason given: it is logged instead, and the
+    # worker reports it when asked whether it can read (see _ready).
     try:
-        AccessHelper.da = data_access_factory()
+        AccessHelper.da = _worker_data_access_factory()
+        return True
     except Exception:
         logger.exception("Cannot set up data access in the worker process")
+        return False
 
 
 def _forward_logging(log_queue, parent_log_file):
-    """Send this worker's log records to the parent process rather than to a log file of its own."""
-    queue_handler = logging.handlers.QueueHandler(log_queue)
+    """Send this worker's log records to the parent process, which logs them as its own."""
     own_file = setupLogger.FileHandlerIplot.fhandler
-    # Loggers made from now on, and those made while this process imported its modules.
-    setupLogger.FileHandlerIplot.fhandler = queue_handler
-    for existing in list(logging.Logger.manager.loggerDict.values()):
-        if isinstance(existing, logging.Logger) and own_file in existing.handlers:
-            existing.removeHandler(own_file)
-            existing.addHandler(queue_handler)
+    # Loggers made from now on log through the root logger too.
+    setupLogger.FileHandlerIplot.fhandler = logging.NullHandler()
+    _drop_log_handlers()
+    logging.getLogger().addHandler(logging.handlers.QueueHandler(log_queue))
+    logging.captureWarnings(True)
     own_file.close()
     own_path = getattr(own_file, 'baseFilename', None)
     if own_path and own_path != parent_log_file:
@@ -78,17 +116,56 @@ def _forward_logging(log_queue, parent_log_file):
             pass  # The empty file is only clutter.
 
 
+def _drop_log_handlers():
+    # Records go up to the root logger, whose handler sends them to the parent process.
+    for existing in list(logging.Logger.manager.loggerDict.values()):
+        if isinstance(existing, logging.Logger):
+            for handler in list(existing.handlers):
+                existing.removeHandler(handler)
+
+
+def _log_as_own(record: logging.LogRecord):
+    """Log a record of a worker process through the logger of the same name of this process."""
+    logging.getLogger(record.name).handle(record)
+
+
+class _AsOwnRecord(logging.Handler):
+    def emit(self, record):
+        _log_as_own(record)
+
+
 def _read(params: dict, cache_epoch: int) -> dict:
     global _worker_cache_epoch
     if AccessHelper.da is None:
         raise DataAccessError("Data access could not be set up in the worker process, see the log")
+    name = params.get('data_s_name')
+    connected = getattr(AccessHelper.da, 'get_connected_data_source_names', None)
+    if name is not None and connected is not None and name not in connected() and name not in _worker_reconnected:
+        # The application connected to it, but this process could not when it started.
+        _worker_reconnected.add(name)
+        logger.warning(f"The data access process connects again to the data sources: {name} was not connected")
+        _set_up_data_access()
     if cache_epoch != _worker_cache_epoch:
-        AccessHelper.da.clear_cache()
         _worker_cache_epoch = cache_epoch
-    return AccessHelper._request_data(**params)
+        try:
+            AccessHelper.da.clear_cache()
+        except Exception:
+            logger.exception("Cannot clear the data access cache of the worker process")
+    try:
+        return AccessHelper._request_data(**params)
+    except DataAccessError:
+        raise
+    except BaseException as e:
+        logger.debug(f"Error reading {params.get('varname')}", exc_info=True)
+        # Errors reach the application pickled, which not every exception survives. Their message
+        # is all that AccessHelper._submit_fetch() reports.
+        raise DataAccessError(str(e) if isinstance(e, Exception) else repr(e)) from None
 
 
 def _ready() -> int:
+    """The worker process's id, once it can read data."""
+    if AccessHelper.da is None:
+        raise DataAccessError("Data access could not be set up in the worker process, see the log")
     return os.getpid()
 
 
@@ -98,6 +175,41 @@ def _outcome(future: Future):
         return future.result()
     except Exception as e:
         return e
+
+
+class PendingFetch:
+    """Requests that AccessPool.fetch_later() runs in the worker processes."""
+
+    def __init__(self, pool: 'AccessPool', futures: Dict[tuple, Future],
+                 on_done: Callable[[Dict[tuple, object]], None]):
+        self._pool = pool
+        self._futures = futures
+        self._on_done = on_done
+        # Polled from this thread, which on_done then runs in: the futures complete in another one.
+        self._timer = QTimer()
+        self._timer.timeout.connect(self._check)
+        self._timer.start(_POLL_INTERVAL_MS)
+
+    def cancel(self):
+        """Do not call on_done, and leave unread the requests no worker started yet."""
+        self._timer.stop()
+        for future in self._futures.values():
+            future.cancel()
+
+    def _check(self):
+        if not all(future.done() for future in self._futures.values()):
+            self._pool._release_stuck_executors()
+            return
+        self._timer.stop()
+        results = {key: _outcome(future) for key, future in self._futures.items()}
+        stopped = [key for key, result in results.items() if isinstance(result, (BrokenProcessPool, CancelledError))]
+        if stopped:
+            logger.warning(f"A data access process stopped ({results[stopped[0]]!r}), {len(stopped)} request(s) unread")
+        # The requests a worker that stopped did not read are left out, to be asked for again.
+        try:
+            self._on_done({key: result for key, result in results.items() if key not in stopped})
+        except Exception:
+            logger.exception("Cannot draw the data read in the background")
 
 
 def _stop(executor: Optional[ProcessPoolExecutor]):
@@ -120,7 +232,7 @@ class AccessPool:
     Requests to a data source of PARALLEL_SOURCE_TYPES run in up to `workers` processes at
     once; requests to other data sources share a single worker. Each worker reads through
     a data access object of its own, made by `data_access_factory` (a picklable callable),
-    and logs to this process's log file.
+    and logs through the loggers of this process.
 
     A request read before goes back to the worker that read it, whose data access cache may
     still hold the data; new requests go to the worker with the fewest requests to read.
@@ -132,11 +244,23 @@ class AccessPool:
         # Forking a process that runs Qt and other threads is unsafe: workers start afresh everywhere.
         self._context = multiprocessing.get_context('spawn')
         self._log_queue = self._context.Queue()
-        log_file = setupLogger.FileHandlerIplot.fhandler
-        self._log_file = getattr(log_file, 'baseFilename', None)
-        self._log_listener = logging.handlers.QueueListener(self._log_queue, log_file, respect_handler_level=True)
-        self._log_listener.start()
+        self._log_file = getattr(setupLogger.FileHandlerIplot.fhandler, 'baseFilename', None)
+        # The records of the workers are logged from the thread that runs Qt, if any: log
+        # handlers that show them in a widget can only run there.
+        self._log_timer = self._log_listener = None
+        if QCoreApplication.instance() is not None:
+            self._log_timer = QTimer()
+            self._log_timer.timeout.connect(self._log_worker_records)
+            self._log_timer.start(_POLL_INTERVAL_MS)
+        else:
+            self._log_listener = logging.handlers.QueueListener(self._log_queue, _AsOwnRecord())
+            self._log_listener.start()
         self._executors = {}  # type: Dict[int, ProcessPoolExecutor] # key: worker slot
+        self._ready = {}  # type: Dict[int, Future] # key: worker slot
+        # Requests given to each worker that it has not finished reading, by worker slot.
+        self._loads = defaultdict(int)
+        self._loads_lock = threading.Lock()
+        self._stopped_since = {}  # type: Dict[int, float] # key: worker slot
         self._slots = OrderedDict()  # type: OrderedDict[tuple, int] # key: request key, last used last
         self._cache_epoch = 0
         self._closed = False
@@ -147,7 +271,7 @@ class AccessPool:
         parallel = {ds.source_type in PARALLEL_SOURCE_TYPES for ds in data_sources.values()}
         slots = (list(range(self._workers)) if True in parallel else []) + ([_SERIAL_SLOT] if False in parallel else [])
         for slot in slots:
-            self._executor(slot).submit(_ready)
+            self._executor(slot)
 
     def fetch(self, requests: Iterable[dict], progress: Callable[[int, int], None] = None) \
             -> Optional[Dict[tuple, object]]:
@@ -157,62 +281,138 @@ class AccessPool:
         raised; identical requests run once. While waiting, the GUI keeps painting and running
         its timers, and user input waits for the requests to finish. `progress` is called with
         the number of finished requests and their total. Returns None if the wait is
-        interrupted, e.g. because the application quits.
+        interrupted, e.g. because the application quits. Raises RuntimeError if the worker
+        processes cannot start.
         """
-        unique = {}
-        for params in requests:
-            unique.setdefault(AccessHelper.request_key(params), params)
-        load = defaultdict(int)
-        futures = {key: self._submit(key, params, load) for key, params in unique.items()}
+        self._check_workers()
+        unique = self._unique(requests)
+        futures = {key: self._submit(key, params) for key, params in unique.items()}
         if not self._wait(list(futures.values()), 0, len(unique), progress):
             return None
+        self._check_workers()
         results = {key: _outcome(future) for key, future in futures.items()}
         # A worker that stops fails every request it was given. They are read again one by one,
         # so that a request that stops its worker each time fails on its own.
         stopped = [key for key, result in results.items() if isinstance(result, BrokenProcessPool)]
         if stopped and not self._closed:
-            logger.warning(f"A data access process stopped, reading {len(stopped)} request(s) again")
-        for done, key in enumerate(stopped, start=len(unique) - len(stopped)):
-            result = DataAccessError("The data access process stopped while reading the data")
+            logger.warning(f"A data access process stopped ({results[stopped[0]]}), reading again: "
+                           + ", ".join(str(unique[key].get('varname')) for key in stopped))
+        for key in stopped:
+            result = DataAccessError(_STOPPED)
             if not self._closed:
-                future = self._submit(key, unique[key], defaultdict(int))
-                if not self._wait([future], done, len(unique), progress):
+                future = self._submit(key, unique[key])
+                if not self._wait([future], 0, 1, None):
                     return None
+                self._check_workers()
                 read_again = _outcome(future)
-                if not isinstance(read_again, BrokenProcessPool):
+                if isinstance(read_again, BrokenProcessPool):
+                    logger.warning(f"Reading {unique[key].get('varname')} stops the data access process")
+                else:
                     result = read_again
             results[key] = result
         return results
 
+    def fetch_later(self, requests: Iterable[dict], on_done: Callable[[Dict[tuple, object]], None]) -> PendingFetch:
+        """Run data access requests in the worker processes without waiting for them.
+
+        Once all are read, `on_done` is called in this thread, which runs a Qt event loop, with
+        their results as fetch() returns them, except for those that a worker that stopped did
+        not read. Raises RuntimeError if the worker processes cannot start.
+        """
+        self._check_workers()
+        return PendingFetch(self, {key: self._submit(key, params) for key, params in self._unique(requests).items()},
+                            on_done)
+
     def clear_cache(self):
         """Make every worker clear its data access cache before its next request."""
         self._cache_epoch += 1
+        # No worker holds the data of a request any more.
+        self._slots.clear()
 
     def shutdown(self):
         """Stop the workers without waiting for the requests they are reading."""
+        if self._closed:
+            return
         self._closed = True
-        for slot in list(self._executors):
-            _stop(self._executors.pop(slot))
+        # The records are taken while the workers live: one stopped while it sends a record would
+        # leave it half sent.
+        if self._log_timer is not None:
+            self._log_timer.stop()
+            self._log_worker_records()
         if self._log_listener is not None:
             self._log_listener.stop()
-            self._log_listener = None
-
-    def _submit(self, key: tuple, params: dict, load: Dict[int, int]) -> Future:
-        slot = self._slot(key, params, load)
-        load[slot] += 1
-        try:
-            return self._executor(slot).submit(_read, params, self._cache_epoch)
-        except BrokenProcessPool:
-            # The worker of this slot stopped earlier: a new one takes the request.
+        for slot in list(self._executors):
             _stop(self._executors.pop(slot))
-            return self._executor(slot).submit(_read, params, self._cache_epoch)
+        # Nothing may wait at exit for records that a stopped worker never finished sending.
+        self._log_queue.cancel_join_thread()
+        self._log_queue.close()
 
-    def _slot(self, key: tuple, params: dict, load: Dict[int, int]) -> int:
+    def _log_worker_records(self):
+        while True:
+            try:
+                record = self._log_queue.get_nowait()
+            except queue.Empty:
+                return
+            _log_as_own(record)
+
+    def _release_stuck_executors(self):
+        """Let an executor whose worker stopped while it sent a result see that the worker stopped.
+
+        Its manager thread waits for the rest of the result, which never comes, and the pipe it
+        reads does not end while this process keeps its end open.
+        """
+        now = time.monotonic()
+        for slot, executor in list(self._executors.items()):
+            processes = list((getattr(executor, '_processes', None) or {}).values())
+            if not processes or any(process.is_alive() for process in processes) or getattr(executor, '_broken', False):
+                self._stopped_since.pop(slot, None)
+                continue
+            if now - self._stopped_since.setdefault(slot, now) < _STUCK_AFTER_S:
+                continue
+            writer = getattr(getattr(executor, '_result_queue', None), '_writer', None)
+            if writer is not None and not writer.closed:
+                logger.warning("A data access process stopped while it sent its result")
+                writer.close()
+
+    def _check_workers(self):
+        """Raise RuntimeError if a worker process could not start reading."""
+        for ready in list(self._ready.values()):
+            error = ready.exception() if ready.done() and not ready.cancelled() else None
+            if error is not None:
+                raise RuntimeError(f"The data access processes cannot start: {error}") from error
+
+    @staticmethod
+    def _unique(requests: Iterable[dict]) -> Dict[tuple, dict]:
+        unique = {}
+        for params in requests:
+            unique.setdefault(AccessHelper.request_key(params), params)
+        return unique
+
+    def _submit(self, key: tuple, params: dict) -> Future:
+        slot = self._slot(key, params)
+        try:
+            future = self._executor(slot).submit(_read, params, self._cache_epoch)
+        except BrokenProcessPool:
+            logger.warning("A data access process had stopped, starting a new one")
+            _stop(self._executors.pop(slot))
+            future = self._executor(slot).submit(_read, params, self._cache_epoch)
+        with self._loads_lock:
+            self._loads[slot] += 1
+        future.add_done_callback(partial(self._finished, slot))
+        return future
+
+    def _finished(self, slot: int, _future: Future):
+        # Called from the thread of the executor.
+        with self._loads_lock:
+            self._loads[slot] -= 1
+
+    def _slot(self, key: tuple, params: dict) -> int:
         if not self._is_parallel(params):
             return _SERIAL_SLOT
+        least_loaded = min(range(self._workers), key=lambda candidate: self._loads[candidate])
         slot = self._slots.pop(key, None)
-        if slot is None:
-            slot = min(range(self._workers), key=lambda candidate: load[candidate])
+        if slot is None or self._loads[slot] - self._loads[least_loaded] >= _AFFINITY_MAX_EXCESS:
+            slot = least_loaded
         self._slots[key] = slot
         if len(self._slots) > _REMEMBERED_REQUESTS:
             self._slots.popitem(last=False)
@@ -230,6 +430,8 @@ class AccessPool:
                 initargs=(self._log_queue, self._log_file, self._data_access_factory,
                           AccessHelper.num_samples, AccessHelper.num_samples_override))
             self._executors[slot] = executor
+            # Its first task tells whether the worker can read (see _check_workers).
+            self._ready[slot] = executor.submit(_ready)
         return executor
 
     @staticmethod
@@ -237,24 +439,30 @@ class AccessPool:
         data_source = AccessHelper.da.get_data_source(params.get('data_s_name')) if AccessHelper.da else None
         return getattr(data_source, 'source_type', None) in PARALLEL_SOURCE_TYPES
 
-    @staticmethod
-    def _wait(futures: list, finished: int, total: int, progress: Optional[Callable[[int, int], None]]) -> bool:
+    def _wait(self, futures: list, finished: int, total: int, progress: Optional[Callable[[int, int], None]]) -> bool:
         """Wait for the futures, reporting `finished` plus those done out of `total`. False if interrupted."""
 
-        def all_done() -> bool:
+        loop = QEventLoop() if QCoreApplication.instance() is not None else None
+
+        def check() -> bool:
             done = sum(future.done() for future in futures)
+            if done < len(futures):
+                self._release_stuck_executors()
+            # Before the progress report, which may fail, so that the wait ends anyway.
+            if done == len(futures) and loop is not None:
+                loop.quit()
             if progress is not None:
                 progress(finished + done, total)
             return done == len(futures)
 
-        if QCoreApplication.instance() is None:
-            wait(futures)
-            return all_done()
-        loop = QEventLoop()
+        if loop is None:
+            while wait(futures, timeout=_STUCK_AFTER_S).not_done:
+                self._release_stuck_executors()
+            return check()
         timer = QTimer()
-        timer.timeout.connect(lambda: all_done() and loop.quit())
+        timer.timeout.connect(check)
         timer.start(_POLL_INTERVAL_MS)
-        if not all_done():
+        if not check():
             loop.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
         timer.stop()
         return all(future.done() for future in futures)

@@ -127,6 +127,14 @@ class IplotQtCanvas(QWidget):
         """history: clear undo history. after this, can no longer undo"""
         return self._parser.drop_history()
 
+    def drop_view_reads(self):
+        """Forget the data still being read in the background for views that changed."""
+        self._parser.drop_view_reads()
+
+    def _view_data_read(self):
+        # The data read in the background for a view that changed are drawn: statistics follow them.
+        self.stats(self.get_canvas())
+
     def can_undo(self) -> bool:
         return self._parser._hm.can_undo()
 

@@ -27,11 +27,11 @@
 #  Feb 2023:   Changes by Alberto Luengo
 #              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
 from contextlib import contextmanager
-import copy
 from dataclasses import dataclass, field, fields
 import numbers
 import numpy as np
 import os
+import threading
 import typing
 
 from iplotlib.interface.utils import string_classifier
@@ -807,6 +807,10 @@ class IplotSignalAdapter(ProcessingSignal):
         if self.status_info.result == Result.BUSY:
             return
 
+        deferred = AccessHelper._deferred_reads()
+        if deferred is not None:
+            deferred.signals.append(self)
+
         # Set appropriate status
         self.status_info.reset()
 
@@ -936,12 +940,26 @@ class IplotSignalAdapter(ProcessingSignal):
             return False
 
 
+@dataclass
+class DeferredReads:
+    """The data reads put off within AccessHelper.deferred(), to make in the background."""
+    #: Parameters of the requests put off, by AccessHelper.request_key().
+    requests: typing.Dict[tuple, dict] = field(default_factory=dict)
+    #: Signals whose data access ran within the block. They kept the data of their previous range.
+    signals: typing.List[IplotSignalAdapter] = field(default_factory=list)
+
+    def invalidate(self):
+        """Make the signals access their data again at their next get_data()."""
+        for signal in self.signals:
+            signal._access_md5sum = None
+
+
 class AccessHelper:
     """
         A simple wrapper providing data access.
         Data requests made by get_data() are blocking and occur sequentially i.e, first to enter, first to exit.
         They can be read ahead, all at once, by worker processes (`pool`, an iplotlib.data_access.AccessPool):
-        see data_requests() and prefetched().
+        see data_requests() and prefetched(), or put off to read in the background: see deferred().
         See fetch_data(), _submit_fetch(), on_fetch_done() and request_data()
         For ex. the input and output of request_data() are python builtins i.e, a dictionary
         compatible with pipes/queues/process-pool-executors.
@@ -953,8 +971,8 @@ class AccessHelper:
     num_samples_override = False
     num_samples = 1000
     query_no = 0
-    # Results read ahead, by request_key(), served instead of new reads (see prefetched()).
-    _prefetched = {}
+    # Per thread, the results read ahead that prefetched() serves and the reads deferred() puts off.
+    _context = threading.local()
 
     def __init__(self) -> None:
         pass
@@ -989,12 +1007,31 @@ class AccessHelper:
 
         Empty when the data for that range were already read. A range that changed but is
         still covered by the data in memory is listed, although get_data() does not read it.
+        So are the aliases that the processing of the signal reads over its range.
         """
         if signal.status_info.result == Result.INVALID or not signal.data_access_enabled:
             return []
-        if not string_classifier.is_non_empty(signal.name) or signal._access_md5sum == signal.calculate_data_hash():
-            return []
-        return AccessHelper._fetch_requests(signal)
+        requests = AccessHelper._dependency_requests(signal)
+        if string_classifier.is_non_empty(signal.name) and signal._access_md5sum != signal.calculate_data_hash():
+            requests += AccessHelper._fetch_requests(signal)
+        return requests
+
+    @staticmethod
+    def _dependency_requests(signal: IplotSignalAdapter) -> typing.List[dict]:
+        # As in ParserHelper.evaluate(), the aliases used in x, y and z are read over the signal's range.
+        requests = []
+        for alias in getattr(signal, 'depends_on', None) or ():
+            dep = ParserHelper.env.get(alias)
+            if alias == 'self' or not isinstance(dep, IplotSignalAdapter) or dep is signal or len(dep.children):
+                continue
+            if not dep.data_access_enabled or not string_classifier.is_non_empty(dep.name):
+                continue
+            if (dep.ts_start, dep.ts_end) == (signal.ts_start, signal.ts_end):
+                continue
+            params = AccessHelper.construct_da_params(dep)
+            params.update(tsS=AccessHelper.uda_ts(dep, signal.ts_start), tsE=AccessHelper.uda_ts(dep, signal.ts_end))
+            requests.append(params)
+        return requests
 
     @staticmethod
     def _fetch_requests(signal: IplotSignalAdapter) -> typing.List[dict]:
@@ -1010,25 +1047,54 @@ class AccessHelper:
     def prefetched(results: dict):
         """Within the block, serve the requests found in `results`, by request_key(), instead of reading them.
 
-        A result can be the exception the request raised, which is then raised again.
+        A result can be the exception the request raised, which is then raised again. Only the reads
+        made by the thread that entered the block are served.
         """
-        previous = AccessHelper._prefetched
-        AccessHelper._prefetched = results
+        previous = getattr(AccessHelper._context, 'prefetched', None)
+        AccessHelper._context.prefetched = results
         try:
             yield
         finally:
-            AccessHelper._prefetched = previous
+            AccessHelper._context.prefetched = previous
+
+    @staticmethod
+    @contextmanager
+    def deferred(reads: DeferredReads):
+        """Within the block, put off the requests that are not read ahead (see prefetched()) into `reads`.
+
+        The signals that make them keep the data they have, as if their range had not changed. Once the
+        requests are read, the same calls served with prefetched(), after reads.invalidate(), complete them.
+        Only the requests of the thread that entered the block are put off.
+        """
+        previous = AccessHelper._deferred_reads()
+        AccessHelper._context.deferred = reads
+        try:
+            yield
+        finally:
+            AccessHelper._context.deferred = previous
+
+    @staticmethod
+    def _deferred_reads() -> typing.Optional[DeferredReads]:
+        return getattr(AccessHelper._context, 'deferred', None)
+
+    @staticmethod
+    def _is_prefetched(params: dict) -> bool:
+        prefetched = getattr(AccessHelper._context, 'prefetched', None)
+        return bool(prefetched) and AccessHelper.request_key(params) in prefetched
 
     @staticmethod
     def _read(params: dict) -> dict:
         """_request_data() for the given parameters, unless it was read ahead (see prefetched())."""
-        result = AccessHelper._prefetched.get(AccessHelper.request_key(params)) if AccessHelper._prefetched else None
+        prefetched = getattr(AccessHelper._context, 'prefetched', None)
+        result = prefetched.get(AccessHelper.request_key(params)) if prefetched else None
         if result is None:
+            if prefetched:
+                logger.debug(f"Not read ahead, reading here: {params}")
             return AccessHelper._request_data(**params)
         if isinstance(result, Exception):
             raise result
         # Signals that share a request get buffers of their own, as separate reads would give them.
-        return copy.deepcopy(result)
+        return {name: np.array(value) if isinstance(value, np.ndarray) else value for name, value in result.items()}
 
     @staticmethod
     def uda_ts(signal: IplotSignalAdapter, value):
@@ -1112,6 +1178,10 @@ class AccessHelper:
         :type signal: IplotSignalAdapter
         """
         in_params = AccessHelper.construct_da_params(signal)
+        deferred = AccessHelper._deferred_reads()
+        if deferred is not None and not AccessHelper._is_prefetched(in_params):
+            deferred.requests[AccessHelper.request_key(in_params)] = in_params
+            return
         out_params = dict()
         try:
             result = AccessHelper._read(in_params)
