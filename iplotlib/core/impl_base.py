@@ -727,9 +727,9 @@ class BackendParserBase(ABC):
             # Read the next time the view is drawn.
             more.invalidate()
         if autoscale:
-            self._y_axis_update_callback(impl_plot)
-        else:
-            self.refresh_rulers(impl_plot)
+            # Its new Y range runs the Y axis callback of the backend, as a change of the view does.
+            self.autoscale_y_axis(impl_plot)
+        self.refresh_rulers(impl_plot)
         if self._on_view_data_read is not None:
             self._on_view_data_read()
 

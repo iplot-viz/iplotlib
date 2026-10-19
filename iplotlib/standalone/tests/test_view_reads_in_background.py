@@ -96,8 +96,8 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
         AccessHelper.da = self.da = _DataAccess()
         AccessHelper.pool = None
 
-    def _draw(self, backend):
-        core = Canvas(2, 1, title="background reads", shared_x_axis=True)
+    def _draw(self, backend, autoscale=False):
+        core = Canvas(2, 1, title="background reads", shared_x_axis=True, autoscale=autoscale)
         signals = []
         for name in ('VAR-A', 'VAR-B'):
             plot = PlotXY()
@@ -146,6 +146,24 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
                 self.assertEqual(sorted(self.da.worker_reads), [('VAR-A', *ZOOM), ('VAR-B', *ZOOM)])
                 self.assertTrue(stats.called)
                 self.assertEqual(parser._view_reads, {})
+
+    def test_a_canvas_that_autoscales_fits_the_y_axis_to_the_data_that_arrive(self):
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                qt_canvas, parser, impls, signals = self._draw(backend, autoscale=True)
+                AccessHelper.pool = pool = _Pool()
+                parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                self.app.processEvents()
+
+                with self.assertNoLogs('iplotlib.core.impl_base', level='ERROR'), \
+                        self.assertNoLogs('iplotlib.data_access.access_pool', level='ERROR'):
+                    pool.arrive()
+                    self.app.processEvents()
+
+                self.assertEqual([self._drawn(parser, impl) for impl in impls], [[[60.0]], [[60.0]]])
+                for impl in impls:
+                    low, high = parser.get_oaw_axis_limits(impl, 1)
+                    self.assertTrue(0 < low < 60.0 < high, (low, high))
 
     def test_a_new_zoom_replaces_one_still_reading(self):
         for backend in ('pyqt', 'matplotlib'):
