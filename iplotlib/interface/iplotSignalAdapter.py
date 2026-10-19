@@ -26,6 +26,8 @@
 #              - The alignment modifies the data_store. After evaluation, restore the original buffers.
 #  Feb 2023:   Changes by Alberto Luengo
 #              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
+from contextlib import contextmanager
+import copy
 from dataclasses import dataclass, field, fields
 import numbers
 import numpy as np
@@ -936,19 +938,23 @@ class IplotSignalAdapter(ProcessingSignal):
 
 class AccessHelper:
     """
-        A simple wrapper providing single threaded data access.
-        All Data requests are blocking and occur sequentially i.e, first to enter, first to exit.
-        Concurrent execution is not implemented but the infrastructure is set up to not come in your way,
-        should you wish to introduce concurrency.
+        A simple wrapper providing data access.
+        Data requests made by get_data() are blocking and occur sequentially i.e, first to enter, first to exit.
+        They can be read ahead, all at once, by worker processes (`pool`, an iplotlib.data_access.AccessPool):
+        see data_requests() and prefetched().
         See fetch_data(), _submit_fetch(), on_fetch_done() and request_data()
         For ex. the input and output of request_data() are python builtins i.e, a dictionary
         compatible with pipes/queues/process-pool-executors.
     """
 
     da = None
+    #: Worker processes that read data ahead of the blocking requests (an iplotlib.data_access.AccessPool), if any.
+    pool = None
     num_samples_override = False
     num_samples = 1000
     query_no = 0
+    # Results read ahead, by request_key(), served instead of new reads (see prefetched()).
+    _prefetched = {}
 
     def __init__(self) -> None:
         pass
@@ -971,6 +977,58 @@ class AccessHelper:
             if ds is None or ds.source_type == 'CODAC_UDA':
                 params['retType'] = 'doubleCalibrated'
         return params
+
+    @staticmethod
+    def request_key(params: dict) -> tuple:
+        """Hashable identity of the data access parameters built by construct_da_params()."""
+        return tuple(sorted((name, repr(value)) for name, value in params.items()))
+
+    @staticmethod
+    def data_requests(signal: IplotSignalAdapter) -> typing.List[dict]:
+        """Data access parameters of the requests get_data() makes to read the signal's current range.
+
+        Empty when the data for that range were already read. A range that changed but is
+        still covered by the data in memory is listed, although get_data() does not read it.
+        """
+        if signal.status_info.result == Result.INVALID or not signal.data_access_enabled:
+            return []
+        if not string_classifier.is_non_empty(signal.name) or signal._access_md5sum == signal.calculate_data_hash():
+            return []
+        return AccessHelper._fetch_requests(signal)
+
+    @staticmethod
+    def _fetch_requests(signal: IplotSignalAdapter) -> typing.List[dict]:
+        # As in IplotSignalAdapter._fetch_data(), a signal with children reads theirs instead of its own.
+        if not len(signal.children):
+            return [AccessHelper.construct_da_params(signal)]
+        return [params for child in signal.children
+                if child.data_access_enabled and child._access_md5sum != child.calculate_data_hash()
+                for params in AccessHelper._fetch_requests(child)]
+
+    @staticmethod
+    @contextmanager
+    def prefetched(results: dict):
+        """Within the block, serve the requests found in `results`, by request_key(), instead of reading them.
+
+        A result can be the exception the request raised, which is then raised again.
+        """
+        previous = AccessHelper._prefetched
+        AccessHelper._prefetched = results
+        try:
+            yield
+        finally:
+            AccessHelper._prefetched = previous
+
+    @staticmethod
+    def _read(params: dict) -> dict:
+        """_request_data() for the given parameters, unless it was read ahead (see prefetched())."""
+        result = AccessHelper._prefetched.get(AccessHelper.request_key(params)) if AccessHelper._prefetched else None
+        if result is None:
+            return AccessHelper._request_data(**params)
+        if isinstance(result, Exception):
+            raise result
+        # Signals that share a request get buffers of their own, as separate reads would give them.
+        return copy.deepcopy(result)
 
     @staticmethod
     def uda_ts(signal: IplotSignalAdapter, value):
@@ -1056,7 +1114,7 @@ class AccessHelper:
         in_params = AccessHelper.construct_da_params(signal)
         out_params = dict()
         try:
-            result = AccessHelper._request_data(**in_params)
+            result = AccessHelper._read(in_params)
             out_params.update(result)
             signal.isDownsampled = result['isds']
             # Update pulse_nb and legend label with the resolved value (for 0/-1 special pulses)
