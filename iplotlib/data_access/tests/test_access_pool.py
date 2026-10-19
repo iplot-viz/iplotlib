@@ -1,12 +1,15 @@
 """Tests for AccessPool: data access requests run in worker processes, results come back
 by request key, and the GUI thread keeps running while it waits."""
 
+import ctypes
 import gc
 import logging
 import os
 import signal
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import unittest
 import weakref
@@ -16,6 +19,7 @@ from unittest.mock import patch
 import numpy as np
 from PySide6.QtCore import QTimer
 
+from iplotDataAccess.dataCommon import DataObj
 from iplotLogging import setupLogger
 
 import iplotlib.data_access.access_pool as access_pool
@@ -69,9 +73,37 @@ class _WorkerDataAccess:
         return SimpleNamespace(errcode=0, errdesc='', xdata=T0 + np.arange(len(values)),
                                ydata=np.asarray(values, dtype=float), xunit='ns', yunit='A', resolved_pulse=None)
 
+    def get_archive_window(self, data_s_name, **kwargs):
+        name = kwargs['varname']
+        if name == 'crash':
+            os._exit(3)
+        if name == 'crash-once' and not os.path.exists(kwargs['marker']):
+            open(kwargs['marker'], 'w').close()
+            os._exit(3)
+        if name == 'stall':
+            time.sleep(30)
+        if name == 'fail':
+            raise ValueError("no archive for fail")
+        held = _hold_gil(0.8) if name == 'gil' else 0.0
+        reply = DataObj()
+        reply.xdata, reply.ydata = T0 + np.arange(3), np.array([os.getpid(), held, float(kwargs['tsS'])])
+        reply.xunit, reply.yunit = 'ns', 'A'
+        return reply
+
     def clear_cache(self):
         global _cache_clears
         _cache_clears += 1
+
+
+def _hold_gil(seconds: float) -> float:
+    """Sleep in C for `seconds` keeping the GIL, as a compiled data access client can keep it while it
+    reads: ctypes calls the functions of a PyDLL without releasing it. The time it took."""
+    start = time.perf_counter()
+    if os.name == 'nt':
+        ctypes.PyDLL('kernel32').Sleep(int(seconds * 1000))
+    else:
+        ctypes.PyDLL(None).usleep(int(seconds * 1e6))
+    return time.perf_counter() - start
 
 
 def _worker_data_access():
@@ -80,6 +112,11 @@ def _worker_data_access():
 
 def _broken_data_access():
     raise RuntimeError("no configuration")
+
+
+def _slow_data_access():
+    time.sleep(10)
+    return _WorkerDataAccess()
 
 
 class _ParentDataAccess:
@@ -309,6 +346,28 @@ class AccessPoolTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             pool.fetch([_params('plain')])
 
+    def test_a_shutdown_while_the_workers_start_ends_the_requests_waiting_for_them(self):
+        pool = AccessPool(1, data_access_factory=_slow_data_access)
+        plain = _params('plain')
+        QTimer.singleShot(1000, pool.shutdown)
+
+        results = pool.fetch([plain])
+        error, _ = self._in_thread(lambda: self._call('plain', pool))
+
+        self.assertIsInstance(results[_key(plain)], DataAccessError)
+        self.assertEqual(str(results[_key(plain)]), access_pool._STOPPED)
+        self.assertIsInstance(error, RuntimeError)
+        self.assertIn("shut down", str(error))
+
+    def test_a_call_waiting_for_workers_that_start_ends_when_the_pool_shuts_down(self):
+        pool = AccessPool(1, data_access_factory=_slow_data_access)
+        QTimer.singleShot(1000, pool.shutdown)
+
+        error, _ = self._in_thread(lambda: self._call('plain', pool))
+
+        self.assertIsInstance(error, DataAccessError)
+        self.assertEqual(str(error), access_pool._STOPPED)
+
     def test_start_launches_the_workers_of_the_configured_sources(self):
         pool = self._own_pool()
 
@@ -385,6 +444,112 @@ class AccessPoolTests(unittest.TestCase):
 
         self.assertNotEqual(pids[_key(first)]['d1'][0], pids[_key(second)]['d1'][0])
         self.assertEqual(again[_key(second)]['d1'][0], pids[_key(second)]['d1'][0])
+
+    def _in_thread(self, target):
+        """What `target` returns, or raises, run in another thread while this one runs its Qt events, and
+        the longest time this thread could not run them meanwhile."""
+        outcome, ticks = [], []
+
+        def run():
+            try:
+                outcome.append(target())
+            except Exception as e:
+                outcome.append(e)
+
+        timer = QTimer()
+        timer.timeout.connect(lambda: ticks.append(time.perf_counter()))
+        timer.start(10)
+        thread = threading.Thread(target=run)
+        ticks.append(time.perf_counter())
+        thread.start()
+        while thread.is_alive():
+            self.app.processEvents()
+            time.sleep(0.005)
+        ticks.append(time.perf_counter())
+        timer.stop()
+        return outcome[0], max(b - a for a, b in zip(ticks, ticks[1:]))
+
+    def _call(self, varname, pool=None, **kwargs):
+        return (pool or self.pool).call('get_archive_window', 'uda', varname=varname, tsS='5', tsE='6', **kwargs)
+
+    def test_a_call_from_another_thread_reads_in_a_worker_while_the_gui_thread_runs(self):
+        reply, stall = self._in_thread(lambda: self._call('gil'))
+
+        pid, held, start = reply.ydata
+        self.assertNotEqual(pid, os.getpid())
+        self.assertEqual((reply.xunit, reply.yunit, start), ('ns', 'A', 5.0))
+        np.testing.assert_array_equal(reply.xdata, T0 + np.arange(3))
+        self.assertLess(stall, held / 2)
+
+    def test_the_same_read_in_a_thread_of_this_process_stops_the_gui_thread(self):
+        # What the worker processes spare the GUI thread: the read keeps the GIL.
+        reply, stall = self._in_thread(lambda: _WorkerDataAccess().get_archive_window('uda', varname='gil', tsS='5'))
+
+        self.assertGreater(stall, reply.ydata[1] / 2)
+
+    def test_calls_from_several_threads_at_once_get_their_own_replies(self):
+        replies = {}
+
+        def calls(thread):
+            for i in range(5):
+                start = thread * 100 + i
+                replies[start] = self.pool.call('get_archive_window', 'uda' if i % 2 else 'imas',
+                                                varname='plain', tsS=str(start))
+
+        threads = [threading.Thread(target=calls, args=(thread,)) for thread in range(4)]
+        for thread in threads:
+            thread.start()
+        fetched = self.pool.fetch([_params('plain', end=T1 + 300)])
+        for thread in threads:
+            thread.join(60)
+
+        self.assertEqual(sorted(replies), sorted(thread * 100 + i for thread in range(4) for i in range(5)))
+        self.assertTrue(all(reply.ydata[2] == start for start, reply in replies.items()))
+        np.testing.assert_array_equal(list(fetched.values())[0]['d1'], [1.0, 2.0])
+        # The executors count a request out after they hand its reply over.
+        deadline = time.monotonic() + 5
+        while any(self.pool._loads.values()) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(set(self.pool._loads.values()), {0})
+
+    def test_a_call_whose_worker_stops_is_made_once_more(self):
+        marker = os.path.join(tempfile.mkdtemp(), 'stopped')
+        self.addCleanup(os.rmdir, os.path.dirname(marker))
+        self.addCleanup(os.remove, marker)
+        pool = self._own_pool()
+
+        reply, _ = self._in_thread(lambda: self._call('crash-once', pool, marker=marker))
+        error, _ = self._in_thread(lambda: self._call('crash', pool))
+
+        self.assertTrue(os.path.exists(marker))
+        self.assertEqual(reply.ydata[2], 5.0)
+        self.assertIsInstance(error, DataAccessError)
+        self.assertEqual(str(error), access_pool._STOPPED)
+
+    def test_a_method_that_fails_raises_its_message(self):
+        with self.assertRaisesRegex(DataAccessError, "no archive for fail"):
+            self._call('fail')
+
+    def test_a_call_still_waiting_when_the_pool_shuts_down_ends(self):
+        pool = AccessPool(1, data_access_factory=_worker_data_access)
+        # The worker takes a few seconds to start; the call then reads for 30 s.
+        QTimer.singleShot(8000, pool.shutdown)
+
+        started = time.perf_counter()
+        error, _ = self._in_thread(lambda: self._call('stall', pool))
+
+        self.assertLess(time.perf_counter() - started, 15)
+        self.assertIsInstance(error, DataAccessError)
+        with self.assertRaises(RuntimeError):
+            self._call('plain', pool)
+
+    def test_a_call_to_workers_that_cannot_set_up_data_access_says_so(self):
+        pool = self._own_pool(factory=_broken_data_access)
+
+        error, _ = self._in_thread(lambda: self._call('plain', pool))
+
+        self.assertIsInstance(error, RuntimeError)
+        self.assertIn("could not be set up", str(error))
 
 
 if __name__ == '__main__':

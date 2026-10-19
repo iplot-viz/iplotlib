@@ -10,9 +10,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import numpy as np
+from iplotDataAccess.dataCommon import DataObj
 
 import iplotlib.data_access.streamer as streamer_module
+from iplotlib.data_access.access_pool import AccessPool
 from iplotlib.data_access.streamer import CanvasStreamer, _inject_period_s
+from iplotlib.interface.iplotSignalAdapter import AccessHelper, DataAccessError
+from iplotlib.qt.testing import ensure_qapp
 
 
 class _FakeBuf:
@@ -1557,3 +1561,128 @@ class ReceiverLoopTests(unittest.TestCase):
         receiver = spawned['receiver']
         self.assertIs(receiver.func.__func__, CanvasStreamer._receiver_loop)
         self.assertEqual(receiver.args, ('ds', ['v']))
+
+
+class _ArchiveDataAccess:
+    """Data access of the application and of its worker processes: the archive window of a variable is a
+    ramp over the requested range."""
+
+    ds_list = {'ds': SimpleNamespace(source_type='CODAC_UDA')}
+
+    def get_data_source(self, name):
+        return self.ds_list.get(name)
+
+    def get_archive_window(self, data_s_name, **kwargs):
+        reply = DataObj()
+        reply.xdata = np.linspace(int(kwargs['tsS']), int(kwargs['tsE']), 5).astype(np.int64)
+        reply.ydata = np.arange(5, dtype=float) + len(kwargs['varname'])
+        reply.xunit, reply.yunit = 'ns', 'V'
+        return reply
+
+
+def _archive_data_access():
+    return _ArchiveDataAccess()
+
+
+class ArchiveInWorkerProcessesTests(unittest.TestCase):
+    """With the worker processes of the application, the archive is read in them, with the
+    arguments and the replies of a read in the streaming threads; without them, or for a data
+    access of its own, the streaming reads it itself as before."""
+
+    def setUp(self):
+        for name in ('da', 'pool'):
+            self.addCleanup(setattr, AccessHelper, name, getattr(AccessHelper, name))
+        AccessHelper.da = self.da = MagicMock()
+        AccessHelper.pool = None
+
+    READS = {
+        'archive window': ('get_archive_window', lambda streamer: streamer._fetch_archive_range(
+            'ds', _FakeSignal(name='var'), 10, 20)),
+        'envelope': ('get_envelope', lambda streamer: streamer._fetch_archive_range(
+            'ds', _FakeSignal(name='var', envelope=True), 10, 20)),
+        'last value': ('get_archive_window', lambda streamer: streamer._fetch_last_archive_value(
+            'ds', _FakeSignal(name='var', extremities=True), end_ns=999)),
+    }
+
+    def test_each_archive_read_runs_in_a_worker_with_the_arguments_of_a_read_here(self):
+        reply = _FakeArchiveResponse(x=[1, 2], y=[3.0, 4.0], xunit='ns', yunit='V', ymin=[2.0, 3.0], ymax=[4.0, 5.0])
+        for read, (method, fetch) in self.READS.items():
+            with self.subTest(read=read):
+                getattr(self.da, method).reset_mock()
+                getattr(self.da, method).return_value = reply
+                AccessHelper.pool = None
+                here = fetch(CanvasStreamer(self.da))
+                expected = getattr(self.da, method).call_args
+                getattr(self.da, method).reset_mock()
+                AccessHelper.pool = pool = MagicMock()
+                pool.call.return_value = reply
+
+                in_worker = fetch(CanvasStreamer(self.da))
+
+                pool.call.assert_called_once_with(method, *expected.args, **expected.kwargs)
+                getattr(self.da, method).assert_not_called()
+                self.assertEqual(in_worker, here)
+
+    def test_a_streamer_with_a_data_access_of_its_own_reads_it_itself(self):
+        AccessHelper.pool = pool = MagicMock()
+        own = MagicMock()
+        own.get_archive_window.return_value = _FakeArchiveResponse(x=[1], y=[2.0])
+
+        CanvasStreamer(own)._fetch_archive_range('ds', _FakeSignal(name='var'), 10, 20)
+
+        own.get_archive_window.assert_called_once()
+        pool.call.assert_not_called()
+
+    def test_when_the_workers_cannot_read_the_archive_the_streaming_threads_read_it_from_then_on(self):
+        AccessHelper.pool = pool = MagicMock()
+        pool.call.side_effect = RuntimeError("The data access processes cannot start")
+        self.da.get_archive_window.return_value = _FakeArchiveResponse(x=[1], y=[2.0])
+        streamer = CanvasStreamer(self.da)
+
+        with self.assertLogs(streamer_module.logger, level='WARNING') as logs:
+            first = streamer._fetch_archive_range('ds', _FakeSignal(name='var'), 10, 20)
+            second = streamer._fetch_archive_range('ds', _FakeSignal(name='var'), 20, 30)
+
+        self.assertEqual(pool.call.call_count, 1)
+        self.assertEqual(self.da.get_archive_window.call_count, 2)
+        self.assertEqual(len(logs.records), 1)
+        self.assertEqual((first[0].tolist(), second[0].tolist()), ([1], [1]))
+
+    def test_a_read_that_fails_in_a_worker_is_a_failed_read(self):
+        AccessHelper.pool = pool = MagicMock()
+        pool.call.side_effect = DataAccessError("no data for var")
+
+        with self.assertLogs(streamer_module.logger, level='WARNING') as logs:
+            result = CanvasStreamer(self.da)._fetch_archive_range('ds', _FakeSignal(name='var'), 10, 20)
+
+        self.assertEqual(result, (None,) * 6)
+        self.assertIn("Archive fetch failed for var: no data for var", logs.output[0])
+        self.da.get_archive_window.assert_not_called()
+
+    def test_a_backfill_with_worker_processes_injects_the_archive_reply(self):
+        ensure_qapp()
+        AccessHelper.da = data_access = _ArchiveDataAccess()
+        AccessHelper.pool = pool = AccessPool(1, data_access_factory=_archive_data_access)
+        self.addCleanup(pool.shutdown)
+        calls = []
+        call_in_worker = pool.call
+
+        def call(method, ds, **kwargs):
+            calls.append((method, ds, kwargs))
+            return call_in_worker(method, ds, **kwargs)
+
+        pool.call = call
+        signal = _FakeSignal(name='var')
+        streamer = CanvasStreamer(data_access)
+        streamer._max_points = 0
+        callback = MagicMock()
+
+        streamer._archive_backfill({'ds': [signal]}, 3600 * int(1e9), callback)
+
+        (method, ds, kwargs), = calls
+        expected = data_access.get_archive_window(ds, **kwargs)
+        injected = signal.inject_external.call_args.kwargs
+        np.testing.assert_array_equal(injected['d0'], expected.xdata)
+        np.testing.assert_array_equal(injected['d1'], expected.ydata)
+        self.assertEqual((injected['d0_unit'], injected['d1_unit']), ('ns', 'V'))
+        callback.assert_called_once_with(signal)
