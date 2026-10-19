@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
+from PySide6.QtCore import QTimer
 
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
@@ -164,6 +165,38 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
                 for impl in impls:
                     low, high = parser.get_oaw_axis_limits(impl, 1)
                     self.assertTrue(0 < low < 60.0 < high, (low, high))
+
+    def test_redo_shows_the_y_axis_fitted_to_the_data_that_arrived(self):
+        for backend in ('pyqt', 'matplotlib'):
+            for during_commit in (False, True):
+                with self.subTest(backend=backend, during_commit=during_commit):
+                    qt_canvas, parser, impls, signals = self._draw(backend, autoscale=True)
+                    AccessHelper.pool = pool = _Pool()
+                    qt_canvas.stage_view_lim_cmd(impls[0], name='Zoom')
+                    parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                    if during_commit:
+                        # As the data a worker still holds in its cache arrive.
+                        QTimer.singleShot(0, pool.arrive)
+                    while len(qt_canvas._staging_cmds):
+                        qt_canvas.commit_view_lim_cmd(impls[0])
+                    while len(qt_canvas._commitd_cmds):
+                        qt_canvas.push_view_lim_cmd()
+                    self._arrive_all(pool)
+                    fitted = [parser.get_oaw_axis_limits(impl, 1) for impl in impls]
+                    self.assertTrue(all(0 < low < 60.0 < high for low, high in fitted), fitted)
+
+                    parser._hm.undo()
+                    self._arrive_all(pool)
+                    parser._hm.redo()
+                    self._arrive_all(pool)
+
+                    np.testing.assert_allclose([parser.get_oaw_axis_limits(impl, 1) for impl in impls], fitted)
+
+    def _arrive_all(self, pool):
+        self.app.processEvents()
+        while pool.pending():
+            pool.arrive()
+            self.app.processEvents()
 
     def test_a_new_zoom_replaces_one_still_reading(self):
         for backend in ('pyqt', 'matplotlib'):

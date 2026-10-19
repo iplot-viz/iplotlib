@@ -668,11 +668,13 @@ class IplotQtCanvas(QWidget):
         """push a view command onto their history manager"""
         try:
             cmd = self._commitd_cmds.pop()
-            self._parser._hm.done(cmd)
-            logger.debug(f"Pushed {cmd}")
-            self.cmdDone.emit(cmd)
         except IndexError:
             return
+        self._parser._hm.done(cmd)
+        # Data read in the background can arrive while the command is committed.
+        self._parser._update_view_cmd()
+        logger.debug(f"Pushed {cmd}")
+        self.cmdDone.emit(cmd)
 
     def _flush_view(self):
         """

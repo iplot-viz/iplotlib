@@ -729,9 +729,29 @@ class BackendParserBase(ABC):
         if autoscale:
             # Its new Y range runs the Y axis callback of the backend, as a change of the view does.
             self.autoscale_y_axis(impl_plot)
+            self._update_view_cmd()
         self.refresh_rulers(impl_plot)
         if self._on_view_data_read is not None:
             self._on_view_data_read()
+
+    def _update_view_cmd(self):
+        """Keep in the last view command of the history the Y ranges fitted to data read in the background
+        after it was done, as long as it still describes the view: redo then shows what it showed, as when
+        the data are read at once."""
+        cmd = self._hm.get_next_undo_cmd()
+        recorded = getattr(cmd, 'new_lim', None)
+        if not recorded:
+            return
+        current = []
+        for limits in recorded:
+            impl_plot = self._impl_plot_of(limits)
+            if impl_plot is None:
+                return
+            now = self.get_plot_limits(impl_plot)
+            if now.axes_ranges[0].get_limits() != limits.axes_ranges[0].get_limits():
+                return
+            current.append(now)
+        cmd.new_lim = current
 
     def _cancel_view_read(self, owner: Any):
         pending = self._view_reads.pop(owner, None)
@@ -2430,13 +2450,7 @@ class BackendParserBase(ABC):
         plot = limits.plot_ref()
         ax_limits = limits.axes_ranges
         signal_limits = limits.signals_ranges
-        impl_plot = None
-
-        # Resolve the implementation plot from the recorded signals.
-        for signal_limit in signal_limits:
-            signal = signal_limit.signal_ref()
-            if impl_plot is None:
-                impl_plot = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))
+        impl_plot = self._impl_plot_of(limits)
 
         # Set X limits first. Setting the implementation limits fires the shared-x
         # propagation callback while every plot still holds its pre-restore ts
@@ -2491,6 +2505,14 @@ class BackendParserBase(ABC):
         # Restore slider-specific limits, if the plot has one
         if isinstance(plot, PlotXYWithSlider) and self._pm.get_value(self.canvas, 'shared_x_axis'):
             self.set_impl_plot_slider_limits(plot, *limits.sliders_ranges[0].get_limits())
+
+    def _impl_plot_of(self, limits: IplPlotViewLimits) -> Any:
+        """The implementation plot of recorded limits, found from their signals; None for a plot the focus hides."""
+        for signal_limit in limits.signals_ranges:
+            impl_plot = self._signal_impl_plot_lut.get(self.signal_lut_key(signal_limit.signal_ref()))
+            if impl_plot is not None:
+                return impl_plot
+        return None
 
     def _set_model_plot_limits(self, plot, ax_limits, signal_limits):
         """
