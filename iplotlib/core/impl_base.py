@@ -40,8 +40,9 @@ from iplotlib.interface.iplotSignalAdapter import AccessHelper, DeferredReads, I
 
 logger = Sl.get_logger(__name__)
 
-# Background reads in a row for one change of the view: each next one reads a range that changed
-# meanwhile, e.g. the signals' own range that undo restores after the view's.
+# Background reads in a row for one change of the view: each next one reads what the previous one
+# showed to be missing, e.g. the signals' own range that undo restores after the view's, or an alias
+# that an expression evaluates once the data of its own variable arrive.
 _VIEW_READ_ROUNDS = 3
 
 
@@ -684,10 +685,11 @@ class BackendParserBase(ABC):
             self._cancel_view_read(owner)
         # As the Y axis callback that follows a change of the view (see _y_axis_update_callback).
         autoscale = self._pm.get_value(self.canvas, 'autoscale') and not getattr(self.canvas, 'undo_redo', False)
-        self._read_in_background(owner, impl_plot, step, reads, autoscale, 1)
+        self._read_in_background(owner, impl_plot, step, reads, autoscale, 1, {})
 
     def _read_in_background(self, owner: Any, impl_plot: Any, step: Callable[[], None], reads: DeferredReads,
-                            autoscale: bool, rounds: int):
+                            autoscale: bool, rounds: int, read: dict):
+        """Read `reads` for the change of the view that `step` draws; `read` holds what its earlier rounds read."""
         if not reads.requests:
             return
         pool = AccessHelper.pool
@@ -695,7 +697,7 @@ class BackendParserBase(ABC):
             try:
                 self._view_reads[owner] = pool.fetch_later(
                     reads.requests.values(), partial(self._view_data_read, owner, impl_plot, step, reads, autoscale,
-                                                     rounds))
+                                                     rounds, read))
                 return
             except Exception:
                 logger.exception("Reading in the worker processes failed, data are read in this thread from now on")
@@ -704,13 +706,16 @@ class BackendParserBase(ABC):
         step()
 
     def _view_data_read(self, owner: Any, impl_plot: Any, step: Callable[[], None], reads: DeferredReads,
-                        autoscale: bool, rounds: int, results: dict):
+                        autoscale: bool, rounds: int, read: dict, results: dict):
         """Run `step` again with the data read in the background for it (see _process_view_change)."""
         self._view_reads.pop(owner, None)
+        # The signals that the step reads again get what the earlier rounds read, as an expression
+        # does once the alias it needs arrives.
+        results = {**read, **results}
         if self._interactive_pan:
             # The view is still moving: drawn when it stops, unless it then needs other data.
             self._arrived_in_pan[owner] = partial(self._view_data_read, owner, impl_plot, step, reads, autoscale,
-                                                  rounds, results)
+                                                  rounds, {}, results)
             return
         reads.invalidate()
         more = DeferredReads()
@@ -721,9 +726,9 @@ class BackendParserBase(ABC):
         finally:
             self._update = updating
         if rounds < _VIEW_READ_ROUNDS:
-            self._read_in_background(owner, impl_plot, step, more, autoscale, rounds + 1)
+            self._read_in_background(owner, impl_plot, step, more, autoscale, rounds + 1, results)
         elif more.requests:
-            logger.warning(f"The range of the view changed {rounds} times while its data were read")
+            logger.warning(f"The data of the view were still incomplete after {rounds} reads in the background")
             # Read the next time the view is drawn.
             more.invalidate()
         if autoscale:

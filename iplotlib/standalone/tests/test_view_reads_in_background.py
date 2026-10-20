@@ -87,6 +87,10 @@ class _Pool:
             fetch.arrive()
 
 
+def _variable(name, **kwargs):
+    return SignalXY(name=name, label=name, data_source='uda', ts_start=T0, ts_end=T0 + HOUR, **kwargs)
+
+
 class ViewReadsInBackgroundTest(unittest.TestCase):
     def setUp(self):
         self.app = ensure_qapp()
@@ -97,13 +101,13 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
         AccessHelper.da = self.da = _DataAccess()
         AccessHelper.pool = None
 
-    def _draw(self, backend, autoscale=False):
-        core = Canvas(2, 1, title="background reads", shared_x_axis=True, autoscale=autoscale)
-        signals = []
-        for name in ('VAR-A', 'VAR-B'):
+    def _draw(self, backend, autoscale=False, signals=None):
+        """A plot for each signal, VAR-A and VAR-B unless given, sharing the time axis."""
+        signals = signals or [_variable(name) for name in ('VAR-A', 'VAR-B')]
+        core = Canvas(len(signals), 1, title="background reads", shared_x_axis=True, autoscale=autoscale)
+        for signal in signals:
             plot = PlotXY()
-            signals.append(SignalXY(name=name, label=name, data_source='uda', ts_start=T0, ts_end=T0 + HOUR))
-            plot.add_signal(signals[-1])
+            plot.add_signal(signal)
             plot.axes[0].is_date = True
             core.add_plot(plot, 0)
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=core)
@@ -114,7 +118,7 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
         self.da.reads.clear()
         self.da.worker_reads.clear()
         parser = qt_canvas._parser
-        impls = [parser._plot_impl_plot_lut.get(id(core.plots[0][row]))[0] for row in range(2)]
+        impls = [parser._plot_impl_plot_lut.get(id(core.plots[0][row]))[0] for row in range(len(signals))]
         return qt_canvas, parser, impls, signals
 
     @staticmethod
@@ -192,11 +196,49 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
 
                     np.testing.assert_allclose([parser.get_oaw_axis_limits(impl, 1) for impl in impls], fitted)
 
-    def _arrive_all(self, pool):
+    def _arrive_all(self, pool, last_first=False):
+        """Let every read in the background arrive, those asked for last first if `last_first`."""
         self.app.processEvents()
-        while pool.pending():
-            pool.arrive()
+        while pool is not None and pool.pending():
+            pending = pool.pending()
+            for fetch in reversed(pending) if last_first else pending:
+                if fetch in pool.pending():
+                    fetch.arrive()
             self.app.processEvents()
+
+    def test_the_expressions_of_an_alias_drawn_in_the_next_plots_get_the_new_range_too(self):
+        for backend in ('pyqt', 'matplotlib'):
+            for workers, last_first in ((True, False), (True, True), (False, False)):
+                with self.subTest(backend=backend, workers=workers, last_first=last_first):
+                    ParserHelper.env.clear()
+                    signals = [_variable('VAR-A', alias='a'), _variable('${a}*2', alias='p'), _variable('${p}+1')]
+                    qt_canvas, parser, impls, _ = self._draw(backend, signals=signals)
+                    AccessHelper.pool = pool = _Pool() if workers else None
+
+                    parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                    self._arrive_all(pool, last_first)
+
+                    drawn = {signal.label: self._drawn(parser, impl) for signal, impl in zip(signals, impls)}
+                    self.assertEqual(drawn, {'a': [[60.0]], 'p': [[120.0]], '${p}+1': [[121.0]]})
+                    if workers:
+                        self.assertEqual(self.da.reads, [])
+
+    def test_a_signal_whose_y_uses_another_alias_gets_the_data_of_both(self):
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                ParserHelper.env.clear()
+                _variable('VAR-A', alias='a')  # read by the expression only
+                signal = _variable('VAR-B', y_expr='${self}.data + ${a}.data')
+                qt_canvas, parser, impls, _ = self._draw(backend, signals=[signal])
+                AccessHelper.pool = pool = _Pool()
+
+                with self.assertNoLogs('iplotlib.core.impl_base', level='WARNING'):
+                    parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                    self._arrive_all(pool)
+                signal.get_data()
+
+                self.assertEqual(self._drawn(parser, impls[0]), [[120.0]])
+                self.assertEqual(self.da.reads, [])
 
     def test_a_new_zoom_replaces_one_still_reading(self):
         for backend in ('pyqt', 'matplotlib'):

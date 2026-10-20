@@ -180,6 +180,18 @@ class PrefetchedTests(unittest.TestCase):
 
         self.assertEqual(self.stub.reads, ['VAR-A'])
 
+    def test_the_latest_pulse_read_ahead_is_not_read_again_under_its_number(self):
+        # Pulse 0 asks for the latest pulse; the reply says which one it is.
+        signal = _signal(pulse_nb='0')
+
+        with AccessHelper.prefetched(self._results(signal, dict(_result([5.0, 6.0]), resolved_pulse='42'))):
+            signal.get_data()
+        signal.get_data()
+
+        self.assertEqual(self.stub.reads, [])
+        self.assertEqual(signal.pulse_nb, '42')
+        np.testing.assert_array_equal(np.asarray(signal.y_data), [5.0, 6.0])
+
     def test_results_are_not_served_after_the_block(self):
         before, after = _signal(), _signal()
         with AccessHelper.prefetched(self._results(before, _result([1.0]))):

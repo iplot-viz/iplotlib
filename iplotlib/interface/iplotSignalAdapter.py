@@ -189,6 +189,10 @@ class IplotSignalAdapter(ProcessingSignal):
 
         # 3. Help keep track of data access parameters.
         self._access_md5sum = None
+        # The request put off within AccessHelper.deferred(), until it is read.
+        self._put_off = None
+        # Data accessed but not processed yet, e.g. read for an expression that uses this signal.
+        self._processing_due = False
         # One-shot marker: the current ts range is a genuine time window that was
         # propagated from a shared-time zoom (see set_time_window()).
         self._ts_is_time_window = False
@@ -817,10 +821,15 @@ class IplotSignalAdapter(ProcessingSignal):
         if len(self.children):
             isDownsampled = False
             alias_map = {}
+            put_off = None
             # ask child signals to fetch data
             for child in self.children:
                 if child._needs_refresh():
                     child._fetch_data()
+                if len(child.children) and getattr(child, '_processing_due', False):
+                    # An expression hands on the data it evaluates, which its processing puts in its data store.
+                    child._do_data_processing()
+                put_off = put_off or getattr(child, '_put_off', None)
                 if child.status_info.result == Result.FAIL:
                     self.set_da_fail(msg=child.status_info.msg)  # get exact reason for failure from child.
                     break
@@ -838,9 +847,12 @@ class IplotSignalAdapter(ProcessingSignal):
                 self.alias_map.clear()
                 self.alias_map.update(alias_map)
                 self.set_da_success()
+            # The data of a child read in the background are those of the expression too.
+            self._put_off = put_off
         else:
             # submit a fetch request for ourself.
             CachingAccessHelper.get().fetch_data(self)
+        self._processing_due = True
 
     def _do_data_access(self):
         # Skip if we are invalid.
@@ -883,6 +895,7 @@ class IplotSignalAdapter(ProcessingSignal):
         if self.status_info.result == Result.INVALID:
             return
 
+        self._processing_due = False
         if self.processing_enabled:
             self._process_data()
         else:
@@ -896,6 +909,12 @@ class IplotSignalAdapter(ProcessingSignal):
         # itself falls back to the conservative monotonic-X criterion below.
         ts_is_time_window = getattr(self, '_ts_is_time_window', False)
         self._ts_is_time_window = False
+
+        if getattr(self, '_put_off', None) is not None and AccessHelper._deferred_reads() is not None:
+            # Its data are read in the background for a change of the view: whatever else draws it
+            # within one waits for them too.
+            self._access_md5sum = self.calculate_data_hash()
+            return True
 
         target_md5sum = self.calculate_data_hash()
         logger.debug(
@@ -1181,7 +1200,9 @@ class AccessHelper:
         deferred = AccessHelper._deferred_reads()
         if deferred is not None and not AccessHelper._is_prefetched(in_params):
             deferred.requests[AccessHelper.request_key(in_params)] = in_params
+            signal._put_off = in_params
             return
+        signal._put_off = None
         out_params = dict()
         try:
             result = AccessHelper._read(in_params)
@@ -1191,6 +1212,8 @@ class AccessHelper:
             if result.get('resolved_pulse') and str(signal.pulse_nb) != result['resolved_pulse']:
                 old_pulse = str(signal.pulse_nb)
                 signal.pulse_nb = result['resolved_pulse']
+                # These are the data of the resolved pulse, which would otherwise be read again under its number.
+                signal._access_md5sum = signal.calculate_data_hash()
                 if old_pulse and signal.label and old_pulse in signal.label:
                     signal.label = signal.label.replace(old_pulse, signal.pulse_nb)
         except Exception as e:
