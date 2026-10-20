@@ -284,7 +284,8 @@ class IplotSignalAdapter(ProcessingSignal):
 
         def _log_mismatch(case: str, msg: str) -> None:
             key = (source_label, target_label, len(source), len(target), case)
-            if key in _TRUNCATE_WARN_KEYS:
+            # Within a change of the view drawn before all its data arrive, they can be of two ranges.
+            if key in _TRUNCATE_WARN_KEYS or AccessHelper._deferred_reads() is not None:
                 logger.debug(msg)
             else:
                 _TRUNCATE_WARN_KEYS.add(key)
@@ -866,6 +867,9 @@ class IplotSignalAdapter(ProcessingSignal):
             if self._needs_refresh():
                 self._fetch_data()
                 return True
+            elif getattr(self, '_processing_due', False):
+                # Read for an expression that uses it, which processes only its own data.
+                return True
             elif self.status_info.stage == Stage.PROC:
                 self.set_da_success()
                 return False
@@ -910,7 +914,9 @@ class IplotSignalAdapter(ProcessingSignal):
         ts_is_time_window = getattr(self, '_ts_is_time_window', False)
         self._ts_is_time_window = False
 
-        if getattr(self, '_put_off', None) is not None and AccessHelper._deferred_reads() is not None:
+        deferred = AccessHelper._deferred_reads()
+        put_off = getattr(self, '_put_off', None)
+        if put_off is not None and deferred is not None and AccessHelper.request_key(put_off) not in deferred.waiting:
             # Its data are read in the background for a change of the view: whatever else draws it
             # within one waits for them too.
             self._access_md5sum = self.calculate_data_hash()
@@ -966,6 +972,9 @@ class DeferredReads:
     requests: typing.Dict[tuple, dict] = field(default_factory=dict)
     #: Signals whose data access ran within the block. They kept the data of their previous range.
     signals: typing.List[IplotSignalAdapter] = field(default_factory=list)
+    #: Requests already read in the background for what the block draws: a signal whose request was
+    #: put off for one of them waits for it without asking again.
+    waiting: typing.AbstractSet[tuple] = field(default_factory=frozenset)
 
     def invalidate(self):
         """Make the signals access their data again at their next get_data()."""

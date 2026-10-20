@@ -192,6 +192,24 @@ class PrefetchedTests(unittest.TestCase):
         self.assertEqual(signal.pulse_nb, '42')
         np.testing.assert_array_equal(np.asarray(signal.y_data), [5.0, 6.0])
 
+    def test_a_latest_pulse_alias_read_for_an_expression_is_processed_when_it_is_drawn(self):
+        # As when the plot of the expression comes first: the alias is read as its child.
+        def get_data(data_s_name, **kwargs):
+            self.stub.reads.append(kwargs['varname'])
+            return SimpleNamespace(errcode=0, errdesc='', xdata=T0 + np.arange(3), ydata=np.arange(3) * 2.0,
+                                   xunit='ns', yunit='A', resolved_pulse='42')
+
+        self.stub.get_data = get_data
+        alias = _signal(alias='a0', pulse_nb='0')
+        expression = _signal(name='${a0} * 2', pulse_nb='0')
+
+        expression.get_data()
+        alias.get_data()
+
+        self.assertEqual(self.stub.reads, ['VAR-A'])
+        np.testing.assert_array_equal(np.asarray(alias.y_data), [0.0, 2.0, 4.0])
+        np.testing.assert_array_equal(np.asarray(expression.y_data), [0.0, 4.0, 8.0])
+
     def test_results_are_not_served_after_the_block(self):
         before, after = _signal(), _signal()
         with AccessHelper.prefetched(self._results(before, _result([1.0]))):

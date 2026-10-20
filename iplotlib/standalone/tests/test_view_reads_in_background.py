@@ -272,22 +272,35 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
 
     def test_data_that_arrive_while_the_view_is_dragged_wait_for_its_end(self):
         for backend in ('pyqt', 'matplotlib'):
-            with self.subTest(backend=backend):
-                qt_canvas, parser, impls, signals = self._draw(backend)
-                AccessHelper.pool = pool = _Pool()
-                parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
-                self.app.processEvents()
+            for arrive_first in (True, False):
+                with self.subTest(backend=backend, arrive_first=arrive_first):
+                    qt_canvas, parser, impls, signals = self._draw(backend)
+                    AccessHelper.pool = pool = _Pool()
+                    parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                    self.app.processEvents()
+                    fetches = len(pool.fetches)
 
-                parser.begin_interactive_pan()
-                pool.arrive()
-                self.app.processEvents()
+                    parser.begin_interactive_pan()
+                    if arrive_first:
+                        pool.arrive()
+                        self.app.processEvents()
+                    # Away and back. The width changes a little: pyqtgraph takes a move of the same width in the
+                    # offset of its axis, without a change of its range.
+                    parser.set_oaw_axis_limits(impls[0], 0, (ZOOM[0] + 5 * 10**9, ZOOM[1] + 5 * 10**9 + 5000))
+                    self.app.processEvents()
+                    parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                    self.app.processEvents()
+                    if not arrive_first:
+                        pool.arrive()
+                        self.app.processEvents()
 
-                self.assertEqual([self._drawn(parser, impl) for impl in impls], [[[3600.0]], [[3600.0]]])
-                # A drag that ends where it began leaves the data that arrived meanwhile valid.
-                parser.end_interactive_pan()
-                self.app.processEvents()
-                self.assertEqual([self._drawn(parser, impl) for impl in impls], [[[60.0]], [[60.0]]])
-                self.assertEqual(pool.pending(), [])
+                    self.assertEqual([self._drawn(parser, impl) for impl in impls], [[[3600.0]], [[3600.0]]])
+                    # A drag that ends where it began leaves the data that arrived meanwhile valid.
+                    parser.end_interactive_pan()
+                    self.app.processEvents()
+                    self.assertEqual([self._drawn(parser, impl) for impl in impls], [[[60.0]], [[60.0]]])
+                    self.assertEqual(len(pool.fetches), fetches)
+                    self.assertEqual(pool.pending(), [])
 
     def test_undo_reads_the_restored_range_in_the_background(self):
         for backend in ('pyqt', 'matplotlib'):

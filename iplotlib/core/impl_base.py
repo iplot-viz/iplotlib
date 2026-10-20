@@ -184,6 +184,8 @@ class BackendParserBase(ABC):
         self._signal_flush_scheduled = False
         # Data read in the background for views that changed, by what they redraw (see _process_view_change).
         self._view_reads = {}  # type: Dict[Any, Any]
+        # Their requests, until the view is drawn with their data (see DeferredReads.waiting).
+        self._view_requests = {}  # type: Dict[Any, frozenset]
         # Drawing of the data that arrived while the view was dragged, by what they redraw.
         self._arrived_in_pan = {}  # type: Dict[Any, Callable[[], None]]
         # Called once the data read in the background for a view that changed are drawn.
@@ -674,7 +676,7 @@ class BackendParserBase(ABC):
             self._cancel_view_read(owner)
             step()
             return
-        reads = DeferredReads()
+        reads = DeferredReads(waiting=self._view_requests.get(owner, frozenset()))
         self._previewing = True
         try:
             with AccessHelper.deferred(reads):
@@ -698,6 +700,7 @@ class BackendParserBase(ABC):
                 self._view_reads[owner] = pool.fetch_later(
                     reads.requests.values(), partial(self._view_data_read, owner, impl_plot, step, reads, autoscale,
                                                      rounds, read))
+                self._view_requests[owner] = frozenset(reads.requests)
                 return
             except Exception:
                 logger.exception("Reading in the worker processes failed, data are read in this thread from now on")
@@ -717,6 +720,7 @@ class BackendParserBase(ABC):
             self._arrived_in_pan[owner] = partial(self._view_data_read, owner, impl_plot, step, reads, autoscale,
                                                   rounds, {}, results)
             return
+        self._view_requests.pop(owner, None)
         reads.invalidate()
         more = DeferredReads()
         updating, self._update = self._update, True
@@ -759,6 +763,7 @@ class BackendParserBase(ABC):
         cmd.new_lim = current
 
     def _cancel_view_read(self, owner: Any):
+        self._view_requests.pop(owner, None)
         pending = self._view_reads.pop(owner, None)
         if pending is not None:
             pending.cancel()
@@ -768,6 +773,7 @@ class BackendParserBase(ABC):
         for pending in self._view_reads.values():
             pending.cancel()
         self._view_reads.clear()
+        self._view_requests.clear()
         self._arrived_in_pan.clear()
 
     def _find_canvas_signal_by_alias(self, alias: str):
