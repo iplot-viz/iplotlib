@@ -126,6 +126,23 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
         lines, _, _ = parser.get_impl_lines(impl)
         return [np.unique(np.asarray(parser.get_impl_data(line)[1])).tolist() for line in lines]
 
+    @staticmethod
+    def _zoom(parser, impl, window):
+        """A zoom drawn with the mouse: the X range, then the Y range, whose change autoscales the canvas."""
+        low, high = parser.get_oaw_axis_limits(impl, 1)
+        parser.set_oaw_axis_limits(impl, 0, window)
+        parser.set_oaw_axis_limits(impl, 1, (low + (high - low) / 4, high - (high - low) / 4))
+
+    def _zoom_cmd(self, qt_canvas, parser, impl, window):
+        """A zoom drawn with the mouse, recorded in the history as the mouse gestures record it."""
+        qt_canvas.stage_view_lim_cmd(impl, name='Zoom')
+        self._zoom(parser, impl, window)
+        self.app.processEvents()
+        while len(qt_canvas._staging_cmds):
+            qt_canvas.commit_view_lim_cmd(impl)
+        while len(qt_canvas._commitd_cmds):
+            qt_canvas.push_view_lim_cmd()
+
     def test_a_zoom_draws_at_once_and_again_when_the_data_arrive(self):
         for backend in ('pyqt', 'matplotlib'):
             with self.subTest(backend=backend):
@@ -157,7 +174,7 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
             with self.subTest(backend=backend):
                 qt_canvas, parser, impls, signals = self._draw(backend, autoscale=True)
                 AccessHelper.pool = pool = _Pool()
-                parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                self._zoom(parser, impls[0], ZOOM)
                 self.app.processEvents()
 
                 with self.assertNoLogs('iplotlib.core.impl_base', level='ERROR'), \
@@ -177,7 +194,7 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
                     qt_canvas, parser, impls, signals = self._draw(backend, autoscale=True)
                     AccessHelper.pool = pool = _Pool()
                     qt_canvas.stage_view_lim_cmd(impls[0], name='Zoom')
-                    parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                    self._zoom(parser, impls[0], ZOOM)
                     if during_commit:
                         # As the data a worker still holds in its cache arrive.
                         QTimer.singleShot(0, pool.arrive)
@@ -195,6 +212,74 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
                     self._arrive_all(pool)
 
                     np.testing.assert_allclose([parser.get_oaw_axis_limits(impl, 1) for impl in impls], fitted)
+
+    def test_the_history_fits_again_a_y_axis_recorded_before_the_data_of_its_view_arrived(self):
+        # Undo before the data of a zoom arrive, then redo; a second zoom before they arrive, then undo: the view
+        # comes back with the Y axis fitted to its data, as when they are read at once.
+        zoom2 = (ZOOM[0] + 20 * 10**9, ZOOM[1] - 20 * 10**9)
+        for backend in ('pyqt', 'matplotlib'):
+            for first, then in (('undo', 'redo'), ('zoom', 'undo')):
+                with self.subTest(backend=backend, steps=(first, then)):
+                    qt_canvas, parser, impls, signals = self._draw(backend, autoscale=True)
+                    AccessHelper.pool = pool = _Pool()
+                    self._zoom_cmd(qt_canvas, parser, impls[0], ZOOM)
+                    if first == 'undo':
+                        parser._hm.undo()
+                    else:
+                        self._zoom_cmd(qt_canvas, parser, impls[0], zoom2)
+                    self._arrive_all(pool)
+                    getattr(parser._hm, then)()
+                    self._arrive_all(pool)
+
+                    self.assertEqual([self._drawn(parser, impl) for impl in impls], [[[60.0]], [[60.0]]])
+                    self._assert_y_axes_show(parser, impls, 60.0)
+                    # Going back and forth again shows it before any data arrive, and after.
+                    getattr(parser._hm, 'undo' if then == 'redo' else 'redo')()
+                    getattr(parser._hm, then)()
+                    self.app.processEvents()
+                    self._assert_y_axes_show(parser, impls, 60.0)
+                    self._arrive_all(pool)
+                    self._assert_y_axes_show(parser, impls, 60.0)
+
+    def test_a_redraw_before_the_data_of_a_zoom_arrive_fits_the_y_axis_to_the_data_it_draws(self):
+        # A redraw reads the data at once; the plots that the focus hides fit them once they are drawn again.
+        for backend in ('pyqt', 'matplotlib'):
+            for redraw in ('refresh', 'focus'):
+                with self.subTest(backend=backend, redraw=redraw):
+                    qt_canvas, parser, impls, signals = self._draw(backend, autoscale=True)
+                    AccessHelper.pool = pool = _Pool()
+                    self._zoom(parser, impls[0], ZOOM)
+                    self.app.processEvents()
+
+                    if redraw == 'refresh':
+                        qt_canvas.refresh()
+                    else:
+                        qt_canvas._full_screen_mode_on(impls[0])
+                        self._arrive_all(pool)
+                        qt_canvas._full_screen_mode_off()
+                    self._arrive_all(pool)
+
+                    impls = [parser._plot_impl_plot_lut.get(id(signal.parent()))[0] for signal in signals]
+                    self.assertEqual([self._drawn(parser, impl) for impl in impls], [[[60.0]], [[60.0]]])
+                    self._assert_y_axes_show(parser, impls, 60.0)
+
+    def _assert_y_axes_show(self, parser, impls, value):
+        y_ranges = [parser.get_oaw_axis_limits(impl, 1) for impl in impls]
+        self.assertTrue(all(low < value < high for low, high in y_ranges), y_ranges)
+
+    def test_a_change_of_the_x_range_alone_keeps_the_y_axis_as_when_the_data_are_read_at_once(self):
+        # As a drag along the time axis: no change of the Y range follows it to autoscale the canvas.
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                shown = []
+                for workers in (False, True):
+                    qt_canvas, parser, impls, signals = self._draw(backend, autoscale=True)
+                    AccessHelper.pool = pool = _Pool() if workers else None
+                    parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                    self._arrive_all(pool)
+                    self.assertEqual([self._drawn(parser, impl) for impl in impls], [[[60.0]], [[60.0]]])
+                    shown.append([parser.get_oaw_axis_limits(impl, 1) for impl in impls])
+                np.testing.assert_allclose(shown[1], shown[0])
 
     def _arrive_all(self, pool, last_first=False):
         """Let every read in the background arrive, those asked for last first if `last_first`."""

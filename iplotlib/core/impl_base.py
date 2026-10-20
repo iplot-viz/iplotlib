@@ -23,7 +23,7 @@ import numpy as np
 from queue import Empty, Queue
 import re
 import threading
-from typing import Any, Callable, Collection, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Collection, Dict, List, Optional, Set, Tuple, Union
 import weakref
 
 from iplotProcessing.core import BufferObject
@@ -186,6 +186,12 @@ class BackendParserBase(ABC):
         self._view_reads = {}  # type: Dict[Any, Any]
         # Their requests, until the view is drawn with their data (see DeferredReads.waiting).
         self._view_requests = {}  # type: Dict[Any, frozenset]
+        # Their implementation plots, and the reads whose plot fits its Y range again once they are drawn (see
+        # autoscale_y_axis).
+        self._view_plots = {}  # type: Dict[Any, Any]
+        self._view_fits = set()  # type: Set[Any]
+        # The same for the signals of plots that a redraw did not draw, hidden by the focus (see process_ipl_canvas).
+        self._undrawn_fits = set()  # type: Set[str]
         # Drawing of the data that arrived while the view was dragged, by what they redraw.
         self._arrived_in_pan = {}  # type: Dict[Any, Callable[[], None]]
         # Called once the data read in the background for a view that changed are drawn.
@@ -306,6 +312,9 @@ class BackendParserBase(ABC):
         """
         This function rescales the y-axis based on the data that is visible given the current limits of the X-axis
         """
+        # A plot whose data are still read for its view fits them too once they are drawn, as it would have had they
+        # been read at once.
+        self._view_fits.update(owner for owner, plot in self._view_plots.items() if plot is impl_plot)
         lines, lo, hi = self.get_impl_lines(impl_plot)
         bot, top = np.inf, -np.inf
 
@@ -375,8 +384,21 @@ class BackendParserBase(ABC):
         :param canvas: A Canvas instance
         :type canvas: Canvas
         """
+        fits = self._view_fits | self._undrawn_fits
         with AccessHelper.prefetched(self._read_canvas_data(canvas)):
             self._process_ipl_canvas(canvas)
+        # The plots that were to fit their Y range to the data read for their view fit it to the data drawn now,
+        # instead of keeping the Y range fitted while those were read. Those of the signals that the focus hides
+        # fit it once a redraw draws them: the key of a signal outlives the redraw.
+        plots = set()
+        for owner in fits:
+            impl_plot = self._signal_impl_plot_lut.get(owner)
+            if impl_plot is not None:
+                plots.add(impl_plot)
+            elif self._focus_plot is not None and isinstance(owner, str):
+                self._undrawn_fits.add(owner)
+        for impl_plot in plots:
+            self.autoscale_y_axis(impl_plot)
 
     def _read_canvas_data(self, canvas: Canvas) -> dict:
         """The data the signals to draw need and do not have, read all at once by the worker
@@ -683,24 +705,31 @@ class BackendParserBase(ABC):
                 step()
         finally:
             self._previewing = False
+        fit = False
         if reads.requests or self._restoring_view:
+            # A fit still due to the data replaced is due to those that replace them, unless the view is restored
+            # with its own Y range.
+            fit = (owner in self._view_fits and not self._restoring_view
+                   and not getattr(self.canvas, 'undo_redo', False))
             self._cancel_view_read(owner)
-        # As the Y axis callback that follows a change of the view (see _y_axis_update_callback).
-        autoscale = self._pm.get_value(self.canvas, 'autoscale') and not getattr(self.canvas, 'undo_redo', False)
-        self._read_in_background(owner, impl_plot, step, reads, autoscale, 1, {})
+        self._read_in_background(owner, impl_plot, step, reads, fit, 1, {})
 
     def _read_in_background(self, owner: Any, impl_plot: Any, step: Callable[[], None], reads: DeferredReads,
-                            autoscale: bool, rounds: int, read: dict):
-        """Read `reads` for the change of the view that `step` draws; `read` holds what its earlier rounds read."""
+                            fit: bool, rounds: int, read: dict):
+        """Read `reads` for the change of the view that `step` draws; `read` holds what its earlier rounds read, and
+        `fit` says whether the Y range of `impl_plot` is fitted again once they are drawn (see autoscale_y_axis)."""
         if not reads.requests:
             return
         pool = AccessHelper.pool
         if pool is not None:
             try:
                 self._view_reads[owner] = pool.fetch_later(
-                    reads.requests.values(), partial(self._view_data_read, owner, impl_plot, step, reads, autoscale,
-                                                     rounds, read))
+                    reads.requests.values(), partial(self._view_data_read, owner, impl_plot, step, reads, rounds,
+                                                     read))
                 self._view_requests[owner] = frozenset(reads.requests)
+                self._view_plots[owner] = impl_plot
+                if fit:
+                    self._view_fits.add(owner)
                 return
             except Exception:
                 logger.exception("Reading in the worker processes failed, data are read in this thread from now on")
@@ -709,7 +738,7 @@ class BackendParserBase(ABC):
         step()
 
     def _view_data_read(self, owner: Any, impl_plot: Any, step: Callable[[], None], reads: DeferredReads,
-                        autoscale: bool, rounds: int, read: dict, results: dict):
+                        rounds: int, read: dict, results: dict):
         """Run `step` again with the data read in the background for it (see _process_view_change)."""
         self._view_reads.pop(owner, None)
         # The signals that the step reads again get what the earlier rounds read, as an expression
@@ -717,10 +746,13 @@ class BackendParserBase(ABC):
         results = {**read, **results}
         if self._interactive_pan:
             # The view is still moving: drawn when it stops, unless it then needs other data.
-            self._arrived_in_pan[owner] = partial(self._view_data_read, owner, impl_plot, step, reads, autoscale,
-                                                  rounds, {}, results)
+            self._arrived_in_pan[owner] = partial(self._view_data_read, owner, impl_plot, step, reads, rounds, {},
+                                                  results)
             return
         self._view_requests.pop(owner, None)
+        self._view_plots.pop(owner, None)
+        fit = owner in self._view_fits
+        self._view_fits.discard(owner)
         reads.invalidate()
         more = DeferredReads()
         updating, self._update = self._update, True
@@ -730,12 +762,12 @@ class BackendParserBase(ABC):
         finally:
             self._update = updating
         if rounds < _VIEW_READ_ROUNDS:
-            self._read_in_background(owner, impl_plot, step, more, autoscale, rounds + 1, results)
+            self._read_in_background(owner, impl_plot, step, more, fit, rounds + 1, results)
         elif more.requests:
             logger.warning(f"The data of the view were still incomplete after {rounds} reads in the background")
             # Read the next time the view is drawn.
             more.invalidate()
-        if autoscale:
+        if fit:
             # Its new Y range runs the Y axis callback of the backend, as a change of the view does.
             self.autoscale_y_axis(impl_plot)
             self._update_view_cmd()
@@ -762,8 +794,23 @@ class BackendParserBase(ABC):
             current.append(now)
         cmd.new_lim = current
 
+    def _fit_due(self, impl_plot: Any) -> bool:
+        """Whether `impl_plot` fits its Y range again once the data read for its view are drawn."""
+        return any(self._view_plots.get(owner) is impl_plot for owner in self._view_fits)
+
+    def _refit_y(self, impl_plot: Any, limits: IplPlotViewLimits):
+        """Fit again the Y range of a view restored from `limits`, which recorded it fitted to the data drawn while
+        those of the view were read: as the change of the view they recorded did, once the data are drawn."""
+        self.autoscale_y_axis(impl_plot)
+        if not self._fit_due(impl_plot):
+            # The data of the view are there: the limits keep the Y range fitted to them.
+            limits.axes_ranges[1] = IplAxisLimits(*self.get_oaw_axis_limits(impl_plot, 1))
+            limits.refit_y = False
+
     def _cancel_view_read(self, owner: Any):
         self._view_requests.pop(owner, None)
+        self._view_plots.pop(owner, None)
+        self._view_fits.discard(owner)
         pending = self._view_reads.pop(owner, None)
         if pending is not None:
             pending.cancel()
@@ -774,6 +821,9 @@ class BackendParserBase(ABC):
             pending.cancel()
         self._view_reads.clear()
         self._view_requests.clear()
+        self._view_plots.clear()
+        self._view_fits.clear()
+        self._undrawn_fits.clear()
         self._arrived_in_pan.clear()
 
     def _find_canvas_signal_by_alias(self, alias: str):
@@ -2450,6 +2500,10 @@ class BackendParserBase(ABC):
         if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
             plot_lims.sliders_ranges.append(IplSliderLimits(plot.slider_last_min, plot.slider_last_max))
 
+        # A Y range shown fitted to the data drawn while those of the view are read: restoring it fits it again (see
+        # set_plot_limits).
+        plot_lims.refit_y = (plot_lims.axes_ranges[1].get_limits() == (y_oaw_begin, y_oaw_end)
+                             and self._fit_due(impl_plot))
         return plot_lims
 
     def set_plot_limits(self, limits: IplPlotViewLimits):
@@ -2512,6 +2566,9 @@ class BackendParserBase(ABC):
                 if signal is not None:
                     self._process_view_change(self.signal_lut_key(signal), impl_plot,
                                               partial(self.process_ipl_signal, signal))
+
+        if has_impl and limits.refit_y:
+            self._refit_y(impl_plot, limits)
 
         # Restore slider-specific limits, if the plot has one
         if isinstance(plot, PlotXYWithSlider) and self._pm.get_value(self.canvas, 'shared_x_axis'):
