@@ -422,6 +422,21 @@ class AccessPoolTests(unittest.TestCase):
 
         self.assertIsNone(data())
 
+    def test_a_read_in_the_background_keeps_no_result(self):
+        delivered = []
+        pending = self.pool.fetch_later([_params('plain', end=T1 + 91)], delivered.append)
+        deadline = time.monotonic() + 30
+        while not delivered and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.01)
+        data = weakref.ref(list(delivered[0].values())[0]['d1'])
+
+        delivered.clear()
+        gc.collect()
+
+        self.assertIsNone(data())
+        self.assertEqual(pending._futures, {})
+
     def test_requests_read_before_by_one_worker_are_spread_when_read_together(self):
         requests = [_params('slow-pid', end=T1 + 100 + i) for i in range(4)]
         for params in requests:

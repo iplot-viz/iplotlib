@@ -220,19 +220,29 @@ class PendingFetch:
         self._timer.stop()
         for future in self._futures.values():
             future.cancel()
+        self._release()
+
+    def _release(self):
+        # Some PySide6 releases keep the slot of the timer connection, with this object, for a while:
+        # it must not keep the data read with it.
+        self._futures, self._on_done = {}, None
 
     def _check(self):
+        if self._on_done is None:
+            return
         if not all(future.done() for future in self._futures.values()):
             self._pool._release_stuck_executors()
             return
         self._timer.stop()
-        results = {key: _outcome(future) for key, future in self._futures.items()}
+        futures, on_done = self._futures, self._on_done
+        self._release()
+        results = {key: _outcome(future) for key, future in futures.items()}
         stopped = [key for key, result in results.items() if isinstance(result, (BrokenProcessPool, CancelledError))]
         if stopped:
             logger.warning(f"A data access process stopped ({results[stopped[0]]!r}), {len(stopped)} request(s) unread")
         # The requests a worker that stopped did not read are left out, to be asked for again.
         try:
-            self._on_done({key: result for key, result in results.items() if key not in stopped})
+            on_done({key: result for key, result in results.items() if key not in stopped})
         except Exception:
             logger.exception("Cannot draw the data read in the background")
 
@@ -526,29 +536,35 @@ class AccessPool:
         app = QCoreApplication.instance()
         # Only the thread that runs Qt keeps processing its events while it waits.
         loop = QEventLoop() if app is not None and QThread.currentThread() == app.thread() else None
+        # Emptied once waited for: some PySide6 releases keep the slot of the timer connection below,
+        # and with it the futures and their data, for a while.
+        waiting = list(futures)
 
         def check() -> bool:
-            done = sum(future.done() for future in futures)
-            if done < len(futures):
+            done = sum(future.done() for future in waiting)
+            if done < len(waiting):
                 self._release_stuck_executors()
             # Before the progress report, which may fail, so that the wait ends anyway.
-            if done == len(futures) and loop is not None:
+            if done == len(waiting) and loop is not None:
                 loop.quit()
             if progress is not None:
                 progress(finished + done, total)
-            return done == len(futures)
+            return done == len(waiting)
 
         if loop is None:
             # Polled as the event loop below is: wait() alone never counts the futures that a shutdown
             # cancels, and nothing waits for the rest once the pool is shut down.
-            while not all(future.done() for future in futures) and not self._closed:
-                wait(futures, timeout=_POLL_INTERVAL_MS / 1000)
+            while not all(future.done() for future in waiting) and not self._closed:
+                wait(waiting, timeout=_POLL_INTERVAL_MS / 1000)
                 self._release_stuck_executors()
-            return check()
-        timer = QTimer()
-        timer.timeout.connect(check)
-        timer.start(_POLL_INTERVAL_MS)
-        if not check():
-            loop.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
-        timer.stop()
-        return all(future.done() for future in futures)
+            all_done = check()
+        else:
+            timer = QTimer()
+            timer.timeout.connect(check)
+            timer.start(_POLL_INTERVAL_MS)
+            if not check():
+                loop.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+            timer.stop()
+            all_done = all(future.done() for future in waiting)
+        waiting.clear()
+        return all_done
