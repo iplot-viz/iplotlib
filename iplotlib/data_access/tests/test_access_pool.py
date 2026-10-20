@@ -13,6 +13,7 @@ import threading
 import time
 import unittest
 import weakref
+from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -108,6 +109,16 @@ def _hold_gil(seconds: float) -> float:
 
 def _worker_data_access():
     return _WorkerDataAccess()
+
+
+class _WorkerDataAccessOfSources(_WorkerDataAccess):
+    """A data access object of the data sources it lists, as iplotDataAccess's DataAccess."""
+
+    ds_list = {'uda': None, 'imas': None}
+
+
+def _worker_data_access_of_sources():
+    return _WorkerDataAccessOfSources()
 
 
 def _broken_data_access():
@@ -542,6 +553,63 @@ class AccessPoolTests(unittest.TestCase):
         self.assertIsInstance(error, DataAccessError)
         with self.assertRaises(RuntimeError):
             self._call('plain', pool)
+
+    def test_a_wait_in_another_thread_ends_for_a_request_that_a_shutdown_cancels(self):
+        pool = self._own_pool()
+        cancelled = Future()
+        cancelled.cancel()
+        waits = []
+        thread = threading.Thread(target=lambda: waits.append(pool._wait([cancelled], 0, 1, None)), daemon=True)
+
+        thread.start()
+        thread.join(10)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(waits, [True])
+
+    def test_calls_still_queued_when_the_pool_shuts_down_end_too(self):
+        pool = AccessPool(1, data_access_factory=_worker_data_access)
+        outcomes = []
+
+        def call():
+            try:
+                outcomes.append(self._call('stall', pool))
+            except Exception as e:
+                outcomes.append(e)
+
+        threads = [threading.Thread(target=call, daemon=True) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        # The worker takes a few seconds to start; the first call then reads for 30 s and the others wait.
+        QTimer.singleShot(8000, pool.shutdown)
+        deadline = time.monotonic() + 20
+        while any(thread.is_alive() for thread in threads) and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.05)
+
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual([str(outcome) for outcome in outcomes], [access_pool._STOPPED] * 8)
+
+    def test_stopping_an_executor_ends_the_pipe_its_manager_thread_reads(self):
+        writer = SimpleNamespace(closed=False)
+        writer.close = lambda: setattr(writer, 'closed', True)
+        executor = SimpleNamespace(_processes={}, shutdown=lambda **kwargs: None,
+                                   _result_queue=SimpleNamespace(_writer=writer))
+
+        access_pool._stop(executor)
+
+        self.assertTrue(writer.closed)
+
+    def test_a_call_to_a_data_source_the_worker_does_not_have_says_so(self):
+        # Rather than read its default data source, as the data access object would.
+        pool = self._own_pool(factory=_worker_data_access_of_sources)
+
+        error, _ = self._in_thread(lambda: pool.call('get_archive_window', 'other', varname='plain', tsS='5'))
+        reply, _ = self._in_thread(lambda: self._call('plain', pool))
+
+        self.assertIsInstance(error, RuntimeError)
+        self.assertIn("no data source other", str(error))
+        self.assertEqual(reply.ydata[2], 5.0)
 
     def test_a_call_to_workers_that_cannot_set_up_data_access_says_so(self):
         pool = self._own_pool(factory=_broken_data_access)

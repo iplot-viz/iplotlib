@@ -1634,19 +1634,22 @@ class ArchiveInWorkerProcessesTests(unittest.TestCase):
         pool.call.assert_not_called()
 
     def test_when_the_workers_cannot_read_the_archive_the_streaming_threads_read_it_from_then_on(self):
-        AccessHelper.pool = pool = MagicMock()
-        pool.call.side_effect = RuntimeError("The data access processes cannot start")
-        self.da.get_archive_window.return_value = _FakeArchiveResponse(x=[1], y=[2.0])
-        streamer = CanvasStreamer(self.da)
+        for error in (RuntimeError("The data access processes cannot start"), OSError(12, "Cannot allocate memory")):
+            with self.subTest(error=type(error).__name__):
+                AccessHelper.pool = pool = MagicMock()
+                pool.call.side_effect = error
+                self.da.get_archive_window.reset_mock()
+                self.da.get_archive_window.return_value = _FakeArchiveResponse(x=[1], y=[2.0])
+                streamer = CanvasStreamer(self.da)
 
-        with self.assertLogs(streamer_module.logger, level='WARNING') as logs:
-            first = streamer._fetch_archive_range('ds', _FakeSignal(name='var'), 10, 20)
-            second = streamer._fetch_archive_range('ds', _FakeSignal(name='var'), 20, 30)
+                with self.assertLogs(streamer_module.logger, level='WARNING') as logs:
+                    first = streamer._fetch_archive_range('ds', _FakeSignal(name='var'), 10, 20)
+                    second = streamer._fetch_archive_range('ds', _FakeSignal(name='var'), 20, 30)
 
-        self.assertEqual(pool.call.call_count, 1)
-        self.assertEqual(self.da.get_archive_window.call_count, 2)
-        self.assertEqual(len(logs.records), 1)
-        self.assertEqual((first[0].tolist(), second[0].tolist()), ([1], [1]))
+                self.assertEqual(pool.call.call_count, 1)
+                self.assertEqual(self.da.get_archive_window.call_count, 2)
+                self.assertEqual(len(logs.records), 1)
+                self.assertEqual((first[0].tolist(), second[0].tolist()), ([1], [1]))
 
     def test_a_read_that_fails_in_a_worker_is_a_failed_read(self):
         AccessHelper.pool = pool = MagicMock()

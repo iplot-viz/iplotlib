@@ -175,6 +175,10 @@ def _read(params: dict, cache_epoch: int) -> dict:
 def _call(method: str, name: str, kwargs: dict, cache_epoch: int):
     """`method` of the data access object, called for the data source `name` (see AccessPool.call)."""
     data_access = _data_access(name, cache_epoch)
+    sources = getattr(data_access, 'ds_list', None)
+    if sources is not None and name not in sources:
+        # The data access object would answer for its default data source instead.
+        raise RuntimeError(f"The data access process has no data source {name}")
     try:
         return getattr(data_access, method)(name, **kwargs)
     except DataAccessError:
@@ -240,11 +244,16 @@ def _stop(executor: Optional[ProcessPoolExecutor]):
     terminate_workers = getattr(executor, 'terminate_workers', None)  # Python 3.14
     if terminate_workers is not None:
         terminate_workers()
-        return
-    # Before that, the executor only exposes its workers through its process table.
-    for process in list((getattr(executor, '_processes', None) or {}).values()):
-        process.terminate()
-    executor.shutdown(wait=False, cancel_futures=True)
+    else:
+        # Before that, the executor only exposes its workers through its process table.
+        for process in list((getattr(executor, '_processes', None) or {}).values()):
+            process.terminate()
+        executor.shutdown(wait=False, cancel_futures=True)
+    # Its manager thread could be waiting for the rest of a result that a stopped worker was sending
+    # (see AccessPool._release_stuck_executors): the pipe it reads ends once this process closes its end.
+    writer = getattr(getattr(executor, '_result_queue', None), '_writer', None)
+    if writer is not None and not writer.closed:
+        writer.close()
 
 
 class AccessPool:
@@ -364,7 +373,7 @@ class AccessPool:
                 future = self._run(self._free_slot(data_s_name), _call, method, data_s_name, kwargs,
                                    self._cache_epoch)
             if not self._wait([future], 0, 1, None):
-                raise DataAccessError("The wait for the data access process was interrupted")
+                raise DataAccessError(_STOPPED if self._closed else "The wait for the data access process was interrupted")
             self._check_workers()
             result = _outcome(future)
             if not isinstance(result, BrokenProcessPool) or self._closed or attempt:
@@ -530,7 +539,10 @@ class AccessPool:
             return done == len(futures)
 
         if loop is None:
-            while wait(futures, timeout=_STUCK_AFTER_S).not_done:
+            # Polled as the event loop below is: wait() alone never counts the futures that a shutdown
+            # cancels, and nothing waits for the rest once the pool is shut down.
+            while not all(future.done() for future in futures) and not self._closed:
+                wait(futures, timeout=_POLL_INTERVAL_MS / 1000)
                 self._release_stuck_executors()
             return check()
         timer = QTimer()

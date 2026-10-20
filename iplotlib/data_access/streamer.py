@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, QThread, Slot
 
 import iplotLogging.setupLogger as Sl
 from iplotlib.core.decimation import minmax_decimate
-from iplotlib.interface.iplotSignalAdapter import AccessHelper
+from iplotlib.interface.iplotSignalAdapter import AccessHelper, DataAccessError
 
 logger = Sl.get_logger(__name__)
 
@@ -249,7 +249,10 @@ class CanvasStreamer:
         if pool is not None and self.da is AccessHelper.da and not self._read_archive_here:
             try:
                 return pool.call(method, ds, **kwargs)
-            except RuntimeError as exc:
+            except DataAccessError:
+                raise
+            except Exception as exc:
+                # The read did not fail: the worker processes cannot make it.
                 logger.warning(f"The archive is read in the streaming threads from now on: {exc}")
                 self._read_archive_here = True
         return getattr(self.da, method)(ds, **kwargs)
