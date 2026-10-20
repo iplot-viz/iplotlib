@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from iplotlib.core.signal import SignalXY
-from iplotlib.interface.iplotSignalAdapter import AccessHelper, DataAccessError, ParserHelper, Result
+from iplotlib.interface.iplotSignalAdapter import AccessHelper, DataAccessError, DeferredReads, ParserHelper, Result
 
 T0 = 1_700_000_000_000_000_000
 T1 = T0 + 60_000_000_000
@@ -77,6 +77,23 @@ class DataRequestsTests(unittest.TestCase):
         self.assertEqual(AccessHelper.data_requests(signal), [])
         signal.ts_end = T1 + 1
         self.assertEqual(AccessHelper.data_requests(signal), [AccessHelper.construct_da_params(signal)])
+
+    def test_a_read_put_off_for_a_change_of_the_view_is_asked_for_until_it_is_read(self):
+        # The hash of the signal already names the range, but its data have not arrived.
+        signal = _signal()
+        with AccessHelper.deferred(DeferredReads()):
+            signal.get_data()
+
+        self.assertEqual(AccessHelper.da.reads, [])
+        self.assertEqual(AccessHelper.data_requests(signal), [AccessHelper.construct_da_params(signal)])
+
+    def test_an_alias_put_off_over_the_signal_range_is_asked_for(self):
+        alias = SignalXY(name='VAR-B', alias='b', data_source='uda', ts_start=T0, ts_end=T1)
+        with AccessHelper.deferred(DeferredReads()):
+            alias.get_data()
+        signal = _signal(y_expr='${b}.data * 2')
+
+        self.assertIn(AccessHelper.construct_da_params(alias), AccessHelper.data_requests(signal))
 
     def test_signals_without_data_access_ask_for_nothing(self):
         disabled = _signal()

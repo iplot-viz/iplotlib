@@ -190,8 +190,10 @@ class BackendParserBase(ABC):
         # autoscale_y_axis).
         self._view_plots = {}  # type: Dict[Any, Any]
         self._view_fits = set()  # type: Set[Any]
-        # The same for the signals of plots that a redraw did not draw, hidden by the focus (see process_ipl_canvas).
+        # The same for the signals of plots that a redraw did not draw, hidden by the focus, and those of the plots of
+        # one signal versus another that follow the shared time (see process_ipl_canvas).
         self._undrawn_fits = set()  # type: Set[str]
+        self._undrawn_follows = {}  # type: Dict[Tuple[int, str], Tuple[weakref.ref, str]]
         # Drawing of the data that arrived while the view was dragged, by what they redraw.
         self._arrived_in_pan = {}  # type: Dict[Any, Callable[[], None]]
         # Called once the data read in the background for a view that changed are drawn.
@@ -385,8 +387,35 @@ class BackendParserBase(ABC):
         :type canvas: Canvas
         """
         fits = self._view_fits | self._undrawn_fits
+        # The plots of one signal versus another that follow the shared time, keyed by their implementation plot (see
+        # _x_axis_update_callback), and still to follow its window with the data read for it.
+        follows = dict(self._undrawn_follows)
+        for owner, impl_plot in self._view_plots.items():
+            item = self._impl_plot_cache_table.get_cache_item(impl_plot) if owner is impl_plot else None
+            if item is not None and item.plot() is not None:
+                follows[(id(item.plot()), item.stack_key)] = (item.plot, item.stack_key)
         with AccessHelper.prefetched(self._read_canvas_data(canvas)):
             self._process_ipl_canvas(canvas)
+        # The redraw dropped those reads: they follow the window again over the data drawn now, as when the reads
+        # arrive (see _view_data_read); those that the focus hides, once a redraw draws them.
+        updating, self._update = self._update, True
+        try:
+            for key, (plot_ref, stack_key) in follows.items():
+                plot = plot_ref()
+                if plot is None:
+                    continue
+                impl_plots = [impl_plot for impl_plot in self._plot_impl_plot_lut.get(id(plot), [])
+                              if self._impl_plot_cache_table.get_cache_item(impl_plot).stack_key == stack_key]
+                for impl_plot in impl_plots:
+                    refs = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+                    signal = refs[0]() if refs else None
+                    if signal is not None:
+                        self._process_view_change(impl_plot, impl_plot, partial(
+                            self._follow_shared_time_window, impl_plot, plot, signal.ts_start, signal.ts_end))
+                if not impl_plots and self._focus_plot is not None:
+                    self._undrawn_follows[key] = (plot_ref, stack_key)
+        finally:
+            self._update = updating
         # The plots that were to fit their Y range to the data read for their view fit it to the data drawn now,
         # instead of keeping the Y range fitted while those were read. Those of the signals that the focus hides
         # fit it once a redraw draws them: the key of a signal outlives the redraw.
@@ -548,7 +577,11 @@ class BackendParserBase(ABC):
         # the selected X range maps back to a time window. Otherwise
         # (non-monotonic X, or a data-independent expression such as
         # 'np.ones(10)') the zoom stays local and the other plots are untouched.
+        # Undo and redo restore the recorded window of the time plots themselves:
+        # mapping the X range back to time could only use the samples drawn while
+        # those of the window are read in the background.
         if (use_shared
+                and not getattr(self.canvas, 'undo_redo', False)
                 and not self._plot_x_is_time(current_ipl_plot)
                 and not self._plot_x_expr_yields_time(current_ipl_plot)):
             base_impl = self._find_shared_time_base_impl(current_ipl_plot)
@@ -824,6 +857,7 @@ class BackendParserBase(ABC):
         self._view_plots.clear()
         self._view_fits.clear()
         self._undrawn_fits.clear()
+        self._undrawn_follows.clear()
         self._arrived_in_pan.clear()
 
     def _find_canvas_signal_by_alias(self, alias: str):

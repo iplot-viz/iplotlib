@@ -44,6 +44,16 @@ class _DataAccess:
         return None
 
 
+class _RampDataAccess(_DataAccess):
+    """As _DataAccess, with a ramp of height 1 along the range: an expression of the data grows with time."""
+
+    def get_data(self, data_s_name, **kwargs):
+        reply = super().get_data(data_s_name, **kwargs)
+        if reply.errcode == 0:
+            reply.ydata = reply.ydata + np.linspace(0.0, 1.0, len(reply.ydata))
+        return reply
+
+
 class _PendingFetch:
     def __init__(self, requests, on_done):
         self.requests = list(requests)
@@ -262,6 +272,63 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
                     impls = [parser._plot_impl_plot_lut.get(id(signal.parent()))[0] for signal in signals]
                     self.assertEqual([self._drawn(parser, impl) for impl in impls], [[[60.0]], [[60.0]]])
                     self._assert_y_axes_show(parser, impls, 60.0)
+
+    def test_undo_restores_the_window_of_the_time_plots_of_a_plot_of_one_signal_versus_another(self):
+        # Its X range maps back to time through the samples it draws, those of the view undone until the data of
+        # the restored one arrive: the time plots restore the window themselves.
+        zoom2 = (ZOOM[0] + 20 * 10**9, ZOOM[1] - 20 * 10**9)
+        AccessHelper.da = self.da = _RampDataAccess()
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                ParserHelper.env.clear()
+                signals = [_variable('VAR-A', alias='a'), _variable('VAR-B', alias='b'),
+                           SignalXY(name='', label='xy', data_source='uda', ts_start=T0, ts_end=T0 + HOUR,
+                                    x_expr='${a}.data', y_expr='${b}.data')]
+                qt_canvas, parser, impls, _ = self._draw(backend, signals=signals)
+                AccessHelper.pool = pool = _Pool()
+                self._zoom_cmd(qt_canvas, parser, impls[0], ZOOM)
+                self._arrive_all(pool)
+                self._zoom_cmd(qt_canvas, parser, impls[0], zoom2)
+                self._arrive_all(pool)
+
+                parser._hm.undo()
+                self._arrive_all(pool)
+
+                for impl in impls[:2]:
+                    np.testing.assert_allclose(parser.get_oaw_axis_limits(impl, 0), ZOOM)
+                self.assertEqual([min(self._drawn(parser, impl)[0]) for impl in impls], [60.0, 60.0, 60.0])
+                self.assertEqual(self.da.reads, [])
+
+    def test_a_redraw_before_the_data_of_a_zoom_arrive_draws_a_plot_of_one_signal_versus_another_over_them(self):
+        # The redraw reads the data still being read for the window, and the plot follows the window again; hidden by
+        # the focus, once it is drawn again.
+        AccessHelper.da = self.da = _RampDataAccess()
+        for backend in ('pyqt', 'matplotlib'):
+            for redraw in ('refresh', 'focus'):
+                with self.subTest(backend=backend, redraw=redraw):
+                    ParserHelper.env.clear()
+                    signals = [_variable('VAR-A', alias='a'), _variable('VAR-B', alias='b'),
+                               SignalXY(name='', label='xy', data_source='uda', ts_start=T0, ts_end=T0 + HOUR,
+                                        x_expr='${a}.data', y_expr='${b}.data')]
+                    qt_canvas, parser, impls, _ = self._draw(backend, signals=signals)
+                    AccessHelper.pool = pool = _Pool()
+                    parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                    self.app.processEvents()
+
+                    if redraw == 'refresh':
+                        qt_canvas.refresh()
+                    else:
+                        qt_canvas._full_screen_mode_on(impls[0])
+                        self._arrive_all(pool)
+                        qt_canvas._full_screen_mode_off()
+                    self._arrive_all(pool)
+
+                    impls = [parser._plot_impl_plot_lut.get(id(signal.parent()))[0] for signal in signals]
+                    drawn = [self._drawn(parser, impl)[0] for impl in impls]
+                    self.assertEqual([(len(values), min(values), max(values)) for values in drawn],
+                                     [(50, 60.0, 61.0)] * 3)
+                    np.testing.assert_allclose(parser.get_oaw_axis_limits(impls[2], 0), (60.0, 61.0))
+                    self.assertEqual(self.da.reads, [])
 
     def _assert_y_axes_show(self, parser, impls, value):
         y_ranges = [parser.get_oaw_axis_limits(impl, 1) for impl in impls]

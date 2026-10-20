@@ -1035,12 +1035,15 @@ class AccessHelper:
 
         Empty when the data for that range were already read. A range that changed but is
         still covered by the data in memory is listed, although get_data() does not read it.
-        So are the aliases that the processing of the signal reads over its range.
+        So are the aliases that the processing of the signal reads over its range, and a read
+        put off for a change of the view (see deferred()), whose data have not arrived although
+        the hash of the signal names its range.
         """
         if signal.status_info.result == Result.INVALID or not signal.data_access_enabled:
             return []
         requests = AccessHelper._dependency_requests(signal)
-        if string_classifier.is_non_empty(signal.name) and signal._access_md5sum != signal.calculate_data_hash():
+        if string_classifier.is_non_empty(signal.name) and (getattr(signal, '_put_off', None) is not None
+                                                             or signal._access_md5sum != signal.calculate_data_hash()):
             requests += AccessHelper._fetch_requests(signal)
         return requests
 
@@ -1054,7 +1057,7 @@ class AccessHelper:
                 continue
             if not dep.data_access_enabled or not string_classifier.is_non_empty(dep.name):
                 continue
-            if (dep.ts_start, dep.ts_end) == (signal.ts_start, signal.ts_end):
+            if (dep.ts_start, dep.ts_end) == (signal.ts_start, signal.ts_end) and getattr(dep, '_put_off', None) is None:
                 continue
             params = AccessHelper.construct_da_params(dep)
             params.update(tsS=AccessHelper.uda_ts(dep, signal.ts_start), tsE=AccessHelper.uda_ts(dep, signal.ts_end))
