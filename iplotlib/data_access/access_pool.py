@@ -330,8 +330,10 @@ class AccessPool:
         self._lock = threading.RLock()
         self._executors = {}  # type: Dict[int, ProcessPoolExecutor] # key: worker slot
         self._ready = {}  # type: Dict[int, Future] # key: worker slot
-        # Requests given to each worker that it has not finished reading, by worker slot.
+        # Requests given to each worker that it has not finished reading, by worker slot. They have a lock
+        # of their own, never held while a worker is given a request (see _finished).
         self._loads = defaultdict(int)
+        self._loads_lock = threading.Lock()
         self._stopped_since = {}  # type: Dict[int, float] # key: worker slot
         self._slots = OrderedDict()  # type: OrderedDict[tuple, int] # key: request key, last used last
         self._cache_epoch = 0
@@ -524,13 +526,16 @@ class AccessPool:
                 logger.warning("A data access process had stopped, starting a new one")
                 _stop(self._executors.pop(slot))
                 future = self._executor(slot).submit(function, *args)
-            self._loads[slot] += 1
+            with self._loads_lock:
+                self._loads[slot] += 1
         future.add_done_callback(partial(self._finished, slot))
         return future
 
     def _finished(self, slot: int, _future: Future):
-        # Called from the thread of the executor.
-        with self._lock:
+        # Called from the thread of the executor, which fails the requests of a worker that stopped holding
+        # the lock that submit() takes (Python 3.12.1 and later): waiting here for self._lock, which _run()
+        # holds while it submits, would leave both threads waiting for each other.
+        with self._loads_lock:
             self._loads[slot] -= 1
 
     def _slot(self, key: tuple, params: dict) -> int:

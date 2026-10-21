@@ -196,6 +196,39 @@ input()
 """
 
 
+# An application whose worker stops while another of its threads gives that worker a request (see
+# AccessPool._run). Prints whether the request was given, or the wait for it ended.
+_STOPPED_WHILE_GIVEN = """
+import os, signal, threading, time
+from iplotlib.data_access.access_pool import AccessPool, _read
+from iplotlib.data_access.tests.test_access_pool import _ParentDataAccess, _params, _worker_data_access, T1
+from iplotlib.interface.iplotSignalAdapter import AccessHelper
+AccessHelper.da = _ParentDataAccess()
+pool = AccessPool(1, data_access_factory=_worker_data_access)
+pool.fetch([_params('plain')])
+worker = pool._ready[0].result()
+# Requests the worker has not read yet: its executor fails them, calling back the pool, when it stops.
+for n in range(2):
+    params = _params('stall', end=T1 + n)
+    pool._submit(AccessHelper.request_key(params), params)
+given = threading.Event()
+
+def give_a_request():
+    with pool._lock:
+        os.kill(worker, signal.SIGTERM)
+        time.sleep(3)
+        try:
+            pool._executors[0].submit(_read, _params('plain'), 0)
+        except Exception:
+            pass
+    given.set()
+
+threading.Thread(target=give_a_request, daemon=True).start()
+print('given' if given.wait(30) else 'blocked', flush=True)
+os._exit(0)
+"""
+
+
 def _params(varname, source='uda', end=T1):
     return dict(data_s_name=source, varname=varname, tsS=T0, tsE=end, tsFormat='absolute', pulse=None,
                 envelope=False, extremities=False, nbp=-1)
@@ -470,6 +503,13 @@ class AccessPoolTests(unittest.TestCase):
             time.sleep(0.1)
 
         self.assertFalse(_alive(worker))
+
+    def test_a_worker_that_stops_while_it_is_given_a_request_blocks_no_thread(self):
+        # Python 3.12.1 and later fail the requests of a stopped worker holding the lock that submit() takes.
+        application = subprocess.run([sys.executable, '-c', _STOPPED_WHILE_GIVEN], capture_output=True, text=True,
+                                     timeout=120)
+
+        self.assertIn('given', application.stdout.split(), application.stdout + application.stderr[-2000:])
 
     @unittest.skipUnless(os.name == 'posix', "Ctrl+C reaches every process of the console the same way on Windows")
     def test_ctrl_c_is_left_to_the_application(self):
