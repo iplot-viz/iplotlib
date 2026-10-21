@@ -20,6 +20,7 @@ from unittest.mock import patch
 import numpy as np
 from PySide6.QtCore import QTimer
 
+from iplotDataAccess.appDataAccess import AppDataAccess
 from iplotDataAccess.dataCommon import DataObj
 from iplotLogging import setupLogger
 
@@ -119,6 +120,31 @@ class _WorkerDataAccessOfSources(_WorkerDataAccess):
 
 def _worker_data_access_of_sources():
     return _WorkerDataAccessOfSources()
+
+
+class _Cache:
+    """The query cache of a data source, as the LRUCache of cachetools."""
+
+    def __init__(self, maxsize):
+        self.maxsize = maxsize
+
+
+class _WorkerDataAccessWithCaches(_WorkerDataAccess):
+    """Data sources with a query cache each, and what a worker knows of the types it reads."""
+
+    def __init__(self):
+        self.ds_list = {'uda': SimpleNamespace(access_cache=_Cache(300)),
+                        'imas': SimpleNamespace(access_cache=_Cache(300))}
+
+    def cache_size(self, data_s_name):
+        return self.ds_list[data_s_name].access_cache.maxsize
+
+    def source_types(self, data_s_name):
+        return sorted(access_pool._worker_source_types or [])
+
+
+def _worker_data_access_with_caches():
+    return _WorkerDataAccessWithCaches()
 
 
 def _broken_data_access():
@@ -386,6 +412,50 @@ class AccessPoolTests(unittest.TestCase):
 
         self.assertEqual(set(pool._executors), {0, 1, access_pool._SERIAL_SLOT})
 
+    def test_prepare_starts_only_the_workers_of_the_data_sources_given(self):
+        pool = self._own_pool()
+
+        pool.prepare(['imas', 'not configured'])
+        serial = dict(pool._executors)
+        pool.prepare(['uda', 'imas'])
+
+        self.assertEqual(set(serial), {access_pool._SERIAL_SLOT})
+        self.assertEqual(set(pool._executors), {0, 1, access_pool._SERIAL_SLOT})
+        self.assertIs(pool._executors[access_pool._SERIAL_SLOT], serial[access_pool._SERIAL_SLOT])
+
+    def test_prepare_takes_a_single_name_too(self):
+        pool = self._own_pool()
+
+        pool.prepare('uda')
+
+        self.assertEqual(set(pool._executors), {0, 1})
+
+    def test_a_shut_down_pool_starts_no_worker(self):
+        pool = self._own_pool()
+        pool.shutdown()
+
+        pool.prepare(['uda', 'imas'])
+
+        self.assertEqual(pool._executors, {})
+
+    def test_each_worker_reads_the_data_source_types_of_its_requests(self):
+        pool = self._own_pool(factory=_worker_data_access_with_caches)
+
+        parallel, _ = self._in_thread(lambda: pool.call('source_types', 'uda'))
+        serial, _ = self._in_thread(lambda: pool.call('source_types', 'imas'))
+
+        self.assertEqual(parallel, sorted(access_pool.PARALLEL_SOURCE_TYPES))
+        self.assertEqual(serial, ['IMAS'])
+
+    def test_the_workers_of_a_parallel_source_share_its_cache(self):
+        pool = self._own_pool(factory=_worker_data_access_with_caches)
+
+        parallel, _ = self._in_thread(lambda: pool.call('cache_size', 'uda'))
+        serial, _ = self._in_thread(lambda: pool.call('cache_size', 'imas'))
+
+        self.assertEqual(parallel, 150)
+        self.assertEqual(serial, 300)
+
     def test_workers_stop_when_the_application_is_killed(self):
         application = subprocess.Popen([sys.executable, '-c', _APPLICATION], stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, text=True)
@@ -633,6 +703,59 @@ class AccessPoolTests(unittest.TestCase):
 
         self.assertIsInstance(error, RuntimeError)
         self.assertIn("could not be set up", str(error))
+
+
+class AppDataAccessTests(unittest.TestCase):
+    """The data access a worker sets up, as the application's: for the data source types it reads."""
+
+    def _set_up(self, initialize):
+        with patch.object(access_pool, '_worker_source_types', frozenset({'IMAS'})), \
+                patch.object(AppDataAccess, 'initialize', staticmethod(initialize)):
+            access_pool.app_data_access()
+
+    def test_only_the_data_sources_of_the_types_the_worker_reads_are_set_up(self):
+        asked = []
+
+        def initialize(config_file=None, source_types=None):
+            asked.append(source_types)
+            return True
+
+        self._set_up(initialize)
+
+        self.assertEqual(asked, [frozenset({'IMAS'})])
+
+    def test_an_iplotdataaccess_that_sets_up_every_type_is_asked_for_all(self):
+        asked = []
+
+        def initialize(config_file=None):
+            asked.append(config_file)
+            return True
+
+        self._set_up(initialize)
+
+        self.assertEqual(asked, [None])
+
+    def test_the_single_worker_reads_no_type_when_every_data_source_is_parallel(self):
+        with patch.object(AccessHelper, 'da', SimpleNamespace(ds_list={'uda': SimpleNamespace(source_type='CODAC_UDA')})):
+            self.assertEqual(AccessPool._serial_source_types(), frozenset())
+        with patch.object(AccessHelper, 'da', SimpleNamespace()):
+            self.assertIsNone(AccessPool._serial_source_types())
+
+    def test_a_worker_of_no_type_reports_no_missing_data_sources(self):
+        with patch.object(access_pool, '_worker_source_types', frozenset()), \
+                patch.object(AppDataAccess, 'initialize', staticmethod(lambda config_file=None, source_types=None: False)), \
+                patch.object(access_pool.logger, 'error') as error:
+            access_pool.app_data_access()
+
+        error.assert_not_called()
+
+    def test_a_cache_keeps_its_share_when_data_access_is_set_up_again(self):
+        data_access = SimpleNamespace(ds_list={'uda': SimpleNamespace(access_cache=_Cache(300))})
+
+        access_pool._share_cache(data_access, 2)
+        access_pool._share_cache(data_access, 2)
+
+        self.assertEqual(data_access.ds_list['uda'].access_cache.maxsize, 150)
 
 
 if __name__ == '__main__':

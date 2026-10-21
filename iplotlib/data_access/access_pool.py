@@ -7,6 +7,7 @@ thread free and let independent requests run at the same time.
 """
 
 import faulthandler
+import inspect
 import logging
 import logging.handlers
 import multiprocessing
@@ -50,23 +51,33 @@ _STUCK_AFTER_S = 2.0
 
 _STOPPED = "The data access process stopped while reading the data"
 
-# State of a worker process: what sets its data access up, the cache generation it last cleared
-# its data access cache for, and the data sources it tried to connect to again.
+# State of a worker process: what sets its data access up, the data source types it reads (all if
+# None), the number of workers that share the caches of their data sources, the cache generation it
+# last cleared its data access cache for, and the data sources it tried to connect to again.
 _worker_data_access_factory = None
+_worker_source_types = None
+_worker_cache_share = 1
 _worker_cache_epoch = 0
 _worker_reconnected = set()
 
 
 def app_data_access():
-    """Data access configured as the application's, from the data sources file AppDataAccess finds."""
+    """Data access configured as the application's, from the data sources file AppDataAccess finds: with
+    the data sources of the types this worker reads only, if iplotDataAccess can leave the others out."""
     from iplotDataAccess.appDataAccess import AppDataAccess
-    if not AppDataAccess.initialize():
+    if 'source_types' in inspect.signature(AppDataAccess.initialize).parameters:
+        configured = AppDataAccess.initialize(source_types=_worker_source_types)
+    else:
+        configured = AppDataAccess.initialize()
+    # A worker of no type serves only requests to data sources the application does not have.
+    if not configured and _worker_source_types != frozenset():
         logger.error("No data sources found for the data access worker")
     return AppDataAccess.get_data_access()
 
 
-def _init_worker(log_queue, parent_log_file, data_access_factory, num_samples, num_samples_override):
-    global _worker_data_access_factory
+def _init_worker(log_queue, parent_log_file, data_access_factory, num_samples, num_samples_override,
+                 source_types=None, cache_share=1):
+    global _worker_data_access_factory, _worker_source_types, _worker_cache_share
     # Ctrl+C is the application's to handle, and a worker stops when the application does.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     threading.Thread(target=_watch_parent, daemon=True).start()
@@ -76,6 +87,8 @@ def _init_worker(log_queue, parent_log_file, data_access_factory, num_samples, n
     AccessHelper.num_samples = num_samples
     AccessHelper.num_samples_override = num_samples_override
     _worker_data_access_factory = data_access_factory
+    _worker_source_types = source_types
+    _worker_cache_share = cache_share
     _set_up_data_access()
     # The modules imported to set up data access made loggers of their own.
     _drop_log_handlers()
@@ -92,10 +105,25 @@ def _set_up_data_access() -> bool:
     # worker reports it when asked whether it can read (see _ready).
     try:
         AccessHelper.da = _worker_data_access_factory()
+        _share_cache(AccessHelper.da, _worker_cache_share)
         return True
     except Exception:
         logger.exception("Cannot set up data access in the worker process")
         return False
+
+
+def _share_cache(data_access, workers: int):
+    """Keep in this worker its share of the query cache of each data source: the other workers that read
+    the same data sources keep the rest, so that together they keep as many queries as one process would."""
+    if workers <= 1:
+        return
+    for data_source in (getattr(data_access, 'ds_list', None) or {}).values():
+        cache = getattr(data_source, 'access_cache', None)
+        maxsize = getattr(cache, 'maxsize', None)
+        # A data source kept when the worker sets up data access again (see _data_access) has its share.
+        if maxsize and not getattr(data_source, '_shared_cache', False):
+            data_source.access_cache = type(cache)(maxsize=max(1, int(maxsize) // workers))
+            data_source._shared_cache = True
 
 
 def _forward_logging(log_queue, parent_log_file):
@@ -270,9 +298,11 @@ class AccessPool:
     """Runs AccessHelper data access requests in worker processes.
 
     Requests to a data source of PARALLEL_SOURCE_TYPES run in up to `workers` processes at
-    once; requests to other data sources share a single worker. Each worker reads through
-    a data access object of its own, made by `data_access_factory` (a picklable callable),
-    and logs through the loggers of this process.
+    once; requests to other data sources share a single worker. A worker starts with the
+    first request it is given, or ahead of it with prepare(). Each worker reads through a
+    data access object of its own, made by `data_access_factory` (a picklable callable; the
+    default one sets up only the data sources of the types the worker reads), and logs
+    through the loggers of this process.
 
     A request read before goes back to the worker that read it, whose data access cache may
     still hold the data; new requests go to the worker with the fewest requests to read.
@@ -309,11 +339,23 @@ class AccessPool:
 
     def start(self):
         """Start the workers for the configured data sources ahead of the first request."""
-        data_sources = getattr(AccessHelper.da, 'ds_list', None) or {}
-        parallel = {ds.source_type in PARALLEL_SOURCE_TYPES for ds in data_sources.values()}
-        slots = (list(range(self._workers)) if True in parallel else []) + ([_SERIAL_SLOT] if False in parallel else [])
+        self.prepare(getattr(AccessHelper.da, 'ds_list', None) or {})
+
+    def prepare(self, data_source_names: Iterable[str]):
+        """Start, ahead of their first request, the workers that requests to these data sources need: every
+        worker of the parallel sources, or the single one of the others. Names of no configured data source
+        are left out, and so are the workers already started."""
+        if isinstance(data_source_names, str):
+            data_source_names = (data_source_names,)
+        configured = getattr(AccessHelper.da, 'ds_list', None) or {}
+        slots = set()
+        for name in data_source_names:
+            if name in configured:
+                slots.update(range(self._workers) if self._is_parallel(name) else (_SERIAL_SLOT,))
         with self._lock:
-            for slot in slots:
+            if self._closed:
+                return
+            for slot in sorted(slots):
                 self._executor(slot)
 
     def fetch(self, requests: Iterable[dict], progress: Callable[[int, int], None] = None) \
@@ -514,16 +556,31 @@ class AccessPool:
             raise RuntimeError("The data access pool is shut down")
         executor = self._executors.get(slot)
         if executor is None:
+            parallel = slot != _SERIAL_SLOT
             executor = ProcessPoolExecutor(
                 max_workers=1,
                 mp_context=self._context,
                 initializer=_init_worker,
                 initargs=(self._log_queue, self._log_file, self._data_access_factory,
-                          AccessHelper.num_samples, AccessHelper.num_samples_override))
+                          AccessHelper.num_samples, AccessHelper.num_samples_override,
+                          PARALLEL_SOURCE_TYPES if parallel else self._serial_source_types(),
+                          self._workers if parallel else 1))
             self._executors[slot] = executor
             # Its first task tells whether the worker can read (see _check_workers).
             self._ready[slot] = executor.submit(_ready)
         return executor
+
+    @staticmethod
+    def _serial_source_types() -> Optional[frozenset]:
+        """The types of the configured data sources whose requests share the single worker: none if they are
+        all parallel, when it reads only requests to data sources the application does not have; every type
+        (None) if the data access object lists no data sources."""
+        data_sources = getattr(AccessHelper.da, 'ds_list', None)
+        if data_sources is None:
+            return None
+        types = {getattr(ds, 'source_type', None) for ds in data_sources.values()} - set(PARALLEL_SOURCE_TYPES)
+        types.discard(None)
+        return frozenset(types)
 
     @staticmethod
     def _is_parallel(data_s_name: Optional[str]) -> bool:
