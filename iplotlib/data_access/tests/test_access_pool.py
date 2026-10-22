@@ -38,6 +38,10 @@ logger = setupLogger.get_logger(__name__)
 T0 = 1_700_000_000_000_000_000
 T1 = T0 + 60_000_000_000
 
+# How long the tests wait for a worker to start: as long as Python takes to load what the worker reads with,
+# which is minutes on a loaded machine (over three on an SDCC login node).
+_START_TIMEOUT_S = 600
+
 _cache_clears = 0
 
 _SAMPLE_LIMIT = ('Number of samples in reply exceeds available limit. Reduce request interval, use decimation '
@@ -215,7 +219,7 @@ def _workers_started(pool: AccessPool, *data_sources) -> AccessPool:
     reads the requests in this process."""
     pool.prepare(data_sources or ('uda', 'imas'))
     for ready in list(pool._ready.values()):
-        ready.exception(timeout=120)
+        ready.exception(timeout=_START_TIMEOUT_S)
     return pool
 
 
@@ -646,7 +650,7 @@ class AccessPoolTests(unittest.TestCase):
         # The application bounds its wait for the request itself. The timeout only ends one that hangs before, and
         # leaves it the minutes that starting Python and a worker can take on a loaded machine.
         application = subprocess.run([sys.executable, '-c', _STOPPED_WHILE_GIVEN], capture_output=True, text=True,
-                                     timeout=600)
+                                     timeout=2 * _START_TIMEOUT_S)
 
         self.assertIn('given', application.stdout.split(), application.stdout + application.stderr[-2000:])
 
@@ -865,7 +869,7 @@ class AccessPoolTests(unittest.TestCase):
 
     def test_stopping_an_executor_ends_the_pipe_its_manager_thread_reads(self):
         executor = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context('spawn'))
-        executor.submit(os.getpid).result(timeout=120)
+        executor.submit(os.getpid).result(timeout=_START_TIMEOUT_S)
         writer = executor._result_queue._writer
 
         access_pool._stop(executor)

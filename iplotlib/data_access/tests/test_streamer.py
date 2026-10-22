@@ -16,6 +16,7 @@ import iplotlib.data_access.access_pool as access_pool_module
 import iplotlib.data_access.streamer as streamer_module
 from iplotlib.data_access.access_pool import AccessPool
 from iplotlib.data_access.streamer import CanvasStreamer, _inject_period_s
+from iplotlib.data_access.tests.test_access_pool import _START_TIMEOUT_S
 from iplotlib.interface.iplotSignalAdapter import AccessHelper, DataAccessError
 from iplotlib.qt.testing import ensure_qapp
 
@@ -1670,7 +1671,7 @@ class ArchiveInWorkerProcessesTests(unittest.TestCase):
         self.addCleanup(pool.shutdown)
         # Until its worker has started, the pool makes the call in the streaming thread.
         pool.prepare('ds')
-        pool._ready[0].result(timeout=120)
+        pool._ready[0].result(timeout=_START_TIMEOUT_S)
         calls = []
         call_in_worker = pool.call
 
