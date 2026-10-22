@@ -526,8 +526,10 @@ class AccessPoolTests(unittest.TestCase):
 
     def test_a_worker_that_stops_while_it_is_given_a_request_blocks_no_thread(self):
         # Python 3.12.1 and later fail the requests of a stopped worker holding the lock that submit() takes.
+        # The application bounds its wait for the request itself. The timeout only ends one that hangs before, and
+        # leaves it the minutes that starting Python and a worker can take on a loaded machine.
         application = subprocess.run([sys.executable, '-c', _STOPPED_WHILE_GIVEN], capture_output=True, text=True,
-                                     timeout=120)
+                                     timeout=600)
 
         self.assertIn('given', application.stdout.split(), application.stdout + application.stderr[-2000:])
 
