@@ -10,6 +10,9 @@ from iplotlib.core.date_ticks import (
     pick_interval as _pick_interval,
     generate_ticks as _generate_ticks,
     relative_ticks as _rel_time_ticks,
+    fitting_count as _fit_count,
+    fitting_date_count as _fit_date_count,
+    number_label_sample as _number_label_sample,
     segments_for_interval as _segments_for_interval,
     label_unit as _label_unit,
 )
@@ -358,15 +361,18 @@ class NanosecondDateFormatter(pg.AxisItem):
         # Limit tick count to what fits without overlapping labels: label
         # width along a horizontal axis, line height along a vertical one.
         n = self.n_ticks
-        if size > 0:
-            font = self.style.get('tickFont') or self.font()
-            fm = pg.Qt.QtGui.QFontMetricsF(font)
-            if self.orientation in ('left', 'right'):
-                slot = fm.height() + 6
-            else:
-                sample = "00:00:00.000" if self.is_date else "0.00000"
-                slot = fm.horizontalAdvance(sample) + 10
-            n = max(2, min(n, int(size / slot)))
+        fm = pg.Qt.QtGui.QFontMetricsF(self.style.get('tickFont') or self.font()) if size > 0 else None
+
+        def room_for(sample):
+            # How many labels as wide as `sample` fit along the axis.
+            if fm is None:
+                return None
+            slot = fm.height() + 6 if self.orientation in ('left', 'right') else fm.horizontalAdvance(sample) + 10
+            return max(2, int(size / slot))
+
+        def fitting(ticks_for, sample_for=_number_label_sample):
+            # The ladders give at least n ticks, often more: no more than fit (see date_ticks.fitting_count).
+            return _fit_count(ticks_for, n, lambda ticks: room_for(sample_for(ticks)))
 
         if self.is_date:
             # Place ticks on round UTC civil-time boundaries (Grafana-style)
@@ -382,7 +388,8 @@ class NanosecondDateFormatter(pg.AxisItem):
                 min_step = self.unit_scale
             else:
                 min_step = 0
-            step_ns, kind = _pick_interval(abs_lo, abs_hi, n, min_step)
+            step_ns, kind = _pick_interval(abs_lo, abs_hi, _fit_date_count(abs_lo, abs_hi, n, min_step, room_for),
+                                           min_step)
             ticks_abs = _generate_ticks(abs_lo, abs_hi, step_ns, kind)
             values = [self._abs_to_axis(t) for t in ticks_abs]
 
@@ -407,7 +414,7 @@ class NanosecondDateFormatter(pg.AxisItem):
         # positions with at least n of them, so the count follows the setting
         # and repaints cannot drift with the pan/zoom history.
         last_range = maxVal - minVal
-        values = _linear_ticks(minVal, maxVal, n)
+        values = _linear_ticks(minVal, maxVal, fitting(lambda k: _linear_ticks(minVal, maxVal, k)))
         self.last_values = values
         self.last_range = last_range
         if len(values) >= 2:
@@ -424,8 +431,12 @@ class NanosecondDateFormatter(pg.AxisItem):
             # (e.g. 36ms250us) and label each tick with the changing groups
             # + unit (e.g. 150ns). Negative views are not offset; units
             # extend to days for long pulses.
-            rel = _rel_time_ticks(int(round(minVal * 1e9)),
-                                  int(round(maxVal * 1e9)), n)
+            lo_ns, hi_ns = int(round(minVal * 1e9)), int(round(maxVal * 1e9))
+
+            def widest_label(ticks):
+                labels = eng_time_axis_labels(minVal, maxVal, [tick / 1e9 for tick in ticks])[1].values()
+                return max(labels, key=len, default='0')
+            rel = _rel_time_ticks(lo_ns, hi_ns, fitting(lambda k: _rel_time_ticks(lo_ns, hi_ns, k), widest_label))
             if rel:
                 values = [t / 1e9 for t in rel]
             common, labels, base, g_scale = eng_time_axis_labels(
