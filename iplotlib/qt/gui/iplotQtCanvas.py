@@ -131,7 +131,7 @@ class IplotQtCanvas(QWidget):
         """Forget the data still being read in the background for views that changed."""
         self._parser.drop_view_reads()
 
-    def _view_data_read(self):
+    def _view_data_drawn(self):
         # The data read in the background for a view that changed are drawn: statistics follow them.
         self.stats(self.get_canvas())
 
@@ -604,8 +604,9 @@ class IplotQtCanvas(QWidget):
         signals = self.get_signals(canvas)
         if signals:
             for signal in signals:
-                if (isinstance(signal,
-                               SignalXY) and signal.status_info.result == 'Success' and signal.parent is not None):
+                # A signal whose data are read in the background shows those it has until they arrive.
+                read = signal.status_info.result == 'Success' or getattr(signal, '_put_off', None) is not None
+                if isinstance(signal, SignalXY) and read and signal.parent is not None:
                     impl_plot = self._parser._signal_impl_plot_lut.get(self._parser.signal_lut_key(signal))
                     if impl_plot is None:
                         continue

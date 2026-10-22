@@ -4,6 +4,7 @@ by request key, and the GUI thread keeps running while it waits."""
 import ctypes
 import gc
 import logging
+import multiprocessing
 import os
 import signal
 import subprocess
@@ -13,7 +14,7 @@ import threading
 import time
 import unittest
 import weakref
-from concurrent.futures import Future
+from concurrent.futures import Future, ProcessPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -572,6 +573,15 @@ class AccessPoolTests(unittest.TestCase):
 
         self.assertTrue(writer.closed)
 
+    def test_new_requests_read_one_at_a_time_take_turns_between_the_workers(self):
+        # Each worker keeps its share of the cache of the data source (see _share_cache).
+        pids = set()
+        for n in range(4):
+            params = _params('slow-pid', end=T1 + 300 + n)
+            pids.add(self.pool.fetch([params])[_key(params)]['d1'][0])
+
+        self.assertEqual(len(pids), 2)
+
     def test_a_request_read_before_goes_back_to_its_worker(self):
         first, second = _params('slow-pid', end=T1 + 50), _params('slow-pid', end=T1 + 51)
         pids = self.pool.fetch([first, second])
@@ -684,7 +694,7 @@ class AccessPoolTests(unittest.TestCase):
         cancelled = Future()
         cancelled.cancel()
         waits = []
-        thread = threading.Thread(target=lambda: waits.append(pool._wait([cancelled], 0, 1, None)), daemon=True)
+        thread = threading.Thread(target=lambda: waits.append(pool._wait([cancelled], 1, None)), daemon=True)
 
         thread.start()
         thread.join(10)
@@ -716,10 +726,9 @@ class AccessPoolTests(unittest.TestCase):
         self.assertEqual([str(outcome) for outcome in outcomes], [access_pool._STOPPED] * 8)
 
     def test_stopping_an_executor_ends_the_pipe_its_manager_thread_reads(self):
-        writer = SimpleNamespace(closed=False)
-        writer.close = lambda: setattr(writer, 'closed', True)
-        executor = SimpleNamespace(_processes={}, shutdown=lambda **kwargs: None,
-                                   _result_queue=SimpleNamespace(_writer=writer))
+        executor = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context('spawn'))
+        executor.submit(os.getpid).result(timeout=120)
+        writer = executor._result_queue._writer
 
         access_pool._stop(executor)
 
@@ -732,7 +741,7 @@ class AccessPoolTests(unittest.TestCase):
         error, _ = self._in_thread(lambda: pool.call('get_archive_window', 'other', varname='plain', tsS='5'))
         reply, _ = self._in_thread(lambda: self._call('plain', pool))
 
-        self.assertIsInstance(error, RuntimeError)
+        self.assertIsInstance(error, DataAccessError)
         self.assertIn("no data source other", str(error))
         self.assertEqual(reply.ydata[2], 5.0)
 

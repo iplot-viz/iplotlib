@@ -69,6 +69,6 @@ class IplPlotViewLimits:
     sliders_ranges: List[IplSliderLimits] = field(
         default_factory=list)  #: a list of slider limits for each axis of this plot.
     plot_ref: ref = None  #: a weak reference to the core iplotlib plot object.
-    #: the Y range was fitted to the data drawn while those of the X range were read: restoring the limits fits it
-    #: again to the data of the X range.
+    #: the Y range was fitted to the data on screen while the data of the X range were still read: restoring the
+    #: limits fits it again once those are drawn.
     refit_y: bool = field(default=False, compare=False)

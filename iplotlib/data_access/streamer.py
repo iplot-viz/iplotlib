@@ -243,8 +243,8 @@ class CanvasStreamer:
 
     def _read_archive(self, method: str, ds: str, **kwargs):
         """Call ``method`` of the data access object, which reads the archive. With the worker
-        processes of the application, the call runs in one of them, as Draw reads: a data access
-        client can keep the GIL for as long as it reads, which would stop the GUI thread too."""
+        processes of the application, the call runs in one of them: a data access client can keep
+        the GIL for as long as it reads, which would stop the GUI thread too."""
         pool = AccessHelper.pool
         if pool is not None and self.da is AccessHelper.da and not self._read_archive_here:
             try:

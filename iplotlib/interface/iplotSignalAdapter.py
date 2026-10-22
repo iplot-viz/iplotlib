@@ -284,7 +284,7 @@ class IplotSignalAdapter(ProcessingSignal):
 
         def _log_mismatch(case: str, msg: str) -> None:
             key = (source_label, target_label, len(source), len(target), case)
-            # Within a change of the view drawn before all its data arrive, they can be of two ranges.
+            # A change of the view drawn before all its data arrive can mix data of two ranges.
             if key in _TRUNCATE_WARN_KEYS or AccessHelper._deferred_reads() is not None:
                 logger.debug(msg)
             else:
@@ -828,7 +828,7 @@ class IplotSignalAdapter(ProcessingSignal):
                 if child._needs_refresh():
                     child._fetch_data()
                 if len(child.children) and getattr(child, '_processing_due', False):
-                    # An expression hands on the data it evaluates, which its processing puts in its data store.
+                    # The parent uses the data this expression evaluates, which only its processing stores.
                     child._do_data_processing()
                 put_off = put_off or getattr(child, '_put_off', None)
                 if child.status_info.result == Result.FAIL:
@@ -970,7 +970,7 @@ class DeferredReads:
     """The data reads put off within AccessHelper.deferred(), to make in the background."""
     #: Parameters of the requests put off, by AccessHelper.request_key().
     requests: typing.Dict[tuple, dict] = field(default_factory=dict)
-    #: Signals whose data access ran within the block. They kept the data of their previous range.
+    #: Signals whose data access ran within the block: invalidate() makes them access their data again.
     signals: typing.List[IplotSignalAdapter] = field(default_factory=list)
     #: Requests already read in the background for what the block draws: a signal whose request was
     #: put off for one of them waits for it without asking again.

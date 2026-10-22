@@ -97,6 +97,30 @@ class _Pool:
             fetch.arrive()
 
 
+class _FailingPool(_Pool):
+    """Worker processes that cannot read."""
+
+    def __init__(self):
+        super().__init__()
+        self.shut_down = False
+
+    def fetch(self, requests, progress=None):
+        raise RuntimeError("the worker processes cannot start")
+
+    def fetch_later(self, requests, on_done):
+        raise RuntimeError("the worker processes cannot start")
+
+    def shutdown(self):
+        self.shut_down = True
+
+
+class _QuittingPool(_Pool):
+    """Worker processes whose wait ends because the application quits."""
+
+    def fetch(self, requests, progress=None):
+        return None
+
+
 def _variable(name, **kwargs):
     return SignalXY(name=name, label=name, data_source='uda', ts_start=T0, ts_end=T0 + HOUR, **kwargs)
 
@@ -497,6 +521,63 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
                 # The redraw made new implementation plots.
                 impls = [parser._plot_impl_plot_lut.get(id(signal.parent()))[0] for signal in signals]
                 self.assertEqual([self._drawn(parser, impl) for impl in impls], [[[60.0]], [[60.0]]])
+
+    def test_the_statistics_keep_the_signals_whose_data_are_still_read(self):
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                qt_canvas, parser, impls, signals = self._draw(backend)
+                AccessHelper.pool = pool = _Pool()
+                parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                self.app.processEvents()
+
+                with patch.object(qt_canvas._stats_table, 'fill_table') as fill_table:
+                    qt_canvas.stats(qt_canvas.get_canvas())
+                pool.arrive()
+                self.app.processEvents()
+
+                self.assertEqual(sorted(row[0].name for row in fill_table.call_args.args[0]), ['VAR-A', 'VAR-B'])
+
+    def test_worker_processes_that_cannot_read_a_view_are_shut_down_and_it_is_read_here(self):
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                qt_canvas, parser, impls, signals = self._draw(backend)
+                AccessHelper.pool = pool = _FailingPool()
+
+                with self.assertLogs('iplotlib.core.impl_base', level='ERROR'):
+                    parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                    self.app.processEvents()
+
+                self.assertIsNone(AccessHelper.pool)
+                self.assertTrue(pool.shut_down)
+                self.assertEqual(sorted(self.da.reads), [('VAR-A', *ZOOM), ('VAR-B', *ZOOM)])
+
+    def test_worker_processes_that_cannot_read_for_a_redraw_are_shut_down_and_it_reads_here(self):
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                qt_canvas, parser, impls, signals = self._draw(backend)
+                for signal in signals:
+                    signal._access_md5sum = None
+                AccessHelper.pool = pool = _FailingPool()
+
+                with self.assertLogs('iplotlib.core.impl_base', level='ERROR'):
+                    parser.process_ipl_canvas(parser.canvas)
+
+                self.assertIsNone(AccessHelper.pool)
+                self.assertTrue(pool.shut_down)
+                self.assertEqual(sorted(name for name, *_ in self.da.reads), ['VAR-A', 'VAR-B'])
+
+    def test_a_redraw_while_the_application_quits_reads_nothing_here(self):
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                AccessHelper.pool = None
+                qt_canvas, parser, impls, signals = self._draw(backend)
+                for signal in signals:
+                    signal._access_md5sum = None
+                AccessHelper.pool = _QuittingPool()
+
+                parser.process_ipl_canvas(parser.canvas)
+
+                self.assertEqual(self.da.reads, [])
 
     def test_without_worker_processes_a_zoom_reads_at_once(self):
         for backend in ('pyqt', 'matplotlib'):
