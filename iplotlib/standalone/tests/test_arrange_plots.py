@@ -7,10 +7,13 @@ plots it does not draw show while a plot moves, move as plots do and take no plo
 legend still moves those, and nothing moves out of the select mode, while a plot has the focus or while streaming.
 """
 
+import gc
+import sys
 import unittest
+import weakref
+from unittest.mock import patch
 
 import numpy as np
-import shiboken6
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSizeF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
@@ -443,21 +446,25 @@ class TestArrangePlots(unittest.TestCase):
                 self.assertEqual(arranged, [])
 
     def test_qt_destroys_a_canvas_whose_arranger_python_already_cleared(self):
-        for backend in BACKENDS:
-            with self.subTest(backend):
-                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=_canvas((3,)))
-                qt_canvas.show()
-                self.app.processEvents()
-                qt_canvas.set_mouse_mode(Canvas.MOUSE_MODE_SELECT)
-                qt_canvas.close()
-                self.app.processEvents()
-                # As the garbage collector does when it frees the canvas and its arranger together: Qt then sends
-                # events to the widgets it destroys, through the arranger.
-                qt_canvas._arranger.__dict__.clear()
+        # The garbage collector can clear the arranger before the canvas it frees with it: Qt then sends the events
+        # of the widgets it destroys through the arranger. A pyqtgraph canvas goes once dropped, and the error of an
+        # event filter called meanwhile goes to sys.excepthook.
+        qt_canvas = IplotQtCanvasFactory.new('pyqt', canvas=_canvas((3,)))
+        qt_canvas.show()
+        self.app.processEvents()
+        qt_canvas.set_mouse_mode(Canvas.MOUSE_MODE_SELECT)
+        qt_canvas.close()
+        self.app.processEvents()
+        qt_canvas._arranger.__dict__.clear()
+        dropped, errors = weakref.ref(qt_canvas), []
 
-                # The error of an event filter comes out of the call that sent the event.
-                shiboken6.delete(qt_canvas)
-                self.app.processEvents()
+        with patch.object(sys, 'excepthook', lambda kind, value, traceback: errors.append(value)):
+            del qt_canvas
+            gc.collect()
+            self.app.processEvents()
+
+        self.assertIsNone(dropped())
+        self.assertEqual(errors, [])
 
     def test_the_resize_handle_shows_under_the_mouse(self):
         for backend in BACKENDS:
