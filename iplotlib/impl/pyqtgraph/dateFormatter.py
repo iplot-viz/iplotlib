@@ -364,10 +364,10 @@ class NanosecondDateFormatter(pg.AxisItem):
         fm = pg.Qt.QtGui.QFontMetricsF(self.style.get('tickFont') or self.font()) if size > 0 else None
 
         def room_for(sample):
-            # How many labels as wide as `sample` fit along the axis.
+            # How many labels as wide as `sample` fit along the axis: a line of text each along a vertical one.
             if fm is None:
                 return None
-            slot = fm.height() + 6 if self.orientation in ('left', 'right') else fm.horizontalAdvance(sample) + 10
+            slot = fm.lineSpacing() if self.orientation in ('left', 'right') else fm.horizontalAdvance(sample) + 10
             return max(2, int(size / slot))
 
         def fitting(ticks_for, sample_for=_number_label_sample):

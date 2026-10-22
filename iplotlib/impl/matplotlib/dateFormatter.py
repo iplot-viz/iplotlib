@@ -50,9 +50,22 @@ def tick_room(axis, sample: str) -> Optional[int]:
 
 def _fitting_count(axis, ticks_for, target: int, sample_for=None) -> int:
     """The count to ask a tick ladder for on `axis` (see date_ticks.fitting_count): `sample_for(ticks)` is a label as
-    wide as theirs, by default as a numeric axis writes them."""
-    sample_for = sample_for or _number_label_sample
+    wide as theirs, by default the widest the formatter of the axis writes. Along a vertical axis a label takes a
+    line, whatever it says."""
+    if getattr(axis, 'axis_name', None) != 'x':
+        sample_for = lambda ticks: ''
+    sample_for = sample_for or (lambda ticks: _formatted_sample(axis, ticks))
     return _fit_count(ticks_for, target, lambda ticks: tick_room(axis, sample_for(ticks)))
+
+
+def _formatted_sample(axis, ticks) -> str:
+    """The widest label the formatter of `axis` writes for the ticks: the common part and the power of ten it moves
+    to the corner of the axis left out."""
+    try:
+        labels = axis.get_major_formatter().format_ticks(list(ticks))
+    except Exception:
+        return _number_label_sample(ticks)
+    return max(labels, key=len, default='0')
 
 
 def _tick_label_points(axis) -> float:

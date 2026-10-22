@@ -256,7 +256,7 @@ class FittingCountTests(unittest.TestCase):
         room_for = lambda ticks: 60 // (len(number_label_sample(ticks)) * 2)
 
         self.assertEqual(len(linear_ticks(0, 10, fitting_count(lambda n: linear_ticks(0, 10, n), 10, room_for))), 11)
-        self.assertEqual(number_label_sample(linear_ticks(-1, 1, 10)), '-1.0')
+        self.assertEqual(number_label_sample(linear_ticks(-1, 1, 10)), '-0.8')
         self.assertEqual(number_label_sample(linear_ticks(0, 10, 10)), '10')
 
     def test_a_date_axis_measures_the_labels_it_draws(self):

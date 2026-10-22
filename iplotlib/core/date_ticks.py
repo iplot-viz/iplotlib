@@ -286,13 +286,8 @@ def fitting_count(ticks_for, target_ticks: int, room_for) -> int:
 
 
 def number_label_sample(ticks) -> str:
-    """A tick label as wide as the widest a numeric axis shows for these ticks: written with the decimals their step
-    needs. Formatters that factor out an exponent or a prefix write them shorter."""
-    if len(ticks) < 2:
-        return '0'
-    step = abs(ticks[1] - ticks[0])
-    decimals = max(0, -math.floor(math.log10(step))) if step > 0 and math.isfinite(step) else 0
-    return max((f"{tick:.{decimals}f}" for tick in ticks), key=len)
+    """The widest tick label of a numeric axis for these ticks, written as the pyqtgraph backend writes them."""
+    return max((f"{tick:g}" for tick in ticks), key=len, default='0')
 
 
 def linear_ticks(lo: float, hi: float, target_ticks: int):
