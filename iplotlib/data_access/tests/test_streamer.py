@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, call, patch
 import numpy as np
 from iplotDataAccess.dataCommon import DataObj
 
+import iplotlib.data_access.access_pool as access_pool_module
 import iplotlib.data_access.streamer as streamer_module
 from iplotlib.data_access.access_pool import AccessPool
 from iplotlib.data_access.streamer import CanvasStreamer, _inject_period_s
@@ -1667,6 +1668,9 @@ class ArchiveInWorkerProcessesTests(unittest.TestCase):
         AccessHelper.da = data_access = _ArchiveDataAccess()
         AccessHelper.pool = pool = AccessPool(1, data_access_factory=_archive_data_access)
         self.addCleanup(pool.shutdown)
+        # Until its worker has started, the pool makes the call in the streaming thread.
+        pool.prepare('ds')
+        pool._ready[0].result(timeout=120)
         calls = []
         call_in_worker = pool.call
 
@@ -1680,8 +1684,10 @@ class ArchiveInWorkerProcessesTests(unittest.TestCase):
         streamer._max_points = 0
         callback = MagicMock()
 
-        streamer._archive_backfill({'ds': [signal]}, 3600 * int(1e9), callback)
+        with patch.object(access_pool_module, '_call_here', wraps=access_pool_module._call_here) as here:
+            streamer._archive_backfill({'ds': [signal]}, 3600 * int(1e9), callback)
 
+        here.assert_not_called()
         (method, ds, kwargs), = calls
         expected = data_access.get_archive_window(ds, **kwargs)
         injected = signal.inject_external.call_args.kwargs
