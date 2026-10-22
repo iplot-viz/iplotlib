@@ -87,7 +87,7 @@ class TestMoveInItsColumn(unittest.TestCase):
         arrangement = moved(canvas, _plot(canvas, 'B'), 1, 0)
 
         self.assertEqual(_places(arrangement), {'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1)})
-        self.assertEqual(_changes(arrangement), {((2, 0), (1, 0)), ((1, 0), (2, 0))})
+        self.assertEqual(_changes(arrangement), {((2, 0), (1, 0))})
 
     def test_a_plot_dropped_on_an_empty_row_of_its_column_lands_there(self):
         canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1), 'C': (0, 1, 1, 1), 'D': (1, 1, 1, 1),
@@ -97,7 +97,7 @@ class TestMoveInItsColumn(unittest.TestCase):
 
         self.assertEqual(_places(arrangement)['A'], (2, 0, 1, 1))
         self.assertEqual(_places(arrangement)['B'], (0, 0, 1, 1))
-        self.assertEqual(_changes(arrangement), {((0, 0), (2, 0)), ((1, 0), (0, 0)), ((2, 0), (1, 0))})
+        self.assertEqual(_changes(arrangement), {((0, 0), (2, 0)), ((1, 0), (0, 0))})
         self.assertEqual((arrangement.rows, arrangement.cols), (3, 2))
 
     def test_the_only_plot_of_a_column_moves_down_its_column(self):
@@ -134,13 +134,13 @@ class TestMoveElsewhere(unittest.TestCase):
         self.assertEqual(_places(arrangement), {'A': (0, 1, 1, 1), 'C': (0, 0, 2, 1), 'D': (1, 1, 1, 1)})
         self.assertEqual((arrangement.rows, arrangement.cols), (2, 2))
 
-    def test_a_plot_dropped_on_empty_cells_takes_them_and_what_they_held_goes_where_it_was(self):
+    def test_a_plot_dropped_on_empty_cells_takes_them(self):
         canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1), 'C': (0, 1, 1, 1)})
 
         arrangement = moved(canvas, _plot(canvas, 'A'), 1, 1)
 
         self.assertEqual(_places(arrangement), {'A': (1, 1, 1, 1), 'B': (1, 0, 1, 1), 'C': (0, 1, 1, 1)})
-        self.assertEqual(_changes(arrangement), {((0, 0), (1, 1)), ((1, 1), (0, 0))})
+        self.assertEqual(_changes(arrangement), {((0, 0), (1, 1))})
 
     def test_a_plot_lands_where_it_was_grabbed(self):
         canvas = _canvas({'A': (0, 0, 2, 1), 'B': (2, 0, 1, 1)}, cols=2)
@@ -193,7 +193,7 @@ class TestResize(unittest.TestCase):
         arrangement = resized(canvas, _plot(canvas, 'A'), 2, 1)
 
         self.assertEqual(_places(arrangement), {'A': (0, 0, 2, 1), 'C': (3, 0, 1, 1)})
-        self.assertEqual(_changes(arrangement), {((0, 0), (0, 0)), ((2, 0), (3, 0)), ((1, 0), (2, 0))})
+        self.assertEqual(_changes(arrangement), {((0, 0), (0, 0)), ((2, 0), (3, 0))})
 
     def test_a_taller_last_plot_takes_the_rows_left_below_its_column(self):
         canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1), 'C': (0, 1, 1, 1), 'D': (1, 1, 1, 1),
@@ -219,6 +219,68 @@ class TestResize(unittest.TestCase):
         canvas = _canvas(COLUMN)
 
         self.assertIsNone(resized(canvas, _plot(canvas, 'B'), 1, 1))
+
+
+class TestReservedSlots(unittest.TestCase):
+    """Slots an application reserves for plots it does not draw now, such as those whose data could not be read."""
+
+    def test_a_reserved_slot_in_the_column_of_a_plot_moves_as_a_plot_does(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'B': (3, 0, 1, 1)})
+
+        arrangement = moved(canvas, _plot(canvas, 'B'), 0, 0, reserved=[Slot(1, 0, 2, 1)])
+
+        self.assertEqual(_places(arrangement), {'B': (0, 0, 1, 1), 'A': (1, 0, 1, 1)})
+        self.assertEqual(arrangement.reserved, [Slot(2, 0, 2, 1)])
+        self.assertEqual(_changes(arrangement), {((3, 0), (0, 0)), ((0, 0), (1, 0)), ((1, 0), (2, 0))})
+        # Nothing is drawn in a reserved slot: the grid ends with the plots.
+        self.assertEqual((arrangement.rows, arrangement.cols), (2, 1))
+
+    def test_a_plot_dropped_on_a_reserved_slot_trades_places_with_it(self):
+        canvas = _canvas({'A': (0, 0, 2, 1), 'C': (0, 1, 1, 1)})
+
+        arrangement = moved(canvas, _plot(canvas, 'A'), 1, 1, reserved=[Slot(1, 1)])
+
+        self.assertEqual(_places(arrangement), {'A': (1, 1, 1, 1), 'C': (0, 1, 1, 1)})
+        self.assertEqual(arrangement.reserved, [Slot(0, 0, 2, 1)])
+        self.assertEqual(_changes(arrangement), {((0, 0), (1, 1)), ((1, 1), (0, 0))})
+
+    def test_a_plot_does_not_move_over_a_reserved_slot(self):
+        canvas = _canvas({'A': (0, 0, 2, 1), 'C': (0, 1, 1, 1), 'D': (2, 0, 1, 1)})
+
+        self.assertEqual(_places(moved(canvas, _plot(canvas, 'A'), 1, 1))['A'], (1, 1, 2, 1))
+        self.assertIsNone(moved(canvas, _plot(canvas, 'A'), 1, 1, reserved=[Slot(2, 1)]))
+
+    def test_a_plot_does_not_grow_over_a_reserved_slot(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'C': (0, 1, 1, 1), 'W': (2, 0, 1, 2)})
+
+        self.assertEqual(_places(resized(canvas, _plot(canvas, 'C'), 2, 1))['C'], (0, 1, 2, 1))
+        self.assertIsNone(resized(canvas, _plot(canvas, 'C'), 2, 1, reserved=[Slot(1, 1)]))
+
+    def test_a_taller_plot_moves_a_reserved_slot_below_it_down(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'C': (2, 0, 1, 1)})
+
+        arrangement = resized(canvas, _plot(canvas, 'A'), 2, 1, reserved=[Slot(1, 0)])
+
+        self.assertEqual(_places(arrangement), {'A': (0, 0, 2, 1), 'C': (3, 0, 1, 1)})
+        self.assertEqual(arrangement.reserved, [Slot(2, 0)])
+        self.assertEqual(_changes(arrangement), {((0, 0), (0, 0)), ((1, 0), (2, 0)), ((2, 0), (3, 0))})
+
+    def test_a_reserved_slot_left_where_it_is_takes_no_room(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1)})
+
+        arrangement = moved(canvas, _plot(canvas, 'B'), 0, 0, reserved=[Slot(2, 0)])
+
+        self.assertEqual(_places(arrangement), {'B': (0, 0, 1, 1), 'A': (1, 0, 1, 1)})
+        self.assertEqual(arrangement.reserved, [Slot(2, 0)])
+        self.assertEqual(_changes(arrangement), {((1, 0), (0, 0)), ((0, 0), (1, 0))})
+        self.assertEqual((arrangement.rows, arrangement.cols), (2, 1))
+
+    def test_a_reserved_slot_that_shares_cells_with_a_plot_or_another_reserved_slot_stays_out(self):
+        canvas = _canvas({'A': (0, 0, 2, 1), 'B': (2, 0, 1, 1)})
+
+        kept = current(canvas, reserved=[Slot(1, 0), Slot(3, 0, 2, 1), Slot(4, 0)]).reserved
+
+        self.assertEqual(kept, [Slot(3, 0, 2, 1)])
 
 
 class TestArrange(unittest.TestCase):

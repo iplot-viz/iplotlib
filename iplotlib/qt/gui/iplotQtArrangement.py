@@ -36,6 +36,8 @@ class _Gesture:
         self.started = kind == RESIZE
         self.arrangement = None  # type: Optional[Arrangement]
         self.target = slot
+        # The slots the application reserves for plots it does not draw now, read once the gesture starts.
+        self.reserved = None  # type: Optional[List[Slot]]
 
 
 class PlotArranger(QObject):
@@ -158,9 +160,12 @@ class PlotArranger(QObject):
     def _update(self, point: QPointF, bounds: Bounds):
         gesture = self._gesture
         canvas = self._canvas.get_canvas()
+        if gesture.reserved is None:
+            gesture.reserved = layout.current(canvas, self._canvas.reserved_slots()).reserved
         row, col = _cell(bounds[0], point.y()), _cell(bounds[1], point.x())
         if gesture.kind == MOVE:
-            gesture.arrangement = layout.moved(canvas, gesture.plot, row, col, *gesture.grab)
+            gesture.arrangement = layout.moved(canvas, gesture.plot, row, col, *gesture.grab,
+                                               reserved=gesture.reserved)
             rows, cols = layout.grid_size(canvas)
             top = min(max(row - gesture.grab[0], 0), rows - gesture.slot.row_span)
             left = min(max(col - gesture.grab[1], 0), cols - gesture.slot.col_span)
@@ -169,7 +174,7 @@ class PlotArranger(QObject):
             gesture.target = Slot(gesture.slot.row, gesture.slot.col, max(1, row - gesture.slot.row + 1),
                                   max(1, col - gesture.slot.col + 1))
             gesture.arrangement = layout.resized(canvas, gesture.plot, gesture.target.row_span,
-                                                 gesture.target.col_span)
+                                                 gesture.target.col_span, reserved=gesture.reserved)
         allowed = gesture.arrangement is not None or gesture.target == gesture.slot
         QApplication.changeOverrideCursor(Qt.CursorShape.ForbiddenCursor if not allowed else
                                           Qt.CursorShape.ClosedHandCursor if gesture.kind == MOVE else
@@ -178,17 +183,20 @@ class PlotArranger(QObject):
         if gesture.arrangement is not None:
             after = self._preview_bounds(bounds, gesture.arrangement)
             before = {id(plot): slot for plot, slot in layout.slots_of(canvas)}
+            taken = [slot for _, slot in gesture.arrangement.slots] + gesture.arrangement.reserved
+            # Where the plot was, if nothing takes its place.
+            if after is bounds and not any(slot.overlaps(gesture.slot) for slot in taken):
+                shapes.append((_rect(bounds, gesture.slot), _Overlay.SOURCE))
+            shapes += _reserved_shapes(after, gesture.arrangement.reserved)
             for plot, slot in gesture.arrangement.slots:
                 if plot is gesture.plot:
                     shapes.append((_rect(after, slot), _Overlay.TARGET))
                 # With another number of rows or columns, every plot takes another size.
                 elif before.get(id(plot)) != slot or after is not bounds:
                     shapes.append((_rect(after, slot), _Overlay.MOVED))
-            # Where the plot was, if no plot takes its place.
-            if after is bounds and not any(slot.overlaps(gesture.slot) for _, slot in gesture.arrangement.slots):
-                shapes.insert(0, (_rect(bounds, gesture.slot), _Overlay.SOURCE))
         else:
             shapes.append((_rect(bounds, gesture.slot), _Overlay.SOURCE))
+            shapes += _reserved_shapes(bounds, gesture.reserved)
             if not allowed:
                 shapes.append((_rect(bounds, _within(gesture.target, bounds)), _Overlay.FORBIDDEN))
         self._overlay.show_shapes(shapes)
@@ -274,11 +282,18 @@ def _even(start: float, end: float, count: int) -> List[float]:
     return [start + (end - start) * index / count for index in range(count + 1)]
 
 
+def _reserved_shapes(bounds: Bounds, reserved: Sequence[Slot]) -> List[Tuple[QRectF, int]]:
+    """The reserved slots that start inside the grid, cut to it: nothing is drawn there, so the overlay shows them."""
+    rows, cols = len(bounds[0]) - 1, len(bounds[1]) - 1
+    return [(_rect(bounds, _within(slot, bounds)), _Overlay.RESERVED) for slot in reserved
+            if slot.row < rows and slot.col < cols]
+
+
 class _Overlay(QWidget):
     """Draws over the canvas where the plots go while one moves or takes another size, and the resize handle of the
     plot under the mouse. The mouse goes through it to the plots."""
 
-    SOURCE, TARGET, MOVED, FORBIDDEN, GRIP = range(5)
+    SOURCE, TARGET, MOVED, FORBIDDEN, GRIP, RESERVED = range(6)
 
     def __init__(self, canvas: QWidget):
         super().__init__(canvas)
@@ -311,10 +326,11 @@ class _Overlay(QWidget):
             box = rect.adjusted(inset, inset, -inset, -inset)
             color = accent if style in (self.TARGET, self.MOVED) else neutral
             fill = QColor(color)
-            fill.setAlpha({self.SOURCE: 25, self.TARGET: 70, self.MOVED: 18, self.FORBIDDEN: 45}[style])
+            fill.setAlpha({self.SOURCE: 25, self.TARGET: 70, self.MOVED: 18, self.FORBIDDEN: 45,
+                           self.RESERVED: 12}[style])
             pen = QPen(color, ScaledPixels(2).px() if style == self.TARGET else ScaledPixels(1.5).px())
             if style != self.TARGET:
-                pen.setStyle(Qt.PenStyle.DashLine)
+                pen.setStyle(Qt.PenStyle.DotLine if style == self.RESERVED else Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.setBrush(fill)
             radius = ScaledPixels(4).px()

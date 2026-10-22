@@ -213,7 +213,14 @@ class IplotQtMainWindow(QMainWindow):
         w.openPlotPreferences.connect(self._open_plot_preferences)
         w.focusChanged.connect(self.refresh_minimap_availability)
         w.plotsArranged.connect(self.on_plots_arranged)
+        w.reserved_slots = self.reserved_slots
         self.refresh_minimap_availability()
+
+    def reserved_slots(self) -> list:
+        """The slots of the grid of the canvas that the application reserves for plots it does not draw now, such as
+        those whose data could not be read: they move with the plots as plots do, and no plot moves or grows over them
+        (see iplotlib.core.layout). This window reserves none."""
+        return []
 
     def on_plots_arranged(self, changes: list):
         """The plots of a canvas moved or took another size (see IplotQtCanvas.plotsArranged): the preferences list

@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from abc import abstractmethod
 from contextlib import contextmanager
-from typing import List, Tuple, Optional
+from typing import Callable, List, Tuple, Optional
 
 import numpy as np
 from PySide6.QtCore import QEventLoop, QMetaObject, QSize, Qt, QTimer, Signal, Slot
@@ -46,7 +46,7 @@ class IplotQtCanvas(QWidget):
     signalShiftPulseApplied = Signal(str, str, float, float, str)  # (signal_uid, pulse_id, dx, dy, source)
     signalShiftPulseUndone = Signal(str, str, float, float)  # (signal_uid, pulse_id, previous_dx, previous_dy)
     # The plots moved or took another size on the grid, by the mouse or by undo/redo: the slot before and after of
-    # each plot, and of each empty cell, that moved (see iplotlib.core.layout.Arrangement.changes).
+    # each plot, and of each reserved slot, that moved (see iplotlib.core.layout.Arrangement.changes).
     plotsArranged = Signal(object)
 
     def __init__(self, parent=None, **kwargs):
@@ -86,6 +86,9 @@ class IplotQtCanvas(QWidget):
 
         # Moves and resizes the plots with the mouse, once the backend gives it the widget that draws them.
         self._arranger = None  # type: Optional[PlotArranger]
+        # Gives the slots of the grid that the application reserves for plots it does not draw now (see
+        # IplotQtMainWindow.reserved_slots).
+        self.reserved_slots = lambda: []  # type: Callable[[], List[layout.Slot]]
 
         # Streaming redraws are capped to one signal flush per interval (1 Hz).
         self._signal_flush_interval_ms = 1000

@@ -2,8 +2,9 @@
 
 In the select mode, a plot dragged by its background moves: in its column the others make room for it, onto a plot
 of another column the two trade places. Dragged by its bottom right corner, it spans other rows. The canvas tells
-where the plots went, undo takes them back, and each plot keeps its view. A drag from a curve or a legend still
-moves those, and nothing moves out of the select mode, while a plot has the focus or while streaming.
+where the plots went, undo takes them back, and each plot keeps its view. The slots the application reserves for
+plots it does not draw show while a plot moves, move as plots do and take no plot over them. A drag from a curve or a
+legend still moves those, and nothing moves out of the select mode, while a plot has the focus or while streaming.
 """
 
 import unittest
@@ -17,7 +18,7 @@ from iplotlib.core import layout
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
-from iplotlib.qt.gui.iplotQtArrangement import HANDLE, RESIZE
+from iplotlib.qt.gui.iplotQtArrangement import HANDLE, RESIZE, _Overlay
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.testing import ensure_qapp
 
@@ -303,6 +304,38 @@ class TestArrangePlots(unittest.TestCase):
                 mouse.drag(mouse.cell(0, 0), mouse.cell(1, 1))
 
                 self.assertEqual(_titles(canvas), [['0.0'], ['0.1']])
+                self.assertEqual(arranged, [])
+
+    def test_a_reserved_slot_shows_while_dragging_and_trades_places_with_the_plot_dropped_on_it(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(2, 1))
+                # The empty cell below the plot of the second column is kept for a plot the application does not draw.
+                qt_canvas.reserved_slots = lambda: [layout.Slot(1, 1)]
+
+                mouse.drag(mouse.cell(0, 0), mouse.cell(1, 1), release=False)
+                reserved = [rect for rect, style in qt_canvas._arranger._overlay._shapes if style == _Overlay.RESERVED]
+                mouse.release(mouse.cell(1, 1))
+
+                self.assertEqual(len(reserved), 1)
+                self.assertTrue(reserved[0].contains(QPointF(*mouse.cell(0, 0, fx=0.5, fy=0.5))))
+                self.assertEqual(_titles(canvas), [[None, '1.0'], ['0.1', '0.0']])
+                self.assertEqual({((before.row, before.col), (after.row, after.col)) for before, after in arranged[0]},
+                                 {((0, 0), (1, 1)), ((1, 1), (0, 0))})
+
+    def test_a_plot_does_not_grow_over_a_reserved_slot(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(2, 1))
+                qt_canvas.reserved_slots = lambda: [layout.Slot(1, 1)]
+                end = mouse.cell(1, 1, fx=0.6, fy=0.6)
+
+                mouse.drag(mouse.corner(layout.Slot(1, 0)), end, release=False)
+                shown = [style for _, style in qt_canvas._arranger._overlay._shapes]
+                mouse.release(end)
+
+                self.assertIn(_Overlay.FORBIDDEN, shown)
+                self.assertEqual(_titles(canvas), [['0.0', '1.0'], ['0.1']])
                 self.assertEqual(arranged, [])
 
     def test_the_resize_handle_shows_under_the_mouse(self):
