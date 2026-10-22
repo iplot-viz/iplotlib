@@ -264,10 +264,8 @@ class FittingCountTests(unittest.TestCase):
         sample = date_label_sample(*week, _DAY, 'day')
         # Day ticks over one month show the day only, with no unit.
         self.assertEqual(sample, '00')
-        widths = []
 
         def room_for(label):
-            widths.append(label)
             return 400 // (len(label) * 7 + 10)
 
         count = fitting_date_count(*week, 7, 0, room_for)

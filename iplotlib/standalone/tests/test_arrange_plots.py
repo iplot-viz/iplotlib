@@ -10,9 +10,11 @@ legend still moves those, and nothing moves out of the select mode, while a plot
 import unittest
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, Qt
+import shiboken6
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSizeF, Qt
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QAbstractScrollArea
+from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QMenu
 
 from iplotlib.core import layout
 from iplotlib.core.canvas import Canvas
@@ -25,14 +27,14 @@ from iplotlib.qt.testing import ensure_qapp
 BACKENDS = ('matplotlib', 'pyqt')
 
 
-def _canvas(columns) -> Canvas:
+def _canvas(columns, labels: dict = None) -> Canvas:
     """A canvas with a column of plots for each count of plots in `columns`: each plot draws a rising line, which
-    leaves its top left corner empty, and is titled by its place."""
+    leaves its top left corner empty, and is titled by its place. `labels` names the signals of some places."""
     canvas = Canvas(rows=max(columns), cols=len(columns), mouse_mode=Canvas.MOUSE_MODE_SELECT)
     for col, count in enumerate(columns):
         for row in range(count):
             plot = PlotXY(plot_title=f'{row}.{col}', row=row + 1, col=col + 1)
-            signal = SignalXY(label=f's{row}{col}')
+            signal = SignalXY(label=(labels or {}).get((row, col), f's{row}{col}'), uid=f'{row}.{col}')
             signal.set_data([np.arange(10.0), np.arange(10.0)])
             plot.add_signal(signal)
             canvas.add_plot(plot, col)
@@ -97,13 +99,13 @@ class TestArrangePlots(unittest.TestCase):
     def setUpClass(cls):
         cls.app = ensure_qapp()
 
-    def _qt_canvas(self, backend, columns=(3,)):
+    def _qt_canvas(self, backend, columns=(3,), labels: dict = None):
         # One canvas shown at a time: the mouse of another, left over the same place, would take its events.
         previous = getattr(self, '_shown', None)
         if previous is not None:
             previous.close()
             self.app.processEvents()
-        canvas = _canvas(columns)
+        canvas = _canvas(columns, labels)
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
         self._shown = qt_canvas
         self.addCleanup(qt_canvas.close)
@@ -118,6 +120,19 @@ class TestArrangePlots(unittest.TestCase):
 
     def _impl(self, qt_canvas, canvas, title):
         return qt_canvas._parser._plot_impl_plot_lut[id(_plot(canvas, title))][0]
+
+    def _legend_rect(self, qt_canvas, canvas, title) -> QRectF:
+        """The legend of the plot, in the coordinates of the canvas widget."""
+        impl = self._impl(qt_canvas, canvas, title)
+        if hasattr(impl, 'get_legend'):
+            box = impl.get_legend().get_window_extent()
+            renderer = qt_canvas._mpl_renderer
+            ratio = renderer.devicePixelRatioF()
+            top_left = renderer.mapTo(qt_canvas, QPoint(round(box.x0 / ratio), round(renderer.height() - box.y1 / ratio)))
+            return QRectF(QPointF(top_left), QSizeF(box.width / ratio, box.height / ratio))
+        view = qt_canvas._parser.figure
+        rect = view.mapFromScene(impl.legend.sceneBoundingRect()).boundingRect()
+        return QRectF(rect.translated(view.viewport().mapTo(qt_canvas, QPoint(0, 0))))
 
     def _curve_point(self, qt_canvas, canvas, title, x, y):
         """Where the point (x, y) of the data of the plot is drawn, in the coordinates of the canvas widget."""
@@ -144,6 +159,7 @@ class TestArrangePlots(unittest.TestCase):
                 self.assertEqual({((before.row, before.col), (after.row, after.col)) for before, after in arranged[0]},
                                  {((2, 0), (0, 0)), ((0, 0), (1, 0)), ((1, 0), (2, 0))})
                 self.assertEqual(qt_canvas.get_next_undo_cmd_name(), 'Move plot')
+                self.assertIsNone(QApplication.overrideCursor())
 
     def test_undo_and_redo_take_the_plots_back_and_forth(self):
         for backend in BACKENDS:
@@ -231,22 +247,15 @@ class TestArrangePlots(unittest.TestCase):
         for backend in BACKENDS:
             with self.subTest(backend):
                 canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
-                impl = self._impl(qt_canvas, canvas, '2.0')
-                if hasattr(impl, 'get_legend'):
-                    box = impl.get_legend().get_window_extent()
-                    renderer = qt_canvas._mpl_renderer
-                    ratio = renderer.devicePixelRatioF()
-                    local = QPoint(round(box.x0 / ratio + 4), round(renderer.height() - (box.y0 + box.y1) / 2 / ratio))
-                    start = QPointF(renderer.mapTo(qt_canvas, local)).toTuple()
-                else:
-                    view = qt_canvas._parser.figure
-                    rect = view.mapFromScene(impl.legend.sceneBoundingRect()).boundingRect()
-                    start = QPointF(view.viewport().mapTo(qt_canvas, rect.center())).toTuple()
+                legend = self._legend_rect(qt_canvas, canvas, '2.0')
 
-                mouse.drag(start, mouse.cell(0, 0))
+                # From its middle: by its left or right side, a drag resizes it.
+                mouse.drag(legend.center().toTuple(), mouse.cell(2, 0, fx=0.35, fy=0.8))
 
                 self.assertEqual(_titles(canvas), [['0.0', '1.0', '2.0']])
                 self.assertEqual(arranged, [])
+                moved = self._legend_rect(qt_canvas, canvas, '2.0')
+                self.assertGreater(abs(moved.top() - legend.top()) + abs(moved.left() - legend.left()), 20)
 
     def test_a_click_moves_nothing(self):
         for backend in BACKENDS:
@@ -291,6 +300,101 @@ class TestArrangePlots(unittest.TestCase):
                 self.assertEqual(_titles(canvas), [['0.0', '1.0', '2.0']])
                 self.assertEqual(arranged, [])
                 self.assertFalse(qt_canvas._arranger._overlay.isVisible())
+                self.assertIsNone(QApplication.overrideCursor())
+
+    def test_a_press_of_another_button_ends_the_gesture(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                mouse.drag(mouse.cell(2, 0), mouse.cell(0, 0), release=False)
+
+                # A right click opens a menu of the plot, which can take the release of the drag.
+                at = mouse._at(mouse.cell(0, 0))
+                QTest.mousePress(mouse.widget, Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier, at)
+                QTest.mouseRelease(mouse.widget, Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier, at)
+                self.app.processEvents()
+                for menu in [widget for widget in QApplication.topLevelWidgets() if isinstance(widget, QMenu)]:
+                    menu.close()
+                mouse.release(mouse.cell(0, 0))
+
+                self.assertEqual(_titles(canvas), [['0.0', '1.0', '2.0']])
+                self.assertEqual(arranged, [])
+                self.assertIsNone(QApplication.overrideCursor())
+
+    def test_a_drag_whose_release_went_elsewhere_ends_at_the_next_move(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                mouse.drag(mouse.cell(2, 0), mouse.cell(0, 0), release=False)
+
+                at = QPointF(mouse._at(mouse.cell(0, 0)))
+                QApplication.sendEvent(mouse.widget, QMouseEvent(QEvent.Type.MouseMove, at, mouse.widget.mapToGlobal(at),
+                                                                 Qt.MouseButton.NoButton, Qt.MouseButton.NoButton,
+                                                                 Qt.KeyboardModifier.NoModifier))
+                self.assertIsNone(qt_canvas._arranger._gesture)
+                self.assertIsNone(QApplication.overrideCursor())
+                mouse.release(mouse.cell(0, 0))
+
+                self.assertEqual(_titles(canvas), [['0.0', '1.0', '2.0']])
+                self.assertEqual(arranged, [])
+
+    def test_the_release_of_a_move_reaches_the_plots_where_they_were(self):
+        # pyqtgraph makes a click of the press and the release of a drag it did not see move: the click must land on
+        # the background the drag started from, not on the legend of the plot that takes its place.
+        long_name = 'a much longer name of a signal, which takes the room of the shorter ones'
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, labels={(1, 0): long_name})
+                legend = self._legend_rect(qt_canvas, canvas, '2.0')
+                start = (legend.left() - 25, legend.top() + 6)
+                self.assertFalse(qt_canvas._press_taken(QPointF(*start)))
+
+                mouse.drag(start, mouse.cell(0, 0))
+
+                self.assertEqual(_titles(canvas), [['2.0', '0.0', '1.0']])
+                self.assertEqual([signal.label for plot, _ in layout.slots_of(canvas)
+                                  for signals in plot.signals.values() for signal in signals if signal.hidden], [])
+
+    def test_a_marker_keeps_its_plot_when_the_plot_moves(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                signal = next(iter(_plot(canvas, '2.0').signals.values()))[0]
+                qt_canvas._marker_window.add_marker(signal, (5.0, 5.0), signal.label)
+
+                mouse.drag(mouse.cell(2, 0), mouse.cell(0, 0))
+
+                plot_id = qt_canvas._marker_window.table.item(0, 1).data(Qt.ItemDataRole.UserRole)
+                self.assertEqual(plot_id, signal.get_id())
+                self.assertIs(qt_canvas.get_signal_marker(plot_id[:2], signal.uid)[0], signal)
+
+    def test_the_last_plot_of_a_column_grows_below_the_grid(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                rows, cols = qt_canvas._grid_bounds()
+
+                mouse.drag(mouse.corner(layout.Slot(2, 0)), (cols[1] - 20, rows[3] + (rows[3] - rows[2]) * 0.5))
+
+                self.assertEqual([(plot.plot_title, slot.row, slot.row_span) for plot, slot in
+                                  layout.slots_of(canvas)], [('0.0', 0, 1), ('1.0', 1, 1), ('2.0', 2, 2)])
+                self.assertEqual((canvas.rows, canvas.cols), (4, 1))
+
+    def test_an_arrangement_of_plots_drawn_again_since_is_left_aside(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                arrangement = layout.moved(canvas, _plot(canvas, '2.0'), 0, 0)
+                # As an application drawing the canvas again does: other plots in the same places.
+                canvas.plots = _canvas((3,)).plots
+                qt_canvas.refresh()
+                drawn = [list(column) for column in canvas.plots]
+
+                qt_canvas._apply_arrangement('Move plot', arrangement)
+
+                self.assertEqual(canvas.plots, drawn)
+                self.assertTrue(all(new is old for new, old in zip(canvas.plots[0], drawn[0])))
+                self.assertEqual(arranged, [])
 
     def test_a_plot_that_does_not_fit_where_it_is_dropped_stays(self):
         for backend in BACKENDS:
@@ -337,6 +441,23 @@ class TestArrangePlots(unittest.TestCase):
                 self.assertIn(_Overlay.FORBIDDEN, shown)
                 self.assertEqual(_titles(canvas), [['0.0', '1.0'], ['0.1']])
                 self.assertEqual(arranged, [])
+
+    def test_qt_destroys_a_canvas_whose_arranger_python_already_cleared(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=_canvas((3,)))
+                qt_canvas.show()
+                self.app.processEvents()
+                qt_canvas.set_mouse_mode(Canvas.MOUSE_MODE_SELECT)
+                qt_canvas.close()
+                self.app.processEvents()
+                # As the garbage collector does when it frees the canvas and its arranger together: Qt then sends
+                # events to the widgets it destroys, through the arranger.
+                qt_canvas._arranger.__dict__.clear()
+
+                # The error of an event filter comes out of the call that sent the event.
+                shiboken6.delete(qt_canvas)
+                self.app.processEvents()
 
     def test_the_resize_handle_shows_under_the_mouse(self):
         for backend in BACKENDS:

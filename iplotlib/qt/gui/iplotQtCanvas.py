@@ -752,10 +752,10 @@ class IplotQtCanvas(QWidget):
     def _arrangement_allowed(self) -> bool:
         """Whether the mouse can move and resize the plots now: in the select mode, with every plot shown and the
         canvas not streaming, on a grid of more than one cell."""
-        canvas = self.get_canvas()
-        if self._mmode != Canvas.MOUSE_MODE_SELECT or canvas is None or canvas.streaming:
+        if self._mmode != Canvas.MOUSE_MODE_SELECT or self._parser is None or self._parser._focus_plot is not None:
             return False
-        if self._parser is None or self._parser._focus_plot is not None:
+        canvas = self.get_canvas()
+        if canvas is None or canvas.streaming:
             return False
         rows, cols = layout.grid_size(canvas)
         return rows * cols > 1 and bool(layout.slots_of(canvas))
@@ -776,15 +776,20 @@ class IplotQtCanvas(QWidget):
 
     def _apply_arrangement(self, name: str, arrangement: Arrangement):
         """Lay the plots out as the arrangement says, as a command that undo takes back."""
-        cmd = ArrangeCommand(name, layout.current(self.get_canvas()), arrangement, self._arrange)
-        self._arrange(arrangement, arrangement.changes)
-        self._parser._hm.done(cmd)
-        self.cmdDone.emit(cmd)
+        before = layout.current(self.get_canvas())
+        if self._arrange(arrangement, arrangement.changes):
+            cmd = ArrangeCommand(name, before, arrangement, self._arrange)
+            self._parser._hm.done(cmd)
+            self.cmdDone.emit(cmd)
 
-    def _arrange(self, arrangement: Arrangement, changes: list):
+    def _arrange(self, arrangement: Arrangement, changes: list) -> bool:
         """Lay the plots out as the arrangement says, each plot keeping its view: their data are drawn again, not
-        read again."""
+        read again. Whether it did: an arrangement of other plots than those of the canvas, drawn again since, is
+        left aside."""
         canvas = self.get_canvas()
+        if canvas is None or {id(plot) for plot, _ in arrangement.slots} != \
+                {id(plot) for plot, _ in layout.slots_of(canvas)}:
+            return False
         limits = self._parser.get_all_plot_limits()
         layout.arrange(canvas, arrangement)
         self.refresh()
@@ -797,7 +802,10 @@ class IplotQtCanvas(QWidget):
             canvas.undo_redo = False
         self._flush_view()
         self.stats(canvas)
+        # The markers window knows the plot of each marker by its place.
+        self.check_markers(canvas)
         self.plotsArranged.emit(changes)
+        return True
 
     def clean_canvas(self):
         """

@@ -4,9 +4,10 @@ and one dragged by its bottom right corner takes another size; while the mouse m
 plots go (see iplotlib.core.layout).
 """
 
+from functools import partial
 from typing import List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPalette, QPen
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QWidget
 
@@ -22,6 +23,10 @@ MOVE, RESIZE = 'Move plot', 'Resize plot'
 # The bounds of the rows and of the columns of the grid of the canvas, from its top and from its left, in the
 # coordinates of the canvas widget: n + 1 values for n rows or columns.
 Bounds = Tuple[List[float], List[float]]
+
+# The events of the widget that the arranger acts on; it lets the others through untouched.
+_EVENTS = frozenset({QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent.Type.MouseButtonRelease,
+                     QEvent.Type.KeyPress, QEvent.Type.Hide, QEvent.Type.Leave})
 
 
 class _Gesture:
@@ -62,6 +67,10 @@ class PlotArranger(QObject):
 
     def eventFilter(self, watched, event) -> bool:
         kind = event.type()
+        # Qt still sends events while it destroys the canvas, which the garbage collector of Python can do after
+        # it cleared the arranger: then nothing is left to act on.
+        if kind not in _EVENTS or not hasattr(self, '_widget'):
+            return False
         if watched is not self._widget:
             if kind == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape and self._gesture is not None:
                 self.cancel()
@@ -93,7 +102,10 @@ class PlotArranger(QObject):
     # The mouse
 
     def _press(self, event) -> bool:
-        if event.button() != Qt.MouseButton.LeftButton or self._gesture is not None:
+        if self._gesture is not None:
+            # A press during a gesture: another button, or the left one again after its release went elsewhere.
+            self.cancel()
+        if event.button() != Qt.MouseButton.LeftButton:
             return False
         point = self._point(event)
         found = self._plot_at(point)
@@ -117,10 +129,14 @@ class PlotArranger(QObject):
         if gesture is None:
             self._hover(point if event.buttons() == Qt.MouseButton.NoButton else None)
             return False
+        if not event.buttons() & Qt.MouseButton.LeftButton:
+            # The release of the button went elsewhere, to a menu for one: the gesture ends without moving anything.
+            self.cancel()
+            return False
         bounds = self._bounds()
         if not gesture.started:
             # The press may have started something else: a shift of a curve, a drag of a legend or of a slider.
-            if bounds is None or not event.buttons() & Qt.MouseButton.LeftButton or self._canvas._drag_taken():
+            if bounds is None or self._canvas._drag_taken():
                 self._gesture = None
                 return False
             if (point - gesture.start).manhattanLength() < QApplication.startDragDistance():
@@ -142,7 +158,9 @@ class PlotArranger(QObject):
         QApplication.restoreOverrideCursor()
         self._overlay.clear()
         if gesture.arrangement is not None:
-            self._canvas._apply_arrangement(gesture.kind, gesture.arrangement)
+            # The plot saw the press of a move, and sees its release before the plots move: a click the backend makes
+            # of them reaches the plot the press was on, not the one that takes its place.
+            QTimer.singleShot(0, self, partial(self._canvas._apply_arrangement, gesture.kind, gesture.arrangement))
         # The plot saw the press of a move, not that of a resize.
         return gesture.kind == RESIZE
 
@@ -171,6 +189,8 @@ class PlotArranger(QObject):
             left = min(max(col - gesture.grab[1], 0), cols - gesture.slot.col_span)
             gesture.target = gesture.slot.moved_to(top, left) if not gesture.slot.contains(row, col) else gesture.slot
         else:
+            # Below the grid the rows go on, as tall as its last one: a plot can grow past the bottom of its columns.
+            row = _row_below(bounds[0], point.y())
             gesture.target = Slot(gesture.slot.row, gesture.slot.col, max(1, row - gesture.slot.row + 1),
                                   max(1, col - gesture.slot.col + 1))
             gesture.arrangement = layout.resized(canvas, gesture.plot, gesture.target.row_span,
@@ -264,6 +284,14 @@ def _cell(bounds: Sequence[float], value: float) -> int:
         if value < bounds[index + 1]:
             return index
     return len(bounds) - 2
+
+
+def _row_below(rows: Sequence[float], y: float) -> int:
+    """The row at `y`, counting rows below the grid as tall as its last one."""
+    height = rows[-1] - rows[-2]
+    if y < rows[-1] or height <= 0:
+        return _cell(rows, y)
+    return len(rows) - 1 + int((y - rows[-1]) // height)
 
 
 def _rect(bounds: Bounds, slot: Slot) -> QRectF:
