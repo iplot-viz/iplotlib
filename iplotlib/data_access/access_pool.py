@@ -53,10 +53,12 @@ _STUCK_AFTER_S = 2.0
 _STOPPED = "The data access process stopped while reading the data"
 
 # State of a worker process: what sets its data access up, the data source types it reads (all if
-# None), the number of workers that share the caches of their data sources, the cache generation it
-# last cleared its data access cache for, and the data sources it tried to connect to again.
+# None), the data sources it leaves unconnected, the number of workers that share the caches of their
+# data sources, the cache generation it last cleared its data access cache for, and the data sources it
+# tried to connect to again.
 _worker_data_access_factory = None
 _worker_source_types = None
+_worker_leave_unconnected = frozenset()
 _worker_cache_share = 1
 _worker_cache_epoch = 0
 _worker_reconnected = set()
@@ -64,21 +66,23 @@ _worker_reconnected = set()
 
 def app_data_access():
     """Data access configured as the application's, from the data sources file AppDataAccess finds: with
-    the data sources of the types this worker reads only, if iplotDataAccess can leave the others out."""
+    the data sources of the types this worker reads only, and none of those the application could not
+    connect to, as far as iplotDataAccess can leave them out."""
     from iplotDataAccess.appDataAccess import AppDataAccess
-    if 'source_types' in inspect.signature(AppDataAccess.initialize).parameters:
-        configured = AppDataAccess.initialize(source_types=_worker_source_types)
-    else:
-        configured = AppDataAccess.initialize()
-    # A worker of no type serves only requests to data sources the application does not have.
-    if not configured and _worker_source_types != frozenset():
+    accepted = inspect.signature(AppDataAccess.initialize).parameters
+    asked = dict(source_types=_worker_source_types, leave_unconnected=_worker_leave_unconnected)
+    configured = AppDataAccess.initialize(**{name: value for name, value in asked.items() if name in accepted})
+    data_access = AppDataAccess.get_data_access()
+    # A worker of no type serves only requests to data sources the application does not have, and so does
+    # a worker whose data sources the application could not connect to.
+    if not configured and _worker_source_types != frozenset() and not getattr(data_access, 'unconnected', None):
         logger.error("No data sources found for the data access worker")
-    return AppDataAccess.get_data_access()
+    return data_access
 
 
 def _init_worker(log_queue, parent_log_file, data_access_factory, num_samples, num_samples_override,
-                 source_types=None, cache_share=1):
-    global _worker_data_access_factory, _worker_source_types, _worker_cache_share
+                 source_types, cache_share, leave_unconnected):
+    global _worker_data_access_factory, _worker_source_types, _worker_cache_share, _worker_leave_unconnected
     # Ctrl+C is the application's to handle, and a worker stops when the application does.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     threading.Thread(target=_watch_parent, daemon=True).start()
@@ -90,6 +94,7 @@ def _init_worker(log_queue, parent_log_file, data_access_factory, num_samples, n
     _worker_data_access_factory = data_access_factory
     _worker_source_types = source_types
     _worker_cache_share = cache_share
+    _worker_leave_unconnected = leave_unconnected
     _set_up_data_access()
     # The modules imported to set up data access made loggers of their own.
     _drop_log_handlers()
@@ -169,7 +174,8 @@ def _data_access(name: Optional[str], cache_epoch: int):
     if AccessHelper.da is None:
         raise DataAccessError("Data access could not be set up in the worker process, see the log")
     connected = getattr(AccessHelper.da, 'get_connected_data_source_names', None)
-    if name is not None and connected is not None and name not in connected() and name not in _worker_reconnected:
+    if (name is not None and connected is not None and name not in connected() and name not in _worker_reconnected
+            and name not in _worker_leave_unconnected):
         # The application connected to it, but this process could not when it started.
         _worker_reconnected.add(name)
         logger.warning(f"The data access process connects again to the data sources: {name} was not connected")
@@ -570,7 +576,7 @@ class AccessPool:
                 initargs=(self._log_queue, self._log_file, self._data_access_factory,
                           AccessHelper.num_samples, AccessHelper.num_samples_override,
                           PARALLEL_SOURCE_TYPES if parallel else self._serial_source_types(),
-                          self._workers if parallel else 1))
+                          self._workers if parallel else 1, self._unconnected()))
             self._executors[slot] = executor
             # Its first task tells whether the worker can read (see _check_workers).
             self._ready[slot] = executor.submit(_ready)
@@ -587,6 +593,12 @@ class AccessPool:
         types = {getattr(ds, 'source_type', None) for ds in data_sources.values()} - set(PARALLEL_SOURCE_TYPES)
         types.discard(None)
         return frozenset(types)
+
+    @staticmethod
+    def _unconnected() -> frozenset:
+        """The data sources the application could not connect to, which the workers leave unconnected: a
+        worker would take as long to fail, over a minute at times, before it could read anything."""
+        return frozenset(getattr(AccessHelper.da, 'unconnected', None) or ())
 
     @staticmethod
     def _is_parallel(data_s_name: Optional[str]) -> bool:

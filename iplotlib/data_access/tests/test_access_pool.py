@@ -143,6 +143,9 @@ class _WorkerDataAccessWithCaches(_WorkerDataAccess):
     def source_types(self, data_s_name):
         return sorted(access_pool._worker_source_types or [])
 
+    def leave_unconnected(self, data_s_name):
+        return sorted(access_pool._worker_leave_unconnected)
+
 
 def _worker_data_access_with_caches():
     return _WorkerDataAccessWithCaches()
@@ -164,6 +167,12 @@ class _ParentDataAccess:
 
     def get_data_source(self, name):
         return self.ds_list.get(name)
+
+
+class _ParentDataAccessWithOneDown(_ParentDataAccess):
+    """An application that could not connect to one of its UDA data sources."""
+
+    unconnected = {'down'}
 
 
 def _alive(pid: int) -> bool:
@@ -490,6 +499,16 @@ class AccessPoolTests(unittest.TestCase):
         self.assertEqual(parallel, 150)
         self.assertEqual(serial, 300)
 
+    def test_the_workers_leave_unconnected_the_data_sources_the_application_could_not_connect_to(self):
+        pool = self._own_pool(factory=_worker_data_access_with_caches)
+
+        with patch.object(AccessHelper, 'da', _ParentDataAccessWithOneDown()):
+            parallel, _ = self._in_thread(lambda: pool.call('leave_unconnected', 'uda'))
+            serial, _ = self._in_thread(lambda: pool.call('leave_unconnected', 'imas'))
+
+        self.assertEqual(parallel, ['down'])
+        self.assertEqual(serial, ['down'])
+
     def test_workers_stop_when_the_application_is_killed(self):
         application = subprocess.Popen([sys.executable, '-c', _APPLICATION], stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, text=True)
@@ -783,6 +802,40 @@ class AppDataAccessTests(unittest.TestCase):
         self._set_up(initialize)
 
         self.assertEqual(asked, [None])
+
+    def test_the_data_sources_the_application_could_not_connect_to_are_left_unconnected(self):
+        asked = []
+
+        def initialize(config_file=None, source_types=None, leave_unconnected=()):
+            asked.append((source_types, leave_unconnected))
+            return True
+
+        with patch.object(access_pool, '_worker_leave_unconnected', frozenset({'down'})):
+            self._set_up(initialize)
+
+        self.assertEqual(asked, [(frozenset({'IMAS'}), frozenset({'down'}))])
+
+    def test_a_worker_whose_data_sources_are_all_left_unconnected_reports_none_missing(self):
+        with patch.object(access_pool, '_worker_leave_unconnected', frozenset({'down'})), \
+                patch.object(AppDataAccess, 'da', SimpleNamespace(unconnected={'down'})), \
+                patch.object(access_pool.logger, 'error') as error:
+            self._set_up(lambda config_file=None, source_types=None, leave_unconnected=(): False)
+
+        error.assert_not_called()
+
+    def test_a_request_to_a_data_source_left_unconnected_does_not_set_data_access_up_again(self):
+        epoch = access_pool._worker_cache_epoch
+        with patch.object(AccessHelper, 'da', SimpleNamespace(get_connected_data_source_names=lambda: ['uda'])), \
+                patch.object(access_pool, '_worker_leave_unconnected', frozenset({'down'})), \
+                patch.object(access_pool, '_worker_reconnected', set()), \
+                patch.object(access_pool, '_set_up_data_access') as set_up:
+            access_pool._data_access('down', epoch)
+            left_unconnected = set_up.call_count
+            # One the application connected to, but the worker could not.
+            access_pool._data_access('lost', epoch)
+
+        self.assertEqual(left_unconnected, 0)
+        self.assertEqual(set_up.call_count, 1)
 
     def test_the_single_worker_reads_no_type_when_every_data_source_is_parallel(self):
         with patch.object(AccessHelper, 'da', SimpleNamespace(ds_list={'uda': SimpleNamespace(source_type='CODAC_UDA')})):
