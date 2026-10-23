@@ -191,8 +191,12 @@ class PlotArranger(QObject):
         else:
             # Below the grid the rows go on, as tall as its last one: a plot can grow past the bottom of its columns.
             row = _row_below(bounds[0], point.y())
-            gesture.target = Slot(gesture.slot.row, gesture.slot.col, max(1, row - gesture.slot.row + 1),
-                                  max(1, col - gesture.slot.col + 1))
+            row_span, col_span = max(1, row - gesture.slot.row + 1), max(1, col - gesture.slot.col + 1)
+            limit = self._canvas.max_span()
+            if limit:
+                # The application draws no bigger plot.
+                row_span, col_span = min(row_span, limit), min(col_span, limit)
+            gesture.target = Slot(gesture.slot.row, gesture.slot.col, row_span, col_span)
             gesture.arrangement = layout.resized(canvas, gesture.plot, gesture.target.row_span,
                                                  gesture.target.col_span, reserved=gesture.reserved)
         allowed = gesture.arrangement is not None or gesture.target == gesture.slot

@@ -89,6 +89,9 @@ class IplotQtCanvas(QWidget):
         # Gives the slots of the grid that the application reserves for plots it does not draw now (see
         # IplotQtMainWindow.reserved_slots).
         self.reserved_slots = lambda: []  # type: Callable[[], List[layout.Slot]]
+        # Gives the most rows or columns the application draws a plot over, None for no limit (see
+        # IplotQtMainWindow.max_span).
+        self.max_span = lambda: None  # type: Callable[[], Optional[int]]
 
         # Streaming redraws are capped to one signal flush per interval (1 Hz).
         self._signal_flush_interval_ms = 1000

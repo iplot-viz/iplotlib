@@ -208,6 +208,17 @@ class TestArrangePlots(unittest.TestCase):
                                  [(0, 1), (1, 1), (2, 1)])
                 self.assertEqual(canvas.rows, 3)
 
+    def test_a_plot_grows_no_bigger_than_the_application_draws(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                qt_canvas.max_span = lambda: 2
+
+                mouse.drag(mouse.corner(layout.Slot(0, 0)), mouse.cell(2, 0, fx=0.9, fy=0.6))
+
+                self.assertEqual([(plot.plot_title, slot.row, slot.row_span) for plot, slot in
+                                  layout.slots_of(canvas)], [('0.0', 0, 2), ('1.0', 2, 1), ('2.0', 3, 1)])
+
     def test_each_plot_keeps_its_view(self):
         for backend in BACKENDS:
             with self.subTest(backend):

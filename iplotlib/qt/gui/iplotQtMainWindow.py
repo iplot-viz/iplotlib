@@ -214,6 +214,7 @@ class IplotQtMainWindow(QMainWindow):
         w.focusChanged.connect(self.refresh_minimap_availability)
         w.plotsArranged.connect(self.on_plots_arranged)
         w.reserved_slots = self.reserved_slots
+        w.max_span = self.max_span
         self.refresh_minimap_availability()
 
     def reserved_slots(self) -> list:
@@ -221,6 +222,11 @@ class IplotQtMainWindow(QMainWindow):
         those whose data could not be read: they move with the plots as plots do, and no plot moves or grows over them
         (see iplotlib.core.layout). This window reserves none."""
         return []
+
+    def max_span(self) -> typing.Optional[int]:
+        """The most rows or columns a plot of the canvas can span: the mouse makes no plot bigger, since the
+        application would not draw it. This window sets no limit."""
+        return None
 
     def on_plots_arranged(self, changes: list):
         """The plots of a canvas moved or took another size (see IplotQtCanvas.plotsArranged): the preferences list
