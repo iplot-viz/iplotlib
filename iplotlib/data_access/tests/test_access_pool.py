@@ -39,7 +39,7 @@ T0 = 1_700_000_000_000_000_000
 T1 = T0 + 60_000_000_000
 
 # How long the tests wait for a worker to start: as long as Python takes to load what the worker reads with,
-# which is minutes on a loaded machine (over three on an SDCC login node).
+# which is minutes on a loaded machine (over two on an SDCC login node).
 _START_TIMEOUT_S = 600
 
 _cache_clears = 0
