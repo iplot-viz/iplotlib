@@ -1,5 +1,6 @@
 import os
 import weakref
+from types import SimpleNamespace
 
 from PySide6.QtCore import QMargins, QPoint, Qt, Signal, QEvent, QTimer
 from PySide6.QtGui import QFont, QFontMetricsF
@@ -923,6 +924,15 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 if isinstance(item, (_Legend, _LegendEye, QGraphicsProxyWidget)):
                     return True
                 item = item.parentItem()
+        return False
+
+    def _press_shifts(self, point) -> bool:
+        view = self._parser.figure
+        scene_point = view.mapToScene(view.viewport().mapFrom(self, point.toPoint()))
+        for item in view.scene().items(scene_point):
+            if isinstance(item, pg.ViewBox):
+                signal = self._find_signal_at_event(item, SimpleNamespace(scenePos=lambda: scene_point))[0]
+                return signal is not None and not signal.envelope
         return False
 
     def _drag_taken(self) -> bool:

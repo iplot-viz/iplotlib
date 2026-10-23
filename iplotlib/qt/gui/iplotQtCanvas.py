@@ -773,6 +773,11 @@ class IplotQtCanvas(QWidget):
         such as a legend or a slider, rather than for moving or resizing a plot."""
         return False
 
+    def _press_shifts(self, point) -> bool:
+        """Whether a press at the point, in the coordinates of this widget, would take a curve to shift it rather
+        than the plot under it."""
+        return False
+
     def _drag_taken(self) -> bool:
         """Whether the press that started the drag under way did something else than grab a plot."""
         return self._drag_shift_active
@@ -786,24 +791,25 @@ class IplotQtCanvas(QWidget):
             self.cmdDone.emit(cmd)
 
     def _arrange(self, arrangement: Arrangement, changes: list) -> bool:
-        """Lay the plots out as the arrangement says, each plot keeping its view: their data are drawn again, not
-        read again. Whether it did: an arrangement of other plots than those of the canvas, drawn again since, is
-        left aside."""
+        """Lay the plots out as the arrangement says, each plot keeping its view and its data: the backend moves
+        the plots it drew, or draws them again where they go (see BackendParserBase.relayout). Whether it did: an
+        arrangement of other plots than those of the canvas, drawn again since, is left aside."""
         canvas = self.get_canvas()
         if canvas is None or {id(plot) for plot, _ in arrangement.slots} != \
                 {id(plot) for plot, _ in layout.slots_of(canvas)}:
             return False
         limits = self._parser.get_all_plot_limits()
         layout.arrange(canvas, arrangement)
-        self.refresh()
-        # As undo and redo restore the views (see IplotAxesRangeCmd), without a command in the history.
-        canvas.undo_redo = True
-        try:
-            for plot_limits in limits:
-                self._parser.set_plot_limits(plot_limits)
-        finally:
-            canvas.undo_redo = False
-        self._flush_view()
+        if not self._parser.relayout():
+            self.refresh()
+            # As undo and redo restore the views (see IplotAxesRangeCmd), without a command in the history.
+            canvas.undo_redo = True
+            try:
+                for plot_limits in limits:
+                    self._parser.set_plot_limits(plot_limits)
+            finally:
+                canvas.undo_redo = False
+            self._flush_view()
         self.stats(canvas)
         # The markers window knows the plot of each marker by its place.
         self.check_markers(canvas)

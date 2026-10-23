@@ -57,7 +57,7 @@ class PlotArranger(QObject):
         self._overlay = _Overlay(canvas)
         self._gesture = None  # type: Optional[_Gesture]
         self._grip = None  # type: Optional[QRectF] # the resize handle shown under the mouse
-        self._hand = False  # whether the widget shows the resize cursor
+        self._cursor = None  # type: Optional[Qt.CursorShape] # the cursor the widget shows to resize or move
         widget.setMouseTracking(True)
         widget.installEventFilter(self)
         # A view that draws in a viewport takes the keys itself.
@@ -165,13 +165,20 @@ class PlotArranger(QObject):
         return gesture.kind == RESIZE
 
     def _hover(self, point: Optional[QPointF]):
-        grip = None
+        grip = cursor = None
         if point is not None and self._canvas._arrangement_allowed():
             found = self._plot_at(point)
             if found is not None:
                 plot, slot, bounds = found
                 grip = self._handle(_rect(bounds, slot))
-        self._show_grip(grip, point is not None and grip is not None and grip.contains(point))
+                # As a press there would do (see _press): a press on a curve shifts the curve instead.
+                if self._canvas._press_taken(point):
+                    pass
+                elif grip.contains(point):
+                    cursor = Qt.CursorShape.SizeFDiagCursor
+                elif not self._canvas._press_shifts(point):
+                    cursor = Qt.CursorShape.OpenHandCursor
+        self._show_grip(grip, cursor)
 
     # Where the plots go
 
@@ -267,17 +274,17 @@ class PlotArranger(QObject):
         side = HANDLE.px()
         return QRectF(rect.right() - side, rect.bottom() - side, side, side)
 
-    def _show_grip(self, grip: Optional[QRectF], hand: bool = False):
+    def _show_grip(self, grip: Optional[QRectF], cursor: Optional[Qt.CursorShape] = None):
         if grip != self._grip:
             self._grip = grip
             if grip is None:
                 self._overlay.clear()
             else:
                 self._overlay.show_shapes([(grip, _Overlay.GRIP)])
-        if hand != self._hand:
-            self._hand = hand
-            if hand:
-                self._widget.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        if cursor != self._cursor:
+            self._cursor = cursor
+            if cursor is not None:
+                self._widget.setCursor(cursor)
             else:
                 self._widget.unsetCursor()
 

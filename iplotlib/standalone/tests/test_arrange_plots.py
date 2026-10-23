@@ -124,6 +124,17 @@ class TestArrangePlots(unittest.TestCase):
     def _impl(self, qt_canvas, canvas, title):
         return qt_canvas._parser._plot_impl_plot_lut[id(_plot(canvas, title))][0]
 
+    @staticmethod
+    def _drawn_place(qt_canvas, impl) -> tuple:
+        """The place the backend drew the plot of `impl` on: (row, col, row_span, col_span) of its grid."""
+        parser = qt_canvas._parser
+        if hasattr(impl, 'get_subplotspec'):
+            spec = impl.get_subplotspec().get_topmost_subplotspec()
+            return spec.rowspan.start, spec.colspan.start, len(spec.rowspan), len(spec.colspan)
+        cells = parser.figure.ci.items[impl.parentItem()]
+        rows, cols = {row for row, _ in cells}, {col for _, col in cells}
+        return min(rows) - parser._row_offset, min(cols), len(rows), len(cols)
+
     def _legend_rect(self, qt_canvas, canvas, title) -> QRectF:
         """The legend of the plot, in the coordinates of the canvas widget."""
         impl = self._impl(qt_canvas, canvas, title)
@@ -270,6 +281,37 @@ class TestArrangePlots(unittest.TestCase):
                 self.assertEqual(arranged, [])
                 moved = self._legend_rect(qt_canvas, canvas, '2.0')
                 self.assertGreater(abs(moved.top() - legend.top()) + abs(moved.left() - legend.left()), 20)
+
+    def test_a_move_moves_what_the_backend_drew_without_drawing_it_again(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(3, 1))
+                drawn = {plot.plot_title: self._impl(qt_canvas, canvas, plot.plot_title)
+                         for plot, _ in layout.slots_of(canvas)}
+
+                with patch.object(qt_canvas, 'refresh') as refresh:
+                    mouse.drag(mouse.cell(2, 0), mouse.cell(0, 1))
+
+                refresh.assert_not_called()
+                self.assertEqual(_titles(canvas), [['0.0', '1.0', '0.1'], ['2.0']])
+                for plot, slot in layout.slots_of(canvas):
+                    impl = self._impl(qt_canvas, canvas, plot.plot_title)
+                    self.assertIs(impl, drawn[plot.plot_title])
+                    self.assertEqual(self._drawn_place(qt_canvas, impl),
+                                     (slot.row, slot.col, slot.row_span, slot.col_span))
+
+    def test_a_backend_that_cannot_move_its_plots_draws_them_again_where_they_go(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+
+                with patch.object(qt_canvas._parser, 'relayout', return_value=False):
+                    mouse.drag(mouse.cell(2, 0), mouse.cell(0, 0))
+
+                self.assertEqual(_titles(canvas), [['2.0', '0.0', '1.0']])
+                for plot, slot in layout.slots_of(canvas):
+                    self.assertEqual(self._drawn_place(qt_canvas, self._impl(qt_canvas, canvas, plot.plot_title)),
+                                     (slot.row, slot.col, slot.row_span, slot.col_span))
 
     def test_a_click_moves_nothing(self):
         for backend in BACKENDS:
@@ -476,6 +518,27 @@ class TestArrangePlots(unittest.TestCase):
 
         self.assertIsNone(dropped())
         self.assertEqual(errors, [])
+
+    def test_the_cursor_shows_where_the_mouse_takes_a_plot(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+
+                mouse.hover(mouse.cell(1, 0))
+                self.assertEqual(mouse.widget.cursor().shape(), Qt.CursorShape.OpenHandCursor)
+
+                mouse.hover(self._curve_point(qt_canvas, canvas, '1.0', 5, 5))
+                self.assertNotEqual(mouse.widget.cursor().shape(), Qt.CursorShape.OpenHandCursor)
+
+    def test_a_click_on_a_curve_draws_the_canvas_no_more(self):
+        # A press on a curve, missing the background that moves the plot, must not cost a drawing of the canvas.
+        canvas, qt_canvas, mouse, arranged = self._qt_canvas('matplotlib')
+
+        with patch.object(qt_canvas, 'render') as render:
+            mouse.click(self._curve_point(qt_canvas, canvas, '1.0', 5, 5))
+
+        render.assert_not_called()
+        self.assertEqual(_titles(canvas), [['0.0', '1.0', '2.0']])
 
     def test_the_resize_handle_shows_under_the_mouse(self):
         for backend in BACKENDS:

@@ -831,13 +831,21 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 + [origin.x() + width])
         return rows, cols
 
-    def _press_taken(self, point) -> bool:
+    def _press_event(self, point) -> MouseEvent:
+        """A press of the left button at the point, in the coordinates of this widget, as matplotlib sees it."""
         x, y = self._mpl_renderer.mouseEventCoords(QPointF(self._mpl_renderer.mapFrom(self, point.toPoint())))
-        event = MouseEvent('button_press_event', self._mpl_renderer, x, y, MouseButton.LEFT)
+        return MouseEvent('button_press_event', self._mpl_renderer, x, y, MouseButton.LEFT)
+
+    def _press_taken(self, point) -> bool:
+        event = self._press_event(point)
         if self._parser.legend_eye_under(event) is not None or self._legend_under(event) is not None:
             return True
         # Axes of no plot: the slider of a plot.
         return event.inaxes is not None and self._parser._impl_plot_cache_table.get_cache_item(event.inaxes) is None
+
+    def _press_shifts(self, point) -> bool:
+        signal = self._find_signal_at_event(self._press_event(point))[0]
+        return signal is not None and not signal.envelope
 
     def _drag_taken(self) -> bool:
         return (super()._drag_taken() or self._legend_gesture is not None or self._ruler_drag is not None
@@ -1379,11 +1387,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         else:
             # Handle drag shift completion in Select mode
             if self._drag_shift_active and self._mmode == Canvas.MOUSE_MODE_SELECT:
+                # A press on a curve that did not drag it shifts nothing: nothing to draw again.
+                dragged = self._drag_shift_preview_line is not None
                 if event.ydata is not None:
                     self._end_drag_shift(event.ydata, event.xdata)
                 else:
                     self._cancel_drag_shift()
-                self.render()
+                if dragged:
+                    self.render()
                 return
 
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:

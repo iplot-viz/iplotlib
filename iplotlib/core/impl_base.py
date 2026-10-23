@@ -501,6 +501,11 @@ class BackendParserBase(ABC):
         """
         pass
 
+    def relayout(self) -> bool:
+        """Put the plots it drew where the canvas has them now, as they are: their curves, views and legends are
+        not drawn again. Whether it could: a backend that cannot leaves the canvas to be drawn again."""
+        return False
+
     @abstractmethod
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
         """
