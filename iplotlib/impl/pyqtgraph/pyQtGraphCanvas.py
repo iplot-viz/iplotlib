@@ -4,6 +4,7 @@ import gc
 import math
 import os
 from datetime import datetime
+from functools import partial
 from typing import Any, Callable, Collection, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
@@ -1370,7 +1371,7 @@ class PyQtGraphParser(BackendParserBase):
             # Process signal
             for signal in signals:
                 self._signal_impl_plot_lut.update({self.signal_lut_key(signal): plot})
-                self.process_ipl_signal(signal)
+                self._process_view_change(self.signal_lut_key(signal), plot, partial(self.process_ipl_signal, signal))
 
             # Legend processing for downsampled data when drawing
             self._finish_legend(plot, i_plot, signals)

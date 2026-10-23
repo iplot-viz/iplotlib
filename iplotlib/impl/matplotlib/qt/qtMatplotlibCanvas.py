@@ -81,6 +81,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self._mpl_size_pol = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
+        self._parser._on_view_data_read = self._view_data_drawn
         self._parser.legend_eye_images = {state: _rgba_array(svg_icon_image(name, 48))
                                           for state, name in (('open', 'eye'), ('closed', 'eye_closed'))}
         self._mpl_renderer = FigureCanvas(self._parser.figure)
