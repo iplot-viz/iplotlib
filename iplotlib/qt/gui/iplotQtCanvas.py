@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from abc import abstractmethod
 from contextlib import contextmanager
-from typing import List, Tuple, Optional
+from typing import Callable, List, Tuple, Optional
 
 import numpy as np
 from PySide6.QtCore import QEventLoop, QMetaObject, QSize, Qt, QTimer, Signal, Slot
@@ -18,10 +18,14 @@ from iplotlib.core.plot import PlotXY, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.command import IplotCommand
 from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
+from iplotlib.core.commands.layout import ArrangeCommand
 from iplotlib.core.impl_base import BackendParserBase
+from iplotlib.core import layout
+from iplotlib.core.layout import Arrangement
 from iplotlib.core.ruler import Ruler
 import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
+from iplotlib.qt.gui.iplotQtArrangement import PlotArranger
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
 
@@ -41,6 +45,9 @@ class IplotQtCanvas(QWidget):
     signalShiftUndone = Signal(str, float, float, str)   # (signal_uid, dx, dy, source)
     signalShiftPulseApplied = Signal(str, str, float, float, str)  # (signal_uid, pulse_id, dx, dy, source)
     signalShiftPulseUndone = Signal(str, str, float, float)  # (signal_uid, pulse_id, previous_dx, previous_dy)
+    # The plots moved or took another size on the grid, by the mouse or by undo/redo: the slot before and after of
+    # each plot, and of each reserved slot, that moved (see iplotlib.core.layout.Arrangement.changes).
+    plotsArranged = Signal(object)
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent)
@@ -76,6 +83,15 @@ class IplotQtCanvas(QWidget):
         self._drag_shift_start_y = None
         self._drag_shift_is_datetime = False
         self._drag_shift_preview_line = None
+
+        # Moves and resizes the plots with the mouse, once the backend gives it the widget that draws them.
+        self._arranger = None  # type: Optional[PlotArranger]
+        # Gives the slots of the grid that the application reserves for plots it does not draw now (see
+        # IplotQtMainWindow.reserved_slots).
+        self.reserved_slots = lambda: []  # type: Callable[[], List[layout.Slot]]
+        # Gives the most rows or columns the application draws a plot over, None for no limit (see
+        # IplotQtMainWindow.max_span).
+        self.max_span = lambda: None  # type: Callable[[], Optional[int]]
 
         # Streaming redraws are capped to one signal flush per interval (1 Hz).
         self._signal_flush_interval_ms = 1000
@@ -188,6 +204,8 @@ class IplotQtCanvas(QWidget):
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
         logger.debug(f"MMode change {self._mmode} -> {mode}")
+        if self._arranger is not None:
+            self._arranger.cancel()
         self._mmode = mode
         if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
             self.setCursor(Qt.CursorShape.CrossCursor)
@@ -209,6 +227,9 @@ class IplotQtCanvas(QWidget):
     def save_canvas_image(self, filename: str):
         """Save the canvas to an image file (PNG, JPEG, or SVG)."""
         ext = os.path.splitext(filename)[1].lower()
+        if self._arranger is not None:
+            # The resize handle drawn under the mouse is for the screen, not for the image.
+            self._arranger.cancel()
         if ext == '.svg':
             self._save_svg(filename)
         else:
@@ -726,6 +747,74 @@ class IplotQtCanvas(QWidget):
             self.cmdDone.emit(cmd)
         self._flush_view()
         self.stats(self.get_canvas())
+
+    def _install_arranger(self, widget: QWidget):
+        """Let the mouse move and resize the plots that `widget` draws, in the select mode."""
+        self._arranger = PlotArranger(self, widget)
+
+    def _arrangement_allowed(self) -> bool:
+        """Whether the mouse can move and resize the plots now: in the select mode, with every plot shown and the
+        canvas not streaming, on a grid of more than one cell."""
+        if self._mmode != Canvas.MOUSE_MODE_SELECT or self._parser is None or self._parser._focus_plot is not None:
+            return False
+        canvas = self.get_canvas()
+        if canvas is None or canvas.streaming:
+            return False
+        rows, cols = layout.grid_size(canvas)
+        return rows * cols > 1 and bool(layout.slots_of(canvas))
+
+    def _grid_bounds(self):
+        """The bounds of the rows and of the columns of the grid of the plots, in the coordinates of this widget
+        (see iplotQtArrangement.Bounds); None if the backend does not give them."""
+        return None
+
+    def _press_taken(self, point) -> bool:
+        """Whether a press at the point, in the coordinates of this widget, is for something drawn over the plots,
+        such as a legend or a slider, rather than for moving or resizing a plot."""
+        return False
+
+    def _press_shifts(self, point) -> bool:
+        """Whether a press at the point, in the coordinates of this widget, would take a curve to shift it rather
+        than the plot under it."""
+        return False
+
+    def _drag_taken(self) -> bool:
+        """Whether the press that started the drag under way did something else than grab a plot."""
+        return self._drag_shift_active
+
+    def _apply_arrangement(self, name: str, arrangement: Arrangement):
+        """Lay the plots out as the arrangement says, as a command that undo takes back."""
+        before = layout.current(self.get_canvas())
+        if self._arrange(arrangement, arrangement.changes):
+            cmd = ArrangeCommand(name, before, arrangement, self._arrange)
+            self._parser._hm.done(cmd)
+            self.cmdDone.emit(cmd)
+
+    def _arrange(self, arrangement: Arrangement, changes: list) -> bool:
+        """Lay the plots out as the arrangement says, each plot keeping its view and its data: the backend moves
+        the plots it drew, or draws them again where they go (see BackendParserBase.relayout). Whether it did: an
+        arrangement of other plots than those of the canvas, drawn again since, is left aside."""
+        canvas = self.get_canvas()
+        if canvas is None or {id(plot) for plot, _ in arrangement.slots} != \
+                {id(plot) for plot, _ in layout.slots_of(canvas)}:
+            return False
+        limits = self._parser.get_all_plot_limits()
+        layout.arrange(canvas, arrangement)
+        if not self._parser.relayout():
+            self.refresh()
+            # As undo and redo restore the views (see IplotAxesRangeCmd), without a command in the history.
+            canvas.undo_redo = True
+            try:
+                for plot_limits in limits:
+                    self._parser.set_plot_limits(plot_limits)
+            finally:
+                canvas.undo_redo = False
+            self._flush_view()
+        self.stats(canvas)
+        # The markers window knows the plot of each marker by its place.
+        self.check_markers(canvas)
+        self.plotsArranged.emit(changes)
+        return True
 
     def clean_canvas(self):
         """

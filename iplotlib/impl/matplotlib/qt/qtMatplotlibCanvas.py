@@ -15,7 +15,7 @@ import typing
 from collections.abc import Collection
 
 import numpy as np
-from PySide6.QtCore import QMargins, Qt, Slot, Signal
+from PySide6.QtCore import QMargins, QPoint, QPointF, Qt, Slot, Signal
 from PySide6.QtGui import QCursor, QKeyEvent
 from PySide6.QtWidgets import QApplication, QMessageBox, QSizePolicy, QSplitter, QToolTip, QVBoxLayout, QMenu
 
@@ -126,6 +126,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
         self.setAcceptDrops(True)
+        self._install_arranger(self._mpl_renderer)
 
         self._mouse_impl = None
 
@@ -814,6 +815,42 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def _flush_view(self):
         self.render()
 
+    def _grid_bounds(self):
+        gridspec = getattr(self._parser, '_layout', None)
+        if gridspec is None or self._parser._focus_plot is not None:
+            return None
+        # Fractions of the figure, from its bottom; row 0 is the top one.
+        bottoms, tops, lefts, rights = gridspec.get_grid_positions(self._parser.figure)
+        width, height = self._mpl_renderer.width(), self._mpl_renderer.height()
+        origin = self._mpl_renderer.mapTo(self, QPoint(0, 0))
+        # Between two rows or two columns, the bound halves the gap that holds their tick labels; the outer rows and
+        # columns reach the edges of the figure.
+        rows = ([origin.y()] + [origin.y() + (1 - (bottom + top) / 2) * height for bottom, top in zip(bottoms, tops[1:])]
+                + [origin.y() + height])
+        cols = ([origin.x()] + [origin.x() + (right + left) / 2 * width for right, left in zip(rights, lefts[1:])]
+                + [origin.x() + width])
+        return rows, cols
+
+    def _press_event(self, point) -> MouseEvent:
+        """A press of the left button at the point, in the coordinates of this widget, as matplotlib sees it."""
+        x, y = self._mpl_renderer.mouseEventCoords(QPointF(self._mpl_renderer.mapFrom(self, point.toPoint())))
+        return MouseEvent('button_press_event', self._mpl_renderer, x, y, MouseButton.LEFT)
+
+    def _press_taken(self, point) -> bool:
+        event = self._press_event(point)
+        if self._parser.legend_eye_under(event) is not None or self._legend_under(event) is not None:
+            return True
+        # Axes of no plot: the slider of a plot.
+        return event.inaxes is not None and self._parser._impl_plot_cache_table.get_cache_item(event.inaxes) is None
+
+    def _press_shifts(self, point) -> bool:
+        signal = self._find_signal_at_event(self._press_event(point))[0]
+        return signal is not None and not signal.envelope
+
+    def _drag_taken(self) -> bool:
+        return (super()._drag_taken() or self._legend_gesture is not None or self._ruler_drag is not None
+                or self._mpl_renderer.mouse_grabber is not None)
+
     # custom event handlers
     def _mpl_draw_finish(self, event: DrawEvent):
         self._draw_call_counter += 1
@@ -1350,11 +1387,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         else:
             # Handle drag shift completion in Select mode
             if self._drag_shift_active and self._mmode == Canvas.MOUSE_MODE_SELECT:
+                # A press on a curve that did not drag it shifts nothing: nothing to draw again.
+                dragged = self._drag_shift_preview_line is not None
                 if event.ydata is not None:
                     self._end_drag_shift(event.ydata, event.xdata)
                 else:
                     self._cancel_drag_shift()
-                self.render()
+                if dragged:
+                    self.render()
                 return
 
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:

@@ -1,15 +1,18 @@
 import os
+import weakref
+from types import SimpleNamespace
 
-from PySide6.QtCore import QMargins, Qt, Signal, QEvent, QTimer
+from PySide6.QtCore import QMargins, QPoint, Qt, Signal, QEvent, QTimer
 from PySide6.QtGui import QFont, QFontMetricsF
-from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox, QSplitter
+from PySide6.QtWidgets import QGraphicsProxyWidget, QVBoxLayout, QMenu, QMessageBox, QSplitter
 
 import numpy as np
 from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY, PlotContourWithSlider
+from iplotlib.core import layout
 from iplotlib.core.display import ScaledPixels
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.core.ruler import Ruler
-from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
+from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser, _Legend, _LegendEye
 from iplotlib.core.date_ticks import (
     pick_interval,
     generate_ticks,
@@ -56,8 +59,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._parser._on_view_data_read = self._view_data_drawn
         self._parser.legend_eyes = True
 
-        # Track connected ViewBoxes to avoid duplicate connections
-        self._connected_viewboxes = set()
+        # Track connected ViewBoxes to avoid duplicate connections. By the objects themselves: a ViewBox made by a
+        # redraw can take the id of one the redraw freed.
+        self._connected_viewboxes = weakref.WeakSet()
 
         self._minimap_widget = pg.GraphicsLayoutWidget()
         self._minimap_widget.setMinimumHeight(MINIMAP_MIN_HEIGHT.px())
@@ -92,6 +96,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         # Drag & Drop
         self.setAcceptDrops(True)
+        self._install_arranger(self._parser.figure.viewport())
 
     def set_canvas(self, canvas):
         prev_canvas = self._parser.canvas
@@ -120,8 +125,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             for stack in self._parser._layout_stacks.values():
                 for plot in stack.values():
                     vb = plot.getViewBox()
-                    vb_id = id(vb)
-                    if vb_id not in self._connected_viewboxes:
+                    if vb not in self._connected_viewboxes:
                         vb.pressed.connect(self._impl_mouse_press_handler)
                         vb.released.connect(self._impl_mouse_release_handler)
                         vb.dragged.connect(self._impl_mouse_drag_handler)
@@ -130,7 +134,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                         # Ruler labels are positioned in scene coordinates; a widget
                         # resize moves the axes without a range change, so re-project.
                         vb.sigResized.connect(self._on_viewbox_resized)
-                        self._connected_viewboxes.add(vb_id)
+                        self._connected_viewboxes.add(vb)
 
             super().set_canvas(canvas)
             self._repaint_rulers_from_canvas()
@@ -888,6 +892,52 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def redo(self):
         self._parser.redo()
 
+    def _grid_bounds(self):
+        canvas = self.get_canvas()
+        parser = self._parser
+        if canvas is None or parser._focus_plot is not None or not parser._cell_gl:
+            return None
+        rows, cols = layout.grid_size(canvas)
+        view = parser.figure
+        origin = view.viewport().mapTo(self, QPoint(0, 0))
+        # Where the cells of the plots begin and end, by row and by column.
+        tops, bottoms, lefts, rights = [None] * rows, [None] * rows, [None] * cols, [None] * cols
+        for _, slot in layout.slots_of(canvas):
+            cell = parser._cell_gl.get((slot.row, slot.col))
+            if cell is None:
+                continue
+            rect = view.mapFromScene(cell.sceneBoundingRect()).boundingRect()
+            tops[slot.row] = origin.y() + rect.top()
+            bottoms[slot.bottom - 1] = origin.y() + rect.top() + rect.height()
+            lefts[slot.col] = origin.x() + rect.left()
+            rights[slot.right - 1] = origin.x() + rect.left() + rect.width()
+        # The outer rows and columns reach the edges of the view; a bound no cell gives is taken evenly between
+        # those around it.
+        return (_bounds(tops, bottoms, origin.y(), origin.y() + view.viewport().height()),
+                _bounds(lefts, rights, origin.x(), origin.x() + view.viewport().width()))
+
+    def _press_taken(self, point) -> bool:
+        view = self._parser.figure
+        scene_point = view.mapToScene(view.viewport().mapFrom(self, point.toPoint()))
+        for item in view.scene().items(scene_point):
+            while item is not None:
+                if isinstance(item, (_Legend, _LegendEye, QGraphicsProxyWidget)):
+                    return True
+                item = item.parentItem()
+        return False
+
+    def _press_shifts(self, point) -> bool:
+        view = self._parser.figure
+        scene_point = view.mapToScene(view.viewport().mapFrom(self, point.toPoint()))
+        for item in view.scene().items(scene_point):
+            if isinstance(item, pg.ViewBox):
+                signal = self._find_signal_at_event(item, SimpleNamespace(scenePos=lambda: scene_point))[0]
+                return signal is not None and not signal.envelope
+        return False
+
+    def _drag_taken(self) -> bool:
+        return super()._drag_taken() or self._ruler_drag is not None
+
     def _full_screen_mode_on(self, impl_plot):
         self._parser.set_focus_plot(impl_plot)
         canvas = self.get_canvas()
@@ -1300,3 +1350,27 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             except Exception:
                 pass
             self._drag_shift_preview_line = None
+
+
+def _bounds(starts: list, ends: list, first: float, last: float) -> list:
+    """The bounds of the rows (or the columns) of the grid, given where cells start and end in each of them (None
+    where none does) and the first and the last bound. Between two rows the bound halves the gap the cells leave;
+    where no cell tells, the bounds are spread evenly between those known."""
+    count = len(starts)
+    bounds = [first] + [None] * (count - 1) + [last]
+    for index in range(1, count):
+        known = [value for value in (ends[index - 1], starts[index]) if value is not None]
+        if known:
+            bounds[index] = sum(known) / len(known)
+    index = 1
+    while index < count:
+        if bounds[index] is None:
+            end = index
+            while bounds[end] is None:
+                end += 1
+            low, high = bounds[index - 1], bounds[end]
+            for unknown in range(index, end):
+                bounds[unknown] = low + (high - low) * (unknown - index + 1) / (end - index + 1)
+            index = end
+        index += 1
+    return bounds
