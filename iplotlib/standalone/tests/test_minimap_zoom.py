@@ -1,6 +1,7 @@
 """A left drag across the mini-map zooms the plot above to the span it covers, as one
 undoable zoom that reads the data of the new range. The mini-map keeps showing the
-range drawn; a click or a drag with another button changes nothing."""
+range drawn; a click, a drag with another button or a drag that starts on an axis
+changes nothing."""
 
 import unittest
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
@@ -27,7 +29,8 @@ _SAMPLE_LIMIT = ('Number of samples in reply exceeds available limit. Reduce req
 
 class _DataAccess:
     """Asks for decimation, as a large archive would, so that a zoom reads the data again, and answers
-    with the width of the requested range in seconds: what is drawn tells which range was read."""
+    with the width of the requested range in seconds: what is drawn tells which range was read. FLAT
+    answers 1 whatever the range."""
 
     def __init__(self):
         self.reads = []
@@ -37,8 +40,9 @@ class _DataAccess:
             return SimpleNamespace(errcode=-1, errdesc=_SAMPLE_LIMIT)
         self.reads.append((kwargs['varname'], kwargs['tsS'], kwargs['tsE']))
         x = np.linspace(kwargs['tsS'], kwargs['tsE'], 50).astype(np.int64)
-        return SimpleNamespace(errcode=0, errdesc='', xdata=x, ydata=np.full(50, (kwargs['tsE'] - kwargs['tsS']) / 1e9),
-                               xunit='ns', yunit='A', resolved_pulse=None)
+        y = 1.0 if kwargs['varname'] == 'FLAT' else (kwargs['tsE'] - kwargs['tsS']) / 1e9
+        return SimpleNamespace(errcode=0, errdesc='', xdata=x, ydata=np.full(50, y), xunit='ns', yunit='A',
+                               resolved_pulse=None)
 
     def get_data_source(self, name):
         return None
@@ -97,9 +101,11 @@ class MinimapZoomTest(unittest.TestCase):
         parser = qt_canvas._parser
         return qt_canvas, parser, parser._plot_impl_plot_lut.get(id(plot))[0]
 
-    def _draw(self, backend, autoscale=False):
-        plot = PlotXY()
-        plot.add_signal(SignalXY(name='VAR', label='VAR', data_source='uda', ts_start=T0, ts_end=T0 + HOUR))
+    def _draw(self, backend, autoscale=False, stacks=('VAR',)):
+        """A plot of the variables `stacks`, one stack each, over an hour."""
+        plot = PlotXY(axes=[LinearAxis(), [LinearAxis() for _ in stacks]])
+        for stack, name in enumerate(stacks, start=1):
+            plot.add_signal(SignalXY(name=name, label=name, data_source='uda', ts_start=T0, ts_end=T0 + HOUR), stack)
         plot.axes[0].is_date = True
         return self._show(backend, plot, autoscale)
 
@@ -131,7 +137,10 @@ class MinimapZoomTest(unittest.TestCase):
         """Drag across the mini-map from time `begin` to time `end`, and then `past` pixels further right."""
         widget, start = self._minimap_point(qt_canvas, begin)
         _, stop = self._minimap_point(qt_canvas, end)
-        stop += QPointF(past, 0)
+        self._drag_px(widget, start, stop + QPointF(past, 0), button)
+
+    def _drag_px(self, widget, start, stop, button=Qt.MouseButton.LeftButton):
+        """Drag in `widget` from the point `start` to the point `stop`."""
         self._send(widget, QEvent.Type.MouseButtonPress, start, button, button)
         for k in range(1, 7):
             QTest.qWait(20)  # pyqtgraph drops the moves closer than 10 ms
@@ -148,6 +157,15 @@ class MinimapZoomTest(unittest.TestCase):
         if hasattr(qt_canvas, '_minimap_axes'):
             return tuple(qt_canvas._minimap_axes.get_xlim())
         low, high = qt_canvas._minimap_plot.getViewBox().viewRange()[0]
+        return low + qt_canvas._minimap_offset, high + qt_canvas._minimap_offset
+
+    @staticmethod
+    def _band(qt_canvas):
+        """The span of time the band of the mini-map marks as the one the plot above shows."""
+        if hasattr(qt_canvas, '_minimap_axes'):
+            rect = qt_canvas._minimap_viewport_patch
+            return rect.get_x(), rect.get_x() + rect.get_width()
+        low, high = qt_canvas._minimap_viewport_item.getRegion()
         return low + qt_canvas._minimap_offset, high + qt_canvas._minimap_offset
 
     def test_a_drag_zooms_the_plot_above_and_reads_the_new_range(self):
@@ -290,6 +308,87 @@ class MinimapZoomTest(unittest.TestCase):
                 self.assertAlmostEqual(begin, baseline[0] + span * 0.25, delta=2 * pixel)
                 self.assertAlmostEqual(end, baseline[0] + span * 0.5, delta=2 * pixel)
                 self.assertNotEqual(begin, round(begin))
+
+    def test_a_span_as_wide_as_the_one_shown_reads_and_marks_its_own_range(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                qt_canvas, parser, impl = self._draw(backend)
+                widget, start = self._minimap_point(qt_canvas, T0 + HOUR // 8)
+                _, stop = self._minimap_point(qt_canvas, T0 + HOUR * 3 // 8)
+                # In whole pixels, so that both spans are as wide.
+                start, stop = QPointF(round(start.x()), round(start.y())), QPointF(round(stop.x()), round(stop.y()))
+                self._drag_px(widget, start, stop)
+                shown = tuple(parser.get_oaw_axis_limits(impl, 0))
+                self.da.reads.clear()
+
+                self._drag_px(widget, start + QPointF(100, 0), stop + QPointF(100, 0))
+
+                begin, end = parser.get_oaw_axis_limits(impl, 0)
+                self.assertNotEqual((begin, end), shown)
+                self.assertEqual(self.da.reads, [('VAR', begin, end)])
+                np.testing.assert_allclose(np.subtract(self._band(qt_canvas), T0), (begin - T0, end - T0),
+                                           atol=HOUR / self._minimap_width(qt_canvas))
+
+    def test_a_canvas_that_autoscales_fits_each_stack_to_the_data_of_the_new_range(self):
+        # The mini-map shows the last stack, whose Y range stays the same here.
+        for backend in BACKENDS:
+            for workers in (False, True):
+                with self.subTest(backend=backend, workers=workers):
+                    qt_canvas, parser, impl = self._draw(backend, autoscale=True, stacks=('VAR', 'FLAT'))
+                    AccessHelper.pool = pool = _Pool() if workers else None
+
+                    self._drag(qt_canvas, T0 + HOUR // 4, T0 + HOUR // 2)
+                    if pool is not None:
+                        pool.arrive()
+                        self.app.processEvents()
+
+                    begin, end = parser.get_oaw_axis_limits(impl, 0)
+                    low, high = parser.get_oaw_axis_limits(impl, 1)
+                    self.assertLess(low, (end - begin) / 1e9)
+                    self.assertGreater(high, (end - begin) / 1e9)
+                    self.assertGreater(low, 0)
+
+    def test_a_drag_that_starts_on_an_axis_of_the_mini_map_changes_nothing(self):
+        # As matplotlib's SpanSelector, which takes no press outside its axes.
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                qt_canvas, parser, impl = self._draw(backend)
+                self.da.reads.clear()
+
+                # From the Y axis, left of the range drawn.
+                self._drag(qt_canvas, T0 - 25 * HOUR / self._minimap_width(qt_canvas), T0 + HOUR // 2)
+
+                self.assertEqual(tuple(parser.get_oaw_axis_limits(impl, 0)), (T0, T0 + HOUR))
+                self.assertEqual(self.da.reads, [])
+                self.assertFalse(parser._hm.can_undo())
+
+    def test_another_button_pressed_during_a_drag_leaves_its_start_where_it_was(self):
+        left, right, none = Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton, Qt.MouseButton.NoButton
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                qt_canvas, parser, impl = self._draw(backend)
+                widget, start = self._minimap_point(qt_canvas, T0 + HOUR // 4)
+                _, stop = self._minimap_point(qt_canvas, T0 + HOUR // 2)
+
+                self._send(widget, QEvent.Type.MouseButtonPress, start, left, left)
+                for k in range(1, 7):
+                    QTest.qWait(20)
+                    if k == 4:
+                        middle = start + (stop - start) * 0.5
+                        self._send(widget, QEvent.Type.MouseButtonPress, middle, right, left | right)
+                    self._send(widget, QEvent.Type.MouseMove, start + (stop - start) * (k / 6), none,
+                               left | right if k >= 4 else left)
+                self._send(widget, QEvent.Type.MouseButtonRelease, stop, left, right)
+                self._send(widget, QEvent.Type.MouseButtonRelease, stop, right, none)
+
+                begin, end = parser.get_oaw_axis_limits(impl, 0)
+                pixel = HOUR / self._minimap_width(qt_canvas)
+                self.assertAlmostEqual(begin, T0 + HOUR // 4, delta=2 * pixel)
+                # matplotlib keeps the span it had when the other button went down, pyqtgraph follows the mouse.
+                self.assertLess(begin, end)
+                self.assertLessEqual(end, T0 + HOUR // 2 + 2 * pixel)
+                parser._hm.undo()
+                self.assertFalse(parser._hm.can_undo())
 
 
 if __name__ == '__main__':

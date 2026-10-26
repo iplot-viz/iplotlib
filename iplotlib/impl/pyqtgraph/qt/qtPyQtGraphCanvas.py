@@ -45,13 +45,22 @@ class _MinimapViewBox(pg.ViewBox):
     def __init__(self):
         super().__init__(enableMenu=False)
         self._span = None
+        self._start = None
 
     def mouseDragEvent(self, ev, axis=None):
-        if ev.button() != Qt.MouseButton.LeftButton:
+        # An axis passes on the drags that start on it: only those across the view count, as with matplotlib.
+        if ev.button() != Qt.MouseButton.LeftButton or axis is not None:
             ev.ignore()
             return
         ev.accept()
-        begin, end = sorted((self.mapToView(ev.buttonDownPos()).x(), self.mapToView(ev.pos()).x()))
+        if ev.isStart():
+            # Qt keeps where the last button pressed went down only: another one pressed during the drag would
+            # move its start.
+            self._start = ev.buttonDownPos()
+        elif self._start is None:
+            # The drag ended when its button was released, with another one still down.
+            return
+        begin, end = sorted((self.mapToView(self._start).x(), self.mapToView(ev.pos()).x()))
         if self._span is None:
             self._span = pg.LinearRegionItem(movable=False, brush=pg.mkBrush(25, 118, 210, 64),
                                              pen=pg.mkPen('#1976d2'))
@@ -61,7 +70,8 @@ class _MinimapViewBox(pg.ViewBox):
         if ev.isFinish():
             self.removeItem(self._span)
             self._span = None
-            if abs(ev.pos().x() - ev.buttonDownPos().x()) >= IplotQtCanvas.MINIMAP_ZOOM_MIN_PX:
+            start, self._start = self._start, None
+            if abs(ev.pos().x() - start.x()) >= IplotQtCanvas.MINIMAP_ZOOM_MIN_PX:
                 self.spanSelected.emit(begin, end)
 
 

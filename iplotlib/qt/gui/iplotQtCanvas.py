@@ -748,10 +748,17 @@ class IplotQtCanvas(QWidget):
         undoable zoom. The data of the new range are read as for any zoom.
         """
         self.stage_view_lim_cmd(impl_plot, name='Zoom')
-        self._parser.set_oaw_axis_limits(impl_plot, 0, (begin, end))
+        # As a zoom made with the mouse, on the offset the view has: the view moves and the plots follow it. A new
+        # offset first would put a range as wide as the one shown at the same place of a pyqtgraph view, which then
+        # tells nothing (see set_plot_limits).
+        view = [self._parser.transform_value(impl_plot, 0, value, inverse=True) for value in (begin, end)]
+        self._parser.set_impl_x_axis_limits(impl_plot, tuple(view))
         if self._parser._pm.get_value(self.get_canvas(), 'autoscale'):
-            # A zoom made with the mouse sets the Y axis too, which fits it to the data then.
-            self._parser.autoscale_y_axis(impl_plot)
+            # A zoom made with the mouse sets the Y axis too, which fits it to the data then. Each stack, since
+            # pyqtgraph tells nothing of a Y range that stays the same.
+            plot = self._parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+            for stack in self._parser._plot_impl_plot_lut.get(id(plot)):
+                self._parser.autoscale_y_axis(stack)
         while len(self._staging_cmds):
             self.commit_view_lim_cmd(impl_plot)
         while len(self._commitd_cmds):
