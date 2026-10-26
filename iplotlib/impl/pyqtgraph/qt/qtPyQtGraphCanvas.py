@@ -3,7 +3,7 @@ import weakref
 from types import SimpleNamespace
 from typing import Optional
 
-from PySide6.QtCore import QMargins, QPoint, Qt, QEvent, QTimer
+from PySide6.QtCore import QMargins, QPoint, Qt, Signal, QEvent, QTimer
 from PySide6.QtGui import QFont, QFontMetricsF
 from PySide6.QtWidgets import QGraphicsProxyWidget, QVBoxLayout, QMenu, QMessageBox, QSplitter
 
@@ -34,6 +34,35 @@ logger = Sl.get_logger(__name__)
 
 #: The mini-map must stay tall enough to read once the UI scale grows.
 MINIMAP_MIN_HEIGHT = ScaledPixels(110)
+
+
+class _MinimapViewBox(pg.ViewBox):
+    """The view of the mini-map. A left drag across it selects a span of the time axis,
+    drawn while it is dragged; the mouse moves nothing in the mini-map."""
+
+    spanSelected = Signal(float, float)
+
+    def __init__(self):
+        super().__init__(enableMenu=False)
+        self._span = None
+
+    def mouseDragEvent(self, ev, axis=None):
+        if ev.button() != Qt.MouseButton.LeftButton:
+            ev.ignore()
+            return
+        ev.accept()
+        begin, end = sorted((self.mapToView(ev.buttonDownPos()).x(), self.mapToView(ev.pos()).x()))
+        if self._span is None:
+            self._span = pg.LinearRegionItem(movable=False, brush=pg.mkBrush(25, 118, 210, 64),
+                                             pen=pg.mkPen('#1976d2'))
+            self._span.setZValue(20)
+            self.addItem(self._span, ignoreBounds=True)
+        self._span.setRegion((begin, end))
+        if ev.isFinish():
+            self.removeItem(self._span)
+            self._span = None
+            if abs(ev.pos().x() - ev.buttonDownPos().x()) >= IplotQtCanvas.MINIMAP_ZOOM_MIN_PX:
+                self.spanSelected.emit(begin, end)
 
 
 class QtPyQtGraphCanvas(IplotQtCanvas):
@@ -67,7 +96,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._minimap_widget.setMinimumHeight(MINIMAP_MIN_HEIGHT.px())
         self._minimap_widget.setVisible(False)
         self._minimap_widget.setBackground('#f5f5f5')
-        self._minimap_plot = self._minimap_widget.addPlot(row=0, col=0)
+        self._minimap_plot = self._minimap_widget.addPlot(row=0, col=0, viewBox=_MinimapViewBox())
+        self._minimap_plot.getViewBox().spanSelected.connect(self._on_minimap_span)
         self._minimap_plot.setMouseEnabled(x=False, y=False)
         self._minimap_plot.showAxis('left')
         self._minimap_plot.showAxis('bottom')
@@ -430,6 +460,24 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         if main_plot is None or self._minimap_viewport_item is None:
             return
         self._on_main_x_range_changed(main_plot, main_plot.getViewBox().viewRange())
+
+    def _on_minimap_span(self, begin: float, end: float):
+        """Zoom the plot above to the span selected on the mini-map, within the range it shows."""
+        canvas = self.get_canvas()
+        main_plot = self._get_main_plot_for_minimap()
+        baseline = canvas.get_minimap_baseline() if canvas is not None else None
+        if main_plot is None or baseline is None:
+            return
+        target_plot = canvas.get_minimap_target_plot()
+        if target_plot.axes and getattr(target_plot.axes[0], 'is_date', False):
+            # The mini-map shows a date axis from an integer offset (see _update_minimap).
+            begin, end = self._minimap_offset + int(round(begin)), self._minimap_offset + int(round(end))
+            low, high = int(baseline[0]), int(baseline[1])
+        else:
+            low, high = float(baseline[0]), float(baseline[1])
+        begin, end = max(begin, low), min(end, high)
+        if begin < end:
+            self.zoom_plot_x_range(main_plot, begin, end)
 
     def get_base_plot(self) -> PlotItem:
         for stack in self._parser._layout_stacks.values():
