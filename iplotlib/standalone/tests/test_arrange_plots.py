@@ -1,10 +1,13 @@
-"""Moving and resizing plots with the mouse, in both backends.
+"""Moving and resizing plots with the mouse, laying them out on a grid, and dropping on the grid, in both backends.
 
 In the select mode, a plot dragged by its background moves: in its column the others make room for it, onto a plot
 of another column the two trade places. Dragged by its bottom right corner, it spans other rows. The canvas tells
 where the plots went, undo takes them back, and each plot keeps its view. The slots the application reserves for
 plots it does not draw show while a plot moves, move as plots do and take no plot over them. A drag from a curve or a
 legend still moves those, and nothing moves out of the select mode, while a plot has the focus or while streaming.
+
+The Layout tool of the toolbar lays the plots out on the grid picked in its menu, the plots that do not fit going into
+the last cell as stacks of one plot. What the application takes can be dropped on a cell of the grid, empty or not.
 """
 
 import gc
@@ -14,8 +17,8 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSizeF, Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRectF, QSizeF, Qt
+from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QMenu
 
@@ -25,6 +28,8 @@ from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
 from iplotlib.qt.gui.iplotQtArrangement import HANDLE, RESIZE, _Overlay
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
+from iplotlib.qt.gui.iplotQtLayoutPicker import CELL, GAP, LayoutPicker
+from iplotlib.qt.gui.iplotQtMainWindow import IplotQtMainWindow
 from iplotlib.qt.testing import ensure_qapp
 
 BACKENDS = ('matplotlib', 'pyqt')
@@ -552,6 +557,298 @@ class TestArrangePlots(unittest.TestCase):
 
                 mouse.hover(mouse.cell(1, 0))
                 self.assertNotEqual(mouse.widget.cursor().shape(), Qt.CursorShape.SizeFDiagCursor)
+
+    # Laying the plots out on a grid
+
+    def test_the_plots_are_laid_out_on_the_grid_picked_without_drawing_them_again(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(4,))
+                impls = {title: self._impl(qt_canvas, canvas, title) for title in ('0.0', '1.0', '2.0', '3.0')}
+
+                with patch.object(qt_canvas, 'refresh') as refresh:
+                    qt_canvas.lay_out(2, 2)
+                    self.app.processEvents()
+
+                refresh.assert_not_called()
+                self.assertEqual(_titles(canvas), [['0.0', '1.0'], ['2.0', '3.0']])
+                self.assertEqual({title: self._drawn_place(qt_canvas, impl) for title, impl in impls.items()},
+                                 {'0.0': (0, 0, 1, 1), '1.0': (1, 0, 1, 1), '2.0': (0, 1, 1, 1), '3.0': (1, 1, 1, 1)})
+                self.assertEqual(len(arranged), 1)
+                self.assertEqual(qt_canvas.get_next_undo_cmd_name(), 'Layout')
+
+                qt_canvas.undo()
+                self.app.processEvents()
+                self.assertEqual(_titles(canvas), [['0.0', '1.0', '2.0', '3.0']])
+                self.assertEqual((canvas.layout_rows, canvas.layout_cols), (None, None))
+
+    def test_the_plots_beyond_the_last_cell_are_drawn_as_stacks_of_one_plot_there(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+
+                qt_canvas.lay_out(1, 2)
+                self.app.processEvents()
+
+                joined = canvas.plots[1][0]
+                self.assertEqual([[signal.label for signal in signals] for signals in joined.signals.values()],
+                                 [['s10'], ['s20']])
+                self.assertEqual(len(qt_canvas._parser._plot_impl_plot_lut[id(joined)]), 2)
+                self.assertEqual({((before.row, before.col, before.stack_offset), (after.row, after.col,
+                                                                                   after.stack_offset))
+                                  for before, after in arranged[-1]}, {((1, 0, 0), (0, 1, 0)), ((2, 0, 0), (0, 1, 1))})
+
+                qt_canvas.undo()
+                self.app.processEvents()
+                self.assertEqual(_titles(canvas), [['0.0', '1.0', '2.0']])
+                self.assertEqual([len(qt_canvas._parser._plot_impl_plot_lut[id(plot)]) for plot in canvas.plots[0]],
+                                 [1, 1, 1])
+
+    def test_a_joined_plot_shows_the_x_ranges_of_all_its_plots_and_undo_gives_each_its_own_back(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                parser = qt_canvas._parser
+                # Without a shared time, each plot keeps a view of its own.
+                canvas.shared_x_axis = False
+                parser.set_oaw_axis_limits(self._impl(qt_canvas, canvas, '1.0'), 0, (1.0, 3.0))
+                parser.set_oaw_axis_limits(self._impl(qt_canvas, canvas, '2.0'), 0, (5.0, 8.0))
+                qt_canvas._flush_view()
+                self.app.processEvents()
+
+                qt_canvas.lay_out(1, 2)
+                self.app.processEvents()
+                for impl in parser._plot_impl_plot_lut[id(canvas.plots[1][0])]:
+                    np.testing.assert_allclose(parser.get_oaw_axis_limits(impl, 0), (1.0, 8.0))
+
+                qt_canvas.undo()
+                self.app.processEvents()
+                np.testing.assert_allclose(parser.get_oaw_axis_limits(self._impl(qt_canvas, canvas, '1.0'), 0),
+                                           (1.0, 3.0))
+                np.testing.assert_allclose(parser.get_oaw_axis_limits(self._impl(qt_canvas, canvas, '2.0'), 0),
+                                           (5.0, 8.0))
+
+    def test_undo_or_redo_that_takes_the_plot_in_focus_away_shows_all_the_plots(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                parser = qt_canvas._parser
+                qt_canvas.lay_out(1, 2)
+                self.app.processEvents()
+                qt_canvas._full_screen_mode_on(parser._plot_impl_plot_lut[id(canvas.plots[1][0])][0])
+                self.app.processEvents()
+
+                qt_canvas.undo()
+                self.app.processEvents()
+                self.assertIsNone(parser._focus_plot)
+                self.assertEqual([len(parser._plot_impl_plot_lut.get(id(plot), [])) for plot in canvas.plots[0]],
+                                 [1, 1, 1])
+
+                qt_canvas._full_screen_mode_on(self._impl(qt_canvas, canvas, '2.0'))
+                self.app.processEvents()
+                qt_canvas.redo()
+                self.app.processEvents()
+                self.assertIsNone(parser._focus_plot)
+                self.assertEqual([len(parser._plot_impl_plot_lut.get(id(plot), []))
+                                  for plot, _ in layout.slots_of(canvas)], [1, 2])
+
+    def test_the_markers_window_shows_the_stack_a_marker_takes_in_a_joined_plot(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                win = IplotQtMainWindow()
+                self.addCleanup(win.close)
+                canvas = _canvas((3,))
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                win.canvasStack.addWidget(qt_canvas)
+                win.show()
+                win.canvasStack.refreshLinks()
+                self.app.processEvents()
+                signal = next(iter(_plot(canvas, '2.0').signals.values()))[0]
+                qt_canvas._marker_window.add_marker(signal, (5.0, 5.0), signal.label)
+
+                qt_canvas.lay_out(1, 2)
+                self.app.processEvents()
+                self.assertEqual(qt_canvas._marker_window.table.item(0, 1).text(), '2.1.2')
+
+                qt_canvas.undo()
+                self.app.processEvents()
+                self.assertEqual(qt_canvas._marker_window.table.item(0, 1).text(), '1.3.1')
+                win.close()
+
+    def test_the_toolbar_lays_the_plots_out_on_the_grid_picked_in_its_menu(self):
+        win = IplotQtMainWindow()
+        self.addCleanup(win.close)
+        canvas = _canvas((3,))
+        qt_canvas = IplotQtCanvasFactory.new('matplotlib', canvas=canvas)
+        win.canvasStack.addWidget(qt_canvas)
+        win.show()
+        self.app.processEvents()
+        picker = win.toolBar.layoutPicker
+
+        win.toolBar.layoutMenu.aboutToShow.emit()
+        self.assertEqual([picker.outcome(1, 1), picker.outcome(1, 2), picker.outcome(3, 1), picker.outcome(2, 2)],
+                         [2, 1, 0, 0])
+
+        picker.picked.emit(3, 2)
+        self.app.processEvents()
+        self.assertEqual(_titles(canvas), [['0.0', '1.0', '2.0'], []])
+        self.assertEqual((canvas.rows, canvas.cols), (3, 2))
+        self.assertEqual(win.toolBar.undoAction.text(), 'Undo Layout')
+
+        canvas.streaming = True
+        win.toolBar.layoutMenu.aboutToShow.emit()
+        canvas.streaming = False
+        self.assertIsNone(picker.outcome(2, 2))
+        self.assertIn('streaming', picker._label.text())
+
+    def test_the_layout_picker_names_the_grid_under_the_mouse_and_picks_the_one_clicked(self):
+        picker = LayoutPicker()
+        self.addCleanup(picker.close)
+        picker.set_outcomes({(rows, cols): (0 if rows * cols >= 3 else None if rows * cols == 1 else 3 - rows * cols)
+                             for rows in range(1, LayoutPicker.ROWS + 1) for cols in range(1, LayoutPicker.COLS + 1)})
+        picker.show()
+        self.app.processEvents()
+        picked = []
+        picker.picked.connect(lambda rows, cols: picked.append((rows, cols)))
+        step = CELL.px() + GAP.px()
+
+        def at(rows, cols):
+            return QPoint(round((cols - 0.5) * step), round((rows - 0.5) * step))
+
+        def hover(rows, cols):
+            # Straight to the cells: QTest.mouseMove moves the cursor of the platform, which goes to the first window
+            # under it, and the small picker may lie under a window that another test left open.
+            point = QPointF(at(rows, cols))
+            QApplication.sendEvent(picker._cells, QMouseEvent(QEvent.Type.MouseMove, point,
+                                                              picker._cells.mapToGlobal(point), Qt.MouseButton.NoButton,
+                                                              Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+
+        hover(3, 2)
+        self.assertEqual(picker._label.text(), '3 rows × 2 columns')
+        hover(1, 2)
+        self.assertEqual(picker._label.text(), '1 row × 2 columns: the last cell takes 2 plots as one')
+        hover(1, 1)
+        self.assertIn('cannot', picker._label.text())
+
+        QTest.mouseClick(picker._cells, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(1, 1))
+        QTest.mouseClick(picker._cells, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(3, 2))
+        self.assertEqual(picked, [(3, 2)])
+
+        picker.set_outcomes(None)
+        self.assertIn('streaming', picker._label.text())
+
+    # Dropping on the grid
+
+    def _drag(self, qt_canvas, point, drop=True) -> bool:
+        """A drag from elsewhere that comes over the canvas to the point, in the coordinates of the canvas widget, and
+        drops there: whether the canvas took the last event."""
+        widget = qt_canvas._arranger._widget
+        local = widget.mapFrom(qt_canvas, QPoint(round(point[0]), round(point[1])))
+        mime = QMimeData()
+        mime.setText('variable')
+        args = (Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, mime, Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier)
+        events = [QDragEnterEvent(local, *args), QDragMoveEvent(local, *args)]
+        if drop:
+            events.append(QDropEvent(QPointF(local), *args))
+        for event in events:
+            QApplication.sendEvent(widget, event)
+            if not event.isAccepted():
+                break
+        self.app.processEvents()
+        return event.isAccepted()
+
+    def test_something_dropped_on_an_empty_cell_or_on_a_plot_tells_where(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(2, 1))
+                qt_canvas.accepts_drop = lambda source, mime: True
+                dropped = []
+                qt_canvas.dropSignal.connect(dropped.append)
+
+                self.assertTrue(self._drag(qt_canvas, mouse.cell(1, 1)))
+                self.assertTrue(self._drag(qt_canvas, mouse.cell(1, 0)))
+                self.app.processEvents()
+
+                self.assertEqual([(info.row, info.col, info.stack) for info in dropped], [(2, 2, None), (2, 1, 1)])
+                self.assertFalse(qt_canvas._arranger._overlay.isVisible())
+
+    def test_a_grid_picked_for_a_canvas_with_no_plot_takes_drops_on_its_cells(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                previous = getattr(self, '_shown', None)
+                if previous is not None:
+                    previous.close()
+                    self.app.processEvents()
+                canvas = Canvas(mouse_mode=Canvas.MOUSE_MODE_SELECT)
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                self._shown = qt_canvas
+                self.addCleanup(qt_canvas.close)
+                qt_canvas.resize(800, 900)
+                qt_canvas.show()
+                self.app.processEvents()
+                qt_canvas.accepts_drop = lambda source, mime: True
+                dropped = []
+                qt_canvas.dropSignal.connect(dropped.append)
+
+                qt_canvas.lay_out(2, 3)
+                self.app.processEvents()
+                self._drag(qt_canvas, _Mouse(qt_canvas, self.app).cell(1, 2))
+                self.app.processEvents()
+
+                self.assertEqual((canvas.rows, canvas.cols), (2, 3))
+                self.assertEqual([(info.row, info.col, info.stack) for info in dropped], [(2, 3, None)])
+
+    def test_something_dropped_on_a_plot_goes_to_the_stack_under_the_mouse(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                qt_canvas.lay_out(1, 1)
+                self.app.processEvents()
+                qt_canvas.accepts_drop = lambda source, mime: True
+                dropped = []
+                qt_canvas.dropSignal.connect(dropped.append)
+
+                # Three stacks share the cell: the last one is at its bottom.
+                self._drag(qt_canvas, mouse.cell(0, 0, fx=0.5, fy=0.85))
+                self.app.processEvents()
+
+                self.assertEqual([(info.row, info.col, info.stack) for info in dropped], [(1, 1, 3)])
+
+    def test_a_drag_over_the_canvas_shows_the_cell_it_would_drop_on(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(2, 1))
+                qt_canvas.accepts_drop = lambda source, mime: True
+                rows, cols = qt_canvas._grid_bounds()
+
+                self._drag(qt_canvas, mouse.cell(0, 0), drop=False)
+
+                overlay = qt_canvas._arranger._overlay
+                self.assertTrue(overlay.isVisible())
+                empty = QRectF(QPointF(cols[1], rows[1]), QPointF(cols[2], rows[2]))
+                plot = QRectF(QPointF(cols[0], rows[0]), QPointF(cols[1], rows[1]))
+                self.assertEqual(overlay._shapes, [(empty, _Overlay.RESERVED), (plot, _Overlay.TARGET)])
+
+                QApplication.sendEvent(qt_canvas._arranger._widget, QDragLeaveEvent())
+                self.assertFalse(overlay.isVisible())
+
+    def test_nothing_the_application_does_not_take_is_dropped_nor_anything_while_streaming(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(2, 1))
+                dropped = []
+                qt_canvas.dropSignal.connect(dropped.append)
+
+                self.assertFalse(self._drag(qt_canvas, mouse.cell(1, 1)))
+                qt_canvas.accepts_drop = lambda source, mime: True
+                canvas.streaming = True
+                self.assertFalse(self._drag(qt_canvas, mouse.cell(1, 1)))
+                canvas.streaming = False
+                self.app.processEvents()
+
+                self.assertEqual(dropped, [])
+                self.assertFalse(qt_canvas._arranger._overlay.isVisible())
 
 
 if __name__ == '__main__':

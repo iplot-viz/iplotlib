@@ -15,7 +15,7 @@ import typing
 from collections.abc import Collection
 
 import numpy as np
-from PySide6.QtCore import QMargins, QPoint, QPointF, Qt, Slot, Signal
+from PySide6.QtCore import QMargins, QPoint, QPointF, Qt, Slot
 from PySide6.QtGui import QCursor, QKeyEvent
 from PySide6.QtWidgets import QApplication, QMessageBox, QSizePolicy, QSplitter, QToolTip, QVBoxLayout, QMenu
 
@@ -56,7 +56,6 @@ def _rgba_array(image) -> np.ndarray:
 class QtMatplotlibCanvas(IplotQtCanvas):
     """Qt widget that internally uses a matplotlib canvas backend"""
 
-    dropSignal = Signal(object)
     _PREVIEW_RULER_NAME = "__preview__"
 
     def __init__(self, parent=None, tight_layout=True, **kwargs):
@@ -125,7 +124,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
-        self.setAcceptDrops(True)
         self._install_arranger(self._mpl_renderer)
 
         self._mouse_impl = None
@@ -847,6 +845,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         signal = self._find_signal_at_event(self._press_event(point))[0]
         return signal is not None and not signal.envelope
 
+    def _stack_at(self, point, plot) -> typing.Optional[int]:
+        event = self._press_event(point)
+        for mpl_axes in self._parser._plot_impl_plot_lut.get(id(plot), []):
+            if mpl_axes.contains_point((event.x, event.y)):
+                return self._parser._impl_plot_cache_table.get_cache_item(mpl_axes).stack_key
+        return None
+
     def _drag_taken(self) -> bool:
         return (super()._drag_taken() or self._legend_gesture is not None or self._ruler_drag is not None
                 or self._mpl_renderer.mouse_grabber is not None)
@@ -1454,58 +1459,3 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _debug_log_event(self, event: Event, msg: str):
         logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")
-
-    def dragEnterEvent(self, event):
-        """
-        This function will detect the drag enter event from the mouse on the main window
-        """
-        super(QtMatplotlibCanvas, self).dragEnterEvent(event)
-        event.accept()
-
-    def dragMoveEvent(self, event):
-        """
-        This function will detect the drag move event on the main window
-        """
-        x = event.position().x()
-        y = event.position().y()
-        height = self._parser.figure.bbox.height
-        for axe in self._parser.figure.axes:
-            if axe.bbox.x0 < x < axe.bbox.x1 and height - axe.bbox.y0 > y > height - axe.bbox.y1:
-                event.accept()
-                return
-        event.ignore()
-
-    def dropEvent(self, event):
-        """
-        This function will enable the drop file directly on to the
-        main window. The file location will be stored in the self.filename
-        """
-        super(QtMatplotlibCanvas, self).dropEvent(event)
-        plot = self.get_plot(event)
-
-        row, col = self.get_position(plot)
-        self.dropInfo.row = row
-        self.dropInfo.col = col
-        self.dropInfo.dragged_item = event.source().dragged_item
-        self.dropSignal.emit(self.dropInfo)
-        # row, col = self.get_position(plot)
-        # new_data = pd.DataFrame([['codacuda', f"{dragged_item.key}", f'{col}.{row}']],
-        #                       columns=['DS', 'Variable', 'Stack'])
-        # self.parent().parent().parent().parent().sigCfgWidget._model.append_dataframe(new_data)
-        # self.parent().parent().parent().parent().drawClicked()
-        event.ignore()
-
-    def get_plot(self, event):
-        x = event.position().x()
-        y = event.position().y()
-        height = self._parser.figure.bbox.height
-        for axe in self._parser.figure.axes:
-            if axe.bbox.x0 < x < axe.bbox.x1 and height - axe.bbox.y0 > y > height - axe.bbox.y1:
-                return self._parser._impl_plot_cache_table.get_cache_item(axe).plot()
-
-    def get_position(self, plot):
-        all_plots = self._parser.canvas.plots
-        for column, col_plots in enumerate(all_plots):
-            for row, row_plot in enumerate(col_plots):
-                if row_plot.col == plot.col and row_plot.row == plot.row:
-                    return row + 1, column + 1

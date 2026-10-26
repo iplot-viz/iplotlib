@@ -7,13 +7,18 @@ Where the plots of a canvas sit on its grid, and where they go when one of them 
 An application can reserve slots of the grid for plots it does not draw now, as MINT does for the rows of its table
 whose data could not be read: a reserved slot moves and trades places as a plot does, and no plot moves or grows over
 it.
+
+The grid can also be chosen, rows by columns, for the plots to be laid out on it, which it keeps from then on (see
+laid_out).
 """
 
+import copy
+import weakref
 from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Tuple
 
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.plot import Plot
+from iplotlib.core.plot import Plot, PlotXY
 
 
 @dataclass(frozen=True)
@@ -23,6 +28,9 @@ class Slot:
     col: int
     row_span: int = 1
     col_span: int = 1
+    # In a change that joins plots (see Arrangement.changes): the stack number that the stacks the change takes are
+    # counted past. 0 everywhere else.
+    stack_offset: int = 0
 
     @property
     def bottom(self) -> int:
@@ -52,9 +60,15 @@ class Arrangement:
     cols: int
     # The slot before and after of each plot, and of each reserved slot, that moved or took another size. An
     # application that keeps the place of each plot elsewhere, as the table of MINT does, moves what it keeps there.
+    # When plots are joined into one (see laid_out), their changes carry stack offsets: a change takes, from its slot
+    # before, the stacks numbered past its offset that no change from the same slot with a higher offset takes, and
+    # numbers them past the offset of its slot after. Undone, this gives each joined plot its stacks back.
     changes: List[Tuple[Slot, Slot]]
     # Where the reserved slots go.
     reserved: List[Slot] = field(default_factory=list)
+    # The rows and columns of the grid chosen for the plots, which the grid keeps at least: None for none (see
+    # Canvas.layout_rows).
+    layout: Tuple[Optional[int], Optional[int]] = (None, None)
 
 
 class _Reserved:
@@ -77,7 +91,8 @@ def grid_size(canvas: Canvas) -> Tuple[int, int]:
 def current(canvas: Canvas, reserved: Iterable[Slot] = ()) -> Arrangement:
     """The arrangement the canvas has, to go back to it, with the reserved slots that take part in arrangements."""
     rows, cols = grid_size(canvas)
-    return Arrangement(slots_of(canvas), rows, cols, [], [slot for _, slot in _reserved(canvas, reserved)])
+    return Arrangement(slots_of(canvas), rows, cols, [], [slot for _, slot in _reserved(canvas, reserved)],
+                       (canvas.layout_rows, canvas.layout_cols))
 
 
 def moved(canvas: Canvas, plot: Plot, row: int, col: int, grab_row: int = 0, grab_col: int = 0,
@@ -140,16 +155,95 @@ def resized(canvas: Canvas, plot: Plot, row_span: int, col_span: int, reserved: 
     return _arrangement(canvas, slots, {id(plot): taken})
 
 
+def laid_out(canvas: Canvas, rows: int, cols: int, reserved: Iterable[Slot] = (), stacks: dict = None) \
+        -> Optional[Arrangement]:
+    """The plots of the canvas on a grid of `rows` by `cols`, which it keeps from then on, each in a cell of its own:
+    they fill the columns one after the other, each from the top, in the order they have down the columns now, and
+    the cells left over stay empty. When the plots outnumber the cells, the plot of the last cell and those after it
+    are joined into one there, each giving its stacks below those of the one before (see _joined). None if they
+    cannot be: if one of them is a reserved slot, or not a plot that can share its X axis.
+
+    The reserved slots take cells as the plots do. `stacks` gives, by the row and the column of a plot, the highest
+    stack the application keeps for it, drawn or not: the stacks of the plot joined after it are counted past that
+    one, so that those it does not draw keep their own numbers."""
+    occupants = sorted(_occupants(canvas, reserved), key=lambda item: (item[1].col, item[1].row))
+    cells = rows * cols
+    kept, joined = (occupants, []) if len(occupants) <= cells else (occupants[:cells - 1], occupants[cells - 1:])
+    places = [Slot(index % rows, index // rows) for index in range(len(kept))]
+    plots = [(other, place) for (other, _), place in zip(kept, places) if not isinstance(other, _Reserved)]
+    changes = [(slot, place) for (_, slot), place in zip(kept, places) if place != slot]
+    if joined:
+        found = _joined(joined, stacks or {})
+        if found is None:
+            return None
+        plot, offsets = found
+        last = Slot(rows - 1, cols - 1)
+        plots.append((plot, last))
+        changes += [(slot, Slot(last.row, last.col, stack_offset=offset)) for (_, slot), offset in zip(joined, offsets)
+                    if offset or slot != last]
+    return Arrangement(plots, rows, cols, changes,
+                       [place for (other, _), place in zip(kept, places) if isinstance(other, _Reserved)], (rows, cols))
+
+
 def arrange(canvas: Canvas, arrangement: Arrangement):
     """Lay the plots of the canvas out as the arrangement says, as an application building the canvas would: each
     column lists its plots down to its last one, with None where no plot starts."""
     canvas.rows, canvas.cols = arrangement.rows, arrangement.cols
+    canvas.layout_rows, canvas.layout_cols = arrangement.layout
     columns = [dict() for _ in range(arrangement.cols)]
     for plot, slot in arrangement.slots:
         columns[slot.col][slot.row] = plot
         plot.row, plot.col = slot.row + 1, slot.col + 1
         plot.row_span, plot.col_span = slot.row_span, slot.col_span
+        _adopt(canvas, plot)
     canvas.plots = [[column.get(row) for row in range(max(column) + 1)] if column else [] for column in columns]
+
+
+def _joined(plots: List[Tuple[object, Slot]], stacks: dict) -> Optional[Tuple[PlotXY, List[int]]]:
+    """A plot with the stacks of these plots, given with their slots, those of each below those of the one before and
+    below the highest stack the application keeps for it (`stacks`, see laid_out), and the number the stacks of each
+    are counted past in it. It takes the X axis of the first, the rulers of all of them, and the legends dragged or
+    folded away with their stacks. None unless they are all plots of curves along X of the same kind, dates or not:
+    only those can share an X axis.
+
+    The plots are left as they were, to take their stacks back: arrange makes the joined plot the parent of its
+    signals and axes, and gives them back to their plots when they come back."""
+    # The stacks of a plot take its Y axes in order.
+    if any(type(plot) is not PlotXY or not plot.signals or len(plot.axes[1]) != len(plot.signals)
+           for plot, _ in plots) or len({bool(getattr(plot.axes[0], 'is_date', False)) for plot, _ in plots}) > 1:
+        return None
+    first = plots[0][0]
+    joined = copy.copy(first)
+    joined.signals = {}
+    joined.axes = [first.axes[0], []]
+    joined.rulers, joined.legend_anchor, joined.legend_collapsed = [], {}, []
+    offsets, top = [], 0
+    for plot, slot in plots:
+        offsets.append(top)
+        joined.axes[1] += plot.axes[1]
+        for stack, signals in plot.signals.items():
+            joined.signals[top + stack] = list(signals)
+        # The rulers go by their names, which those of the plots before keep.
+        joined.rulers += [ruler for ruler in plot.rulers or [] if all(ruler.name != r.name for r in joined.rulers)]
+        for stack, anchor in (plot.legend_anchor or {}).items():
+            joined.legend_anchor[str(top + int(stack))] = list(anchor)
+        joined.legend_collapsed += [str(top + int(stack)) for stack in plot.legend_collapsed or []]
+        top += max([*plot.signals, stacks.get((slot.row, slot.col), 0)])
+    joined.legend_anchor = joined.legend_anchor or None
+    joined.legend_collapsed = joined.legend_collapsed or None
+    return joined, offsets
+
+
+def _adopt(canvas: Canvas, plot: Plot):
+    """Make the canvas the parent of the plot and the plot that of its axes and signals: a plot joined from others,
+    or one of those back from it, takes them over."""
+    plot.parent = weakref.ref(canvas)
+    plot.axes[0].parent = weakref.ref(plot)
+    for axis in plot.axes[1]:
+        axis.parent = weakref.ref(plot)
+    for signals in plot.signals.values():
+        for signal in signals:
+            signal.parent = weakref.ref(plot)
 
 
 def _reserved(canvas: Canvas, reserved: Iterable[Slot]) -> List[Tuple[_Reserved, Slot]]:
@@ -218,12 +312,14 @@ def _arrangement(canvas: Canvas, slots: List[Tuple[object, Slot]], places: dict)
     drawn = [slot for other, slot in slots if not isinstance(other, _Reserved)]
     plots = [(other, slot) for other, slot in new_slots if not isinstance(other, _Reserved)]
     # A grid that ends with its plots, as an application builds it from where they are, still does; one that keeps
-    # room beyond them keeps that size at least. Reserved slots take no room: nothing is drawn there.
-    new_rows = max(slot.bottom for _, slot in plots)
+    # room beyond them keeps that size at least, as one chosen for them does. Reserved slots take no room: nothing is
+    # drawn there.
+    new_rows = max([slot.bottom for _, slot in plots] + [canvas.layout_rows or 0])
     if rows > max(slot.bottom for slot in drawn):
         new_rows = max(new_rows, rows)
-    new_cols = max(slot.right for _, slot in plots)
+    new_cols = max([slot.right for _, slot in plots] + [canvas.layout_cols or 0])
     if cols > max(slot.right for slot in drawn):
         new_cols = max(new_cols, cols)
     return Arrangement(plots, new_rows, new_cols, changes,
-                       [slot for other, slot in new_slots if isinstance(other, _Reserved)])
+                       [slot for other, slot in new_slots if isinstance(other, _Reserved)],
+                       (canvas.layout_rows, canvas.layout_cols))

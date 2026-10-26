@@ -1,10 +1,14 @@
-"""Unit tests for the arrangement of the plots on the grid of a canvas (moving and resizing plots)."""
+"""Unit tests for the arrangement of the plots on the grid of a canvas (moving and resizing plots, laying them out on a
+grid picked for them)."""
 
 import unittest
 
+from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.layout import Arrangement, Slot, arrange, current, grid_size, moved, resized, slots_of
-from iplotlib.core.plot import PlotXY
+from iplotlib.core.layout import Arrangement, Slot, arrange, current, grid_size, laid_out, moved, resized, slots_of
+from iplotlib.core.plot import PlotXY, PlotXYWithSlider
+from iplotlib.core.ruler import Ruler
+from iplotlib.core.signal import SignalXY
 
 
 def _canvas(places: dict, rows: int = None, cols: int = None) -> Canvas:
@@ -325,6 +329,160 @@ class TestArrange(unittest.TestCase):
         self.assertEqual(canvas.plots, plots)
         self.assertEqual((canvas.rows, canvas.cols), (4, 1))
         self.assertEqual([(plot.row, plot.row_span) for plot in plots[0]], [(1, 1), (2, 1), (3, 1), (4, 1)])
+
+
+def _stacked(canvas: Canvas, stacks: dict = None) -> Canvas:
+    """The canvas with a signal in each stack of each plot, and a Y axis for each stack: one stack, or as many as
+    `stacks` gives by plot title."""
+    for plot, _ in slots_of(canvas):
+        count = (stacks or {}).get(plot.plot_title, 1)
+        plot.axes = [LinearAxis(), [LinearAxis() for _ in range(count)]]
+        for stack in range(1, count + 1):
+            plot.add_signal(SignalXY(label=f'{plot.plot_title}{stack}'), stack=stack)
+    return canvas
+
+
+def _offsets(arrangement: Arrangement) -> set:
+    return {((before.row, before.col, before.stack_offset), (after.row, after.col, after.stack_offset))
+            for before, after in arrangement.changes}
+
+
+class TestLayOut(unittest.TestCase):
+
+    def test_the_plots_fill_the_columns_one_after_the_other(self):
+        canvas = _canvas(COLUMN)
+
+        arrangement = laid_out(canvas, 2, 2)
+
+        self.assertEqual(_places(arrangement), {'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1), 'C': (0, 1, 1, 1),
+                                                'D': (1, 1, 1, 1)})
+        self.assertEqual((arrangement.rows, arrangement.cols, arrangement.layout), (2, 2, (2, 2)))
+        self.assertEqual(_changes(arrangement), {((2, 0), (0, 1)), ((3, 0), (1, 1))})
+
+    def test_the_plots_keep_the_order_they_have_down_the_columns_and_lose_their_spans(self):
+        canvas = _canvas({'A': (0, 1, 1, 1), 'B': (0, 0, 2, 1), 'C': (2, 0, 1, 1)})
+
+        arrangement = laid_out(canvas, 3, 1)
+
+        self.assertEqual(_places(arrangement), {'B': (0, 0, 1, 1), 'C': (1, 0, 1, 1), 'A': (2, 0, 1, 1)})
+
+    def test_the_cells_left_over_stay_and_the_canvas_keeps_the_grid(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1)})
+
+        arrange(canvas, laid_out(canvas, 3, 2))
+
+        self.assertEqual(_titles(canvas), [['A', 'B'], []])
+        self.assertEqual((canvas.rows, canvas.cols, canvas.layout_rows, canvas.layout_cols), (3, 2, 3, 2))
+
+    def test_a_grid_picked_for_the_plots_keeps_its_columns_when_a_plot_leaves_the_last_one(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'B': (0, 2, 1, 1)}, rows=2, cols=3)
+        canvas.layout_rows, canvas.layout_cols = 2, 3
+
+        arrangement = moved(canvas, _plot(canvas, 'B'), 1, 0)
+
+        self.assertEqual(_places(arrangement), {'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1)})
+        self.assertEqual((arrangement.rows, arrangement.cols, arrangement.layout), (2, 3, (2, 3)))
+
+    def test_the_plots_beyond_the_last_cell_join_its_plot_as_stacks_below_its_own(self):
+        canvas = _stacked(_canvas(COLUMN), {'B': 2})
+        b = _plot(canvas, 'B')
+
+        arrangement = laid_out(canvas, 1, 2)
+
+        joined = next(plot for plot, slot in arrangement.slots if slot == Slot(0, 1))
+        self.assertEqual(_places(arrangement), {'A': (0, 0, 1, 1), 'B': (0, 1, 1, 1)})
+        self.assertEqual({stack: [signal.label for signal in signals] for stack, signals in joined.signals.items()},
+                         {1: ['B1'], 2: ['B2'], 3: ['C1'], 4: ['D1']})
+        self.assertEqual(len(joined.axes[1]), 4)
+        self.assertIs(joined.axes[0], b.axes[0])
+        self.assertEqual(_offsets(arrangement), {((1, 0, 0), (0, 1, 0)), ((2, 0, 0), (0, 1, 2)),
+                                                 ((3, 0, 0), (0, 1, 3))})
+        # The plots joined are left as they were.
+        self.assertEqual(sorted(b.signals), [1, 2])
+        self.assertTrue(all(signal.parent() is b for signals in b.signals.values() for signal in signals))
+
+    def test_the_joined_plot_takes_the_signals_and_going_back_gives_them_back(self):
+        canvas = _stacked(_canvas(COLUMN))
+        before = current(canvas)
+        plots = [plot for plot, _ in slots_of(canvas)]
+
+        arrange(canvas, laid_out(canvas, 1, 2))
+        joined = canvas.plots[1][0]
+        self.assertTrue(all(signal.parent() is joined for signals in joined.signals.values() for signal in signals))
+        self.assertTrue(all(axis.parent() is joined for axis in joined.axes[1]))
+
+        arrange(canvas, before)
+        self.assertEqual(_titles(canvas), [['A', 'B', 'C', 'D']])
+        for plot in plots:
+            self.assertTrue(all(signal.parent() is plot for signals in plot.signals.values() for signal in signals))
+            self.assertTrue(all(axis.parent() is plot for axis in [plot.axes[0]] + plot.axes[1]))
+        self.assertEqual((canvas.layout_rows, canvas.layout_cols), (None, None))
+
+    def test_the_stacks_the_application_keeps_for_a_plot_but_does_not_draw_keep_their_numbers(self):
+        canvas = _stacked(_canvas(COLUMN))
+
+        # The application keeps three stacks for B, which draws its first one only.
+        arrangement = laid_out(canvas, 1, 2, stacks={(1, 0): 3, (2, 0): 1})
+
+        joined = next(plot for plot, slot in arrangement.slots if slot == Slot(0, 1))
+        self.assertEqual({stack: [signal.label for signal in signals] for stack, signals in joined.signals.items()},
+                         {1: ['B1'], 4: ['C1'], 5: ['D1']})
+        self.assertEqual(_offsets(arrangement), {((1, 0, 0), (0, 1, 0)), ((2, 0, 0), (0, 1, 3)),
+                                                 ((3, 0, 0), (0, 1, 4))})
+
+    def test_the_joined_plot_takes_the_rulers_and_the_legends_moved_of_each_plot_with_its_stacks(self):
+        canvas = _stacked(_canvas(COLUMN), {'B': 2})
+        b, c = _plot(canvas, 'B'), _plot(canvas, 'C')
+        b.add_ruler(Ruler(name='A', xy=(1.0, 0.0)))
+        c.add_ruler(Ruler(name='A', xy=(2.0, 0.0)))
+        c.add_ruler(Ruler(name='B', xy=(3.0, 0.0)))
+        b.legend_anchor, c.legend_anchor = {'2': [0.1, 0.2]}, {'1': [0.3, 0.4]}
+        c.legend_collapsed = ['1']
+
+        joined = next(plot for plot, slot in laid_out(canvas, 1, 2).slots if slot == Slot(0, 1))
+
+        self.assertEqual([(ruler.name, ruler.xy[0]) for ruler in joined.rulers], [('A', 1.0), ('B', 3.0)])
+        self.assertEqual(joined.legend_anchor, {'2': [0.1, 0.2], '3': [0.3, 0.4]})
+        self.assertEqual(joined.legend_collapsed, ['3'])
+        # The plots joined are left as they were.
+        self.assertEqual((c.legend_anchor, c.legend_collapsed), ({'1': [0.3, 0.4]}, ['1']))
+        self.assertEqual([ruler.name for ruler in c.rulers], ['A', 'B'])
+
+    def test_plots_that_cannot_share_an_x_axis_are_not_joined(self):
+        canvas = _stacked(_canvas(COLUMN))
+        _plot(canvas, 'D').axes[0].is_date = True
+
+        self.assertIsNone(laid_out(canvas, 1, 2))
+        self.assertIsNotNone(laid_out(canvas, 2, 2))
+
+    def test_a_plot_with_a_slider_is_not_joined(self):
+        canvas = _stacked(_canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1)}))
+        slider = PlotXYWithSlider(plot_title='C', row=3, col=1)
+        slider.add_signal(SignalXY(label='C1'))
+        canvas.plots[0].append(slider)
+
+        self.assertIsNone(laid_out(canvas, 1, 2))
+
+    def test_a_reserved_slot_takes_a_cell_but_is_not_joined(self):
+        canvas = _stacked(_canvas({'A': (0, 0, 1, 1), 'C': (2, 0, 1, 1)}, rows=3, cols=1))
+
+        arrangement = laid_out(canvas, 1, 3, [Slot(1, 0)])
+
+        self.assertEqual(_places(arrangement), {'A': (0, 0, 1, 1), 'C': (0, 2, 1, 1)})
+        self.assertEqual(arrangement.reserved, [Slot(0, 1)])
+        self.assertIsNone(laid_out(canvas, 1, 2, [Slot(1, 0)]))
+
+    def test_a_canvas_with_no_plot_takes_the_grid(self):
+        canvas = Canvas()
+
+        arrange(canvas, laid_out(canvas, 2, 3))
+
+        self.assertEqual((canvas.rows, canvas.cols, canvas.layout_rows, canvas.layout_cols), (2, 3, 2, 3))
+        self.assertEqual(canvas.plots, [[], [], []])
+
+
+def _titles(canvas: Canvas) -> list:
+    return [[plot.plot_title if plot is not None else None for plot in column] for column in canvas.plots]
 
 
 if __name__ == '__main__':

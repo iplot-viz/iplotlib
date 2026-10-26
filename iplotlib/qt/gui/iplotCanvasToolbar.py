@@ -13,10 +13,11 @@ This module is deprecated and unused.
 import typing
 
 from PySide6.QtCore import QMargins, Signal
-from PySide6.QtWidgets import QSizePolicy, QToolBar, QWidget
+from PySide6.QtWidgets import QMenu, QSizePolicy, QToolBar, QToolButton, QWidget, QWidgetAction
 from PySide6.QtGui import QAction, QActionGroup
 
 from iplotlib.core.canvas import Canvas
+from iplotlib.qt.gui.iplotQtLayoutPicker import LayoutPicker
 from iplotlib.qt.utils.icon_loader import create_icon
 from iplotlib.qt.utils.icon_sizing import FontScaledIcons
 
@@ -71,6 +72,21 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         self.minimapAction.setToolTip('Show mini-map (available when a single plot is visible, '
                                       'except while streaming)')
         self.addAction(self.minimapAction)
+
+        # Lays the plots out on a grid picked in its menu.
+        self.layoutPicker = LayoutPicker()
+        self.layoutMenu = QMenu(self)
+        picker_action = QWidgetAction(self.layoutMenu)
+        picker_action.setDefaultWidget(self.layoutPicker)
+        self.layoutMenu.addAction(picker_action)
+        self.layoutPicker.picked.connect(lambda *_: self.layoutMenu.close())
+        self.layoutAction = QAction(create_icon('layout', 'svg'), 'Layout', self)
+        self.layoutAction.setToolTip('Lay the plots out on a grid of the rows and columns you pick')
+        self.layoutAction.setMenu(self.layoutMenu)
+        self.addAction(self.layoutAction)
+        button = self.widgetForAction(self.layoutAction)
+        if isinstance(button, QToolButton):
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.addSeparator()
 
         # Command-history management

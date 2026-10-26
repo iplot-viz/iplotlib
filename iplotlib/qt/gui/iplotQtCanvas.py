@@ -7,6 +7,7 @@ import time
 from collections import defaultdict
 from abc import abstractmethod
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Callable, List, Tuple, Optional
 
 import numpy as np
@@ -16,7 +17,6 @@ from iplotlib.core.signal import SignalXY
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.command import IplotCommand
-from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.commands.axes_range import IplotAxesRangeCmd
 from iplotlib.core.commands.layout import ArrangeCommand
 from iplotlib.core.impl_base import BackendParserBase
@@ -25,7 +25,7 @@ from iplotlib.core.layout import Arrangement
 from iplotlib.core.ruler import Ruler
 import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
-from iplotlib.qt.gui.iplotQtArrangement import PlotArranger
+from iplotlib.qt.gui.iplotQtArrangement import LAYOUT, PlotArranger
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
 
@@ -48,6 +48,9 @@ class IplotQtCanvas(QWidget):
     # The plots moved or took another size on the grid, by the mouse or by undo/redo: the slot before and after of
     # each plot, and of each reserved slot, that moved (see iplotlib.core.layout.Arrangement.changes).
     plotsArranged = Signal(object)
+    # Something the application takes, such as variables of its variable browser, was dropped on the grid: where
+    # (see DropInfo and IplotQtMainWindow.accepts_drop).
+    dropSignal = Signal(object)
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent)
@@ -55,7 +58,6 @@ class IplotQtCanvas(QWidget):
         self._parser = None  # type: BackendParserBase
         self._staging_cmds = []  # type: List[IplotAxesRangeCmd]
         self._commitd_cmds = []  # type: List[IplotAxesRangeCmd]
-        self.dropInfo = DropInfo()
 
         # Iplotlib markers
         self._marker_window = IplotQtMarker()
@@ -89,9 +91,15 @@ class IplotQtCanvas(QWidget):
         # Gives the slots of the grid that the application reserves for plots it does not draw now (see
         # IplotQtMainWindow.reserved_slots).
         self.reserved_slots = lambda: []  # type: Callable[[], List[layout.Slot]]
+        # Gives, by the row and the column of a plot, the highest stack the application keeps for it, drawn or not
+        # (see IplotQtMainWindow.reserved_stacks).
+        self.reserved_stacks = lambda: {}  # type: Callable[[], dict]
         # Gives the most rows or columns the application draws a plot over, None for no limit (see
         # IplotQtMainWindow.max_span).
         self.max_span = lambda: None  # type: Callable[[], Optional[int]]
+        # Gives whether the application takes what is dragged over the canvas, given the widget the drag comes from
+        # and its data (see IplotQtMainWindow.accepts_drop).
+        self.accepts_drop = lambda source, mime: False  # type: Callable[[object, object], bool]
 
         # Streaming redraws are capped to one signal flush per interval (1 Hz).
         self._signal_flush_interval_ms = 1000
@@ -763,6 +771,65 @@ class IplotQtCanvas(QWidget):
         rows, cols = layout.grid_size(canvas)
         return rows * cols > 1 and bool(layout.slots_of(canvas))
 
+    def _layout_allowed(self) -> bool:
+        """Whether the plots can be laid out on a grid, and things dropped on it, now: with every plot shown and the
+        canvas not streaming, in any mouse mode."""
+        if self._parser is None or self._parser._focus_plot is not None:
+            return False
+        canvas = self.get_canvas()
+        return canvas is not None and not canvas.streaming
+
+    def layout_outcomes(self, rows: int, cols: int) -> dict:
+        """For each grid of up to `rows` by `cols`, by its (rows, cols): how many plots besides its own its last cell
+        would take, joined into one (see iplotlib.core.layout.laid_out), 0 if each plot takes a cell of its own; None
+        if the plots cannot be laid out on it now."""
+        if not self._layout_allowed():
+            return {(row, col): None for row in range(1, rows + 1) for col in range(1, cols + 1)}
+        canvas, reserved = self.get_canvas(), self.reserved_slots()
+        current = layout.current(canvas, reserved)
+        count = len(current.slots) + len(current.reserved)
+        # The plots joined depend only on how many cells the grid has.
+        joined = {}
+        outcomes = {}
+        for row in range(1, rows + 1):
+            for col in range(1, cols + 1):
+                cells = row * col
+                if cells >= count:
+                    outcomes[(row, col)] = 0
+                    continue
+                if cells not in joined:
+                    joined[cells] = layout.laid_out(canvas, row, col, reserved) is not None
+                outcomes[(row, col)] = count - cells if joined[cells] else None
+        return outcomes
+
+    def lay_out(self, rows: int, cols: int):
+        """Lay the plots out on a grid of `rows` by `cols` that the canvas keeps (see iplotlib.core.layout.laid_out),
+        as a command that undo takes back. Nothing happens if they cannot be, or if they are so already."""
+        if not self._layout_allowed():
+            return
+        canvas, reserved = self.get_canvas(), self.reserved_slots()
+        arrangement = layout.laid_out(canvas, rows, cols, reserved, self.reserved_stacks())
+        if arrangement is None:
+            return
+        current = layout.current(canvas, reserved)
+        if not arrangement.changes and (arrangement.rows, arrangement.cols, arrangement.layout) == \
+                (current.rows, current.cols, current.layout):
+            return
+        if self._arranger is not None:
+            self._arranger.cancel()
+        # Plots joined into one leave their places to it.
+        self._apply_arrangement(LAYOUT, arrangement, current)
+
+    def _drop_allowed(self, source, mime) -> bool:
+        """Whether what is dragged over the canvas can be dropped on a cell of its grid now: something the
+        application takes, with every plot shown and the canvas not streaming."""
+        return self._layout_allowed() and bool(self.accepts_drop(source, mime))
+
+    def _stack_at(self, point, plot) -> Optional[int]:
+        """The stack of the plot drawn at the point, in the coordinates of this widget, by its key in plot.signals;
+        None if the backend does not tell."""
+        return None
+
     def _grid_bounds(self):
         """The bounds of the rows and of the columns of the grid of the plots, in the coordinates of this widget
         (see iplotQtArrangement.Bounds); None if the backend does not give them."""
@@ -782,22 +849,32 @@ class IplotQtCanvas(QWidget):
         """Whether the press that started the drag under way did something else than grab a plot."""
         return self._drag_shift_active
 
-    def _apply_arrangement(self, name: str, arrangement: Arrangement):
-        """Lay the plots out as the arrangement says, as a command that undo takes back."""
+    def _apply_arrangement(self, name: str, arrangement: Arrangement, replaced: Arrangement = None):
+        """Lay the plots out as the arrangement says, as a command that undo takes back. The arrangement lays out the
+        plots of `replaced`, by default its own ones (see _arrange)."""
         before = layout.current(self.get_canvas())
-        if self._arrange(arrangement, arrangement.changes):
-            cmd = ArrangeCommand(name, before, arrangement, self._arrange)
+        views = self._arrange(arrangement, arrangement.changes, replaced or arrangement)
+        if views is not None:
+            cmd = ArrangeCommand(name, before, arrangement, self._arrange, views)
             self._parser._hm.done(cmd)
             self.cmdDone.emit(cmd)
 
-    def _arrange(self, arrangement: Arrangement, changes: list) -> bool:
-        """Lay the plots out as the arrangement says, each plot keeping its view and its data: the backend moves
-        the plots it drew, or draws them again where they go (see BackendParserBase.relayout). Whether it did: an
-        arrangement of other plots than those of the canvas, drawn again since, is left aside."""
+    def _arrange(self, arrangement: Arrangement, changes: list, replaced: Arrangement, views: list = None) \
+            -> Optional[list]:
+        """Lay the plots out as the arrangement says, in place of those of `replaced`, each plot keeping its view and
+        its data: the backend moves the plots it drew, or draws them again where they go (see
+        BackendParserBase.relayout). The plots that come back from one they were joined into take the `views` they
+        had before (see _views_after). The views the plots had, or None if nothing was done: an arrangement that
+        replaces other plots than those of the canvas, drawn again since, is left aside."""
         canvas = self.get_canvas()
-        if canvas is None or {id(plot) for plot, _ in arrangement.slots} != \
+        if canvas is None or {id(plot) for plot, _ in replaced.slots} != \
                 {id(plot) for plot, _ in layout.slots_of(canvas)}:
-            return False
+            return None
+        focus = self._parser._focus_plot
+        if focus is not None and all(plot is not focus for plot, _ in arrangement.slots):
+            # The plot in focus goes, joined into another or back into those it was joined from: the canvas leaves
+            # the focus first, as Unfocus plot does, to keep the views of all the plots.
+            self._full_screen_mode_off()
         limits = self._parser.get_all_plot_limits()
         layout.arrange(canvas, arrangement)
         if not self._parser.relayout():
@@ -805,16 +882,37 @@ class IplotQtCanvas(QWidget):
             # As undo and redo restore the views (see IplotAxesRangeCmd), without a command in the history.
             canvas.undo_redo = True
             try:
-                for plot_limits in limits:
+                for plot_limits in self._views_after(limits, views, arrangement, replaced):
                     self._parser.set_plot_limits(plot_limits)
             finally:
                 canvas.undo_redo = False
             self._flush_view()
         self.stats(canvas)
-        # The markers window knows the plot of each marker by its place.
-        self.check_markers(canvas)
         self.plotsArranged.emit(changes)
-        return True
+        # The markers window knows the plot of each marker by its place, and its stack by the number the plots
+        # listed again give it (see IplotQtMainWindow.on_plots_arranged).
+        self.check_markers(canvas)
+        return limits
+
+    @staticmethod
+    def _views_after(limits: list, views: Optional[list], arrangement: Arrangement, replaced: Arrangement) -> list:
+        """The views to give the plots laid out as the arrangement says, from those they had (`limits`): the plots
+        that come back from one they were joined into take those they had before (`views`), and a plot joined from
+        others shows the X ranges of all of them, as its stacks share their X axis."""
+        laid_out = {id(plot) for plot, _ in arrangement.slots}
+        if views:
+            back = laid_out - {id(plot) for plot, _ in replaced.slots}
+            return [view for view in limits if id(view.plot_ref()) in laid_out] + \
+                [view for view in views if id(view.plot_ref()) in back]
+        joined = {id(view) for view in limits if id(view.plot_ref()) not in laid_out and view.axes_ranges}
+        begins = [view.axes_ranges[0].begin for view in limits if id(view) in joined]
+        ends = [view.axes_ranges[0].end for view in limits if id(view) in joined]
+        if not joined or None in begins + ends:
+            return limits
+        # Copies, as the views the plots had go back to them on undo.
+        return [replace(view, axes_ranges=[replace(view.axes_ranges[0], begin=min(begins), end=max(ends)),
+                                           *view.axes_ranges[1:]]) if id(view) in joined else view
+                for view in limits]
 
     def clean_canvas(self):
         """

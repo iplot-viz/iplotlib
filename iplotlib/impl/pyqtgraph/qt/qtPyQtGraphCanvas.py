@@ -1,8 +1,9 @@
 import os
 import weakref
 from types import SimpleNamespace
+from typing import Optional
 
-from PySide6.QtCore import QMargins, QPoint, Qt, Signal, QEvent, QTimer
+from PySide6.QtCore import QMargins, QPoint, Qt, QEvent, QTimer
 from PySide6.QtGui import QFont, QFontMetricsF
 from PySide6.QtWidgets import QGraphicsProxyWidget, QVBoxLayout, QMenu, QMessageBox, QSplitter
 
@@ -38,7 +39,6 @@ MINIMAP_MIN_HEIGHT = ScaledPixels(110)
 class QtPyQtGraphCanvas(IplotQtCanvas):
     """Qt widget that internally uses a matplotlib canvas backend"""
 
-    dropSignal = Signal(object)
     _PREVIEW_RULER_NAME = "__preview__"
 
     def __init__(self, parent=None, tight_layout=True, **kwargs):
@@ -93,9 +93,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
-
-        # Drag & Drop
-        self.setAcceptDrops(True)
         self._install_arranger(self._parser.figure.viewport())
 
     def set_canvas(self, canvas):
@@ -895,7 +892,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     def _grid_bounds(self):
         canvas = self.get_canvas()
         parser = self._parser
-        if canvas is None or parser._focus_plot is not None or not parser._cell_gl:
+        # A grid of no plot, as one just laid out for them, is shared evenly by its cells.
+        if canvas is None or parser._focus_plot is not None:
             return None
         rows, cols = layout.grid_size(canvas)
         view = parser.figure
@@ -934,6 +932,14 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 signal = self._find_signal_at_event(item, SimpleNamespace(scenePos=lambda: scene_point))[0]
                 return signal is not None and not signal.envelope
         return False
+
+    def _stack_at(self, point, plot) -> Optional[int]:
+        view = self._parser.figure
+        scene_point = view.mapToScene(view.viewport().mapFrom(self, point.toPoint()))
+        for item in self._parser._plot_impl_plot_lut.get(id(plot), []):
+            if item.sceneBoundingRect().contains(scene_point):
+                return self._parser._impl_plot_cache_table.get_cache_item(item).stack_key
+        return None
 
     def _drag_taken(self) -> bool:
         return super()._drag_taken() or self._ruler_drag is not None

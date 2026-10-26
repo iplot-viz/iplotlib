@@ -1,7 +1,8 @@
 """
 Moving and resizing the plots of a canvas with the mouse, in the select mode. A plot dragged by its background moves
 and one dragged by its bottom right corner takes another size; while the mouse moves, an overlay shows where the
-plots go (see iplotlib.core.layout).
+plots go (see iplotlib.core.layout). Things the application takes, such as variables of its variable browser, can be
+dropped on a cell of the grid, in any mode: the overlay shows the cell under the mouse among those no plot is drawn on.
 """
 
 from functools import partial
@@ -13,20 +14,24 @@ from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QWidget
 
 from iplotlib.core import layout
 from iplotlib.core.display import ScaledPixels
+from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.layout import Arrangement, Slot
 
 # Side of the square in the bottom right corner of a plot where a drag resizes it.
 HANDLE = ScaledPixels(14)
 
-MOVE, RESIZE = 'Move plot', 'Resize plot'
+MOVE, RESIZE, LAYOUT = 'Move plot', 'Resize plot', 'Layout'
 
 # The bounds of the rows and of the columns of the grid of the canvas, from its top and from its left, in the
 # coordinates of the canvas widget: n + 1 values for n rows or columns.
 Bounds = Tuple[List[float], List[float]]
 
+# The events of a drag from elsewhere over the widget.
+_DRAGS = frozenset({QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.DragLeave, QEvent.Type.Drop})
+
 # The events of the widget that the arranger acts on; it lets the others through untouched.
 _EVENTS = frozenset({QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent.Type.MouseButtonRelease,
-                     QEvent.Type.KeyPress, QEvent.Type.Hide, QEvent.Type.Leave})
+                     QEvent.Type.KeyPress, QEvent.Type.Hide, QEvent.Type.Leave}) | _DRAGS
 
 
 class _Gesture:
@@ -58,7 +63,10 @@ class PlotArranger(QObject):
         self._gesture = None  # type: Optional[_Gesture]
         self._grip = None  # type: Optional[QRectF] # the resize handle shown under the mouse
         self._cursor = None  # type: Optional[Qt.CursorShape] # the cursor the widget shows to resize or move
+        # The slots the application reserves, read once a drag from elsewhere comes in (see _drop_target).
+        self._drop_reserved = None  # type: Optional[List[Slot]]
         widget.setMouseTracking(True)
+        widget.setAcceptDrops(True)
         widget.installEventFilter(self)
         # A view that draws in a viewport takes the keys itself.
         view = widget.parentWidget()
@@ -76,6 +84,8 @@ class PlotArranger(QObject):
                 self.cancel()
                 return True
             return False
+        if kind in _DRAGS:
+            return self._drag(event)
         if kind == QEvent.Type.MouseButtonPress:
             return self._press(event)
         if kind == QEvent.Type.MouseMove:
@@ -179,6 +189,74 @@ class PlotArranger(QObject):
                 elif not self._canvas._press_shifts(point):
                     cursor = Qt.CursorShape.OpenHandCursor
         self._show_grip(grip, cursor)
+
+    # Drops
+
+    def _drag(self, event) -> bool:
+        """A drag from elsewhere over the widget: the cell a drop would go to shows, and a drop there tells the canvas
+        (see IplotQtCanvas.dropSignal). Only a drag of something the application takes comes in."""
+        kind = event.type()
+        if kind == QEvent.Type.DragLeave:
+            self._drop_reserved = None
+            self._overlay.clear()
+            return True
+        if kind == QEvent.Type.DragEnter:
+            if not self._canvas._drop_allowed(event.source(), event.mimeData()):
+                event.ignore()
+                return True
+            self._show_grip(None)
+            self._drop_reserved = layout.current(self._canvas.get_canvas(), self._canvas.reserved_slots()).reserved
+        target = self._drop_target(event)
+        if kind == QEvent.Type.Drop:
+            self._drop_reserved = None
+            self._overlay.clear()
+            if target is None:
+                event.ignore()
+                return True
+            slot, stack, _ = target
+            info = DropInfo(slot.row + 1, slot.col + 1, stack, event.source())
+            # Once the drop is over: the drag waits for it, and what the application does with it can take a while.
+            QTimer.singleShot(0, self._canvas, partial(self._canvas.dropSignal.emit, info))
+        elif target is None:
+            self._overlay.clear()
+            if kind == QEvent.Type.DragMove:
+                # Not here, but the drag may come over a cell.
+                event.ignore()
+                return True
+        else:
+            slot, _, bounds = target
+            self._overlay.show_shapes(self._drop_shapes(bounds, slot))
+        # A copy: what was dragged stays where it came from.
+        if event.possibleActions() & Qt.DropAction.CopyAction:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+        else:
+            event.acceptProposedAction()
+        return True
+
+    def _drop_target(self, event):
+        """Where a drop at the event goes: the slot of the plot or of the reserved slot there, or the empty cell, with
+        the stack of the plot under the mouse if the backend tells, and the bounds of the grid. None if it cannot."""
+        if self._drop_reserved is None or not self._canvas._drop_allowed(event.source(), event.mimeData()):
+            return None
+        bounds = self._bounds()
+        point = QPointF(self._widget.mapTo(self._canvas, event.position().toPoint()))
+        if bounds is None or not _rect(bounds, Slot(0, 0, len(bounds[0]) - 1, len(bounds[1]) - 1)).contains(point):
+            return None
+        row, col = _cell(bounds[0], point.y()), _cell(bounds[1], point.x())
+        for plot, slot in layout.slots_of(self._canvas.get_canvas()):
+            if slot.contains(row, col):
+                return slot, self._canvas._stack_at(point, plot), bounds
+        slot = next((slot for slot in self._drop_reserved if slot.contains(row, col)), Slot(row, col))
+        return slot, None, bounds
+
+    def _drop_shapes(self, bounds: Bounds, target: Slot) -> List[Tuple[QRectF, int]]:
+        """The cells no plot is drawn on, and the slot a drop goes to."""
+        taken = [slot for _, slot in layout.slots_of(self._canvas.get_canvas())] + [target]
+        rows, cols = len(bounds[0]) - 1, len(bounds[1]) - 1
+        empty = [Slot(row, col) for row in range(rows) for col in range(cols)
+                 if not any(slot.contains(row, col) for slot in taken)]
+        return [(_rect(bounds, slot), _Overlay.RESERVED) for slot in empty] + [(_rect(bounds, target), _Overlay.TARGET)]
 
     # Where the plots go
 
