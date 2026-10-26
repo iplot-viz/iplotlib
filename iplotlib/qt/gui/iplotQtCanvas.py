@@ -38,6 +38,8 @@ class IplotQtCanvas(QWidget):
     """
     cmdDone = Signal(IplotCommand)
     focusChanged = Signal()
+    #: How far, in pixels, a drag across the mini-map must go to zoom the plot above to it.
+    MINIMAP_ZOOM_MIN_PX = 5
     openPlotPreferences = Signal(object)
     signalShiftRequested = Signal(str, str, str, str, float, float, bool)
     # Unified shift signals (work for both drag and DIST)
@@ -733,6 +735,30 @@ class IplotQtCanvas(QWidget):
             for sibling in self._parser._get_all_shared_axes(impl_plot):
                 if sibling is not impl_plot:
                     self._parser.set_plot_limits_to_original(sibling)
+        while len(self._staging_cmds):
+            self.commit_view_lim_cmd(impl_plot)
+        while len(self._commitd_cmds):
+            self.push_view_lim_cmd()
+        self._flush_view()
+        self.stats(self.get_canvas())
+
+    def zoom_plot_x_range(self, impl_plot, begin, end):
+        """
+        Show [begin, end] on the time axis of a plot, and of the plots that share it, as one
+        undoable zoom. The data of the new range are read as for any zoom.
+        """
+        self.stage_view_lim_cmd(impl_plot, name='Zoom')
+        # As a zoom made with the mouse, on the offset the view has: the view moves and the plots follow it. A new
+        # offset first would put a range as wide as the one shown at the same place of a pyqtgraph view, which then
+        # tells nothing (see set_plot_limits).
+        view = [self._parser.transform_value(impl_plot, 0, value, inverse=True) for value in (begin, end)]
+        self._parser.set_impl_x_axis_limits(impl_plot, tuple(view))
+        if self._parser._pm.get_value(self.get_canvas(), 'autoscale'):
+            # A zoom made with the mouse sets the Y axis too, which fits it to the data then. Each stack, since
+            # pyqtgraph tells nothing of a Y range that stays the same.
+            plot = self._parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
+            for stack in self._parser._plot_impl_plot_lut.get(id(plot)):
+                self._parser.autoscale_y_axis(stack)
         while len(self._staging_cmds):
             self.commit_view_lim_cmd(impl_plot)
         while len(self._commitd_cmds):
