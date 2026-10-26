@@ -675,8 +675,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 best = r
         return best
 
-    def _repaint_rulers_from_canvas(self) -> bool:
-        added = super()._repaint_rulers_from_canvas()
+    def _repaint_rulers_from_canvas(self, draw: bool = True) -> bool:
+        added = super()._repaint_rulers_from_canvas(draw)
         # Only re-draw when rulers were actually restored.
         if added:
             self.render()
@@ -1129,6 +1129,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         ax = event.inaxes
         ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
         click_px = np.array([event.x, event.y])
+        # The X of the data within reach of the press (see _points_near).
+        reach = ax.transData.inverted().transform([(event.x - self.PICK_RADIUS_PX, event.y),
+                                                   (event.x + self.PICK_RADIUS_PX, event.y)])[:, 0]
 
         def get_line_pixel_data(line):
             """Transform a matplotlib line to pixel coords for distance calculation."""
@@ -1139,6 +1142,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 if xdata is None or ydata is None or len(xdata) == 0:
                     continue
                 try:
+                    xdata, ydata = self._points_near(xdata, ydata, min(reach), max(reach))
                     data_coords = np.column_stack([xdata, ydata])
                     pixel_coords = ax.transData.transform(data_coords)
                 except (ValueError, TypeError):

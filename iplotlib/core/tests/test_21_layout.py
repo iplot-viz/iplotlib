@@ -394,7 +394,9 @@ class TestLayOut(unittest.TestCase):
         self.assertEqual({stack: [signal.label for signal in signals] for stack, signals in joined.signals.items()},
                          {1: ['B1'], 2: ['B2'], 3: ['C1'], 4: ['D1']})
         self.assertEqual(len(joined.axes[1]), 4)
-        self.assertIs(joined.axes[0], b.axes[0])
+        # A copy of the X axis of the first: the first plot keeps its own for when it comes back.
+        self.assertEqual(joined.axes[0], b.axes[0])
+        self.assertIsNot(joined.axes[0], b.axes[0])
         self.assertEqual(_offsets(arrangement), {((1, 0, 0), (0, 1, 0)), ((2, 0, 0), (0, 1, 2)),
                                                  ((3, 0, 0), (0, 1, 3))})
         # The plots joined are left as they were.
@@ -447,6 +449,19 @@ class TestLayOut(unittest.TestCase):
         # The plots joined are left as they were.
         self.assertEqual((c.legend_anchor, c.legend_collapsed), ({'1': [0.3, 0.4]}, ['1']))
         self.assertEqual([ruler.name for ruler in c.rulers], ['A', 'B'])
+
+    def test_the_joined_plot_spans_the_x_ranges_all_its_plots_were_drawn_over(self):
+        canvas = _stacked(_canvas(COLUMN))
+        for title, (begin, end) in {'B': (0, 10), 'C': (5, 20), 'D': (-3, 8)}.items():
+            axis = _plot(canvas, title).axes[0]
+            axis.original_begin, axis.original_end = begin, end
+
+        joined = next(plot for plot, slot in laid_out(canvas, 1, 2).slots if slot == Slot(0, 1))
+
+        self.assertEqual((joined.axes[0].original_begin, joined.axes[0].original_end), (-3, 20))
+        # The plots joined are left as they were.
+        b_axis = _plot(canvas, 'B').axes[0]
+        self.assertEqual((b_axis.original_begin, b_axis.original_end), (0, 10))
 
     def test_plots_that_cannot_share_an_x_axis_are_not_joined(self):
         canvas = _stacked(_canvas(COLUMN))

@@ -1297,6 +1297,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             x_min, x_max = x_data.min(), x_data.max()
             if not (x_min - tol_x <= click_x <= x_max + tol_x):
                 return None
+            x_data, y_data = self._points_near(x_data, y_data, click_x - tol_x, click_x + tol_x)
             pixel_coords = np.column_stack([x_data * sx, y_data * sy])
             return pixel_coords, click_norm
 

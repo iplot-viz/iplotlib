@@ -359,7 +359,9 @@ class PlotArranger(QObject):
                 self._overlay.clear()
             else:
                 self._overlay.show_shapes([(grip, _Overlay.GRIP)])
-        if cursor != self._cursor:
+        # The backends set the cursor of the same widget for their own tools (a mouse mode, the eye of a legend):
+        # the one wanted goes back on when another took its place.
+        if cursor != self._cursor or (cursor is not None and self._widget.cursor().shape() != cursor):
             self._cursor = cursor
             if cursor is not None:
                 self._widget.setCursor(cursor)

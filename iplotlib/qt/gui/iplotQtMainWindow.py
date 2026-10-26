@@ -257,12 +257,14 @@ class IplotQtMainWindow(QMainWindow):
 
     def on_plots_arranged(self, changes: list):
         """The plots of a canvas moved or took another size (see IplotQtCanvas.plotsArranged): the preferences list
-        the plots of a canvas by their place, so they list them again, as after a draw."""
+        the plots of a canvas by their place, so they list them again, as after a draw, and the mini-map, which only
+        a single plot has, may come or go."""
         self.canvasStack.refreshLinks()
         self.prefWindow.set_canvas_from_preferences()
         if self.prefWindow.isVisible():
             self.prefWindow.treeView.selectionModel().select(self.prefWindow.treeView.model().index(0, 0),
                                                              QItemSelectionModel.SelectionFlag.ClearAndSelect)
+        self.refresh_minimap_availability()
 
     def on_cmd_done(self, w: IplotQtCanvas, cmd: IplotCommand):
         """

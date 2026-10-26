@@ -415,9 +415,10 @@ class IplotQtCanvas(QWidget):
             'x_is_time': self._plot_x_is_time(plot),
         }
 
-    def _repaint_rulers_from_canvas(self) -> bool:
+    def _repaint_rulers_from_canvas(self, draw: bool = True) -> bool:
         """Rebuild the backend rulers and the window rows from the model rulers
-        of every plot. Returns True when at least one artist was created."""
+        of every plot. Returns True when at least one artist was created. Without
+        `draw`, the window rows only: the rulers drawn moved with their plots."""
         self._clear_preview_ruler()
         self._preview_ruler_identity = None
         self._ruler_window.clear_info()
@@ -434,21 +435,23 @@ class IplotQtCanvas(QWidget):
                     impl_plot = self._get_impl_plot_for_plot(plot)
                     for ruler in plot.rulers:
                         if impl_plot is not None:
-                            self._restore_ruler(impl_plot, ruler)
+                            self._restore_ruler(impl_plot, ruler, draw)
+                            added = added or draw
+                        elif draw and self._restore_ruler_echoes(plot, ruler):
                             added = True
-                        elif self._restore_ruler_echoes(plot, ruler):
-                            added = True
-                        self._apply_ruler_state(ruler)
+                        if draw:
+                            self._apply_ruler_state(ruler)
                     self._ruler_window.count = max(self._ruler_window.count, len(plot.rulers))
         return added
 
-    def _restore_ruler(self, impl_plot, ruler):
+    def _restore_ruler(self, impl_plot, ruler, draw: bool = True):
         """Draw a model ruler on its own plot, mirror it on the plots sharing
-        the time axis and list it in the window."""
+        the time axis and list it in the window; without `draw`, list it only."""
         x_view = self._parser.transform_value(impl_plot, 0, ruler.xy[0], inverse=True)
-        y_view = self._parser.transform_value(impl_plot, 1, ruler.xy[1], inverse=True)
-        self._parser.add_ruler(impl_plot, ruler.name, x_view, y_view, ruler.color)
-        self._parser.create_ruler_echoes(impl_plot, ruler.name, ruler.xy[0], ruler.xy[1], ruler.color)
+        if draw:
+            y_view = self._parser.transform_value(impl_plot, 1, ruler.xy[1], inverse=True)
+            self._parser.add_ruler(impl_plot, ruler.name, x_view, y_view, ruler.color)
+            self._parser.create_ruler_echoes(impl_plot, ruler.name, ruler.xy[0], ruler.xy[1], ruler.color)
         for entry in self._ruler_window_rows(impl_plot, x_view, ruler.xy):
             self._add_ruler_window_row(ruler, entry)
 
@@ -887,6 +890,9 @@ class IplotQtCanvas(QWidget):
             finally:
                 canvas.undo_redo = False
             self._flush_view()
+        else:
+            # The rulers moved with their plots, but the window names each plot by its place: it lists them again.
+            self._repaint_rulers_from_canvas(draw=False)
         self.stats(canvas)
         self.plotsArranged.emit(changes)
         # The markers window knows the plot of each marker by its place, and its stack by the number the plots
@@ -950,6 +956,18 @@ class IplotQtCanvas(QWidget):
         t = np.clip(np.sum(pt_vec * seg_vec, axis=1) / seg_len_sq, 0.0, 1.0)
         projections = seg_starts + t[:, np.newaxis] * seg_vec
         return float(np.linalg.norm(projections - click_px, axis=1).min())
+
+    @staticmethod
+    def _points_near(x_data, y_data, low, high) -> Tuple[np.ndarray, np.ndarray]:
+        """The points of a line that a press over X from `low` to `high` can reach: those there and the next one
+        beyond each side, so that a segment across counts too. All of them if X does not keep rising, as with gaps.
+        The hover asks at every move of the mouse, and a curve can have millions of points."""
+        x_data, y_data = np.asarray(x_data), np.asarray(y_data)
+        if len(x_data) > 2 and np.all(x_data[1:] >= x_data[:-1]):
+            first = max(int(np.searchsorted(x_data, low, side='left')) - 1, 0)
+            last = int(np.searchsorted(x_data, high, side='right')) + 1
+            return x_data[first:last], y_data[first:last]
+        return x_data, y_data
 
     def _find_nearest_signal(self, ci, get_line_pixel_data) -> Optional[Tuple]:
         """Find the nearest visible signal in *ci* using a backend-supplied callable.

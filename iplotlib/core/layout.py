@@ -202,9 +202,9 @@ def arrange(canvas: Canvas, arrangement: Arrangement):
 def _joined(plots: List[Tuple[object, Slot]], stacks: dict) -> Optional[Tuple[PlotXY, List[int]]]:
     """A plot with the stacks of these plots, given with their slots, those of each below those of the one before and
     below the highest stack the application keeps for it (`stacks`, see laid_out), and the number the stacks of each
-    are counted past in it. It takes the X axis of the first, the rulers of all of them, and the legends dragged or
-    folded away with their stacks. None unless they are all plots of curves along X of the same kind, dates or not:
-    only those can share an X axis.
+    are counted past in it. It takes the X axis of the first, spanning the X ranges all of them were drawn over, the
+    rulers of all of them, and the legends dragged or folded away with their stacks. None unless they are all plots of
+    curves along X of the same kind, dates or not: only those can share an X axis.
 
     The plots are left as they were, to take their stacks back: arrange makes the joined plot the parent of its
     signals and axes, and gives them back to their plots when they come back."""
@@ -215,7 +215,13 @@ def _joined(plots: List[Tuple[object, Slot]], stacks: dict) -> Optional[Tuple[Pl
     first = plots[0][0]
     joined = copy.copy(first)
     joined.signals = {}
-    joined.axes = [first.axes[0], []]
+    # Home takes the plot back to where it was drawn: over the X ranges of all of them, as it shows them.
+    x_axis = copy.copy(first.axes[0])
+    begins = [getattr(plot.axes[0], 'original_begin', None) for plot, _ in plots]
+    ends = [getattr(plot.axes[0], 'original_end', None) for plot, _ in plots]
+    if None not in begins + ends:
+        x_axis.original_begin, x_axis.original_end = min(begins), max(ends)
+    joined.axes = [x_axis, []]
     joined.rulers, joined.legend_anchor, joined.legend_collapsed = [], {}, []
     offsets, top = [], 0
     for plot, slot in plots:

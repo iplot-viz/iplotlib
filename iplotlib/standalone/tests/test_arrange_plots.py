@@ -26,6 +26,7 @@ from iplotlib.core import layout
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
+from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import _LegendEye
 from iplotlib.qt.gui.iplotQtArrangement import HANDLE, RESIZE, _Overlay
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.gui.iplotQtLayoutPicker import CELL, GAP, LayoutPicker
@@ -35,15 +36,16 @@ from iplotlib.qt.testing import ensure_qapp
 BACKENDS = ('matplotlib', 'pyqt')
 
 
-def _canvas(columns, labels: dict = None) -> Canvas:
-    """A canvas with a column of plots for each count of plots in `columns`: each plot draws a rising line, which
-    leaves its top left corner empty, and is titled by its place. `labels` names the signals of some places."""
+def _canvas(columns, labels: dict = None, points: int = 10) -> Canvas:
+    """A canvas with a column of plots for each count of plots in `columns`: each plot draws a rising line of
+    `points` points from 0 to 9, which leaves its top left corner empty, and is titled by its place. `labels` names
+    the signals of some places."""
     canvas = Canvas(rows=max(columns), cols=len(columns), mouse_mode=Canvas.MOUSE_MODE_SELECT)
     for col, count in enumerate(columns):
         for row in range(count):
             plot = PlotXY(plot_title=f'{row}.{col}', row=row + 1, col=col + 1)
             signal = SignalXY(label=(labels or {}).get((row, col), f's{row}{col}'), uid=f'{row}.{col}')
-            signal.set_data([np.arange(10.0), np.arange(10.0)])
+            signal.set_data([np.linspace(0.0, 9.0, points), np.linspace(0.0, 9.0, points)])
             plot.add_signal(signal)
             canvas.add_plot(plot, col)
     return canvas
@@ -107,13 +109,13 @@ class TestArrangePlots(unittest.TestCase):
     def setUpClass(cls):
         cls.app = ensure_qapp()
 
-    def _qt_canvas(self, backend, columns=(3,), labels: dict = None):
+    def _qt_canvas(self, backend, columns=(3,), labels: dict = None, points: int = 10):
         # One canvas shown at a time: the mouse of another, left over the same place, would take its events.
         previous = getattr(self, '_shown', None)
         if previous is not None:
             previous.close()
             self.app.processEvents()
-        canvas = _canvas(columns, labels)
+        canvas = _canvas(columns, labels, points)
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
         self._shown = qt_canvas
         self.addCleanup(qt_canvas.close)
@@ -429,6 +431,24 @@ class TestArrangePlots(unittest.TestCase):
                 self.assertEqual(plot_id, signal.get_id())
                 self.assertIs(qt_canvas.get_signal_marker(plot_id[:2], signal.uid)[0], signal)
 
+    def test_the_rulers_window_names_a_plot_moved_by_its_new_place(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(2, 1))
+                plot = _plot(canvas, '0.0')
+                qt_canvas._add_ruler_at(self._impl(qt_canvas, canvas, '0.0'), plot, 4.0, 4.0)
+                self.app.processEvents()
+                ruler = plot.rulers[0]
+
+                qt_canvas._apply_arrangement('Move plot', layout.moved(canvas, plot, 1, 1))
+                self.app.processEvents()
+
+                # The window lists the plot the ruler is on first, and acts on the plot it names.
+                plot_id = qt_canvas._ruler_window._rows[0]['plot_id']
+                self.assertEqual(plot_id, qt_canvas._canvas_position_of(plot))
+                qt_canvas.toggle_ruler_visibility(ruler.name, plot_id, False)
+                self.assertFalse(ruler.visible)
+
     def test_the_last_plot_of_a_column_grows_below_the_grid(self):
         for backend in BACKENDS:
             with self.subTest(backend):
@@ -558,6 +578,48 @@ class TestArrangePlots(unittest.TestCase):
                 mouse.hover(mouse.cell(1, 0))
                 self.assertNotEqual(mouse.widget.cursor().shape(), Qt.CursorShape.SizeFDiagCursor)
 
+    def test_the_mouse_over_a_curve_of_many_points_looks_at_the_points_near_it_only(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, points=200_000)
+                distance = qt_canvas._min_distance_to_segments
+                points = []
+
+                def measured(coords, click):
+                    points.append(len(coords))
+                    return distance(coords, click)
+                with patch.object(qt_canvas, '_min_distance_to_segments', side_effect=measured):
+                    mouse.hover(mouse.cell(1, 0))
+                    background = mouse.widget.cursor().shape()
+                    mouse.hover(self._curve_point(qt_canvas, canvas, '1.0', 5, 5))
+
+                self.assertEqual(background, Qt.CursorShape.OpenHandCursor)
+                self.assertNotEqual(mouse.widget.cursor().shape(), Qt.CursorShape.OpenHandCursor)
+                # Those a few pixels around the mouse, out of the 200 000 of each curve.
+                self.assertTrue(points)
+                self.assertLess(max(points), 20_000)
+
+    def test_the_hand_comes_back_after_another_tool_showed_its_cursor(self):
+        canvas, qt_canvas, mouse, arranged = self._qt_canvas('matplotlib')
+        mouse.hover(mouse.cell(1, 0))
+        qt_canvas.set_mouse_mode(Canvas.MOUSE_MODE_ZOOM)
+        mouse.hover(mouse.cell(1, 0, fx=0.25))
+        qt_canvas.set_mouse_mode(Canvas.MOUSE_MODE_SELECT)
+        for fx in (0.2, 0.25, 0.3):
+            mouse.hover(mouse.cell(1, 0, fx=fx))
+        self.assertEqual(mouse.widget.cursor().shape(), Qt.CursorShape.OpenHandCursor)
+
+        canvas, qt_canvas, mouse, arranged = self._qt_canvas('pyqt')
+        view = qt_canvas._parser.figure
+        eye = next(item for item in view.scene().items() if isinstance(item, _LegendEye))
+        eye.setVisible(True)
+        centre = view.viewport().mapTo(qt_canvas, view.mapFromScene(eye.sceneBoundingRect().center()))
+        mouse.hover(mouse.cell(1, 0))
+        mouse.hover((centre.x(), centre.y()))
+        for fx in (0.2, 0.25, 0.3):
+            mouse.hover(mouse.cell(1, 0, fx=fx))
+        self.assertEqual(mouse.widget.cursor().shape(), Qt.CursorShape.OpenHandCursor)
+
     # Laying the plots out on a grid
 
     def test_the_plots_are_laid_out_on_the_grid_picked_without_drawing_them_again(self):
@@ -674,6 +736,29 @@ class TestArrangePlots(unittest.TestCase):
                 self.app.processEvents()
                 self.assertEqual(qt_canvas._marker_window.table.item(0, 1).text(), '1.3.1')
                 win.close()
+
+    def test_the_mini_map_comes_with_the_one_plot_a_layout_leaves_and_goes_on_undo(self):
+        win = IplotQtMainWindow()
+        self.addCleanup(win.close)
+        canvas = _canvas((2,))
+        qt_canvas = IplotQtCanvasFactory.new('matplotlib', canvas=canvas)
+        win.canvasStack.addWidget(qt_canvas)
+        win.show()
+        win.canvasStack.refreshLinks()
+        self.app.processEvents()
+        action = win.toolBar.minimapAction
+        self.assertFalse(action.isEnabled())
+
+        qt_canvas.lay_out(1, 1)
+        self.app.processEvents()
+        self.assertTrue(action.isEnabled())
+        action.setChecked(True)
+        self.app.processEvents()
+        self.assertTrue(canvas.show_minimap)
+
+        qt_canvas.undo()
+        self.app.processEvents()
+        self.assertEqual((action.isEnabled(), action.isChecked(), canvas.show_minimap), (False, False, False))
 
     def test_the_toolbar_lays_the_plots_out_on_the_grid_picked_in_its_menu(self):
         win = IplotQtMainWindow()
