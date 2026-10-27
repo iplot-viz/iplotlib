@@ -86,6 +86,17 @@ class TruncateToTargetTests(unittest.TestCase):
         self.assertIn('y and x expressions', combined)
         self.assertNotIn('source and target', combined)
 
+    def test_no_warning_while_a_change_of_the_view_waits_for_its_data(self):
+        # Its arrays can then be of the previous range and of the new one; the mismatch is told once they arrive.
+        source = BufferObject(np.arange(10))
+        target = BufferObject(np.arange(3))
+        with self.assertLogs(adapter_module.logger.name, level='DEBUG') as cm:
+            with adapter_module.AccessHelper.deferred(adapter_module.DeferredReads()):
+                IplotSignalAdapter.truncate_to_target(source, target, source_label='y', target_label='x')
+            IplotSignalAdapter.truncate_to_target(source, target, source_label='y', target_label='x')
+        levels = [r.levelno for r in cm.records if 'different lengths' in r.getMessage()]
+        self.assertEqual(levels, [logging.DEBUG, logging.WARNING])
+
 
 if __name__ == '__main__':
     unittest.main()

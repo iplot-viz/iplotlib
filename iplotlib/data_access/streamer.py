@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, QThread, Slot
 
 import iplotLogging.setupLogger as Sl
 from iplotlib.core.decimation import minmax_decimate
+from iplotlib.interface.iplotSignalAdapter import AccessHelper, DataAccessError
 
 logger = Sl.get_logger(__name__)
 
@@ -168,6 +169,8 @@ class CanvasStreamer:
         self._hold_semantics = set()
         self._last_refresh_any = 0.0
         self._qt_threads = []
+        # Set once the worker processes cannot read the archive (see _read_archive).
+        self._read_archive_here = False
 
     def _spawn(self, name: str, target):
         """Start ``target`` on a dedicated QThread and keep it referenced."""
@@ -238,19 +241,36 @@ class CanvasStreamer:
         y = np.asarray(ds[1]) if len(ds) > 1 else np.array([])
         return x, y, None, None
 
+    def _read_archive(self, method: str, ds: str, **kwargs):
+        """Call ``method`` of the data access object, which reads the archive. With the worker
+        processes of the application, the call runs in one of them: a data access client can keep
+        the GIL for as long as it reads, which would stop the GUI thread too."""
+        pool = AccessHelper.pool
+        if pool is not None and self.da is AccessHelper.da and not self._read_archive_here:
+            try:
+                return pool.call(method, ds, **kwargs)
+            except DataAccessError:
+                raise
+            except Exception as exc:
+                # The read did not fail: the worker processes cannot make it.
+                logger.warning(f"The archive is read in the streaming threads from now on: {exc}")
+                self._read_archive_here = True
+        return getattr(self.da, method)(ds, **kwargs)
+
     def _fetch_archive_range(self, ds, signal, start_ns, end_ns):
         # Read as a server-side envelope only when the user opted this signal
         # into one (Envelope column). A plain raw read is used otherwise, which
         # the access layer still decimates to an envelope on server overflow.
         is_envelope = getattr(signal, 'envelope', False)
         if is_envelope:
-            fetch = self.da.get_envelope
+            method = 'get_envelope'
             kwargs = {'nbp': self._max_points or _ENVELOPE_TARGET_POINTS}
         else:
-            fetch = self.da.get_archive_window
+            method = 'get_archive_window'
             kwargs = self._archive_kwargs(signal)
         try:
-            data = fetch(
+            data = self._read_archive(
+                method,
                 ds,
                 varname=signal.name,
                 tsS=str(start_ns),
@@ -272,7 +292,8 @@ class CanvasStreamer:
         if not getattr(signal, 'extremities', False):
             return None, None, None, None, None, None
         try:
-            data = self.da.get_archive_window(
+            data = self._read_archive(
+                'get_archive_window',
                 ds,
                 varname=signal.name,
                 tsS="0",

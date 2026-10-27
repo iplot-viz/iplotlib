@@ -1,6 +1,7 @@
 # Changelog:
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 from datetime import datetime
+from functools import partial
 from typing import Any, Callable, Collection, Dict, List, Optional
 import pandas
 import gc
@@ -1297,7 +1298,8 @@ class MatplotlibParser(BackendParserBase):
 
                 for signal in signals:
                     self._signal_impl_plot_lut.update({self.signal_lut_key(signal): mpl_axes})
-                    self.process_ipl_signal(signal)
+                    self._process_view_change(self.signal_lut_key(signal), mpl_axes,
+                                              partial(self.process_ipl_signal, signal))
 
                 # Show the plot legend if enabled
                 show_legend = self._pm.get_value(plot, 'legend')
