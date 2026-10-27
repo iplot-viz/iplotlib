@@ -1389,7 +1389,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     if any([dx, dy, dz]):
                         # Get visible signals from the current plot only
                         plot_signals = self.get_visible_plot_signals(plot)
-                        dx_numeric = 0.0 if is_date else float(dx)
+                        # Along a time axis dx is text: the dialog takes the time measured, in nanoseconds.
+                        dist = self._dist_calculator
+                        dx_numeric = float(abs(dist.p2[0] - dist.p1[0])) if is_date else float(dx)
                         dialog = SignalShiftDialog(
                             self,
                             dx=dx_numeric,
