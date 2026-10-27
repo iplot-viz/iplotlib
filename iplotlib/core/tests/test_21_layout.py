@@ -224,6 +224,24 @@ class TestResize(unittest.TestCase):
 
         self.assertIsNone(resized(canvas, _plot(canvas, 'B'), 1, 1))
 
+    def test_a_plot_grows_to_the_left_or_up_into_empty_cells_only(self):
+        canvas = _canvas({'A': (0, 1, 1, 1), 'B': (1, 0, 1, 1), 'C': (1, 1, 1, 1)})
+
+        arrangement = resized(canvas, _plot(canvas, 'A'), 1, 2, col=0)
+        self.assertEqual(_places(arrangement), {'A': (0, 0, 1, 2), 'B': (1, 0, 1, 1), 'C': (1, 1, 1, 1)})
+        self.assertEqual(arrangement.changes, [(Slot(0, 1), Slot(0, 0, 1, 2))])
+        self.assertEqual(_places(resized(canvas, _plot(canvas, 'B'), 2, 1, row=0))['B'], (0, 0, 2, 1))
+        self.assertIsNone(resized(canvas, _plot(canvas, 'C'), 1, 2, col=0))
+        self.assertIsNone(resized(canvas, _plot(canvas, 'C'), 2, 1, row=0))
+        self.assertIsNone(resized(canvas, _plot(canvas, 'A'), 1, 3, col=-1))
+
+    def test_a_top_side_moved_takes_no_plot_of_its_column_with_it(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 2, 1), 'C': (3, 0, 1, 1)})
+
+        arrangement = resized(canvas, _plot(canvas, 'B'), 1, 1, row=2)
+
+        self.assertEqual(_places(arrangement), {'A': (0, 0, 1, 1), 'B': (2, 0, 1, 1), 'C': (3, 0, 1, 1)})
+
 
 class TestReservedSlots(unittest.TestCase):
     """Slots an application reserves for plots it does not draw now, such as those whose data could not be read."""

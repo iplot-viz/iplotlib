@@ -1,8 +1,9 @@
 """
 Moving and resizing the plots of a canvas with the mouse, in the select mode. A plot dragged by its background moves
-and one dragged by its bottom right corner takes another size; while the mouse moves, an overlay shows where the
-plots go (see iplotlib.core.layout). Things the application takes, such as variables of its variable browser, can be
-dropped on a cell of the grid, in any mode: the overlay shows the cell under the mouse among those no plot is drawn on.
+and one dragged by a corner takes another size, the opposite corner staying where it is; while the mouse moves, an
+overlay shows where the plots go (see iplotlib.core.layout). Things the application takes, such as variables of its
+variable browser, can be dropped on a cell of the grid, in any mode: the overlay shows the cell under the mouse among
+those no plot is drawn on.
 """
 
 from functools import partial
@@ -17,10 +18,14 @@ from iplotlib.core.display import ScaledPixels
 from iplotlib.core.drop_info import DropInfo
 from iplotlib.core.layout import Arrangement, Slot
 
-# Side of the square in the bottom right corner of a plot where a drag resizes it.
+# Side of the square in a corner of a plot where a drag resizes it.
 HANDLE = ScaledPixels(14)
 
 MOVE, RESIZE, LAYOUT = 'Move plot', 'Resize plot', 'Layout'
+
+# A corner of a plot, as whether it is a top one and whether it is a left one.
+Corner = Tuple[bool, bool]
+BOTTOM_RIGHT = (False, False)
 
 # The bounds of the rows and of the columns of the grid of the canvas, from its top and from its left, in the
 # coordinates of the canvas widget: n + 1 values for n rows or columns.
@@ -35,13 +40,16 @@ _EVENTS = frozenset({QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent
 
 
 class _Gesture:
-    def __init__(self, kind: str, plot, slot: Slot, start: QPointF, grab: Tuple[int, int] = (0, 0)):
+    def __init__(self, kind: str, plot, slot: Slot, start: QPointF, grab: Tuple[int, int] = (0, 0),
+                 corner: Corner = BOTTOM_RIGHT):
         self.kind = kind
         self.plot = plot
         self.slot = slot
         self.start = start
         # The cell the plot was grabbed by, from its top left one.
         self.grab = grab
+        # The corner a resize drags.
+        self.corner = corner
         # A move starts once the mouse has gone some way with the button down; a resize, on the press.
         self.started = kind == RESIZE
         self.arrangement = None  # type: Optional[Arrangement]
@@ -122,10 +130,12 @@ class PlotArranger(QObject):
         if found is None or self._canvas._press_taken(point):
             return False
         plot, slot, bounds = found
-        if self._handle(_rect(bounds, slot)).contains(point):
-            self._gesture = _Gesture(RESIZE, plot, slot, point)
+        rect = _rect(bounds, slot)
+        corner = _corner_at(rect, point)
+        if self._handle(rect, corner).contains(point):
+            self._gesture = _Gesture(RESIZE, plot, slot, point, corner=corner)
             self._show_grip(None)
-            QApplication.setOverrideCursor(Qt.CursorShape.SizeFDiagCursor)
+            QApplication.setOverrideCursor(_resize_cursor(corner))
             self._update(point, bounds)
             # The plot does not see the press: a drag from its corner resizes it and nothing else.
             return True
@@ -176,19 +186,23 @@ class PlotArranger(QObject):
 
     def _hover(self, point: Optional[QPointF]):
         grip = cursor = None
+        corner = BOTTOM_RIGHT
         if point is not None and self._canvas._arrangement_allowed():
             found = self._plot_at(point)
             if found is not None:
                 plot, slot, bounds = found
-                grip = self._handle(_rect(bounds, slot))
+                rect = _rect(bounds, slot)
+                # The handle of the corner the mouse is nearest to.
+                corner = _corner_at(rect, point)
+                grip = self._handle(rect, corner)
                 # As a press there would do (see _press): a press on a curve shifts the curve instead.
                 if self._canvas._press_taken(point):
                     pass
                 elif grip.contains(point):
-                    cursor = Qt.CursorShape.SizeFDiagCursor
+                    cursor = _resize_cursor(corner)
                 elif not self._canvas._press_shifts(point):
                     cursor = Qt.CursorShape.OpenHandCursor
-        self._show_grip(grip, cursor)
+        self._show_grip(grip, cursor, corner)
 
     # Drops
 
@@ -274,20 +288,13 @@ class PlotArranger(QObject):
             left = min(max(col - gesture.grab[1], 0), cols - gesture.slot.col_span)
             gesture.target = gesture.slot.moved_to(top, left) if not gesture.slot.contains(row, col) else gesture.slot
         else:
-            # Below the grid the rows go on, as tall as its last one: a plot can grow past the bottom of its columns.
-            row = _row_below(bounds[0], point.y())
-            row_span, col_span = max(1, row - gesture.slot.row + 1), max(1, col - gesture.slot.col + 1)
-            limit = self._canvas.max_span()
-            if limit:
-                # The application draws no bigger plot.
-                row_span, col_span = min(row_span, limit), min(col_span, limit)
-            gesture.target = Slot(gesture.slot.row, gesture.slot.col, row_span, col_span)
-            gesture.arrangement = layout.resized(canvas, gesture.plot, gesture.target.row_span,
-                                                 gesture.target.col_span, reserved=gesture.reserved)
+            target = gesture.target = self._resized(gesture, point, bounds)
+            gesture.arrangement = layout.resized(canvas, gesture.plot, target.row_span, target.col_span,
+                                                 reserved=gesture.reserved, row=target.row, col=target.col)
         allowed = gesture.arrangement is not None or gesture.target == gesture.slot
         QApplication.changeOverrideCursor(Qt.CursorShape.ForbiddenCursor if not allowed else
                                           Qt.CursorShape.ClosedHandCursor if gesture.kind == MOVE else
-                                          Qt.CursorShape.SizeFDiagCursor)
+                                          _resize_cursor(gesture.corner))
         shapes = []
         if gesture.arrangement is not None:
             after = self._preview_bounds(bounds, gesture.arrangement)
@@ -309,6 +316,31 @@ class PlotArranger(QObject):
             if not allowed:
                 shapes.append((_rect(bounds, _within(gesture.target, bounds)), _Overlay.FORBIDDEN))
         self._overlay.show_shapes(shapes)
+
+    def _resized(self, gesture: _Gesture, point: QPointF, bounds: Bounds) -> Slot:
+        """The slot of the plot with the corner it was grabbed by dragged to the point, the opposite one staying. Each
+        side that moves goes to the bound of the grid nearest the point: the plot takes a row or a column more or less
+        once the point is past the middle of it, not as soon as a few pixels cross a bound, and keeps one at least.
+        Below the grid the rows go on, as tall as its last one, from a handle's side past it: a plot can grow past
+        the bottom of its columns (see _nearest)."""
+        slot, (top_side, left_side) = gesture.slot, gesture.corner
+        top, bottom, left, right = slot.row, slot.bottom, slot.col, slot.right
+        if top_side:
+            top = min(_nearest(bounds[0], point.y()), bottom - 1)
+        else:
+            bottom = max(_nearest(bounds[0], point.y(), beyond=True), top + 1)
+        if left_side:
+            left = min(_nearest(bounds[1], point.x()), right - 1)
+        else:
+            right = max(_nearest(bounds[1], point.x()), left + 1)
+        limit = self._canvas.max_span()
+        if limit:
+            # The application draws no bigger plot: the side that moves stops short.
+            if bottom - top > limit:
+                top, bottom = (bottom - limit, bottom) if top_side else (top, top + limit)
+            if right - left > limit:
+                left, right = (right - limit, right) if left_side else (left, left + limit)
+        return Slot(top, left, bottom - top, right - left)
 
     @staticmethod
     def _preview_bounds(bounds: Bounds, arrangement: Arrangement) -> Bounds:
@@ -348,17 +380,20 @@ class PlotArranger(QObject):
         return None
 
     @staticmethod
-    def _handle(rect: QRectF) -> QRectF:
+    def _handle(rect: QRectF, corner: Corner) -> QRectF:
         side = HANDLE.px()
-        return QRectF(rect.right() - side, rect.bottom() - side, side, side)
+        top, left = corner
+        return QRectF(rect.left() if left else rect.right() - side, rect.top() if top else rect.bottom() - side,
+                      side, side)
 
-    def _show_grip(self, grip: Optional[QRectF], cursor: Optional[Qt.CursorShape] = None):
+    def _show_grip(self, grip: Optional[QRectF], cursor: Optional[Qt.CursorShape] = None,
+                   corner: Corner = BOTTOM_RIGHT):
         if grip != self._grip:
             self._grip = grip
             if grip is None:
                 self._overlay.clear()
             else:
-                self._overlay.show_shapes([(grip, _Overlay.GRIP)])
+                self._overlay.show_shapes([(grip, _Overlay.GRIP)], corner)
         # The backends set the cursor of the same widget for their own tools (a mouse mode, the eye of a legend):
         # the one wanted goes back on when another took its place.
         if cursor != self._cursor or (cursor is not None and self._widget.cursor().shape() != cursor):
@@ -377,12 +412,27 @@ def _cell(bounds: Sequence[float], value: float) -> int:
     return len(bounds) - 2
 
 
-def _row_below(rows: Sequence[float], y: float) -> int:
-    """The row at `y`, counting rows below the grid as tall as its last one."""
-    height = rows[-1] - rows[-2]
-    if y < rows[-1] or height <= 0:
-        return _cell(rows, y)
-    return len(rows) - 1 + int((y - rows[-1]) // height)
+def _nearest(bounds: Sequence[float], value: float, beyond: bool = False) -> int:
+    """The bound nearest `value`, the later one half way between two. With `beyond`, a value past the last bound by
+    the side of a resize handle counts a bound more, and one more for each further step as long as the last one:
+    past the grid the mouse soon meets the edge of the screen."""
+    step = bounds[-1] - bounds[-2]
+    past = value - bounds[-1] - HANDLE.px()
+    if beyond and past >= 0 and step > 0:
+        return len(bounds) + int(past / step)
+    return min(range(len(bounds)), key=lambda index: (abs(bounds[index] - value), -index))
+
+
+def _corner_at(rect: QRectF, point: QPointF) -> Corner:
+    """The corner of the rectangle nearest the point."""
+    centre = rect.center()
+    return point.y() < centre.y(), point.x() < centre.x()
+
+
+def _resize_cursor(corner: Corner) -> Qt.CursorShape:
+    """The arrows along the diagonal of the corner."""
+    top, left = corner
+    return Qt.CursorShape.SizeFDiagCursor if top == left else Qt.CursorShape.SizeBDiagCursor
 
 
 def _rect(bounds: Bounds, slot: Slot) -> QRectF:
@@ -419,10 +469,13 @@ class _Overlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self._shapes = []  # type: List[Tuple[QRectF, int]]
+        self._grip_corner = BOTTOM_RIGHT
         self.hide()
 
-    def show_shapes(self, shapes: List[Tuple[QRectF, int]]):
+    def show_shapes(self, shapes: List[Tuple[QRectF, int]], grip_corner: Corner = BOTTOM_RIGHT):
+        """Show the shapes, a grip among them in the corner of the plot given."""
         self._shapes = shapes
+        self._grip_corner = grip_corner
         self.setGeometry(self.parentWidget().rect())
         self.raise_()
         self.show()
@@ -440,7 +493,7 @@ class _Overlay(QWidget):
         inset = ScaledPixels(3).px()
         for rect, style in self._shapes:
             if style == self.GRIP:
-                self._paint_grip(painter, rect, neutral)
+                self._paint_grip(painter, rect, neutral, self._grip_corner)
                 continue
             box = rect.adjusted(inset, inset, -inset, -inset)
             color = accent if style in (self.TARGET, self.MOVED) else neutral
@@ -457,11 +510,16 @@ class _Overlay(QWidget):
         painter.end()
 
     @staticmethod
-    def _paint_grip(painter: QPainter, rect: QRectF, color: QColor):
-        """Three short diagonal strokes in the corner, the usual sign of a size grip."""
+    def _paint_grip(painter: QPainter, rect: QRectF, color: QColor, corner: Corner):
+        """Three short diagonal strokes in the corner of the plot, the usual sign of a size grip."""
         painter.setPen(QPen(color, ScaledPixels(1.5).px()))
-        corner = rect.bottomRight() - QPointF(ScaledPixels(3).px(), ScaledPixels(3).px())
+        top, left = corner
+        inset = ScaledPixels(3).px()
+        # From the corner of the square towards its middle.
+        x = rect.left() + inset if left else rect.right() - inset
+        y = rect.top() + inset if top else rect.bottom() - inset
+        across, down = (1 if left else -1), (1 if top else -1)
         step = rect.width() / 4
         for index in range(1, 4):
             offset = step * index
-            painter.drawLine(corner - QPointF(offset, 0), corner - QPointF(0, offset))
+            painter.drawLine(QPointF(x + across * offset, y), QPointF(x, y + down * offset))
