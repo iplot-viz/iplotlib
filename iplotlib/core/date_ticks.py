@@ -231,6 +231,65 @@ def relative_ticks(lo_ns: int, hi_ns: int, target_ticks: int):
     return out
 
 
+# How each date segment prints in a tick label, and what follows it (see NanosecondDateFormatter.date_fmt).
+_SEGMENT_DIGITS = ["0000", "00", "00", "00", "00", "00", "000", "000", "000"]
+_SEGMENT_POSTFIXES = ['-', '-', 'T', ':', ':', '.', '', '', '']
+
+
+def _segments(ns: int) -> tuple:
+    """The date segments of an absolute-ns UTC timestamp, from the year to the nanosecond."""
+    dt = _utc_dt(ns)
+    sub = int(ns) % _SEC
+    return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, sub // _MS, sub // _US % 1000, sub % 1000
+
+
+def date_label_sample(lo_ns, hi_ns, step, kind) -> str:
+    """A tick label as wide as those a date axis shows over [lo, hi] with the ladder step: the segments that change
+    from its first tick to its last one, down to the segment the step needs, with its unit (see label_unit)."""
+    ticks = generate_ticks(lo_ns, hi_ns, step, kind) or [lo_ns, hi_ns]
+    first, last = _segments(ticks[0]), _segments(ticks[-1])
+    common = next((index - 1 for index in range(len(first)) if first[index] != last[index]), 0)
+    start = common + 1
+    end = max(start, segments_for_interval(step, kind))
+    text = ''.join(_SEGMENT_DIGITS[index] + (_SEGMENT_POSTFIXES[index] if index < end else '')
+                   for index in range(start, end + 1))
+    return text + label_unit(start, end)
+
+
+def fitting_date_count(lo_ns, hi_ns, target_ticks: int, min_step_ns: int, room_for) -> int:
+    """The count to ask pick_interval for over [lo, hi]: the target, unless its ticks would be more than their
+    labels leave room for along the axis; then the largest count whose ticks fit. `room_for(sample)` is how many
+    labels as wide as `sample` fit along the axis, None when that is not known."""
+    count = max(1, int(target_ticks))
+    while count > 1:
+        step, kind = pick_interval(lo_ns, hi_ns, count, min_step_ns)
+        room = room_for(date_label_sample(lo_ns, hi_ns, step, kind))
+        if room is None or len(generate_ticks(lo_ns, hi_ns, step, kind)) <= room:
+            break
+        count -= 1
+    return count
+
+
+def fitting_count(ticks_for, target_ticks: int, room_for) -> int:
+    """The count to ask a tick ladder for: the target, unless the ladder would then give more ticks than their labels
+    leave room for along the axis; then the largest count whose ticks fit. `ticks_for(n)` gives the ticks of the
+    ladder for at least n, which can be more than twice n; `room_for(ticks)` tells how many labels like theirs fit
+    along the axis, None when that is not known."""
+    count = max(1, int(target_ticks))
+    while count > 1:
+        ticks = ticks_for(count)
+        room = room_for(ticks)
+        if room is None or len(ticks) <= room:
+            break
+        count -= 1
+    return count
+
+
+def number_label_sample(ticks) -> str:
+    """The widest tick label of a numeric axis for these ticks, written as the pyqtgraph backend writes them."""
+    return max((f"{tick:g}" for tick in ticks), key=len, default='0')
+
+
 def linear_ticks(lo: float, hi: float, target_ticks: int):
     """Nice (1/2/5 x 10^k) tick positions within [lo, hi]: the largest such
     step still giving at least ``target_ticks``. Positions are multiples of

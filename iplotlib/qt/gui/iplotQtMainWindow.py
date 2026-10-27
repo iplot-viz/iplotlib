@@ -70,6 +70,8 @@ class IplotQtMainWindow(QMainWindow):
         self.toolBar.homeAction.triggered.connect(self.home)
         self.toolBar.statistics.triggered.connect(self.show_stats)
         self.toolBar.minimapAction.toggled.connect(self.on_minimap_toggled)
+        self.toolBar.layoutMenu.aboutToShow.connect(self._offer_layouts)
+        self.toolBar.layoutPicker.picked.connect(self.lay_out)
         self.toolBar.toolActivated.connect(self.on_tool_activated)
         self.canvasStack.canvasAdded.connect(self.on_canvas_add)
         self.canvasStack.currentChanged.connect(lambda idx: self.check_history(self.canvasStack.widget(idx)))
@@ -142,6 +144,18 @@ class IplotQtMainWindow(QMainWindow):
             return
         w.set_minimap(checked)
 
+    def _offer_layouts(self):
+        """The grids the Layout tool offers for the plots of the current canvas, as its menu opens."""
+        w = self.canvasStack.currentWidget()
+        picker = self.toolBar.layoutPicker
+        picker.set_outcomes(w.layout_outcomes(picker.ROWS, picker.COLS) if w else None)
+
+    def lay_out(self, rows: int, cols: int):
+        """Lay the plots of the current canvas out on a grid of `rows` by `cols` (see IplotQtCanvas.lay_out)."""
+        w = self.canvasStack.currentWidget()
+        if w:
+            w.lay_out(rows, cols)
+
     def refresh_minimap_availability(self):
         w = self.canvasStack.currentWidget()
         action = self.toolBar.minimapAction
@@ -212,6 +226,44 @@ class IplotQtMainWindow(QMainWindow):
         w.cmdDone.connect(partial(self.on_cmd_done, w))
         w.openPlotPreferences.connect(self._open_plot_preferences)
         w.focusChanged.connect(self.refresh_minimap_availability)
+        w.plotsArranged.connect(self.on_plots_arranged)
+        w.reserved_slots = self.reserved_slots
+        w.reserved_stacks = self.reserved_stacks
+        w.max_span = self.max_span
+        w.accepts_drop = self.accepts_drop
+        self.refresh_minimap_availability()
+
+    def reserved_slots(self) -> list:
+        """The slots of the grid of the canvas that the application reserves for plots it does not draw now, such as
+        those whose data could not be read: they move with the plots as plots do, and no plot moves or grows over them
+        (see iplotlib.core.layout). This window reserves none."""
+        return []
+
+    def reserved_stacks(self) -> dict:
+        """The highest stack the application keeps for each plot of the canvas, drawn or not, by the row and the
+        column of the plot from 0: a layout that joins plots numbers the stacks of the next plot past it (see
+        iplotlib.core.layout.laid_out). This window keeps none but those drawn."""
+        return {}
+
+    def max_span(self) -> typing.Optional[int]:
+        """The most rows or columns a plot of the canvas can span: the mouse makes no plot bigger, since the
+        application would not draw it. This window sets no limit."""
+        return None
+
+    def accepts_drop(self, source, mime) -> bool:
+        """Whether a canvas takes what is dragged over it, from the widget `source` with the data `mime`, to be
+        dropped on a cell of its grid (see IplotQtCanvas.dropSignal). This window takes nothing."""
+        return False
+
+    def on_plots_arranged(self, changes: list):
+        """The plots of a canvas moved or took another size (see IplotQtCanvas.plotsArranged): the preferences list
+        the plots of a canvas by their place, so they list them again, as after a draw, and the mini-map, which only
+        a single plot has, may come or go."""
+        self.canvasStack.refreshLinks()
+        self.prefWindow.set_canvas_from_preferences()
+        if self.prefWindow.isVisible():
+            self.prefWindow.treeView.selectionModel().select(self.prefWindow.treeView.model().index(0, 0),
+                                                             QItemSelectionModel.SelectionFlag.ClearAndSelect)
         self.refresh_minimap_availability()
 
     def on_cmd_done(self, w: IplotQtCanvas, cmd: IplotCommand):

@@ -15,7 +15,7 @@ import typing
 from collections.abc import Collection
 
 import numpy as np
-from PySide6.QtCore import QMargins, Qt, Slot, Signal
+from PySide6.QtCore import QMargins, QPoint, QPointF, Qt, Slot
 from PySide6.QtGui import QCursor, QKeyEvent
 from PySide6.QtWidgets import QApplication, QMessageBox, QSizePolicy, QSplitter, QToolTip, QVBoxLayout, QMenu
 
@@ -56,7 +56,6 @@ def _rgba_array(image) -> np.ndarray:
 class QtMatplotlibCanvas(IplotQtCanvas):
     """Qt widget that internally uses a matplotlib canvas backend"""
 
-    dropSignal = Signal(object)
     _PREVIEW_RULER_NAME = "__preview__"
 
     def __init__(self, parent=None, tight_layout=True, **kwargs):
@@ -125,7 +124,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
         self.setLayout(self._vlayout)
         self.set_canvas(kwargs.get('canvas'))
-        self.setAcceptDrops(True)
+        self._install_arranger(self._mpl_renderer)
 
         self._mouse_impl = None
 
@@ -676,8 +675,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 best = r
         return best
 
-    def _repaint_rulers_from_canvas(self) -> bool:
-        added = super()._repaint_rulers_from_canvas()
+    def _repaint_rulers_from_canvas(self, draw: bool = True) -> bool:
+        added = super()._repaint_rulers_from_canvas(draw)
         # Only re-draw when rulers were actually restored.
         if added:
             self.render()
@@ -813,6 +812,49 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _flush_view(self):
         self.render()
+
+    def _grid_bounds(self):
+        gridspec = getattr(self._parser, '_layout', None)
+        if gridspec is None or self._parser._focus_plot is not None:
+            return None
+        # Fractions of the figure, from its bottom; row 0 is the top one.
+        bottoms, tops, lefts, rights = gridspec.get_grid_positions(self._parser.figure)
+        width, height = self._mpl_renderer.width(), self._mpl_renderer.height()
+        origin = self._mpl_renderer.mapTo(self, QPoint(0, 0))
+        # Between two rows or two columns, the bound halves the gap that holds their tick labels; the outer rows and
+        # columns reach the edges of the figure.
+        rows = ([origin.y()] + [origin.y() + (1 - (bottom + top) / 2) * height for bottom, top in zip(bottoms, tops[1:])]
+                + [origin.y() + height])
+        cols = ([origin.x()] + [origin.x() + (right + left) / 2 * width for right, left in zip(rights, lefts[1:])]
+                + [origin.x() + width])
+        return rows, cols
+
+    def _press_event(self, point) -> MouseEvent:
+        """A press of the left button at the point, in the coordinates of this widget, as matplotlib sees it."""
+        x, y = self._mpl_renderer.mouseEventCoords(QPointF(self._mpl_renderer.mapFrom(self, point.toPoint())))
+        return MouseEvent('button_press_event', self._mpl_renderer, x, y, MouseButton.LEFT)
+
+    def _press_taken(self, point) -> bool:
+        event = self._press_event(point)
+        if self._parser.legend_eye_under(event) is not None or self._legend_under(event) is not None:
+            return True
+        # Axes of no plot: the slider of a plot.
+        return event.inaxes is not None and self._parser._impl_plot_cache_table.get_cache_item(event.inaxes) is None
+
+    def _press_shifts(self, point) -> bool:
+        signal = self._find_signal_at_event(self._press_event(point))[0]
+        return signal is not None and not signal.envelope
+
+    def _stack_at(self, point, plot) -> typing.Optional[int]:
+        event = self._press_event(point)
+        for mpl_axes in self._parser._plot_impl_plot_lut.get(id(plot), []):
+            if mpl_axes.contains_point((event.x, event.y)):
+                return self._parser._impl_plot_cache_table.get_cache_item(mpl_axes).stack_key
+        return None
+
+    def _drag_taken(self) -> bool:
+        return (super()._drag_taken() or self._legend_gesture is not None or self._ruler_drag is not None
+                or self._mpl_renderer.mouse_grabber is not None)
 
     # custom event handlers
     def _mpl_draw_finish(self, event: DrawEvent):
@@ -1087,6 +1129,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         ax = event.inaxes
         ci = self._parser._impl_plot_cache_table.get_cache_item(ax)
         click_px = np.array([event.x, event.y])
+        # The X of the data within reach of the press (see _points_near).
+        reach = ax.transData.inverted().transform([(event.x - self.PICK_RADIUS_PX, event.y),
+                                                   (event.x + self.PICK_RADIUS_PX, event.y)])[:, 0]
 
         def get_line_pixel_data(line):
             """Transform a matplotlib line to pixel coords for distance calculation."""
@@ -1097,6 +1142,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 if xdata is None or ydata is None or len(xdata) == 0:
                     continue
                 try:
+                    xdata, ydata = self._points_near(xdata, ydata, min(reach), max(reach))
                     data_coords = np.column_stack([xdata, ydata])
                     pixel_coords = ax.transData.transform(data_coords)
                 except (ValueError, TypeError):
@@ -1350,11 +1396,14 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         else:
             # Handle drag shift completion in Select mode
             if self._drag_shift_active and self._mmode == Canvas.MOUSE_MODE_SELECT:
+                # A press on a curve that did not drag it shifts nothing: nothing to draw again.
+                dragged = self._drag_shift_preview_line is not None
                 if event.ydata is not None:
                     self._end_drag_shift(event.ydata, event.xdata)
                 else:
                     self._cancel_drag_shift()
-                self.render()
+                if dragged:
+                    self.render()
                 return
 
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
@@ -1414,58 +1463,3 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _debug_log_event(self, event: Event, msg: str):
         logger.debug(f"{self.__class__.__name__}({hex(id(self))}) {msg} | {event}")
-
-    def dragEnterEvent(self, event):
-        """
-        This function will detect the drag enter event from the mouse on the main window
-        """
-        super(QtMatplotlibCanvas, self).dragEnterEvent(event)
-        event.accept()
-
-    def dragMoveEvent(self, event):
-        """
-        This function will detect the drag move event on the main window
-        """
-        x = event.position().x()
-        y = event.position().y()
-        height = self._parser.figure.bbox.height
-        for axe in self._parser.figure.axes:
-            if axe.bbox.x0 < x < axe.bbox.x1 and height - axe.bbox.y0 > y > height - axe.bbox.y1:
-                event.accept()
-                return
-        event.ignore()
-
-    def dropEvent(self, event):
-        """
-        This function will enable the drop file directly on to the
-        main window. The file location will be stored in the self.filename
-        """
-        super(QtMatplotlibCanvas, self).dropEvent(event)
-        plot = self.get_plot(event)
-
-        row, col = self.get_position(plot)
-        self.dropInfo.row = row
-        self.dropInfo.col = col
-        self.dropInfo.dragged_item = event.source().dragged_item
-        self.dropSignal.emit(self.dropInfo)
-        # row, col = self.get_position(plot)
-        # new_data = pd.DataFrame([['codacuda', f"{dragged_item.key}", f'{col}.{row}']],
-        #                       columns=['DS', 'Variable', 'Stack'])
-        # self.parent().parent().parent().parent().sigCfgWidget._model.append_dataframe(new_data)
-        # self.parent().parent().parent().parent().drawClicked()
-        event.ignore()
-
-    def get_plot(self, event):
-        x = event.position().x()
-        y = event.position().y()
-        height = self._parser.figure.bbox.height
-        for axe in self._parser.figure.axes:
-            if axe.bbox.x0 < x < axe.bbox.x1 and height - axe.bbox.y0 > y > height - axe.bbox.y1:
-                return self._parser._impl_plot_cache_table.get_cache_item(axe).plot()
-
-    def get_position(self, plot):
-        all_plots = self._parser.canvas.plots
-        for column, col_plots in enumerate(all_plots):
-            for row, row_plot in enumerate(col_plots):
-                if row_plot.col == plot.col and row_plot.row == plot.row:
-                    return row + 1, column + 1
