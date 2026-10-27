@@ -36,6 +36,7 @@ from iplotlib.core import (Axis,
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
 from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem, NanosecondDateFormatter, is_time_label
+from iplotlib.impl.pyqtgraph.svgExportPatch import patch_closed_paths
 from iplotlib.qt.utils.icon_loader import svg_icon_image
 
 logger = setupLogger.get_logger(__name__)
@@ -58,6 +59,7 @@ IPLOT_PYQTGRAPH_OPENGL = os.environ.get('IPLOT_PYQTGRAPH_OPENGL', "").lower()
 use_open_gl = IPLOT_PYQTGRAPH_OPENGL in ("1", "true", "yes") if IPLOT_PYQTGRAPH_OPENGL else False
 
 pg.setConfigOptions(antialias=True, useOpenGL=use_open_gl)
+patch_closed_paths()
 
 # Above this point count, streamed lines are rendered via per-bucket min/max
 # decimation so the visible line preserves extremes at viewport resolution.
