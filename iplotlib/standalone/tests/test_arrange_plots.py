@@ -1,7 +1,7 @@
 """Moving and resizing plots with the mouse, laying them out on a grid, and dropping on the grid, in both backends.
 
 In the select mode, a plot dragged by its background moves: in its column the others make room for it, onto a plot
-of another column the two trade places. Dragged by its bottom right corner, it spans other rows. The canvas tells
+of another column the two trade places. Dragged by a corner, it spans other rows and columns. The canvas tells
 where the plots went, undo takes them back, and each plot keeps its view. The slots the application reserves for
 plots it does not draw show while a plot moves, move as plots do and take no plot over them. A drag from a curve or a
 legend still moves those, and nothing moves out of the select mode, while a plot has the focus or while streaming.
@@ -36,13 +36,16 @@ from iplotlib.qt.testing import ensure_qapp
 BACKENDS = ('matplotlib', 'pyqt')
 
 
-def _canvas(columns, labels: dict = None, points: int = 10) -> Canvas:
+def _canvas(columns, labels: dict = None, points: int = 10, empty=()) -> Canvas:
     """A canvas with a column of plots for each count of plots in `columns`: each plot draws a rising line of
     `points` points from 0 to 9, which leaves its top left corner empty, and is titled by its place. `labels` names
-    the signals of some places."""
+    the signals of some places, and the places in `empty` have no plot."""
     canvas = Canvas(rows=max(columns), cols=len(columns), mouse_mode=Canvas.MOUSE_MODE_SELECT)
     for col, count in enumerate(columns):
         for row in range(count):
+            if (row, col) in empty:
+                canvas.add_plot(None, col)
+                continue
             plot = PlotXY(plot_title=f'{row}.{col}', row=row + 1, col=col + 1)
             signal = SignalXY(label=(labels or {}).get((row, col), f's{row}{col}'), uid=f'{row}.{col}')
             signal.set_data([np.linspace(0.0, 9.0, points), np.linspace(0.0, 9.0, points)])
@@ -57,6 +60,12 @@ def _titles(canvas: Canvas) -> list:
 
 def _plot(canvas: Canvas, title: str) -> PlotXY:
     return next(plot for plot, _ in layout.slots_of(canvas) if plot.plot_title == title)
+
+
+def _slots(canvas: Canvas) -> list:
+    """Each plot by its title, with its row, its column and the rows and columns it spans."""
+    return sorted((plot.plot_title, slot.row, slot.col, slot.row_span, slot.col_span)
+                  for plot, slot in layout.slots_of(canvas))
 
 
 class _Mouse:
@@ -74,11 +83,12 @@ class _Mouse:
         rows, cols = self.qt_canvas._grid_bounds()
         return cols[col] + (cols[col + 1] - cols[col]) * fx, rows[row] + (rows[row + 1] - rows[row]) * fy
 
-    def corner(self, slot: layout.Slot):
-        """The middle of the resize handle of the plot in the slot."""
+    def corner(self, slot: layout.Slot, top: bool = False, left: bool = False):
+        """The middle of the resize handle of the plot in the slot, in its bottom right corner or the one given."""
         rows, cols = self.qt_canvas._grid_bounds()
         side = HANDLE.px()
-        return cols[slot.right] - side / 2, rows[slot.bottom] - side / 2
+        return (cols[slot.col] + side / 2 if left else cols[slot.right] - side / 2,
+                rows[slot.row] + side / 2 if top else rows[slot.bottom] - side / 2)
 
     def hover(self, point):
         QTest.mouseMove(self.widget, self._at(point))
@@ -109,13 +119,13 @@ class TestArrangePlots(unittest.TestCase):
     def setUpClass(cls):
         cls.app = ensure_qapp()
 
-    def _qt_canvas(self, backend, columns=(3,), labels: dict = None, points: int = 10):
+    def _qt_canvas(self, backend, columns=(3,), labels: dict = None, points: int = 10, empty=()):
         # One canvas shown at a time: the mouse of another, left over the same place, would take its events.
         previous = getattr(self, '_shown', None)
         if previous is not None:
             previous.close()
             self.app.processEvents()
-        canvas = _canvas(columns, labels, points)
+        canvas = _canvas(columns, labels, points, empty)
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
         self._shown = qt_canvas
         self.addCleanup(qt_canvas.close)
@@ -461,6 +471,81 @@ class TestArrangePlots(unittest.TestCase):
                                   layout.slots_of(canvas)], [('0.0', 0, 1), ('1.0', 1, 1), ('2.0', 2, 2)])
                 self.assertEqual((canvas.rows, canvas.cols), (4, 1))
 
+    def test_a_plot_dragged_by_a_left_corner_grows_into_the_empty_cell_on_its_left(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                # A plot in the right column, the cell on its left empty, and plots below.
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(2, 2), empty=[(0, 0)])
+                rows, cols = qt_canvas._grid_bounds()
+                start = mouse.corner(layout.Slot(0, 1), left=True)
+
+                mouse.hover(start)
+                self.assertEqual(mouse.widget.cursor().shape(), Qt.CursorShape.SizeBDiagCursor)
+                mouse.drag(start, (cols[0] + (cols[1] - cols[0]) * 0.3, start[1]))
+
+                self.assertEqual(_slots(canvas), [('0.1', 0, 0, 1, 2), ('1.0', 1, 0, 1, 1), ('1.1', 1, 1, 1, 1)])
+                self.assertEqual(self._drawn_place(qt_canvas, self._impl(qt_canvas, canvas, '0.1')), (0, 0, 1, 2))
+                self.assertEqual(arranged, [[(layout.Slot(0, 1), layout.Slot(0, 0, 1, 2))]])
+                qt_canvas.undo()
+                self.app.processEvents()
+                self.assertEqual(_slots(canvas), [('0.1', 0, 1, 1, 1), ('1.0', 1, 0, 1, 1), ('1.1', 1, 1, 1, 1)])
+
+    def test_a_plot_grown_by_a_left_corner_grows_no_bigger_than_the_application_draws(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(1, 1, 1),
+                                                                     empty=[(0, 0), (0, 1)])
+                qt_canvas.max_span = lambda: 2
+                rows, cols = qt_canvas._grid_bounds()
+                start = mouse.corner(layout.Slot(0, 2), left=True)
+
+                mouse.drag(start, (cols[0] + 5, start[1]))
+
+                self.assertEqual(_slots(canvas), [('0.2', 0, 1, 1, 2)])
+
+    def test_a_plot_dragged_by_a_top_corner_grows_into_the_empty_cell_above_and_shrinks_back(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(2, 2), empty=[(0, 1)])
+                rows, cols = qt_canvas._grid_bounds()
+                start = mouse.corner(layout.Slot(1, 1), top=True)
+
+                mouse.drag(start, (start[0], rows[0] + (rows[1] - rows[0]) * 0.3))
+                self.assertEqual(_slots(canvas), [('0.0', 0, 0, 1, 1), ('1.0', 1, 0, 1, 1), ('1.1', 0, 1, 2, 1)])
+                mouse.drag(mouse.corner(layout.Slot(0, 1, 2, 1), top=True), (start[0], rows[1] + 20))
+
+                self.assertEqual(_slots(canvas), [('0.0', 0, 0, 1, 1), ('1.0', 1, 0, 1, 1), ('1.1', 1, 1, 1, 1)])
+
+    def test_the_last_plot_of_a_column_grows_below_the_grid_with_the_mouse_a_little_past_it(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                # As in a window that fills the screen, where the mouse goes no further than its edge.
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                rows, cols = qt_canvas._grid_bounds()
+
+                mouse.drag(mouse.corner(layout.Slot(2, 0)), (cols[1] - 20, rows[3] + HANDLE.px() + 4))
+
+                self.assertEqual([(plot.plot_title, slot.row, slot.row_span) for plot, slot in
+                                  layout.slots_of(canvas)], [('0.0', 0, 1), ('1.0', 1, 1), ('2.0', 2, 2)])
+
+    def test_a_corner_dragged_a_few_pixels_past_a_bound_takes_no_more_rows_or_columns(self):
+        # A plot stretched into the empty cell on its right along its row, the mouse a little below or above it: a
+        # row more would take the plots below, or the rows below the grid, which it cannot.
+        cases = (('a row with plots below', [(0, 1)], layout.Slot(0, 0), 1, (-12, 12),
+                  [('0.0', 0, 0, 1, 2), ('1.0', 1, 0, 1, 1), ('1.1', 1, 1, 1, 1)]),
+                 ('the last row', [(1, 1)], layout.Slot(1, 0), 2, (5,),
+                  [('0.0', 0, 0, 1, 1), ('0.1', 0, 1, 1, 1), ('1.0', 1, 0, 1, 2)]))
+        for backend in BACKENDS:
+            for name, empty, slot, bound, drifts, expected in cases:
+                for drift in drifts:
+                    with self.subTest(backend, row=name, drift=drift):
+                        canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(2, 2), empty=empty)
+                        rows, cols = qt_canvas._grid_bounds()
+
+                        mouse.drag(mouse.corner(slot), (cols[1] + (cols[2] - cols[1]) * 0.7, rows[bound] + drift))
+
+                        self.assertEqual(_slots(canvas), expected)
+
     def test_an_arrangement_of_plots_drawn_again_since_is_left_aside(self):
         for backend in BACKENDS:
             with self.subTest(backend):
@@ -577,6 +662,25 @@ class TestArrangePlots(unittest.TestCase):
 
                 mouse.hover(mouse.cell(1, 0))
                 self.assertNotEqual(mouse.widget.cursor().shape(), Qt.CursorShape.SizeFDiagCursor)
+
+    def test_the_resize_handle_shows_in_the_corner_nearest_the_mouse(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                arranger, slot = qt_canvas._arranger, layout.Slot(1, 0)
+                rows, cols = qt_canvas._grid_bounds()
+
+                for top, left, cursor in ((True, True, Qt.CursorShape.SizeFDiagCursor),
+                                          (True, False, Qt.CursorShape.SizeBDiagCursor),
+                                          (False, True, Qt.CursorShape.SizeBDiagCursor),
+                                          (False, False, Qt.CursorShape.SizeFDiagCursor)):
+                    # Towards the corner, then on its handle.
+                    mouse.hover(mouse.cell(1, 0, fx=0.1 if left else 0.9, fy=0.1 if top else 0.9))
+                    grip = arranger._grip
+                    self.assertEqual((grip.top() == rows[1], grip.left() == cols[0]), (top, left))
+                    mouse.hover(mouse.corner(slot, top, left))
+                    self.assertEqual(mouse.widget.cursor().shape(), cursor)
+                    self.assertTrue(arranger._overlay.isVisible())
 
     def test_the_mouse_over_a_curve_of_many_points_looks_at_the_points_near_it_only(self):
         for backend in BACKENDS:

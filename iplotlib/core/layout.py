@@ -125,21 +125,25 @@ def moved(canvas: Canvas, plot: Plot, row: int, col: int, grab_row: int = 0, gra
     return _arrangement(canvas, slots, {id(plot): taken})
 
 
-def resized(canvas: Canvas, plot: Plot, row_span: int, col_span: int, reserved: Iterable[Slot] = ()) \
-        -> Optional[Arrangement]:
-    """Where the plots go when `plot` spans these rows and columns. None if nothing changes or the plot does not fit.
+def resized(canvas: Canvas, plot: Plot, row_span: int, col_span: int, reserved: Iterable[Slot] = (),
+            row: int = None, col: int = None) -> Optional[Arrangement]:
+    """Where the plots go when `plot` spans these rows and columns, from its top left cell or from the cell (`row`,
+    `col`) given, as when its top or left side moves. None if nothing changes or the plot does not fit.
 
-    In its own columns, when no other plot covers them only in part, a taller plot moves the plots below it down
-    and a shorter one moves them up. Otherwise the plot grows only into empty cells of the grid. The reserved slots
-    move as the plots do."""
+    In its own columns, when no other plot covers them only in part, a plot whose bottom side moves down moves the
+    plots below it down, and one whose bottom side moves up moves them up. Otherwise the plot grows only into empty
+    cells of the grid. The reserved slots move as the plots do."""
     slots = _occupants(canvas, reserved)
     source = _slot(slots, plot)
     if source is None:
         return None
-    taken = Slot(source.row, source.col, max(1, row_span), max(1, col_span))
+    taken = Slot(source.row if row is None else row, source.col if col is None else col, max(1, row_span),
+                 max(1, col_span))
     if taken == source:
         return None
-    lane = _lane(slots, source) if taken.col_span == source.col_span else None
+    # Only the bottom side takes the plots below with it.
+    bottom_only = (taken.row, taken.col, taken.col_span) == (source.row, source.col, source.col_span)
+    lane = _lane(slots, source) if bottom_only else None
     if lane is not None:
         shift = taken.row_span - source.row_span
         places = {id(plot): taken}
@@ -148,7 +152,7 @@ def resized(canvas: Canvas, plot: Plot, row_span: int, col_span: int, reserved: 
                 places[id(other)] = slot.moved_to(slot.row + shift, slot.col)
         return _arrangement(canvas, slots, places)
     rows, cols = grid_size(canvas)
-    if taken.bottom > rows or taken.right > cols:
+    if taken.row < 0 or taken.col < 0 or taken.bottom > rows or taken.right > cols:
         return None
     if any(slot.overlaps(taken) for other, slot in slots if other is not plot):
         return None
