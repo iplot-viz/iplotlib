@@ -1366,7 +1366,12 @@ class BackendParserBase(ABC):
         if (drag_shift_dx != 0.0 or drag_shift_dy != 0.0) and len(signal_data) >= 2:
             signal_data = list(signal_data)  # Make mutable copy
             if drag_shift_dx != 0.0 and signal_data[0] is not None:
-                signal_data[0] = signal_data[0] + drag_shift_dx
+                x = np.asarray(signal_data[0])
+                if np.issubdtype(x.dtype, np.integer) and float(drag_shift_dx).is_integer():
+                    # Whole nanoseconds stay whole: a float near 1e18 only holds them to 256 ns.
+                    signal_data[0] = x + np.int64(drag_shift_dx)
+                else:
+                    signal_data[0] = signal_data[0] + drag_shift_dx
             if drag_shift_dy != 0.0 and signal_data[1] is not None:
                 signal_data[1] = signal_data[1] + drag_shift_dy
 
