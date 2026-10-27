@@ -53,7 +53,9 @@ class PlotXYForm(IplotPreferencesForm):
             {"label": "Marker size", "property": "marker_size",
              "widget": self.default_markersize_widget()},
             {"label": "Line Path", "property": "step",
-             "widget": self.default_linepath_widget()}
+             "widget": self.default_linepath_widget()},
+            {"label": "Vertical lines", "property": "vertical_lines",
+             "widget": self.default_vertical_lines_widget()}
         ]
         super().__init__(fields=prototype, label="A plot", parent=parent, f=f)
 

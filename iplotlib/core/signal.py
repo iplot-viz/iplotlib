@@ -95,6 +95,10 @@ class SignalXY(Signal, IplotSignalAdapter):
         dependent
     step : str
         default line style - 'post', 'mid', 'pre', 'None', defaults to 'None'.
+    vertical_lines : str
+        style of a vertical line in the signal color and line size through each point, while the signal shows few
+        of them (see BackendParserBase.FEW_POINTS): a point alone, or a few after a zoom, are easy to miss otherwise.
+        Supported types: 'Solid', 'Dashed', 'Dotted', 'None' (no lines, as None)
     hidden : bool
         hidden from the plot by a click on its legend entry
     """
@@ -107,6 +111,7 @@ class SignalXY(Signal, IplotSignalAdapter):
     marker: str = None
     marker_size: int = None
     step: str = None
+    vertical_lines: str = None
     markers_list: List[Marker] = field(default_factory=list)
     hidden: bool = False
 
@@ -128,6 +133,7 @@ class SignalXY(Signal, IplotSignalAdapter):
         self.marker = SignalXY.marker
         self.marker_size = SignalXY.marker_size
         self.step = SignalXY.step
+        self.vertical_lines = SignalXY.vertical_lines
 
     def merge(self, old_signal: dict):
         super().merge(old_signal)
@@ -140,6 +146,7 @@ class SignalXY(Signal, IplotSignalAdapter):
         self.marker = old_signal['marker']
         self.marker_size = old_signal['marker_size']
         self.step = old_signal['step']
+        self.vertical_lines = old_signal.get('vertical_lines', SignalXY.vertical_lines)
         self.hidden = old_signal.get('hidden', SignalXY.hidden)
 
     def add_marker(self, marker: Marker):

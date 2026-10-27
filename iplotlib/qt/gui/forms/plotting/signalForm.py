@@ -38,7 +38,8 @@ class SignalXYForm(IplotPreferencesForm):
              "widget": self.default_marker_widget()},
             {"label": "Marker size", "property": "marker_size",
              "widget": self.default_markersize_widget()},
-            {"label": "Line Path", "property": "step", "widget": self.default_linepath_widget()}]
+            {"label": "Line Path", "property": "step", "widget": self.default_linepath_widget()},
+            {"label": "Vertical lines", "property": "vertical_lines", "widget": self.default_vertical_lines_widget()}]
         super().__init__(fields=prototype, label="A signal", parent=parent, f=f)
 
     @Slot()
