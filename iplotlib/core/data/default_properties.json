@@ -29,6 +29,7 @@
   "marker": null,
   "marker_size": 1,
   "step": null,
+  "vertical_lines": "None",
   "full_mode_all_stack": true,
   "contour_levels": 10,
   "contour_filled": false,

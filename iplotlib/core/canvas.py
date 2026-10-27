@@ -141,6 +141,7 @@ class Canvas(ABC):
     marker: str = None
     marker_size: int = None
     step: str = None
+    vertical_lines: str = None
     legend: bool = None
     legend_position: str = None
     legend_layout: str = None
@@ -226,6 +227,7 @@ class Canvas(ABC):
         self.marker = Canvas.marker
         self.marker_size = Canvas.marker_size
         self.step = Canvas.step
+        self.vertical_lines = Canvas.vertical_lines
         self.legend = Canvas.legend
         self.legend_position = Canvas.legend_position
         self.legend_layout = Canvas.legend_layout
@@ -278,6 +280,7 @@ class Canvas(ABC):
         self.marker = old_canvas['marker']
         self.marker_size = old_canvas['marker_size']
         self.step = old_canvas['step']
+        self.vertical_lines = old_canvas.get('vertical_lines', Canvas.vertical_lines)
         self.legend = old_canvas['legend']
         self.legend_position = old_canvas['legend_position']
         self.legend_layout = old_canvas['legend_layout']

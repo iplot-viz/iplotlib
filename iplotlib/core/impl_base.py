@@ -153,6 +153,9 @@ class BackendParserBase(ABC):
     to instances of the graphic implementation classes.
     """
 
+    #: The most points a signal shows with a vertical line through each (see SignalXY.vertical_lines).
+    FEW_POINTS = 50
+
     def __init__(self, canvas: Canvas = None, focus_plot=None, focus_plot_stack_key=None,
                  impl_flush_method: Callable = None) -> None:
 
@@ -171,6 +174,7 @@ class BackendParserBase(ABC):
         self._plot_impl_plot_lut = defaultdict(list)  # type: Dict[int, List[Any]] # key is id(Plot)
         self._signal_impl_plot_lut = weakref.WeakValueDictionary()  # type: Dict[str, Any] # key: signal_lut_key(signal)
         self._signal_impl_shape_lut = dict()  # type: Dict[int, Any] # key is id(Signal)
+        self._signal_vertical_lines_lut = dict()  # type: Dict[int, Any] # key is id(Signal)
         self._impl_plot_ranges_hash = defaultdict(
             lambda: defaultdict(dict))  # type: Dict[Any, int] # key is id(impl_plot)
         self._update = False
@@ -369,6 +373,7 @@ class BackendParserBase(ABC):
         self._plot_impl_plot_lut.clear()
         self._signal_impl_plot_lut.clear()
         self._signal_impl_shape_lut.clear()
+        self._signal_vertical_lines_lut.clear()
         self._streaming_impl_plot_lut.clear()
 
         # A rebuild invalidates any redraw still queued for the previous canvas
@@ -1825,6 +1830,7 @@ class BackendParserBase(ABC):
                 else:
                     self.set_line_data(plot_lines[0], x_data, y_data)
                     self._update_marker_by_point_count(plot_lines[0], x_data, style)
+                    self._update_vertical_lines(signal, impl_plot, x_data, y_data)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):
                     if y_data.shape == (0, 0):  # Case: no data for 2 dim y_data
@@ -1842,6 +1848,7 @@ class BackendParserBase(ABC):
             if x_data.ndim == 1 and y_data.ndim == 1:
                 plot_lines = self.create_plot_lines_1D(draw_fn, x_data, y_data, style)
                 self._update_marker_by_point_count(plot_lines[0], x_data, style)
+                self._update_vertical_lines(signal, impl_plot, x_data, y_data)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 plot_lines = self.create_plot_lines_2D(draw_fn, signal, x_data, y_data, style)
 
@@ -1887,6 +1894,62 @@ class BackendParserBase(ABC):
 
     def remove_signal_lines(self, signal: Signal):
         """Remove signal lines from the plot."""
+        pass
+
+    def _update_vertical_lines(self, signal: SignalXY, impl_plot: Any, x_data, y_data):
+        """Draw a vertical line through each point of the signal while it shows few of them, if it asks for them (see
+        SignalXY.vertical_lines), in place of those it had: the same lines moved, while their style holds."""
+        style = (self._pm.get_value(signal, 'vertical_lines') or 'None').lower()
+        # While streaming they would not follow the batches (see update_plot_line_streaming).
+        places = () if style == 'none' or self.canvas.streaming else \
+            self._vertical_line_places(signal, impl_plot, x_data, y_data)
+        if len(places) > self.FEW_POINTS:
+            places = ()
+        drawn = self._signal_vertical_lines_lut.get(id(signal))
+        if drawn is not None:
+            drawn_style, lines = drawn
+            if len(places) and drawn_style == style and self.move_vertical_lines(lines, places):
+                return
+            del self._signal_vertical_lines_lut[id(signal)]
+            self.remove_vertical_lines(lines)
+        if not len(places):
+            return
+        lines = self.create_vertical_lines(impl_plot, signal, places, style)
+        if lines is None:
+            return
+        if getattr(signal, 'hidden', False):
+            self.set_vertical_lines_visible(lines, False)
+        self._signal_vertical_lines_lut[id(signal)] = (style, lines)
+
+    def _vertical_line_places(self, signal: SignalXY, impl_plot: Any, x_data, y_data):
+        """Where the samples drawn in the view are. With Extremities the data are not cut to the view, and their
+        first and last samples are the edges of the window read (see iplotDataAccess)."""
+        x = np.asarray(x_data)
+        y = np.asarray(y_data, dtype=float)
+        drawn = np.isfinite(y)
+        if self._pm.get_value(signal, 'log_scale'):
+            drawn &= y > 0
+        if getattr(signal, 'extremities', False) and len(x):
+            drawn[0] = drawn[-1] = False
+            begin, end = self.get_impl_x_axis_limits(impl_plot)
+            drawn &= (x >= begin) & (x <= end)
+        return x[drawn]
+
+    def create_vertical_lines(self, impl_plot: Any, signal: SignalXY, x_data, style: str):
+        """Draw across the plot a vertical line at each of `x_data`, in the signal color and line size and the line
+        `style` ('solid', 'dashed' or 'dotted'); None if the implementation does not."""
+        return None
+
+    def move_vertical_lines(self, lines, x_data) -> bool:
+        """Move the lines that create_vertical_lines() drew to `x_data`, as many: whether the implementation could."""
+        return False
+
+    def remove_vertical_lines(self, lines):
+        """Remove the lines that create_vertical_lines() drew."""
+        pass
+
+    def set_vertical_lines_visible(self, lines, visible: bool):
+        """Show or hide the lines that create_vertical_lines() drew."""
         pass
 
     def remove_signal_from_legend(self, impl_plot: Any, signal: Signal):
@@ -1970,6 +2033,10 @@ class BackendParserBase(ABC):
         choice survives a redraw and is saved with the workspace."""
         if isinstance(signal, SignalXY):
             signal.hidden = bool(hidden)
+            # Its vertical lines go with it.
+            drawn = self._signal_vertical_lines_lut.get(id(signal))
+            if drawn is not None:
+                self.set_vertical_lines_visible(drawn[1], not hidden)
 
     def register_dynamic_signal(self, impl_plot: Any, plot: Plot, signal: Signal):
         """Register a dynamically added signal and update legend. Default implementation does nothing."""
@@ -1991,6 +2058,9 @@ class BackendParserBase(ABC):
         impl_plot = self._signal_impl_plot_lut.get(key)
         plot = signal.parent() if callable(signal.parent) else None
         self.remove_signal_lines(signal)
+        drawn = self._signal_vertical_lines_lut.pop(id(signal), None)
+        if drawn is not None:
+            self.remove_vertical_lines(drawn[1])
         self._signal_impl_plot_lut.pop(key, None)
         self._signal_impl_shape_lut.pop(id(signal), None)
         signal.lines = []

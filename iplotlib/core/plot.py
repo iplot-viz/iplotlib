@@ -278,6 +278,7 @@ class PlotXY(Plot):
     marker: str = None
     marker_size: int = None
     step: str = None
+    vertical_lines: str = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -312,6 +313,7 @@ class PlotXY(Plot):
         self.marker = PlotXY.marker
         self.marker_size = PlotXY.marker_size
         self.step = PlotXY.step
+        self.vertical_lines = PlotXY.vertical_lines
 
     def merge(self, old_plot: dict):
         super().merge(old_plot)
@@ -321,6 +323,7 @@ class PlotXY(Plot):
         self.marker = old_plot['marker']
         self.marker_size = old_plot['marker_size']
         self.step = old_plot['step']
+        self.vertical_lines = old_plot.get('vertical_lines', PlotXY.vertical_lines)
 
     def get_signals_as_df(self, row, col, progress_callback=None):
         x = pd.DataFrame()
