@@ -469,22 +469,55 @@ class PyQtGraphParser(BackendParserBase):
         key = (row, col)
         cell_gl = self._cell_gl.get(key)
         if cell_gl is None:
-            rspan = max(1, rowspan)
-            cspan = max(1, colspan)
-            layout_row = row + self._row_offset
-            end_row = layout_row + rspan - 1
-            end_col = col + cspan - 1
-
-            lay = self.figure.ci.layout
-            lay.setRowStretchFactor(end_row, 1)
-            lay.setColumnStretchFactor(end_col, 1)
-
             cell_gl = pg.GraphicsLayout()
             cell_gl.layout.setSpacing(0)  # Reduce vertical spacing between stacked plots
             cell_gl.layout.setContentsMargins(0, 0, 0, 0)
-            self.figure.addItem(cell_gl, row=layout_row, col=col, rowspan=rowspan, colspan=colspan)
-            self._cell_gl[key] = cell_gl
+            self._place_cell(cell_gl, row, col, rowspan, colspan)
         return cell_gl
+
+    def _place_cell(self, cell_gl, row: int, col: int, rowspan: int, colspan: int):
+        """Put the layout of the plot whose place starts at (row, col) on its rows and columns of the grid."""
+        layout_row = row + self._row_offset
+        lay = self.figure.ci.layout
+        lay.setRowStretchFactor(layout_row + max(1, rowspan) - 1, 1)
+        lay.setColumnStretchFactor(col + max(1, colspan) - 1, 1)
+        # The columns share the width by their stretch alone, as those of matplotlib do: otherwise a column with no
+        # plot of its own, beside one that spans it, takes more than its share.
+        cell_gl.setPreferredWidth(0)
+        self.figure.addItem(cell_gl, row=layout_row, col=col, rowspan=rowspan, colspan=colspan)
+        self._cell_gl[(row, col)] = cell_gl
+
+    def relayout(self) -> bool:
+        # The layout of each plot moves whole, with its stacks, axes and legends. A slider is kept by the place of
+        # its plot, and the title spans the columns the canvas had: those canvases are drawn again.
+        if self._focus_plot is not None or self._slider_placeholders or \
+                (self._row_offset and self.canvas.cols != self._grid_shape[1]):
+            return False
+        places = {}
+        for col, column in enumerate(self.canvas.plots):
+            for row, plot in enumerate(column):
+                if plot is None:
+                    continue
+                items = self._plot_impl_plot_lut.get(id(plot), [])
+                before = next((key for key, stacks in self._layout_stacks.items()
+                               if items and items[0] in stacks.values()), None)
+                if before not in self._cell_gl:
+                    return False
+                places[before] = (row, col, plot)
+        if set(places) != set(self._cell_gl):
+            return False
+        cells, stacks = self._cell_gl, self._layout_stacks
+        for cell_gl in cells.values():
+            self.figure.removeItem(cell_gl)
+        self.set_canvas_gridspec(self.canvas.rows, self.canvas.cols)
+        self._cell_gl, self._layout_stacks = {}, {}
+        for before, (row, col, plot) in places.items():
+            self._place_cell(cells[before], row, col, plot.row_span, plot.col_span)
+            self._layout_stacks[(row, col)] = stacks[before]
+        # The plots of a column share the width of their Y axes.
+        for col in range(self.canvas.cols):
+            self.align_y_axis(col)
+        return True
 
     def export_image(self, filename: str, **kwargs):
         canvas = kwargs.get('canvas')

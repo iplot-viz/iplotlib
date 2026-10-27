@@ -122,7 +122,10 @@ class SignalXY(Signal, IplotSignalAdapter):
 
     def reset_preferences(self):
         super().reset_preferences()
-        self.color = SignalXY.color
+        # Back to the color the plot gave the signal, not to None: None resolves to the configured default color, one
+        # for every signal, and the curves would be drawn in it until the next draw.
+        self.color = self.original_color
+        self.new_color = False
         self.line_style = SignalXY.line_style
         self.line_size = SignalXY.line_size
         self.marker = SignalXY.marker
