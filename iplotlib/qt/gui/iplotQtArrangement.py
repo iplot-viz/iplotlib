@@ -20,6 +20,8 @@ from iplotlib.core.layout import Arrangement, Slot
 
 # Side of the square in a corner of a plot where a drag resizes it.
 HANDLE = ScaledPixels(14)
+# Width of the strokes of the grip drawn there.
+_STROKE = ScaledPixels(1.5)
 
 MOVE, RESIZE, LAYOUT = 'Move plot', 'Resize plot', 'Layout'
 
@@ -280,6 +282,7 @@ class PlotArranger(QObject):
         if gesture.reserved is None:
             gesture.reserved = layout.current(canvas, self._canvas.reserved_slots()).reserved
         row, col = _cell(bounds[0], point.y()), _cell(bounds[1], point.x())
+        split = False
         if gesture.kind == MOVE:
             gesture.arrangement = layout.moved(canvas, gesture.plot, row, col, *gesture.grab,
                                                reserved=gesture.reserved)
@@ -288,10 +291,13 @@ class PlotArranger(QObject):
             left = min(max(col - gesture.grab[1], 0), cols - gesture.slot.col_span)
             gesture.target = gesture.slot.moved_to(top, left) if not gesture.slot.contains(row, col) else gesture.slot
         else:
-            target = gesture.target = self._resized(gesture, point, bounds)
+            gesture.target, split = self._resized(gesture, point, bounds)
+            target = gesture.target
             gesture.arrangement = layout.resized(canvas, gesture.plot, target.row_span, target.col_span,
-                                                 reserved=gesture.reserved, row=target.row, col=target.col)
-        allowed = gesture.arrangement is not None or gesture.target == gesture.slot
+                                                 reserved=gesture.reserved, row=target.row, col=target.col,
+                                                 split=split)
+        # A target in half of the column is never the slot the plot has.
+        allowed = gesture.arrangement is not None or (gesture.target == gesture.slot and not split)
         QApplication.changeOverrideCursor(Qt.CursorShape.ForbiddenCursor if not allowed else
                                           Qt.CursorShape.ClosedHandCursor if gesture.kind == MOVE else
                                           _resize_cursor(gesture.corner))
@@ -314,42 +320,55 @@ class PlotArranger(QObject):
             shapes.append((_rect(bounds, gesture.slot), _Overlay.SOURCE))
             shapes += _reserved_shapes(bounds, gesture.reserved)
             if not allowed:
-                shapes.append((_rect(bounds, _within(gesture.target, bounds)), _Overlay.FORBIDDEN))
+                # A target in half of the column, on the grid split for it.
+                target_bounds = _halved(bounds) if split else bounds
+                shapes.append((_rect(target_bounds, _within(gesture.target, target_bounds)), _Overlay.FORBIDDEN))
         self._overlay.show_shapes(shapes)
 
-    def _resized(self, gesture: _Gesture, point: QPointF, bounds: Bounds) -> Slot:
-        """The slot of the plot with the corner it was grabbed by dragged to the point, the opposite one staying. Each
+    def _resized(self, gesture: _Gesture, point: QPointF, bounds: Bounds) -> Tuple[Slot, bool]:
+        """The slot of the plot with the corner it was grabbed by dragged to the point, the opposite one staying, and
+        whether it counts in the halves of the one column of the grid, which splits in two (see layout.resized). Each
         side that moves goes to the bound of the grid nearest the point: the plot takes a row or a column more or less
         once the point is past the middle of it, not as soon as a few pixels cross a bound, and keeps one at least.
-        Below the grid the rows go on, as tall as its last one, from a handle's side past it: a plot can grow past
-        the bottom of its columns (see _nearest)."""
+        In a grid of one column, the middle of the column counts as a bound, for a plot to take half of it. Below the
+        grid the rows go on, as tall as its last one, from a handle's side past it: a plot can grow past the bottom
+        of its columns (see _nearest)."""
         slot, (top_side, left_side) = gesture.slot, gesture.corner
+        limit = self._canvas.max_span()
+        # Split, the column leaves the other plots spanning two.
+        split = len(bounds[1]) == 2 and (not limit or limit > 1)
+        cols = _halved(bounds)[1] if split else bounds[1]
         top, bottom, left, right = slot.row, slot.bottom, slot.col, slot.right
+        if split:
+            left, right = 0, 2
         if top_side:
             top = min(_nearest(bounds[0], point.y()), bottom - 1)
         else:
             bottom = max(_nearest(bounds[0], point.y(), beyond=True), top + 1)
         if left_side:
-            left = min(_nearest(bounds[1], point.x()), right - 1)
+            left = min(_nearest(cols, point.x()), right - 1)
         else:
-            right = max(_nearest(bounds[1], point.x()), left + 1)
-        limit = self._canvas.max_span()
+            right = max(_nearest(cols, point.x()), left + 1)
+        if split and right - left == 2:
+            # The whole column: it does not split.
+            split, left, right = False, 0, 1
         if limit:
             # The application draws no bigger plot: the side that moves stops short.
             if bottom - top > limit:
                 top, bottom = (bottom - limit, bottom) if top_side else (top, top + limit)
             if right - left > limit:
                 left, right = (right - limit, right) if left_side else (left, left + limit)
-        return Slot(top, left, bottom - top, right - left)
+        return Slot(top, left, bottom - top, right - left), split
 
     @staticmethod
     def _preview_bounds(bounds: Bounds, arrangement: Arrangement) -> Bounds:
         """The bounds the grid would have for the arrangement: those it has, or the same room shared out evenly
-        between the rows and the columns it would have."""
+        between the rows, or the columns, it would have more or fewer of."""
         rows, cols = bounds
         if len(rows) == arrangement.rows + 1 and len(cols) == arrangement.cols + 1:
             return bounds
-        return _even(rows[0], rows[-1], arrangement.rows), _even(cols[0], cols[-1], arrangement.cols)
+        return (rows if len(rows) == arrangement.rows + 1 else _even(rows[0], rows[-1], arrangement.rows),
+                cols if len(cols) == arrangement.cols + 1 else _even(cols[0], cols[-1], arrangement.cols))
 
     # Geometry
 
@@ -393,7 +412,16 @@ class PlotArranger(QObject):
             if grip is None:
                 self._overlay.clear()
             else:
-                self._overlay.show_shapes([(grip, _Overlay.GRIP)], corner)
+                # The strokes from the corner out, up to the first one that would touch what takes a press there, as
+                # the eye of a legend in the corner of its plot does on a screen of high density. A stroke is drawn
+                # with square ends, half its width past them.
+                strokes = _grip_strokes(grip, corner)
+                clear = 0
+                for ends in _grip_strokes(grip, corner, longer=_STROKE.px() / 2):
+                    if any(self._canvas._press_taken(end) for end in ends):
+                        break
+                    clear += 1
+                self._overlay.show_shapes([(grip, _Overlay.GRIP)], strokes[:clear])
         # The backends set the cursor of the same widget for their own tools (a mouse mode, the eye of a legend):
         # the one wanted goes back on when another took its place.
         if cursor != self._cursor or (cursor is not None and self._widget.cursor().shape() != cursor):
@@ -451,6 +479,25 @@ def _even(start: float, end: float, count: int) -> List[float]:
     return [start + (end - start) * index / count for index in range(count + 1)]
 
 
+def _halved(bounds: Bounds) -> Bounds:
+    """The bounds of a grid of one column with the column split in two."""
+    rows, (left, right) = bounds
+    return rows, [left, (left + right) / 2, right]
+
+
+def _grip_strokes(rect: QRectF, corner: Corner, longer: float = 0.0) -> List[Tuple[QPointF, QPointF]]:
+    """Three short diagonal strokes in the corner of the square, from the corner out: the usual sign of a size grip.
+    `longer` makes each longer by as much at both ends."""
+    top, left = corner
+    inset = ScaledPixels(3).px()
+    x = rect.left() + inset if left else rect.right() - inset
+    y = rect.top() + inset if top else rect.bottom() - inset
+    across, down = (1 if left else -1), (1 if top else -1)
+    step = rect.width() / 4
+    return [(QPointF(x + across * (step * index + longer), y), QPointF(x, y + down * (step * index + longer)))
+            for index in range(1, 4)]
+
+
 def _reserved_shapes(bounds: Bounds, reserved: Sequence[Slot]) -> List[Tuple[QRectF, int]]:
     """The reserved slots that start inside the grid, cut to it: nothing is drawn there, so the overlay shows them."""
     rows, cols = len(bounds[0]) - 1, len(bounds[1]) - 1
@@ -469,13 +516,13 @@ class _Overlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self._shapes = []  # type: List[Tuple[QRectF, int]]
-        self._grip_corner = BOTTOM_RIGHT
+        self._grip_strokes = []  # type: List[Tuple[QPointF, QPointF]]
         self.hide()
 
-    def show_shapes(self, shapes: List[Tuple[QRectF, int]], grip_corner: Corner = BOTTOM_RIGHT):
-        """Show the shapes, a grip among them in the corner of the plot given."""
+    def show_shapes(self, shapes: List[Tuple[QRectF, int]], grip_strokes: Sequence[Tuple[QPointF, QPointF]] = ()):
+        """Show the shapes, a grip among them drawn with the strokes given (see _grip_strokes)."""
         self._shapes = shapes
-        self._grip_corner = grip_corner
+        self._grip_strokes = list(grip_strokes)
         self.setGeometry(self.parentWidget().rect())
         self.raise_()
         self.show()
@@ -493,7 +540,9 @@ class _Overlay(QWidget):
         inset = ScaledPixels(3).px()
         for rect, style in self._shapes:
             if style == self.GRIP:
-                self._paint_grip(painter, rect, neutral, self._grip_corner)
+                painter.setPen(QPen(neutral, _STROKE.px()))
+                for start, end in self._grip_strokes:
+                    painter.drawLine(start, end)
                 continue
             box = rect.adjusted(inset, inset, -inset, -inset)
             color = accent if style in (self.TARGET, self.MOVED) else neutral
@@ -508,18 +557,3 @@ class _Overlay(QWidget):
             radius = ScaledPixels(4).px()
             painter.drawRoundedRect(box, radius, radius)
         painter.end()
-
-    @staticmethod
-    def _paint_grip(painter: QPainter, rect: QRectF, color: QColor, corner: Corner):
-        """Three short diagonal strokes in the corner of the plot, the usual sign of a size grip."""
-        painter.setPen(QPen(color, ScaledPixels(1.5).px()))
-        top, left = corner
-        inset = ScaledPixels(3).px()
-        # From the corner of the square towards its middle.
-        x = rect.left() + inset if left else rect.right() - inset
-        y = rect.top() + inset if top else rect.bottom() - inset
-        across, down = (1 if left else -1), (1 if top else -1)
-        step = rect.width() / 4
-        for index in range(1, 4):
-            offset = step * index
-            painter.drawLine(QPointF(x + across * offset, y), QPointF(x, y + down * offset))

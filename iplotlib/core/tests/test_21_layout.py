@@ -242,6 +242,49 @@ class TestResize(unittest.TestCase):
 
         self.assertEqual(_places(arrangement), {'A': (0, 0, 1, 1), 'B': (2, 0, 1, 1), 'C': (3, 0, 1, 1)})
 
+    def test_a_plot_takes_half_of_the_one_column_of_the_grid_and_the_others_span_both(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1), 'C': (2, 0, 1, 1)})
+
+        left = resized(canvas, _plot(canvas, 'B'), 1, 1, split=True)
+        right = resized(canvas, _plot(canvas, 'B'), 1, 1, col=1, split=True)
+
+        self.assertEqual(_places(left), {'A': (0, 0, 1, 2), 'B': (1, 0, 1, 1), 'C': (2, 0, 1, 2)})
+        self.assertEqual(_places(right), {'A': (0, 0, 1, 2), 'B': (1, 1, 1, 1), 'C': (2, 0, 1, 2)})
+        self.assertEqual((right.rows, right.cols), (3, 2))
+        # Every plot changes: an application that keeps the spans elsewhere gives the others two columns.
+        self.assertEqual(right.changes, [(Slot(0, 0), Slot(0, 0, 1, 2)), (Slot(1, 0), Slot(1, 1)),
+                                         (Slot(2, 0), Slot(2, 0, 1, 2))])
+
+    def test_a_column_split_for_a_plot_takes_the_reserved_slots_along_and_no_plot_over_them(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'C': (2, 0, 1, 1)})
+
+        arrangement = resized(canvas, _plot(canvas, 'A'), 1, 1, col=1, reserved=[Slot(1, 0)], split=True)
+
+        self.assertEqual(_places(arrangement), {'A': (0, 1, 1, 1), 'C': (2, 0, 1, 2)})
+        self.assertEqual(arrangement.reserved, [Slot(1, 0, 1, 2)])
+        self.assertIn((Slot(1, 0), Slot(1, 0, 1, 2)), arrangement.changes)
+        self.assertIsNone(resized(canvas, _plot(canvas, 'A'), 2, 1, col=1, reserved=[Slot(1, 0)], split=True))
+
+    def test_only_the_one_column_of_a_grid_splits_and_for_half_of_it(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1), 'C': (0, 1, 1, 1)})
+        column = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1)})
+
+        self.assertIsNone(resized(canvas, _plot(canvas, 'B'), 1, 1, split=True))
+        self.assertIsNone(resized(column, _plot(column, 'B'), 1, 2, split=True))
+        # Taller as well, it would cover the plot below.
+        self.assertIsNone(resized(column, _plot(column, 'A'), 2, 1, split=True))
+
+    def test_a_plot_alone_in_its_column_takes_its_right_half_but_not_its_left_one(self):
+        # The grid ends with its plots: none would keep the right half.
+        canvas = _canvas({'A': (0, 0, 1, 1)}, rows=2)
+
+        right = resized(canvas, _plot(canvas, 'A'), 1, 1, col=1, split=True)
+
+        self.assertEqual(_places(right), {'A': (0, 1, 1, 1)})
+        self.assertEqual((right.rows, right.cols), (2, 2))
+        self.assertIsNone(resized(canvas, _plot(canvas, 'A'), 1, 1, split=True))
+        self.assertIsNone(resized(canvas, _plot(canvas, 'A'), 1, 1, reserved=[Slot(1, 0)], split=True))
+
 
 class TestReservedSlots(unittest.TestCase):
     """Slots an application reserves for plots it does not draw now, such as those whose data could not be read."""
