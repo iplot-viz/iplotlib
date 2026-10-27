@@ -114,6 +114,25 @@ def _hold_gil(seconds: float) -> float:
     return time.perf_counter() - start
 
 
+def _report_steps(data_access, data_s_name, steps, hold=0.0, progress=None):
+    """A call that takes long, as an export does: it reports each of `steps` steps after keeping the GIL for `hold`
+    seconds, and gives the process id it ran in and its data source."""
+    for step in range(steps):
+        _hold_gil(hold)
+        if progress is not None:
+            progress(step, data_s_name)
+    return os.getpid(), data_s_name
+
+
+def _fail(data_access, data_s_name, progress=None):
+    raise ValueError("cannot export")
+
+
+def _stop_after_a_step(data_access, data_s_name, progress=None):
+    progress('started')
+    os._exit(3)
+
+
 def _worker_data_access():
     return _WorkerDataAccess()
 
@@ -894,6 +913,120 @@ class AccessPoolTests(unittest.TestCase):
 
         self.assertIsInstance(error, RuntimeError)
         self.assertIn("could not be set up", str(error))
+
+    def test_a_call_runs_a_function_given_the_data_access_object(self):
+        starting = self._own_pool(factory=_slow_data_access, started=())
+
+        made_there, _ = self._in_thread(lambda: self.pool.call(_report_steps, 'uda', steps=0))
+        # Made here while the workers start, as a method is.
+        with patch.object(AccessHelper, 'da', _ParentDataAccessThatReads()):
+            made_here, _ = self._in_thread(lambda: starting.call(_report_steps, 'uda', steps=0))
+
+        self.assertNotEqual(made_there[0], os.getpid())
+        self.assertEqual(made_there[1], 'uda')
+        self.assertEqual(made_here, (os.getpid(), 'uda'))
+
+    def _call_later(self, pool, method, **kwargs):
+        """What on_done is given once the call made in the background ends, the progress reported until then, and
+        the longest time this thread could not run its Qt events meanwhile."""
+        done, reported, ticks = [], [], []
+        timer = QTimer()
+        timer.timeout.connect(lambda: ticks.append(time.perf_counter()))
+        timer.start(10)
+        ticks.append(time.perf_counter())
+        pool.call_later(method, 'uda', lambda result: done.append((result, list(reported))),
+                        progress=lambda *args: reported.append(args), **kwargs)
+        deadline = time.monotonic() + _START_TIMEOUT_S
+        while not done and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.005)
+        ticks.append(time.perf_counter())
+        timer.stop()
+        self.assertTrue(done, "The call made in the background did not end")
+        result, reported_before = done[0]
+        return result, reported_before, max(b - a for a, b in zip(ticks, ticks[1:]))
+
+    def test_a_call_in_the_background_reports_its_progress_in_this_thread_before_its_result(self):
+        result, reported, stall = self._call_later(self.pool, _report_steps, steps=5, hold=0.2)
+
+        self.assertNotEqual(result[0], os.getpid())
+        self.assertEqual(result[1], 'uda')
+        self.assertEqual(reported, [(step, 'uda') for step in range(5)])
+        # The worker kept the GIL for a second.
+        self.assertLess(stall, 0.5)
+        self.assertEqual(self.pool._progress, {})
+
+    def test_a_call_in_the_background_that_fails_gives_its_error(self):
+        result, _, _ = self._call_later(self.pool, _fail)
+
+        self.assertIsInstance(result, DataAccessError)
+        self.assertIn("cannot export", str(result))
+
+    def test_a_call_in_the_background_whose_worker_stops_ends_without_being_made_again(self):
+        pool = self._own_pool(started=('uda',))
+
+        result, reported, _ = self._call_later(pool, _stop_after_a_step)
+        next_one, _, _ = self._call_later(pool, _report_steps, steps=1)
+
+        self.assertIsInstance(result, DataAccessError)
+        self.assertEqual(str(result), access_pool._STOPPED)
+        self.assertEqual(reported, [('started',)])
+        self.assertNotEqual(next_one[0], os.getpid())
+
+    def test_a_call_in_the_background_waits_for_its_worker_to_start(self):
+        pool = self._own_pool(factory=_slow_data_access, started=())
+
+        with patch.object(AccessHelper, 'da', _ParentDataAccessThatReads()):
+            result, _, stall = self._call_later(pool, _report_steps, steps=1)
+
+        # The workers take 10 s to start.
+        self.assertNotEqual(result[0], os.getpid())
+        self.assertLess(stall, 0.5)
+
+    def test_a_call_in_the_background_cancelled_gives_neither_its_progress_nor_its_result(self):
+        pool = _workers_started(AccessPool(1, data_access_factory=_worker_data_access), 'uda')
+        self.addCleanup(pool.shutdown)
+        done, done_cancelled, reported = [], [], []
+
+        # The worker makes one call at a time, and takes the next one meanwhile: that one is made all the same.
+        pool.call_later(_report_steps, 'uda', done.append, steps=1, hold=1.0)
+        cancelled = pool.call_later(_report_steps, 'uda', done_cancelled.append,
+                                    progress=lambda *args: reported.append(args), steps=1)
+        taken = cancelled._future
+        deadline = time.monotonic() + 30
+        while not taken.running() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        cancelled.cancel()
+        # Made after the one cancelled.
+        pool.call_later(_report_steps, 'uda', done.append, steps=0)
+        while len(done) < 2 and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.01)
+        # Time for the one cancelled to give its result, if it still could.
+        deadline = time.monotonic() + 4 * access_pool._POLL_INTERVAL_MS / 1000
+        while time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.01)
+
+        self.assertEqual(taken.result()[1], 'uda')
+        self.assertEqual(len(done), 2)
+        self.assertEqual(done_cancelled, [])
+        self.assertEqual(reported, [])
+        self.assertEqual(pool._progress, {})
+
+    def test_a_call_in_the_background_still_made_when_the_pool_shuts_down_ends(self):
+        pool = _workers_started(AccessPool(1, data_access_factory=_worker_data_access), 'uda')
+        done = []
+
+        pool.call_later(_report_steps, 'uda', done.append, progress=lambda *args: None, steps=1, hold=30)
+        QTimer.singleShot(1000, pool.shutdown)
+        deadline = time.monotonic() + 15
+        while not done and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.01)
+
+        self.assertIsInstance(done[0], DataAccessError)
+        self.assertEqual(str(done[0]), access_pool._STOPPED)
 
 
 class AppDataAccessTests(unittest.TestCase):
