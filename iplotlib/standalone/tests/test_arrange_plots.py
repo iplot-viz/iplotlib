@@ -24,10 +24,11 @@ from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QMenu
 
 from iplotlib.core import layout
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.display import MODE_FIXED, DisplayScale
 from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
 from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import _LegendEye
-from iplotlib.qt.gui.iplotQtArrangement import HANDLE, RESIZE, _Overlay
+from iplotlib.qt.gui.iplotQtArrangement import _STROKE, HANDLE, RESIZE, _grip_strokes, _Overlay, _rect
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.gui.iplotQtLayoutPicker import CELL, GAP, LayoutPicker
 from iplotlib.qt.gui.iplotQtMainWindow import IplotQtMainWindow
@@ -546,6 +547,92 @@ class TestArrangePlots(unittest.TestCase):
 
                         self.assertEqual(_slots(canvas), expected)
 
+    def test_a_plot_of_a_grid_of_one_column_dragged_by_a_side_to_the_middle_takes_half_of_it(self):
+        for backend in BACKENDS:
+            for left in (False, True):
+                with self.subTest(backend, side='left' if left else 'right'):
+                    canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                    rows, cols = qt_canvas._grid_bounds()
+                    start = mouse.corner(layout.Slot(1, 0), left=left)
+
+                    # A third of the way across: nearer the middle than the side it comes from.
+                    end = (cols[0] + (cols[1] - cols[0]) * (2 / 3 if left else 1 / 3), start[1])
+                    mouse.drag(start, end, release=False)
+                    target = next(rect for rect, style in qt_canvas._arranger._overlay._shapes
+                                  if style == _Overlay.TARGET)
+                    mouse.release(end)
+
+                    # The canvas showed the half the plot takes, in the row it has.
+                    self.assertAlmostEqual(target.top(), rows[1], delta=1)
+                    self.assertAlmostEqual(target.bottom(), rows[2], delta=1)
+                    self.assertAlmostEqual(target.center().x(), (cols[0] + cols[1]) * (3 / 4 if left else 1 / 4),
+                                           delta=(cols[1] - cols[0]) / 20)
+                    half = (1, 1 if left else 0, 1, 1)
+                    self.assertEqual(_slots(canvas), [('0.0', 0, 0, 1, 2), ('1.0',) + half, ('2.0', 2, 0, 1, 2)])
+                    self.assertEqual(self._drawn_place(qt_canvas, self._impl(qt_canvas, canvas, '1.0')), half)
+                    self.assertEqual(len(arranged), 1)
+                    # The two columns share the width evenly, as the other plots keep it all.
+                    rows, cols = qt_canvas._grid_bounds()
+                    self.assertLess(abs((cols[1] - cols[0]) - (cols[2] - cols[1])), (cols[2] - cols[0]) * 0.05)
+                    qt_canvas.undo()
+                    self.app.processEvents()
+                    self.assertEqual(_slots(canvas), [('0.0', 0, 0, 1, 1), ('1.0', 1, 0, 1, 1), ('2.0', 2, 0, 1, 1)])
+                    self.assertEqual((canvas.rows, canvas.cols), (3, 1))
+
+    def test_a_plot_of_a_grid_of_one_column_taking_half_of_it_does_not_grow_over_the_plot_below(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                rows, cols = qt_canvas._grid_bounds()
+                end = (cols[0] + (cols[1] - cols[0]) / 3, rows[2] + (rows[3] - rows[2]) * 0.7)
+
+                mouse.drag(mouse.corner(layout.Slot(1, 0)), end, release=False)
+                shown = [(rect, style) for rect, style in qt_canvas._arranger._overlay._shapes]
+                mouse.release(end)
+
+                # The half it would take, down over the plot below.
+                forbidden = [rect for rect, style in shown if style == _Overlay.FORBIDDEN]
+                self.assertEqual(len(forbidden), 1)
+                self.assertLess(forbidden[0].right(), (cols[0] + cols[1]) / 2 + 1)
+                self.assertGreater(forbidden[0].bottom(), rows[3] - 10)
+                self.assertEqual(_slots(canvas), [('0.0', 0, 0, 1, 1), ('1.0', 1, 0, 1, 1), ('2.0', 2, 0, 1, 1)])
+                self.assertEqual(arranged, [])
+
+    def test_a_plot_alone_in_its_column_takes_its_right_half_but_not_its_left_one(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                # The cell below the plot is empty: the grid ends with its plots, and none would keep a right half.
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(2,), empty=[(1, 0)])
+                rows, cols = qt_canvas._grid_bounds()
+                start = mouse.corner(layout.Slot(0, 0))
+                end = (cols[0] + (cols[1] - cols[0]) / 3, start[1])
+
+                mouse.drag(start, end, release=False)
+                cursor = QApplication.overrideCursor().shape()
+                forbidden = [rect for rect, style in qt_canvas._arranger._overlay._shapes
+                             if style == _Overlay.FORBIDDEN]
+                mouse.release(end)
+
+                self.assertEqual(cursor, Qt.CursorShape.ForbiddenCursor)
+                self.assertEqual(len(forbidden), 1)
+                self.assertEqual(_slots(canvas), [('0.0', 0, 0, 1, 1)])
+                self.assertEqual(arranged, [])
+                start = mouse.corner(layout.Slot(0, 0), left=True)
+                mouse.drag(start, (cols[0] + (cols[1] - cols[0]) * 2 / 3, start[1]))
+                self.assertEqual(_slots(canvas), [('0.0', 0, 1, 1, 1)])
+
+    def test_the_one_column_does_not_split_where_the_application_draws_no_plot_wider_than_one(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                qt_canvas.max_span = lambda: 1
+                rows, cols = qt_canvas._grid_bounds()
+                start = mouse.corner(layout.Slot(1, 0))
+
+                mouse.drag(start, (cols[0] + (cols[1] - cols[0]) / 3, start[1]))
+
+                self.assertEqual(_slots(canvas), [('0.0', 0, 0, 1, 1), ('1.0', 1, 0, 1, 1), ('2.0', 2, 0, 1, 1)])
+
     def test_an_arrangement_of_plots_drawn_again_since_is_left_aside(self):
         for backend in BACKENDS:
             with self.subTest(backend):
@@ -681,6 +768,41 @@ class TestArrangePlots(unittest.TestCase):
                     mouse.hover(mouse.corner(slot, top, left))
                     self.assertEqual(mouse.widget.cursor().shape(), cursor)
                     self.assertTrue(arranger._overlay.isVisible())
+
+    def test_the_grip_keeps_clear_of_the_eye_of_the_legend_in_its_corner(self):
+        # On a screen of high density the grip of the top right corner, bigger, reaches the eye of pyqtgraph there.
+        DisplayScale.reset()
+        self.addCleanup(DisplayScale.reset)
+        DisplayScale.instance().configure(mode=MODE_FIXED, value=2.0, force=True)
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                # As MINT draws them: no title above the plots, the legend at their top.
+                for plot, _ in layout.slots_of(canvas):
+                    plot.plot_title = None
+                qt_canvas.refresh()
+                self.app.processEvents()
+
+                mouse.hover(mouse.corner(layout.Slot(1, 0), top=True))
+
+                strokes = qt_canvas._arranger._overlay._grip_strokes
+                self.assertGreaterEqual(len(strokes), 2)
+                for start, end in strokes:
+                    for step in range(11):
+                        point = start + (end - start) * (step / 10)
+                        self.assertFalse(qt_canvas._press_taken(point), (start, end, point))
+
+    def test_a_stroke_of_the_grip_whose_square_end_would_touch_what_takes_a_press_is_left_out(self):
+        canvas, qt_canvas, mouse, arranged = self._qt_canvas('matplotlib')
+        rows, cols = qt_canvas._grid_bounds()
+        grip = qt_canvas._arranger._handle(_rect((rows, cols), layout.Slot(1, 0)), (True, False))
+        # Something that takes a press from just past the end of the second stroke down: its square end reaches it.
+        below = _grip_strokes(grip, (True, False))[1][1].y() + _STROKE.px() / 4
+        qt_canvas._press_taken = lambda point: point.y() >= below
+
+        mouse.hover(mouse.corner(layout.Slot(1, 0), top=True))
+
+        self.assertEqual(len(qt_canvas._arranger._overlay._grip_strokes), 1)
 
     def test_the_mouse_over_a_curve_of_many_points_looks_at_the_points_near_it_only(self):
         for backend in BACKENDS:

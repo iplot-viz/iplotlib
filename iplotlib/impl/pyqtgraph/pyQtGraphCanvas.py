@@ -483,6 +483,9 @@ class PyQtGraphParser(BackendParserBase):
         lay = self.figure.ci.layout
         lay.setRowStretchFactor(layout_row + max(1, rowspan) - 1, 1)
         lay.setColumnStretchFactor(col + max(1, colspan) - 1, 1)
+        # The columns share the width by their stretch alone, as those of matplotlib do: otherwise a column with no
+        # plot of its own, beside one that spans it, takes more than its share.
+        cell_gl.setPreferredWidth(0)
         self.figure.addItem(cell_gl, row=layout_row, col=col, rowspan=rowspan, colspan=colspan)
         self._cell_gl[(row, col)] = cell_gl
 
