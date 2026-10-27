@@ -639,6 +639,26 @@ class MatplotlibParser(BackendParserBase):
             marker_line.set_marker(signal_style.get('marker') or "")
             marker_line.set_markersize(signal_style.get('markersize'))
 
+    def create_vertical_lines(self, impl_plot: MPLAxes, signal, x_data, style: str):
+        from matplotlib.collections import LineCollection
+        # From the bottom of the plot to its top, whatever its Y limits, which they leave alone: vlines() widened
+        # them before matplotlib 3.8.
+        lines = LineCollection([[(x, 0), (x, 1)] for x in x_data], transform=impl_plot.get_xaxis_transform(),
+                               colors=self._pm.get_value(signal, 'color'), linestyles=style,
+                               linewidths=self._pm.get_value(signal, 'line_size') or 1)
+        impl_plot.add_collection(lines, autolim=False)
+        return lines
+
+    def move_vertical_lines(self, lines, x_data) -> bool:
+        lines.set_segments([[(x, 0), (x, 1)] for x in x_data])
+        return True
+
+    def remove_vertical_lines(self, lines):
+        lines.remove()
+
+    def set_vertical_lines_visible(self, lines, visible: bool):
+        lines.set_visible(visible)
+
     def visible_status(self, plot_lines, signal):
         self.figure.canvas.draw_idle()
 

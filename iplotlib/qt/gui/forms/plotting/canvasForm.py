@@ -85,6 +85,8 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.default_markersize_widget()},
             {"label": "Line Path", "property": "step",
              "widget": self.default_linepath_widget()},
+            {"label": "Vertical lines", "property": "vertical_lines",
+             "widget": self.default_vertical_lines_widget()},
             {"label": "Focus all plots in stack", "property": "full_mode_all_stack", "widget": self.create_checkbox()},
             {"label": "Contour Levels", "property": "contour_levels",
              "widget": self.default_contour_levels_widget()},
