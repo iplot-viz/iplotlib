@@ -203,6 +203,47 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
                 self.assertTrue(stats.called)
                 self.assertEqual(parser._view_reads, {})
 
+    def test_the_canvas_tells_how_many_views_wait_for_their_data(self):
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                qt_canvas, parser, impls, signals = self._draw(backend)
+                AccessHelper.pool = pool = _Pool()
+                told = []
+                qt_canvas.viewReadsChanged.connect(told.append)
+
+                # The plot zoomed and the one that shares its time axis wait for their data.
+                parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                self.app.processEvents()
+                zoomed = list(told)
+                pool.arrive()
+                self.app.processEvents()
+                arrived = told[len(zoomed):]
+                parser.set_oaw_axis_limits(impls[0], 0, (ZOOM[0], ZOOM[1] + 60 * 10**9))
+                self.app.processEvents()
+                qt_canvas.drop_view_reads()
+
+                self.assertEqual((zoomed, arrived), ([1, 2], [1, 0]))
+                self.assertEqual(told[len(zoomed) + len(arrived):], [1, 2, 0])
+
+    def test_the_count_of_views_waiting_ends_at_0_when_their_data_fail_to_draw(self):
+        for backend in ('pyqt', 'matplotlib'):
+            with self.subTest(backend=backend):
+                qt_canvas, parser, impls, signals = self._draw(backend)
+                AccessHelper.pool = pool = _Pool()
+                told = []
+                qt_canvas.viewReadsChanged.connect(told.append)
+                parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
+                self.app.processEvents()
+
+                # Each read whose data fail to draw fails alone, as the reads of the worker processes do.
+                with patch.object(qt_canvas, 'stats', side_effect=RuntimeError("cannot draw")):
+                    for fetch in pool.pending():
+                        with self.assertRaises(RuntimeError):
+                            fetch.arrive()
+
+                self.assertEqual(parser._view_reads, {})
+                self.assertEqual(told[-1], 0)
+
     def test_a_canvas_that_autoscales_fits_the_y_axis_to_the_data_that_arrive(self):
         for backend in ('pyqt', 'matplotlib'):
             with self.subTest(backend=backend):

@@ -38,6 +38,9 @@ class IplotQtCanvas(QWidget):
     """
     cmdDone = Signal(IplotCommand)
     focusChanged = Signal()
+    # How many views wait for data read in the background (see BackendParserBase._process_view_change), whenever that
+    # number changes.
+    viewReadsChanged = Signal(int)
     openPlotPreferences = Signal(object)
     signalShiftRequested = Signal(str, str, str, str, float, float, bool)
     # Unified shift signals (work for both drag and DIST)

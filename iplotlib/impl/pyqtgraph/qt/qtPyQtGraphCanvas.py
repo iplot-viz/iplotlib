@@ -57,6 +57,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._parser = PyQtGraphParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
         self._parser._on_legend_right_click = self._on_legend_right_click
         self._parser._on_view_data_read = self._view_data_drawn
+        self._parser._on_view_reads_changed = self.viewReadsChanged.emit
         self._parser.legend_eyes = True
 
         # Track connected ViewBoxes to avoid duplicate connections. By the objects themselves: a ViewBox made by a
