@@ -179,6 +179,11 @@ def _broken_data_access():
     raise RuntimeError("no configuration")
 
 
+def _ending_data_access():
+    """Ends the worker while it starts, with no error of its own to log, as the system ends a process it kills."""
+    os._exit(5)
+
+
 def _slow_data_access():
     time.sleep(10)
     return _WorkerDataAccess()
@@ -472,6 +477,23 @@ class AccessPoolTests(unittest.TestCase):
         np.testing.assert_array_equal(results[_key(plain)]['d1'], [1.0, 2.0])
         later = pool.fetch([_params('plain', end=T1 + 40)])
         self.assertEqual(len(later), 1)
+
+    def test_the_log_says_how_a_worker_that_stopped_ended(self):
+        pool = self._own_pool(started=('uda',))
+        records = _CapturingHandler()
+        access_pool.logger.addHandler(records)
+        self.addCleanup(access_pool.logger.removeHandler, records)
+
+        pool.fetch([_params('crash')])
+
+        messages = [record.getMessage() for record in records.records]
+        self.assertIn("A data access process had stopped (exit code 3), starting a new one", messages)
+
+    def test_a_worker_that_ends_while_it_starts_says_how(self):
+        pool = self._own_pool(factory=_ending_data_access, started=('uda',))
+
+        with self.assertRaisesRegex(RuntimeError, r"cannot start: .* \(exit code 5\)$"):
+            pool.fetch([_params('plain')])
 
     def test_workers_that_cannot_set_up_data_access_say_so(self):
         pool = self._own_pool(factory=_broken_data_access, started=('uda',))
