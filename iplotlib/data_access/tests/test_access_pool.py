@@ -39,7 +39,7 @@ T0 = 1_700_000_000_000_000_000
 T1 = T0 + 60_000_000_000
 
 # How long the tests wait for a worker to start: as long as Python takes to load what the worker reads with,
-# which is minutes on a loaded machine (over three on an SDCC login node).
+# which is minutes on a loaded machine (over two on an SDCC login node).
 _START_TIMEOUT_S = 600
 
 _cache_clears = 0
@@ -158,6 +158,33 @@ def _worker_data_access_with_caches():
 
 def _broken_data_access():
     raise RuntimeError("no configuration")
+
+
+def _ending_data_access():
+    """Ends the worker while it starts, with no error of its own to log, as the system ends a process it kills."""
+    os._exit(5)
+
+
+class _Worker:
+    """A worker process as _ending sees it. One that ended gives its exit code from the third time it is asked only:
+    on Linux a worker that ends closes the pipe that tells the pool it stopped a moment before its exit code can be
+    read, and the thread of its executor may be the one reading it."""
+
+    def __init__(self, code: int, ended: bool):
+        self._code = code
+        self._asked = 0
+        self.sentinel, self._writer = multiprocessing.Pipe(duplex=False)
+        if ended:
+            self._writer.close()
+
+    @property
+    def exitcode(self):
+        self._asked += 1
+        return self._code if self._writer.closed and self._asked > 2 else None
+
+    def close(self):
+        self.sentinel.close()
+        self._writer.close()
 
 
 def _slow_data_access():
@@ -453,6 +480,37 @@ class AccessPoolTests(unittest.TestCase):
         np.testing.assert_array_equal(results[_key(plain)]['d1'], [1.0, 2.0])
         later = pool.fetch([_params('plain', end=T1 + 40)])
         self.assertEqual(len(later), 1)
+
+    def test_the_log_says_how_a_worker_that_stopped_ended(self):
+        pool = self._own_pool(started=('uda',))
+        records = _CapturingHandler()
+        access_pool.logger.addHandler(records)
+        self.addCleanup(access_pool.logger.removeHandler, records)
+
+        pool.fetch([_params('crash')])
+
+        messages = [record.getMessage() for record in records.records]
+        self.assertIn("A data access process had stopped (exit code 3), starting a new one", messages)
+
+    def test_a_worker_that_ends_while_it_starts_says_how(self):
+        pool = self._own_pool(factory=_ending_data_access, started=('uda',))
+
+        with self.assertRaisesRegex(RuntimeError, r"cannot start: .* \(exit code 5\)$"):
+            pool.fetch([_params('plain')])
+
+    def test_the_log_waits_for_the_exit_code_of_a_worker_that_is_ending(self):
+        worker = _Worker(5, ended=True)
+        self.addCleanup(worker.close)
+
+        self.assertEqual(access_pool._ending(SimpleNamespace(_processes={1: worker})), " (exit code 5)")
+
+    def test_the_log_does_not_wait_for_a_worker_that_runs(self):
+        worker = _Worker(5, ended=False)
+        self.addCleanup(worker.close)
+        started = time.monotonic()
+
+        self.assertEqual(access_pool._ending(SimpleNamespace(_processes={1: worker})), "")
+        self.assertLess(time.monotonic() - started, access_pool._EXIT_CODE_WAIT_S / 2)
 
     def test_workers_that_cannot_set_up_data_access_say_so(self):
         pool = self._own_pool(factory=_broken_data_access, started=('uda',))

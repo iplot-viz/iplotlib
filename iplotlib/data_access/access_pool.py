@@ -50,6 +50,9 @@ _AFFINITY_MAX_EXCESS = 2
 # Seconds a worker may be stopped before its executor counts as waiting for the rest of a result.
 _STUCK_AFTER_S = 2.0
 
+# Seconds to wait for the exit code of a worker that ends (see _exit_code).
+_EXIT_CODE_WAIT_S = 1.0
+
 _STOPPED = "The data access process stopped while reading the data"
 
 # State of a worker process: what sets its data access up, the data source types it reads (all if
@@ -306,6 +309,37 @@ class PendingFetch:
             logger.exception("Cannot draw the data read in the background")
 
 
+def _ending(executor: Optional[ProcessPoolExecutor]) -> str:
+    """How the worker of the executor ended, for the log: " (exit code 3)", " (killed by SIGKILL)", or nothing while it
+    runs. A worker can end with no error of its own to log, killed by the system for one."""
+    for process in list((getattr(executor, '_processes', None) or {}).values()):
+        try:
+            code = _exit_code(process)
+        except (OSError, ValueError):
+            # A process its executor closed has nothing left to read, and the log must not fail instead of the error.
+            continue
+        if code is None:
+            continue
+        if code < 0:
+            try:
+                return f" (killed by {signal.Signals(-code).name})"
+            except ValueError:
+                return f" (killed by signal {-code})"
+        return f" (exit code {code})"
+    return ""
+
+
+def _exit_code(process: multiprocessing.process.BaseProcess) -> Optional[int]:
+    """The exit code of a worker process, None while it runs. On Linux a worker that ends closes the pipe that tells
+    the pool it stopped a moment before its exit code can be read, and the thread of its executor may be the one
+    reading it: a worker whose pipe has closed is waited for, up to _EXIT_CODE_WAIT_S."""
+    deadline = time.monotonic() + _EXIT_CODE_WAIT_S
+    while process.exitcode is None and multiprocessing.connection.wait([process.sentinel], timeout=0) \
+            and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return process.exitcode
+
+
 def _stop(executor: ProcessPoolExecutor):
     """Shut the executor down without waiting for the requests in progress."""
     # Its manager thread could be waiting for the rest of a result that a stopped worker was sending (see
@@ -549,11 +583,11 @@ class AccessPool:
             if self._closed:
                 # Workers that the shutdown stopped while they started could start; their requests fail.
                 return
-            readies = list(self._ready.values())
-        for ready in readies:
+            readies = [(ready, self._executors.get(slot)) for slot, ready in self._ready.items()]
+        for ready, executor in readies:
             error = ready.exception() if ready.done() and not ready.cancelled() else None
             if error is not None:
-                raise RuntimeError(f"The data access processes cannot start: {error}") from error
+                raise RuntimeError(f"The data access processes cannot start: {error}{_ending(executor)}") from error
 
     @staticmethod
     def _unique(requests: Iterable[dict]) -> Dict[tuple, dict]:
@@ -588,8 +622,9 @@ class AccessPool:
             try:
                 future = self._executor(slot).submit(function, *args)
             except BrokenProcessPool:
-                logger.warning("A data access process had stopped, starting a new one")
-                _stop(self._executors.pop(slot))
+                stopped = self._executors.pop(slot)
+                logger.warning(f"A data access process had stopped{_ending(stopped)}, starting a new one")
+                _stop(stopped)
                 future = self._executor(slot).submit(function, *args)
             with self._loads_lock:
                 self._loads[slot] += 1
@@ -650,7 +685,7 @@ class AccessPool:
         """Start the worker of the slot unless it is starting or has started: once more if it stopped."""
         executor = self._executors.get(slot)
         if executor is not None and getattr(executor, '_broken', False):
-            logger.warning("A data access process had stopped, starting a new one")
+            logger.warning(f"A data access process had stopped{_ending(executor)}, starting a new one")
             _stop(self._executors.pop(slot))
         self._executor(slot)
 

@@ -38,6 +38,9 @@ class IplotQtCanvas(QWidget):
     """
     cmdDone = Signal(IplotCommand)
     focusChanged = Signal()
+    # How many views wait for data read in the background (see BackendParserBase._process_view_change), whenever that
+    # number changes.
+    viewReadsChanged = Signal(int)
     #: How far, in pixels, a drag across the mini-map must go to zoom the plot above to it.
     MINIMAP_ZOOM_MIN_PX = 5
     openPlotPreferences = Signal(object)
