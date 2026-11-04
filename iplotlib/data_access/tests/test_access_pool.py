@@ -184,6 +184,28 @@ def _ending_data_access():
     os._exit(5)
 
 
+class _Worker:
+    """A worker process as _ending sees it. One that ended gives its exit code from the third time it is asked only:
+    on Linux a worker that ends closes the pipe that tells the pool it stopped a moment before its exit code can be
+    read, and the thread of its executor may be the one reading it."""
+
+    def __init__(self, code: int, ended: bool):
+        self._code = code
+        self._asked = 0
+        self.sentinel, self._writer = multiprocessing.Pipe(duplex=False)
+        if ended:
+            self._writer.close()
+
+    @property
+    def exitcode(self):
+        self._asked += 1
+        return self._code if self._writer.closed and self._asked > 2 else None
+
+    def close(self):
+        self.sentinel.close()
+        self._writer.close()
+
+
 def _slow_data_access():
     time.sleep(10)
     return _WorkerDataAccess()
@@ -494,6 +516,20 @@ class AccessPoolTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"cannot start: .* \(exit code 5\)$"):
             pool.fetch([_params('plain')])
+
+    def test_the_log_waits_for_the_exit_code_of_a_worker_that_is_ending(self):
+        worker = _Worker(5, ended=True)
+        self.addCleanup(worker.close)
+
+        self.assertEqual(access_pool._ending(SimpleNamespace(_processes={1: worker})), " (exit code 5)")
+
+    def test_the_log_does_not_wait_for_a_worker_that_runs(self):
+        worker = _Worker(5, ended=False)
+        self.addCleanup(worker.close)
+        started = time.monotonic()
+
+        self.assertEqual(access_pool._ending(SimpleNamespace(_processes={1: worker})), "")
+        self.assertLess(time.monotonic() - started, access_pool._EXIT_CODE_WAIT_S / 2)
 
     def test_workers_that_cannot_set_up_data_access_say_so(self):
         pool = self._own_pool(factory=_broken_data_access, started=('uda',))
