@@ -54,6 +54,11 @@ _STUCK_AFTER_S = 2.0
 # Seconds to wait for the exit code of a worker that ends (see _exit_code).
 _EXIT_CODE_WAIT_S = 1.0
 
+# Whether a worker watches the application through a pipe from it (Linux, macOS) rather than through its process
+# (Windows), and the seconds it gives the application to be gone once that pipe has closed (see _watch_parent).
+_PARENT_SENTINEL_IS_A_PIPE = os.name == 'posix'
+_PARENT_GONE_WAIT_S = 2.0
+
 _STOPPED = "The data access process stopped while reading the data"
 
 # State of a worker process: what sets its data access up, the data source types it reads (all if
@@ -86,17 +91,32 @@ def app_data_access():
     return data_access
 
 
+def _start_worker(*args):
+    """Set up a worker process (see _init_worker). The executor logs why one cannot start on a logger of its own,
+    which the application may show in its console only: the reason goes to the application's log too."""
+    try:
+        _init_worker(*args)
+    except BaseException:
+        logger.exception("The data access process cannot start")
+        raise
+
+
 def _init_worker(log_queue, parent_log_file, data_access_factory, num_samples, num_samples_override,
                  source_types, cache_share, leave_unconnected, progress_queue):
     global _worker_data_access_factory, _worker_source_types, _worker_cache_share, _worker_leave_unconnected
     global _worker_progress
+    # First, so that whatever stops the worker from here on is in the application's log.
+    _forward_logging(log_queue, parent_log_file)
     _worker_progress = progress_queue
     # Ctrl+C is the application's to handle, and a worker stops when the application does.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     threading.Thread(target=_watch_parent, daemon=True).start()
-    # A crash of a compiled data access client leaves its Python traceback on stderr.
-    faulthandler.enable()
-    _forward_logging(log_queue, parent_log_file)
+    # A crash of a compiled data access client leaves its Python traceback on stderr, when there is one: without it
+    # the worker reads all the same.
+    try:
+        faulthandler.enable()
+    except (RuntimeError, OSError, ValueError, AttributeError) as error:
+        logger.warning(f"A crash of this data access process would leave no traceback: {error}")
     AccessHelper.num_samples = num_samples
     AccessHelper.num_samples_override = num_samples_override
     _worker_data_access_factory = data_access_factory
@@ -110,8 +130,25 @@ def _init_worker(log_queue, parent_log_file, data_access_factory, num_samples, n
 
 def _watch_parent():
     # A worker left behind by an application that was killed would keep its connections open.
-    multiprocessing.connection.wait([multiprocessing.parent_process().sentinel])
+    parent = multiprocessing.parent_process()
+    multiprocessing.connection.wait([parent.sentinel])
+    # The pipe ends with the application, but it can also close while the application runs: the worker then goes on
+    # until it has another parent, which it gets when the application ends.
+    if _PARENT_SENTINEL_IS_A_PIPE and not _parent_gone(parent.pid, _PARENT_GONE_WAIT_S):
+        logger.warning("The pipe from the application closed while it runs, the data access process goes on")
+        while not _parent_gone(parent.pid, _PARENT_GONE_WAIT_S):
+            pass
     os._exit(0)
+
+
+def _parent_gone(pid: int, seconds: float) -> bool:
+    """Whether the application, process `pid`, has ended within `seconds`."""
+    deadline = time.monotonic() + seconds
+    while os.getppid() == pid:
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
+    return True
 
 
 def _set_up_data_access():
@@ -827,7 +864,7 @@ class AccessPool:
             executor = ProcessPoolExecutor(
                 max_workers=1,
                 mp_context=self._context,
-                initializer=_init_worker,
+                initializer=_start_worker,
                 initargs=(self._log_queue, self._log_file, self._data_access_factory,
                           AccessHelper.num_samples, AccessHelper.num_samples_override,
                           PARALLEL_SOURCE_TYPES if parallel else self._serial_source_types(),
