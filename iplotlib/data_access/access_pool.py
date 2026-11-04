@@ -88,6 +88,16 @@ def app_data_access():
     return data_access
 
 
+def _start_worker(*args):
+    """Set up a worker process (see _init_worker). The executor logs why one cannot start on a logger of its own,
+    which the application may show in its console only: the reason goes to the application's log too."""
+    try:
+        _init_worker(*args)
+    except BaseException:
+        logger.exception("The data access process cannot start")
+        raise
+
+
 def _init_worker(log_queue, parent_log_file, data_access_factory, num_samples, num_samples_override,
                  source_types, cache_share, leave_unconnected):
     global _worker_data_access_factory, _worker_source_types, _worker_cache_share, _worker_leave_unconnected
@@ -725,7 +735,7 @@ class AccessPool:
             executor = ProcessPoolExecutor(
                 max_workers=1,
                 mp_context=self._context,
-                initializer=_init_worker,
+                initializer=_start_worker,
                 initargs=(self._log_queue, self._log_file, self._data_access_factory,
                           AccessHelper.num_samples, AccessHelper.num_samples_override,
                           PARALLEL_SOURCE_TYPES if parallel else self._serial_source_types(),

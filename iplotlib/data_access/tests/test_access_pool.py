@@ -165,6 +165,11 @@ def _ending_data_access():
     os._exit(5)
 
 
+def _exiting_data_access():
+    """Ends the worker while it starts as a library that calls sys.exit() does: with exit code 0."""
+    sys.exit()
+
+
 class _Worker:
     """A worker process as _ending sees it. One that ended gives its exit code from the third time it is asked only:
     on Linux a worker that ends closes the pipe that tells the pool it stopped a moment before its exit code can be
@@ -497,6 +502,21 @@ class AccessPoolTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"cannot start: .* \(exit code 5\)$"):
             pool.fetch([_params('plain')])
+
+    def test_a_worker_that_cannot_start_leaves_the_reason_in_the_application_log(self):
+        records = _CapturingHandler()
+        access_pool.logger.addHandler(records)
+        self.addCleanup(access_pool.logger.removeHandler, records)
+        pool = self._own_pool(factory=_exiting_data_access, started=('uda',))
+
+        with self.assertRaisesRegex(RuntimeError, r"cannot start: .* \(exit code 0\)$"):
+            pool.fetch([_params('plain')])
+        pool._log_worker_records()
+
+        reasons = [record.getMessage() for record in records.records
+                   if record.getMessage().startswith("The data access process cannot start")]
+        self.assertTrue(reasons)
+        self.assertIn("SystemExit", reasons[0])
 
     def test_the_log_waits_for_the_exit_code_of_a_worker_that_is_ending(self):
         worker = _Worker(5, ended=True)
