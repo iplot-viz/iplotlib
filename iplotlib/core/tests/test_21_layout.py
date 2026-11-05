@@ -607,6 +607,23 @@ class TestUnstack(unittest.TestCase):
         # The plot is left as it was.
         self.assertEqual((sorted(b.signals), len(b.axes[1]), b.legend_anchor), ([1, 2], 2, {'2': [0.1, 0.2]}))
 
+    def test_each_plot_takes_the_y_axis_given_to_its_stack_in_the_order_the_backend_draws_them(self):
+        canvas = _canvas(COLUMN)
+        b = _plot(canvas, 'B')
+        b.axes = [LinearAxis(), [LinearAxis(label='first'), LinearAxis(label='second')]]
+        b.add_signal(SignalXY(label='B2'), stack=2)
+        b.add_signal(SignalXY(label='B1'), stack=1)
+
+        def labels(order=None):
+            return [part.axes[1][0].label for part, slot in sorted(unstacked(canvas, b, order=order).slots,
+                                                                   key=lambda item: item[1].row)
+                    if part.plot_title == 'B']
+
+        # From the top, the plots of stacks 1 and 2.
+        self.assertEqual(labels(), ['second', 'first'])
+        self.assertEqual(labels([1, 2]), ['first', 'second'])
+        self.assertEqual(labels([1]), ['second', 'first'])
+
     def test_going_back_gives_the_plot_its_stacks_back(self):
         canvas = _stacked(_canvas(COLUMN), {'B': 2})
         b = _plot(canvas, 'B')

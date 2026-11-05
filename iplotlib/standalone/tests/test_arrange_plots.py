@@ -23,6 +23,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QMenu
 
 from iplotlib.core import layout
+from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.display import MODE_FIXED, DisplayScale
 from iplotlib.core.plot import PlotXY
@@ -971,6 +972,31 @@ class TestArrangePlots(unittest.TestCase):
                 qt_canvas.redo()
                 self.app.processEvents()
                 self.assertEqual(self._labels(canvas), [[['s00']], [['s10']], [['s20']]])
+
+    def test_unstack_gives_each_plot_the_y_axis_of_its_stack_also_for_stacks_added_out_of_order(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                _, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(1,))
+                canvas = Canvas(rows=1, cols=1, mouse_mode=Canvas.MOUSE_MODE_SELECT)
+                plot = PlotXY(plot_title='0.0', row=1, col=1, axes=[LinearAxis(), [LinearAxis(), LinearAxis()]])
+                for stack, low in ((2, 100.0), (1, 0.0)):
+                    signal = SignalXY(label=f'stack {stack}', uid=f'stack {stack}')
+                    signal.set_data([np.linspace(0.0, 9.0, 10), np.linspace(low, low + 9.0, 10)])
+                    plot.add_signal(signal, stack=stack)
+                canvas.add_plot(plot, 0)
+                qt_canvas.set_canvas(canvas)
+                self.app.processEvents()
+
+                qt_canvas.unstack(plot)
+                self.app.processEvents()
+
+                parser = qt_canvas._parser
+                for part, low in zip(canvas.plots[0], (0.0, 100.0)):
+                    impl = parser._plot_impl_plot_lut[id(part)][0]
+                    parser.set_plot_limits_to_original(impl)
+                    self.app.processEvents()
+                    bottom, top = parser.get_oaw_axis_limits(impl, 1)
+                    self.assertTrue(bottom <= low and low + 9.0 <= top < low + 50.0, (part.signals, bottom, top))
 
     def test_unstack_is_greyed_out_while_a_plot_has_the_focus(self):
         for backend in BACKENDS:

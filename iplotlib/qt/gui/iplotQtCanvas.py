@@ -836,7 +836,11 @@ class IplotQtCanvas(QWidget):
         None if it cannot now."""
         if not self._layout_allowed():
             return None
-        return layout.unstacked(self.get_canvas(), plot, self.reserved_slots())
+        # Each backend pairs the stacks with the Y axes in the order it draws them.
+        items = [self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+                 for impl_plot in self._parser._plot_impl_plot_lut.get(id(plot), [])]
+        order = [item.stack_key for item in items] if all(items) else None
+        return layout.unstacked(self.get_canvas(), plot, self.reserved_slots(), order)
 
     def unstack(self, plot):
         """Give each stack of `plot` a plot of its own, as a command that undo takes back. Nothing happens if it

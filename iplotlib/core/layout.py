@@ -202,16 +202,18 @@ def laid_out(canvas: Canvas, rows: int, cols: int, reserved: Iterable[Slot] = ()
                        [place for (other, _), place in zip(kept, places) if isinstance(other, _Reserved)], (rows, cols))
 
 
-def unstacked(canvas: Canvas, plot: Plot, reserved: Iterable[Slot] = ()) -> Optional[Arrangement]:
+def unstacked(canvas: Canvas, plot: Plot, reserved: Iterable[Slot] = (), order: Iterable[int] = None) \
+        -> Optional[Arrangement]:
     """The plots of the canvas with each stack of `plot` in a plot of its own, from the top in the order of their
     numbers: they share out the rows of the plot, and take more below it, as resized gives them, when the stacks
     outnumber its rows. None if the plot has a single stack, is not a plot of curves along X, or cannot take the rows.
 
     Each plot takes the Y axis of its stack, a copy of the X axis and the legend of its stack dragged or folded away;
-    the first one takes the rulers too, which the others echo when they share the X axis. The changes take the stacks
-    from the slot of the plot as those that give joined plots their stacks back do (see Arrangement.changes): the first
-    plot keeps the numbers of the stacks it takes, and each of the others has its stack numbered 1. The plot is left as
-    it was, to take its stacks back."""
+    the first one takes the rulers too, which the others echo when they share the X axis. The plot gives its Y axes to
+    its stacks in `order`, the order the backend that drew it draws them in, or else in the order they were added, as
+    a joined plot does (see _joined). The changes take the stacks from the slot of the plot as those that give joined
+    plots their stacks back do (see Arrangement.changes): the first plot keeps the numbers of the stacks it takes, and
+    each of the others has its stack numbered 1. The plot is left as it was, to take its stacks back."""
     if type(plot) is not PlotXY or len(plot.signals) < 2 or len(plot.axes[1]) != len(plot.signals):
         return None
     slots = _occupants(canvas, reserved)
@@ -219,6 +221,7 @@ def unstacked(canvas: Canvas, plot: Plot, reserved: Iterable[Slot] = ()) -> Opti
     if source is None:
         return None
     stacks = sorted(plot.signals)
+    order = list(order) if order is not None and sorted(order) == stacks else list(plot.signals)
     if source.row_span >= len(stacks):
         before = _arrangement(canvas, slots, {})
         area = source
@@ -238,8 +241,7 @@ def unstacked(canvas: Canvas, plot: Plot, reserved: Iterable[Slot] = ()) -> Opti
         part = copy.copy(plot)
         number = stack - offset
         part.signals = {number: list(plot.signals[stack])}
-        # The stacks of a plot take its Y axes in the order they were added (see _joined).
-        part.axes = [copy.copy(plot.axes[0]), [plot.axes[1][list(plot.signals).index(stack)]]]
+        part.axes = [copy.copy(plot.axes[0]), [plot.axes[1][order.index(stack)]]]
         part.rulers = list(plot.rulers or []) if index == 0 else []
         part.legend_anchor = {str(number): list(anchor) for key, anchor in (plot.legend_anchor or {}).items()
                               if int(key) == stack} or None
