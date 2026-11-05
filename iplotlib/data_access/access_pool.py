@@ -178,7 +178,12 @@ def _forward_logging(log_queue, parent_log_file):
     _drop_log_handlers()
     logging.getLogger().addHandler(logging.handlers.QueueHandler(log_queue))
     logging.captureWarnings(True)
-    own_file.close()
+    try:
+        own_file.close()
+    except OSError as error:
+        # Closing the file reports the writes to it that failed, even those of the parent process to the same file on
+        # a shared disk, as when it is full: this worker writes to it no more.
+        logger.warning(f"Writing to the log file failed: {error}")
     own_path = getattr(own_file, 'baseFilename', None)
     if own_path and own_path != parent_log_file:
         try:
