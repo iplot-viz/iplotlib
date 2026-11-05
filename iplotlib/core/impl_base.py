@@ -202,6 +202,9 @@ class BackendParserBase(ABC):
         self._arrived_in_pan = {}  # type: Dict[Any, Callable[[], None]]
         # Called once the data read in the background for a view that changed are drawn.
         self._on_view_data_read = None  # type: Optional[Callable[[], None]]
+        # Called with how many views wait for data read in the background, whenever that number changes.
+        self._on_view_reads_changed = None  # type: Optional[Callable[[int], None]]
+        self._view_reads_told = 0
 
     @staticmethod
     def signal_lut_key(signal):
@@ -780,6 +783,7 @@ class BackendParserBase(ABC):
                 self._view_plots[owner] = impl_plot
                 if fit:
                     self._view_fits.add(owner)
+                self._view_reads_changed()
                 return
             except Exception:
                 logger.exception("Reading in the worker processes failed, data are read in this thread from now on")
@@ -792,6 +796,7 @@ class BackendParserBase(ABC):
                         rounds: int, read: dict, results: dict):
         """Run `step` again with the data read in the background for it (see _process_view_change)."""
         self._view_reads.pop(owner, None)
+        self._view_reads_changed()
         # The signals that the step reads again get what the earlier rounds read, as an expression
         # does once the alias it needs arrives.
         results = {**read, **results}
@@ -825,6 +830,13 @@ class BackendParserBase(ABC):
         self.refresh_rulers(impl_plot)
         if self._on_view_data_read is not None:
             self._on_view_data_read()
+
+    def _view_reads_changed(self):
+        """Tell _on_view_reads_changed how many views wait for data read in the background, if that changed: right as
+        it changes, so that what fails next, such as drawing the data that arrived, cannot leave it untold."""
+        if len(self._view_reads) != self._view_reads_told and self._on_view_reads_changed is not None:
+            self._view_reads_told = len(self._view_reads)
+            self._on_view_reads_changed(self._view_reads_told)
 
     def _update_view_cmd(self):
         """Keep in the last view command of the history the limits of the view once the data read in the
@@ -865,6 +877,7 @@ class BackendParserBase(ABC):
         pending = self._view_reads.pop(owner, None)
         if pending is not None:
             pending.cancel()
+        self._view_reads_changed()
 
     def drop_view_reads(self):
         """Forget the data still being read in the background for views that changed."""
@@ -877,6 +890,7 @@ class BackendParserBase(ABC):
         self._undrawn_fits.clear()
         self._undrawn_follows.clear()
         self._arrived_in_pan.clear()
+        self._view_reads_changed()
 
     def _find_canvas_signal_by_alias(self, alias: str):
         """Signal registered in the canvas under the given alias, if any."""

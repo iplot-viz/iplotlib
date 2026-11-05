@@ -179,6 +179,38 @@ def _broken_data_access():
     raise RuntimeError("no configuration")
 
 
+def _ending_data_access():
+    """Ends the worker while it starts, with no error of its own to log, as the system ends a process it kills."""
+    os._exit(5)
+
+
+def _exiting_data_access():
+    """Ends the worker while it starts as a library that calls sys.exit() does: with exit code 0."""
+    sys.exit()
+
+
+class _Worker:
+    """A worker process as _ending sees it. One that ended gives its exit code from the third time it is asked only:
+    on Linux a worker that ends closes the pipe that tells the pool it stopped a moment before its exit code can be
+    read, and the thread of its executor may be the one reading it."""
+
+    def __init__(self, code: int, ended: bool):
+        self._code = code
+        self._asked = 0
+        self.sentinel, self._writer = multiprocessing.Pipe(duplex=False)
+        if ended:
+            self._writer.close()
+
+    @property
+    def exitcode(self):
+        self._asked += 1
+        return self._code if self._writer.closed and self._asked > 2 else None
+
+    def close(self):
+        self.sentinel.close()
+        self._writer.close()
+
+
 def _slow_data_access():
     time.sleep(10)
     return _WorkerDataAccess()
@@ -473,6 +505,52 @@ class AccessPoolTests(unittest.TestCase):
         later = pool.fetch([_params('plain', end=T1 + 40)])
         self.assertEqual(len(later), 1)
 
+    def test_the_log_says_how_a_worker_that_stopped_ended(self):
+        pool = self._own_pool(started=('uda',))
+        records = _CapturingHandler()
+        access_pool.logger.addHandler(records)
+        self.addCleanup(access_pool.logger.removeHandler, records)
+
+        pool.fetch([_params('crash')])
+
+        messages = [record.getMessage() for record in records.records]
+        self.assertIn("A data access process had stopped (exit code 3), starting a new one", messages)
+
+    def test_a_worker_that_ends_while_it_starts_says_how(self):
+        pool = self._own_pool(factory=_ending_data_access, started=('uda',))
+
+        with self.assertRaisesRegex(RuntimeError, r"cannot start: .* \(exit code 5\)$"):
+            pool.fetch([_params('plain')])
+
+    def test_a_worker_that_cannot_start_leaves_the_reason_in_the_application_log(self):
+        records = _CapturingHandler()
+        access_pool.logger.addHandler(records)
+        self.addCleanup(access_pool.logger.removeHandler, records)
+        pool = self._own_pool(factory=_exiting_data_access, started=('uda',))
+
+        with self.assertRaisesRegex(RuntimeError, r"cannot start: .* \(exit code 0\)$"):
+            pool.fetch([_params('plain')])
+        pool._log_worker_records()
+
+        reasons = [record.getMessage() for record in records.records
+                   if record.getMessage().startswith("The data access process cannot start")]
+        self.assertTrue(reasons)
+        self.assertIn("SystemExit", reasons[0])
+
+    def test_the_log_waits_for_the_exit_code_of_a_worker_that_is_ending(self):
+        worker = _Worker(5, ended=True)
+        self.addCleanup(worker.close)
+
+        self.assertEqual(access_pool._ending(SimpleNamespace(_processes={1: worker})), " (exit code 5)")
+
+    def test_the_log_does_not_wait_for_a_worker_that_runs(self):
+        worker = _Worker(5, ended=False)
+        self.addCleanup(worker.close)
+        started = time.monotonic()
+
+        self.assertEqual(access_pool._ending(SimpleNamespace(_processes={1: worker})), "")
+        self.assertLess(time.monotonic() - started, access_pool._EXIT_CODE_WAIT_S / 2)
+
     def test_workers_that_cannot_set_up_data_access_say_so(self):
         pool = self._own_pool(factory=_broken_data_access, started=('uda',))
 
@@ -663,6 +741,96 @@ class AccessPoolTests(unittest.TestCase):
             time.sleep(0.1)
 
         self.assertFalse(_alive(worker))
+
+    def _watch(self, parent_checks: int):
+        """Runs the watch of a worker over a pipe from the application that has closed, while the application is
+        still its parent for `parent_checks` checks; gives the checks made before the worker ended and the log."""
+        reader, writer = multiprocessing.Pipe(duplex=False)
+        writer.close()
+        self.addCleanup(reader.close)
+        checks, ended = [], []
+        records = _CapturingHandler()
+        access_pool.logger.addHandler(records)
+        self.addCleanup(access_pool.logger.removeHandler, records)
+
+        def getppid():
+            checks.append(None)
+            return 100 if len(checks) <= parent_checks else 1
+
+        def exit_(code):
+            ended.append((len(checks), code))
+            raise SystemExit
+
+        with patch.object(access_pool, '_PARENT_SENTINEL_IS_A_PIPE', True), \
+                patch.object(access_pool, '_PARENT_GONE_WAIT_S', 0.3), \
+                patch.object(access_pool.multiprocessing, 'parent_process',
+                             lambda: SimpleNamespace(pid=100, sentinel=reader)), \
+                patch.object(access_pool.os, 'getppid', getppid), patch.object(access_pool.os, '_exit', exit_):
+            with self.assertRaises(SystemExit):
+                access_pool._watch_parent()
+        return ended, [record.getMessage() for record in records.records]
+
+    def test_a_worker_goes_on_while_the_application_runs_after_the_pipe_from_it_closed(self):
+        ended, messages = self._watch(parent_checks=8)
+
+        self.assertEqual(ended, [(9, 0)])
+        self.assertEqual(messages, ["The pipe from the application closed while it runs, the data access process "
+                                    "goes on"])
+
+    def test_a_worker_ends_with_the_application(self):
+        ended, messages = self._watch(parent_checks=0)
+
+        self.assertEqual(ended, [(1, 0)])
+        self.assertEqual(messages, [])
+
+    def test_a_worker_sends_its_log_to_the_application_before_anything_that_could_stop_it(self):
+        steps = []
+
+        def step(name):
+            return lambda *args, **kwargs: steps.append(name)
+
+        def enable_without_stderr():
+            steps.append('faulthandler')
+            raise RuntimeError("sys.stderr is None")
+
+        with patch.object(access_pool, '_forward_logging', step('log')), \
+                patch.object(access_pool.signal, 'signal', step('ctrl+c')), \
+                patch.object(access_pool, '_watch_parent', step('watch')), \
+                patch.object(access_pool.faulthandler, 'enable', enable_without_stderr), \
+                patch.object(access_pool, '_set_up_data_access', step('data access')), \
+                patch.object(access_pool, '_drop_log_handlers', step('handlers')), \
+                patch.object(access_pool, '_worker_data_access_factory', None), \
+                patch.object(access_pool, '_worker_source_types', None), \
+                patch.object(access_pool, '_worker_cache_share', 1), \
+                patch.object(access_pool, '_worker_leave_unconnected', frozenset()), \
+                patch.object(access_pool, '_worker_progress', None), \
+                patch.object(AccessHelper, 'num_samples', AccessHelper.num_samples), \
+                patch.object(AccessHelper, 'num_samples_override', AccessHelper.num_samples_override):
+            access_pool._init_worker(None, None, None, 1000, False, None, 1, frozenset(), None)
+
+        self.assertEqual(steps[0], 'log')
+        self.assertIn('data access', steps)
+
+    def test_a_worker_goes_on_when_its_log_file_reports_a_full_disk(self):
+        class FullDiskFile(logging.Handler):
+            def close(self):
+                raise OSError(28, "No space left on device")
+
+        records = _CapturingHandler()
+        access_pool.logger.addHandler(records)
+        self.addCleanup(access_pool.logger.removeHandler, records)
+        root = logging.getLogger()
+        self.addCleanup(setattr, root, 'handlers', list(root.handlers))
+        self.addCleanup(logging.captureWarnings, False)
+        log_queue = SimpleNamespace(put_nowait=lambda record: None)
+
+        with patch.object(setupLogger.FileHandlerIplot, 'fhandler', FullDiskFile()), \
+                patch.object(access_pool, '_drop_log_handlers', lambda: None):
+            access_pool._forward_logging(log_queue, None)
+
+        self.assertTrue(any(getattr(handler, 'queue', None) is log_queue for handler in root.handlers))
+        self.assertEqual([record.getMessage() for record in records.records],
+                         ["Writing to the log file failed: [Errno 28] No space left on device"])
 
     def test_a_worker_that_stops_while_it_is_given_a_request_blocks_no_thread(self):
         # Python 3.12.1 and later fail the requests of a stopped worker holding the lock that submit() takes.
