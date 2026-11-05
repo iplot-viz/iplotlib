@@ -811,6 +811,27 @@ class AccessPoolTests(unittest.TestCase):
         self.assertEqual(steps[0], 'log')
         self.assertIn('data access', steps)
 
+    def test_a_worker_goes_on_when_its_log_file_reports_a_full_disk(self):
+        class FullDiskFile(logging.Handler):
+            def close(self):
+                raise OSError(28, "No space left on device")
+
+        records = _CapturingHandler()
+        access_pool.logger.addHandler(records)
+        self.addCleanup(access_pool.logger.removeHandler, records)
+        root = logging.getLogger()
+        self.addCleanup(setattr, root, 'handlers', list(root.handlers))
+        self.addCleanup(logging.captureWarnings, False)
+        log_queue = SimpleNamespace(put_nowait=lambda record: None)
+
+        with patch.object(setupLogger.FileHandlerIplot, 'fhandler', FullDiskFile()), \
+                patch.object(access_pool, '_drop_log_handlers', lambda: None):
+            access_pool._forward_logging(log_queue, None)
+
+        self.assertTrue(any(getattr(handler, 'queue', None) is log_queue for handler in root.handlers))
+        self.assertEqual([record.getMessage() for record in records.records],
+                         ["Writing to the log file failed: [Errno 28] No space left on device"])
+
     def test_a_worker_that_stops_while_it_is_given_a_request_blocks_no_thread(self):
         # Python 3.12.1 and later fail the requests of a stopped worker holding the lock that submit() takes.
         # The application bounds its wait for the request itself. The timeout only ends one that hangs before, and
