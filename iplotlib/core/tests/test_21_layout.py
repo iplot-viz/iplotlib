@@ -5,7 +5,8 @@ import unittest
 
 from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.layout import Arrangement, Slot, arrange, current, grid_size, laid_out, moved, resized, slots_of
+from iplotlib.core.layout import Arrangement, Slot, arrange, current, grid_size, laid_out, moved, resized, slots_of, \
+    unstacked
 from iplotlib.core.plot import PlotXY, PlotXYWithSlider
 from iplotlib.core.ruler import Ruler
 from iplotlib.core.signal import SignalXY
@@ -287,7 +288,8 @@ class TestResize(unittest.TestCase):
 
 
 class TestReservedSlots(unittest.TestCase):
-    """Slots an application reserves for plots it does not draw now, such as those whose data could not be read."""
+    """Slots an application reserves for plots it does not draw now, such as those of rows added since it drew the
+    canvas."""
 
     def test_a_reserved_slot_in_the_column_of_a_plot_moves_as_a_plot_does(self):
         canvas = _canvas({'A': (0, 0, 1, 1), 'B': (3, 0, 1, 1)})
@@ -555,6 +557,105 @@ class TestLayOut(unittest.TestCase):
 
         self.assertEqual((canvas.rows, canvas.cols, canvas.layout_rows, canvas.layout_cols), (2, 3, 2, 3))
         self.assertEqual(canvas.plots, [[], [], []])
+
+
+def _parts(arrangement: Arrangement, plot) -> list:
+    """The plots that take the stacks of `plot`, from the top: their slots and their signals by stack."""
+    return sorted(((slot.row, slot.col, slot.row_span, slot.col_span),
+                   {stack: [signal.label for signal in signals] for stack, signals in part.signals.items()})
+                  for part, slot in arrangement.slots if part.plot_title == plot.plot_title)
+
+
+class TestUnstack(unittest.TestCase):
+
+    def test_each_stack_takes_a_plot_below_the_one_before_and_the_plots_below_move_down(self):
+        canvas = _stacked(_canvas(COLUMN), {'B': 3})
+
+        arrangement = unstacked(canvas, _plot(canvas, 'B'))
+
+        self.assertEqual(_parts(arrangement, _plot(canvas, 'B')), [((1, 0, 1, 1), {1: ['B1']}),
+                                                                   ((2, 0, 1, 1), {1: ['B2']}),
+                                                                   ((3, 0, 1, 1), {1: ['B3']})])
+        self.assertEqual({_places(arrangement)[title] for title in 'ACD'}, {(0, 0, 1, 1), (4, 0, 1, 1), (5, 0, 1, 1)})
+        self.assertEqual((arrangement.rows, arrangement.cols), (6, 1))
+        self.assertEqual(_offsets(arrangement), {((1, 0, 1), (2, 0, 0)), ((1, 0, 2), (3, 0, 0)),
+                                                 ((2, 0, 0), (4, 0, 0)), ((3, 0, 0), (5, 0, 0))})
+
+    def test_the_stacks_share_out_the_rows_of_a_taller_plot_and_move_no_other_plot(self):
+        canvas = _stacked(_canvas({'A': (0, 0, 3, 1), 'B': (3, 0, 1, 1)}), {'A': 2})
+
+        arrangement = unstacked(canvas, _plot(canvas, 'A'))
+
+        self.assertEqual([slot for slot, _ in _parts(arrangement, _plot(canvas, 'A'))], [(0, 0, 2, 1), (2, 0, 1, 1)])
+        self.assertEqual(_places(arrangement)['B'], (3, 0, 1, 1))
+        self.assertEqual(_offsets(arrangement), {((0, 0, 0), (0, 0, 0)), ((0, 0, 1), (2, 0, 0))})
+
+    def test_each_plot_takes_the_y_axis_and_the_legend_of_its_stack_and_the_first_one_the_rulers(self):
+        canvas = _stacked(_canvas(COLUMN), {'B': 2})
+        b = _plot(canvas, 'B')
+        b.add_ruler(Ruler(name='A', xy=(1.0, 0.0)))
+        b.legend_anchor, b.legend_collapsed = {'2': [0.1, 0.2]}, ['2']
+
+        parts = [part for part, slot in sorted(unstacked(canvas, b).slots, key=lambda item: item[1].row)
+                 if part.plot_title == 'B']
+
+        self.assertEqual([part.axes[1] for part in parts], [[b.axes[1][0]], [b.axes[1][1]]])
+        self.assertTrue(all(part.axes[0] == b.axes[0] and part.axes[0] is not b.axes[0] for part in parts))
+        self.assertEqual([[ruler.name for ruler in part.rulers] for part in parts], [['A'], []])
+        self.assertEqual([(part.legend_anchor, part.legend_collapsed) for part in parts],
+                         [(None, None), ({'1': [0.1, 0.2]}, ['1'])])
+        # The plot is left as it was.
+        self.assertEqual((sorted(b.signals), len(b.axes[1]), b.legend_anchor), ([1, 2], 2, {'2': [0.1, 0.2]}))
+
+    def test_going_back_gives_the_plot_its_stacks_back(self):
+        canvas = _stacked(_canvas(COLUMN), {'B': 2})
+        b = _plot(canvas, 'B')
+        before = current(canvas)
+
+        arrange(canvas, unstacked(canvas, b))
+        self.assertEqual(_titles(canvas), [['A', 'B', 'B', 'C', 'D']])
+        self.assertTrue(all(signal.parent() is not b for signals in b.signals.values() for signal in signals))
+
+        arrange(canvas, before)
+        self.assertEqual(_titles(canvas), [['A', 'B', 'C', 'D']])
+        self.assertIs(canvas.plots[0][1], b)
+        self.assertTrue(all(signal.parent() is b for signals in b.signals.values() for signal in signals))
+        self.assertTrue(all(axis.parent() is b for axis in [b.axes[0]] + b.axes[1]))
+
+    def test_the_stacks_numbered_up_to_the_next_drawn_one_go_with_the_drawn_one_before_them(self):
+        canvas = _canvas(COLUMN)
+        b = _plot(canvas, 'B')
+        b.axes = [LinearAxis(), [LinearAxis(), LinearAxis()]]
+        b.add_signal(SignalXY(label='B2'), stack=2)
+        b.add_signal(SignalXY(label='B4'), stack=4)
+
+        arrangement = unstacked(canvas, b)
+
+        self.assertEqual(_parts(arrangement, b), [((1, 0, 1, 1), {2: ['B2']}), ((2, 0, 1, 1), {1: ['B4']})])
+        self.assertIn(((1, 0, 3), (2, 0, 0)), _offsets(arrangement))
+        self.assertNotIn(((1, 0, 0), (1, 0, 0)), _offsets(arrangement))
+
+    def test_a_plot_of_one_stack_or_with_a_slider_is_not_unstacked(self):
+        canvas = _stacked(_canvas({'A': (0, 0, 1, 1)}))
+        slider = PlotXYWithSlider(plot_title='B', row=2, col=1)
+        slider.axes = [LinearAxis(), [LinearAxis(), LinearAxis()]]
+        slider.add_signal(SignalXY(label='B1'), stack=1)
+        slider.add_signal(SignalXY(label='B2'), stack=2)
+        canvas.plots[0].append(slider)
+
+        self.assertIsNone(unstacked(canvas, _plot(canvas, 'A')))
+        self.assertIsNone(unstacked(canvas, slider))
+
+    def test_a_plot_in_a_column_another_plot_covers_in_part_takes_only_the_empty_cells_below_it(self):
+        # B covers the column of A and the next one: the stacks of A take the empty cell below A, if there is one.
+        canvas = _stacked(_canvas({'A': (0, 0, 1, 1), 'C': (0, 1, 1, 1), 'B': (2, 0, 1, 2)}), {'A': 2})
+        full = _stacked(_canvas({'A': (0, 0, 1, 1), 'C': (0, 1, 1, 1), 'B': (1, 0, 1, 2)}), {'A': 2})
+
+        arrangement = unstacked(canvas, _plot(canvas, 'A'))
+
+        self.assertEqual([slot for slot, _ in _parts(arrangement, _plot(canvas, 'A'))], [(0, 0, 1, 1), (1, 0, 1, 1)])
+        self.assertEqual(_places(arrangement)['B'], (2, 0, 1, 2))
+        self.assertIsNone(unstacked(full, _plot(full, 'A')))
 
 
 def _titles(canvas: Canvas) -> list:
