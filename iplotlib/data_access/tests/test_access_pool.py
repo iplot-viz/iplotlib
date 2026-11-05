@@ -1,27 +1,24 @@
-"""Tests for AccessPool: data access requests run in worker processes, results come back
-by request key, and the GUI thread keeps running while it waits. Until the workers have
-started, the requests are read in this process."""
+"""Tests for AccessPool: data access requests run in worker threads, each with a data access object of its own,
+results come back by request key, and the GUI thread keeps running while it waits."""
 
 import ctypes
 import gc
 import logging
-import multiprocessing
 import os
-import signal
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import unittest
 import weakref
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future, wait
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, Qt, QTimer
 
+import iplotDataAccess.dataAccess as ida_data_access
 from iplotDataAccess.appDataAccess import AppDataAccess
 from iplotDataAccess.dataCommon import DataObj
 from iplotLogging import setupLogger
@@ -38,30 +35,18 @@ logger = setupLogger.get_logger(__name__)
 T0 = 1_700_000_000_000_000_000
 T1 = T0 + 60_000_000_000
 
-# How long the tests wait for a worker to start: as long as Python takes to load what the worker reads with,
-# which is minutes on a loaded machine (over two on an SDCC login node).
-_START_TIMEOUT_S = 600
-
-_cache_clears = 0
-
 _SAMPLE_LIMIT = ('Number of samples in reply exceeds available limit. Reduce request interval, use decimation '
                  'or read data by chunks.')
 
 
-class _UnpicklableError(Exception):
-    """Cannot be rebuilt from its arguments, like some errors of compiled data access clients."""
-
-    def __init__(self, code, text):
-        super().__init__(f"{code}: {text}")
-
-
 class _WorkerDataAccess:
-    """Data access of the worker processes; the variable name selects the behaviour."""
+    """Data access of the worker threads; the variable name selects the behaviour."""
+
+    def __init__(self):
+        self.clears = 0
 
     def get_data(self, data_s_name, **kwargs):
         name = kwargs['varname']
-        if name == 'crash':
-            os._exit(3)
         if name == 'stall':
             time.sleep(30)
         if name.startswith('slow'):
@@ -70,41 +55,38 @@ class _WorkerDataAccess:
             return SimpleNamespace(errcode=-1, errdesc='no data')
         if name == 'log':
             logger.warning("record from a worker")
-        if name == 'unpicklable':
-            raise _UnpicklableError(7, "the client failed")
+        if name == 'fail':
+            raise ValueError("the client failed")
         if name == 'limit':
             if kwargs['nbp'] == -1:
                 return SimpleNamespace(errcode=-1, errdesc=_SAMPLE_LIMIT)
             return SimpleNamespace(errcode=0, errdesc='', xdata=T0 + np.arange(3), ydata=np.full(3, kwargs['nbp']),
                                    xunit='ns', yunit='A', resolved_pulse=None)
-        values = {'slow-pid': [os.getpid()], 'clears': [_cache_clears]}.get(name, [1.0, 2.0])
+        values = {'slow-thread': [threading.get_ident()], 'clears': [self.clears],
+                  'own': [id(self), id(AccessHelper.thread_data_access())]}.get(name, [1.0, 2.0])
         return SimpleNamespace(errcode=0, errdesc='', xdata=T0 + np.arange(len(values)),
                                ydata=np.asarray(values, dtype=float), xunit='ns', yunit='A', resolved_pulse=None)
 
     def get_archive_window(self, data_s_name, **kwargs):
         name = kwargs['varname']
-        if name == 'crash':
-            os._exit(3)
-        if name == 'crash-once' and not os.path.exists(kwargs['marker']):
-            open(kwargs['marker'], 'w').close()
-            os._exit(3)
         if name == 'stall':
             time.sleep(30)
         if name == 'fail':
             raise ValueError("no archive for fail")
         held = _hold_gil(0.8) if name == 'gil' else 0.0
+        if name == 'sleep':
+            time.sleep(0.8)
         reply = DataObj()
-        reply.xdata, reply.ydata = T0 + np.arange(3), np.array([os.getpid(), held, float(kwargs['tsS'])])
+        reply.xdata, reply.ydata = T0 + np.arange(3), np.array([threading.get_ident(), held, float(kwargs['tsS'])])
         reply.xunit, reply.yunit = 'ns', 'A'
         return reply
 
     def clear_cache(self):
-        global _cache_clears
-        _cache_clears += 1
+        self.clears += 1
 
 
 def _hold_gil(seconds: float) -> float:
-    """Sleep in C for `seconds` keeping the GIL, as a compiled data access client can keep it while it
+    """Sleep in C for `seconds` keeping the GIL, as a data access client built without releasing it does while it
     reads: ctypes calls the functions of a PyDLL without releasing it. The time it took."""
     start = time.perf_counter()
     if os.name == 'nt':
@@ -128,6 +110,15 @@ def _worker_data_access_of_sources():
     return _WorkerDataAccessOfSources()
 
 
+class _WorkerDataAccessOfUdaOnly(_WorkerDataAccess):
+    """A data access object that could not connect to the data source uda2 when it was made."""
+
+    ds_list = {'uda': None}
+
+    def get_connected_data_source_names(self):
+        return ['uda']
+
+
 class _Cache:
     """The query cache of a data source, as the LRUCache of cachetools."""
 
@@ -139,6 +130,7 @@ class _WorkerDataAccessWithCaches(_WorkerDataAccess):
     """Data sources with a query cache each, and what a worker knows of the types it reads."""
 
     def __init__(self):
+        super().__init__()
         self.ds_list = {'uda': SimpleNamespace(access_cache=_Cache(300)),
                         'imas': SimpleNamespace(access_cache=_Cache(300))}
 
@@ -146,69 +138,48 @@ class _WorkerDataAccessWithCaches(_WorkerDataAccess):
         return self.ds_list[data_s_name].access_cache.maxsize
 
     def source_types(self, data_s_name):
-        return sorted(access_pool._worker_source_types or [])
+        return sorted(access_pool._worker.source_types or [])
 
     def leave_unconnected(self, data_s_name):
-        return sorted(access_pool._worker_leave_unconnected)
+        return sorted(access_pool._worker.leave_unconnected)
 
 
 def _worker_data_access_with_caches():
     return _WorkerDataAccessWithCaches()
 
 
+class _OverlapsRecorded:
+    """Data access of the application and of the workers at once, that records how many reads of each data source
+    type it makes at the same time."""
+
+    ds_list = {'uda': SimpleNamespace(source_type='CODAC_UDA'), 'imas': SimpleNamespace(source_type='IMAS')}
+    lock = threading.Lock()
+    inside = {}
+    most = {}
+
+    def get_data_source(self, name):
+        return self.ds_list.get(name)
+
+    def get_data(self, data_s_name, **kwargs):
+        with self.lock:
+            self.inside[data_s_name] = self.inside.get(data_s_name, 0) + 1
+            self.most[data_s_name] = max(self.most.get(data_s_name, 0), self.inside[data_s_name])
+        time.sleep(0.5)
+        with self.lock:
+            self.inside[data_s_name] -= 1
+        return SimpleNamespace(errcode=0, errdesc='', xdata=T0 + np.arange(2), ydata=np.ones(2), xunit='ns', yunit='A',
+                               resolved_pulse=None)
+
+    def clear_cache(self):
+        pass
+
+
 def _broken_data_access():
     raise RuntimeError("no configuration")
 
 
-def _ending_data_access():
-    """Ends the worker while it starts, with no error of its own to log, as the system ends a process it kills."""
-    os._exit(5)
-
-
-def _exiting_data_access():
-    """Ends the worker while it starts as a library that calls sys.exit() does: with exit code 0."""
-    sys.exit()
-
-
-class _Worker:
-    """A worker process as _ending sees it. One that ended gives its exit code from the third time it is asked only:
-    on Linux a worker that ends closes the pipe that tells the pool it stopped a moment before its exit code can be
-    read, and the thread of its executor may be the one reading it."""
-
-    def __init__(self, code: int, ended: bool):
-        self._code = code
-        self._asked = 0
-        self.sentinel, self._writer = multiprocessing.Pipe(duplex=False)
-        if ended:
-            self._writer.close()
-
-    @property
-    def exitcode(self):
-        self._asked += 1
-        return self._code if self._writer.closed and self._asked > 2 else None
-
-    def close(self):
-        self.sentinel.close()
-        self._writer.close()
-
-
-def _slow_data_access():
-    time.sleep(10)
-    return _WorkerDataAccess()
-
-
-def _slow_to_start_again_data_access():
-    """Sets up at once the first time, and in 10 s once the file that IPLOT_TEST_SET_UP names says it did."""
-    marker = os.environ['IPLOT_TEST_SET_UP']
-    if os.path.exists(marker):
-        time.sleep(10)
-    else:
-        open(marker, 'w').close()
-    return _WorkerDataAccess()
-
-
-class _ParentDataAccess:
-    """What the pool looks up in this process: the type of each data source."""
+class _ApplicationDataAccess:
+    """What the pool looks up in the application: the type of each data source."""
 
     ds_list = {'uda': SimpleNamespace(source_type='CODAC_UDA'), 'imas': SimpleNamespace(source_type='IMAS')}
 
@@ -216,107 +187,42 @@ class _ParentDataAccess:
         return self.ds_list.get(name)
 
 
-class _ParentDataAccessWithOneDown(_ParentDataAccess):
+class _ApplicationDataAccessOfTwoUda(_ApplicationDataAccess):
+    """An application connected to two UDA data sources."""
+
+    ds_list = dict(_ApplicationDataAccess.ds_list, uda2=SimpleNamespace(source_type='CODAC_UDA'))
+
+
+class _ApplicationDataAccessWithOneDown(_ApplicationDataAccess):
     """An application that could not connect to one of its UDA data sources."""
 
     unconnected = {'down'}
 
 
-class _ParentDataAccessThatReads(_ParentDataAccess, _WorkerDataAccess):
-    """The data access object of this process, which reads as those of the workers do. It notes what it is asked
-    for, and fails what stops a worker instead of stopping this process."""
-
-    def __init__(self):
-        self.asked = []
-        # A read of 'until-started' lasts until this says so.
-        self.started = lambda: True
-
-    def get_data(self, data_s_name, **kwargs):
-        self.asked.append(kwargs['varname'])
-        if kwargs['varname'] == 'crash':
-            raise RuntimeError("read in the application")
-        while kwargs['varname'] == 'until-started' and not self.started():
-            time.sleep(0.05)
-        return super().get_data(data_s_name, **kwargs)
-
-    def get_archive_window(self, data_s_name, **kwargs):
-        self.asked.append(kwargs['varname'])
-        if kwargs['varname'] == 'crash':
-            raise RuntimeError("called in the application")
-        return super().get_archive_window(data_s_name, **kwargs)
-
-
 def _workers_started(pool: AccessPool, *data_sources) -> AccessPool:
-    """The pool, once the workers of the data sources (all by default) have started, or failed to: until then, it
-    reads the requests in this process."""
+    """The pool, once the workers of the data sources (all by default) have set up their data access, or failed to."""
     pool.prepare(data_sources or ('uda', 'imas'))
-    for ready in list(pool._ready.values()):
-        ready.exception(timeout=_START_TIMEOUT_S)
+    for executor in list(pool._executors.values()):
+        executor.ready.exception(timeout=60)
     return pool
 
 
-def _alive(pid: int) -> bool:
-    if os.name == 'nt':
-        import ctypes
-        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return False
-        code = ctypes.c_ulong()
-        ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-        ctypes.windll.kernel32.CloseHandle(handle)
-        return code.value == 259  # STILL_ACTIVE
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
-
-
-# An application that starts a worker, prints its process id and waits to be killed.
-_APPLICATION = """
-from PySide6.QtCore import QCoreApplication
+# An application whose worker reads for 30 s when it exits. Prints when it asks for the read.
+_EXIT_WHILE_READING = """
+import sys
+from PySide6.QtCore import QCoreApplication, QTimer
 from iplotlib.data_access.access_pool import AccessPool
-from iplotlib.data_access.tests.test_access_pool import (_ParentDataAccess, _params, _worker_data_access,
-                                                         _workers_started)
+from iplotlib.data_access.tests.test_access_pool import _ApplicationDataAccess, _params, _worker_data_access
 from iplotlib.interface.iplotSignalAdapter import AccessHelper
 app = QCoreApplication([])
-AccessHelper.da = _ParentDataAccess()
-pool = _workers_started(AccessPool(1, data_access_factory=_worker_data_access), 'uda')
-print(int(list(pool.fetch([_params('slow-pid')]).values())[0]['d1'][0]), flush=True)
-input()
-"""
-
-
-# An application whose worker stops while another of its threads gives that worker a request (see
-# AccessPool._run). Prints whether the request was given, or the wait for it ended.
-_STOPPED_WHILE_GIVEN = """
-import os, signal, threading, time
-from iplotlib.data_access.access_pool import AccessPool, _read
-from iplotlib.data_access.tests.test_access_pool import (_ParentDataAccess, _params, _worker_data_access, T1,
-                                                         _workers_started)
-from iplotlib.interface.iplotSignalAdapter import AccessHelper
-AccessHelper.da = _ParentDataAccess()
-pool = _workers_started(AccessPool(1, data_access_factory=_worker_data_access), 'uda')
-worker = pool._ready[0].result()
-# Requests the worker has not read yet: its executor fails them, calling back the pool, when it stops.
-for n in range(2):
-    params = _params('stall', end=T1 + n)
-    pool._submit(AccessHelper.request_key(params), params)
-given = threading.Event()
-
-def give_a_request():
-    with pool._lock:
-        os.kill(worker, signal.SIGTERM)
-        time.sleep(3)
-        try:
-            pool._executors[0].submit(_read, _params('plain'), 0)
-        except Exception:
-            pass
-    given.set()
-
-threading.Thread(target=give_a_request, daemon=True).start()
-print('given' if given.wait(30) else 'blocked', flush=True)
-os._exit(0)
+AccessHelper.da = _ApplicationDataAccess()
+pool = AccessPool(1, data_access_factory=_worker_data_access)
+pool.fetch_later([_params('stall')], print)
+print('reading', flush=True)
+QTimer.singleShot(1000, app.quit)
+app.exec()
+pool.shutdown()
+sys.exit(0)
 """
 
 
@@ -327,6 +233,13 @@ def _params(varname, source='uda', end=T1):
 
 def _key(params):
     return AccessHelper.request_key(params)
+
+
+def _note_destructions(qobjects: list, threads: list):
+    """Note in `threads` the thread that destroys each of the Qt objects."""
+    for qobject in qobjects:
+        qobject.destroyed.connect(lambda *_: threads.append(threading.current_thread()),
+                                  Qt.ConnectionType.DirectConnection)
 
 
 class _CapturingHandler(logging.Handler):
@@ -343,7 +256,7 @@ class AccessPoolTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = ensure_qapp()
         cls._da = AccessHelper.da
-        AccessHelper.da = _ParentDataAccess()
+        AccessHelper.da = _ApplicationDataAccess()
         cls.pool = _workers_started(AccessPool(2, data_access_factory=_worker_data_access))
 
     @classmethod
@@ -351,36 +264,60 @@ class AccessPoolTests(unittest.TestCase):
         cls.pool.shutdown()
         AccessHelper.da = cls._da
 
-    def _own_pool(self, factory=_worker_data_access, started=('uda', 'imas')):
-        """A pool of its own, once the workers of the data sources `started` have started."""
-        pool = AccessPool(2, data_access_factory=factory)
+    def _own_pool(self, factory=_worker_data_access, started=('uda', 'imas'), workers=2):
+        """A pool of its own, once the workers of the data sources `started` have set up their data access."""
+        pool = AccessPool(workers, data_access_factory=factory)
         self.addCleanup(pool.shutdown)
         return _workers_started(pool, *started) if started else pool
 
+    def _arrived(self, delivered: list, seconds: float = 30):
+        deadline = time.monotonic() + seconds
+        while not delivered and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.01)
+        return delivered
+
     def test_results_and_errors_come_back_by_request_key(self):
-        plain, missing = _params('plain'), _params('missing')
+        plain, missing, fail = _params('plain'), _params('missing'), _params('fail')
 
-        results = self.pool.fetch([plain, missing, dict(plain)])
+        results = self.pool.fetch([plain, missing, dict(plain), fail])
 
-        self.assertEqual(set(results), {_key(plain), _key(missing)})
+        self.assertEqual(set(results), {_key(plain), _key(missing), _key(fail)})
         np.testing.assert_array_equal(results[_key(plain)]['d1'], [1.0, 2.0])
         self.assertIsInstance(results[_key(missing)], DataAccessError)
+        self.assertIsInstance(results[_key(fail)], DataAccessError)
+        self.assertEqual(str(results[_key(fail)]), "the client failed")
 
     def test_requests_to_a_parallel_source_run_at_the_same_time(self):
-        requests = [_params('slow-pid', end=T1 + i) for i in range(2)]
+        requests = [_params('slow-thread', end=T1 + i) for i in range(2)]
 
+        started = time.perf_counter()
         results = self.pool.fetch(requests)
 
-        pids = {results[_key(params)]['d1'][0] for params in requests}
-        self.assertEqual(len(pids), 2)
+        threads = {results[_key(params)]['d1'][0] for params in requests}
+        self.assertEqual(len(threads), 2)
+        self.assertLess(time.perf_counter() - started, 1.9)
 
     def test_requests_to_other_sources_share_one_worker(self):
-        requests = [_params('slow-pid', source='imas', end=T1 + i) for i in range(2)]
+        requests = [_params('slow-thread', source='imas', end=T1 + i) for i in range(2)]
 
         results = self.pool.fetch(requests)
 
-        pids = {results[_key(params)]['d1'][0] for params in requests}
-        self.assertEqual(len(pids), 1)
+        threads = {results[_key(params)]['d1'][0] for params in requests}
+        self.assertEqual(len(threads), 1)
+        self.assertNotIn(threading.get_ident(), threads)
+
+    def test_each_worker_reads_through_a_data_access_object_of_its_own(self):
+        requests = [_params('own', end=T1 + i) for i in range(2)] + [_params('own', source='imas')]
+
+        results = self.pool.fetch(requests)
+
+        owners = [tuple(results[_key(params)]['d1']) for params in requests]
+        # The object that reads is the worker's, and each worker has another one.
+        self.assertTrue(all(reader == own for reader, own in owners))
+        self.assertEqual(len({reader for reader, _ in owners}), 3)
+        self.assertNotIn(id(AccessHelper.da), {reader for reader, _ in owners})
+        self.assertIsNone(AccessHelper.thread_data_access())
 
     def test_the_gui_thread_keeps_running_while_it_waits(self):
         ticks = []
@@ -415,16 +352,7 @@ class AccessPoolTests(unittest.TestCase):
 
         self.assertEqual(len(results), 1)
 
-    def test_an_error_this_process_cannot_rebuild_comes_back_with_its_message(self):
-        unpicklable, plain = _params('unpicklable'), _params('plain', end=T1 + 70)
-
-        results = self.pool.fetch([unpicklable, plain])
-
-        self.assertIsInstance(results[_key(unpicklable)], DataAccessError)
-        self.assertEqual(str(results[_key(unpicklable)]), "7: the client failed")
-        np.testing.assert_array_equal(results[_key(plain)]['d1'], [1.0, 2.0])
-
-    def test_workers_read_with_the_sample_settings_of_this_process(self):
+    def test_workers_read_with_the_sample_settings_of_the_application(self):
         self.addCleanup(setattr, AccessHelper, 'num_samples', AccessHelper.num_samples)
         AccessHelper.num_samples = 777
         limit = _params('limit')
@@ -455,82 +383,15 @@ class AccessPoolTests(unittest.TestCase):
         with patch.object(access_pool, 'QEventLoop', _QuitLoop):
             self.assertIsNone(self.pool.fetch([_params('slow', end=T1 + 30)]))
 
-    def test_worker_log_records_reach_the_logger_of_the_same_name(self):
-        # Here as in the worker: the module's logger, whose handlers include the log file.
+    def test_worker_log_records_reach_the_loggers_of_the_application(self):
         records = _CapturingHandler()
         logger.addHandler(records)
         self.addCleanup(logger.removeHandler, records)
 
-        def from_a_worker():
-            return [record for record in records.records
-                    if record.getMessage() == "record from a worker" and record.process != os.getpid()]
-
         self.pool.fetch([_params('log')])
-        deadline = time.monotonic() + 5
-        while not from_a_worker() and time.monotonic() < deadline:
-            self.app.processEvents()
-            time.sleep(0.05)
 
-        self.assertTrue(from_a_worker())
-        self.assertEqual(len(from_a_worker()), 1)
-
-    def test_a_worker_that_stops_fails_only_its_own_request(self):
-        pool = self._own_pool(started=('uda',))
-        crash, plain = _params('crash'), _params('plain')
-
-        results = pool.fetch([crash, plain])
-
-        self.assertIsInstance(results[_key(crash)], DataAccessError)
-        self.assertIn("stopped", str(results[_key(crash)]))
-        np.testing.assert_array_equal(results[_key(plain)]['d1'], [1.0, 2.0])
-        later = pool.fetch([_params('plain', end=T1 + 40)])
-        self.assertEqual(len(later), 1)
-
-    def test_the_log_says_how_a_worker_that_stopped_ended(self):
-        pool = self._own_pool(started=('uda',))
-        records = _CapturingHandler()
-        access_pool.logger.addHandler(records)
-        self.addCleanup(access_pool.logger.removeHandler, records)
-
-        pool.fetch([_params('crash')])
-
-        messages = [record.getMessage() for record in records.records]
-        self.assertIn("A data access process had stopped (exit code 3), starting a new one", messages)
-
-    def test_a_worker_that_ends_while_it_starts_says_how(self):
-        pool = self._own_pool(factory=_ending_data_access, started=('uda',))
-
-        with self.assertRaisesRegex(RuntimeError, r"cannot start: .* \(exit code 5\)$"):
-            pool.fetch([_params('plain')])
-
-    def test_a_worker_that_cannot_start_leaves_the_reason_in_the_application_log(self):
-        records = _CapturingHandler()
-        access_pool.logger.addHandler(records)
-        self.addCleanup(access_pool.logger.removeHandler, records)
-        pool = self._own_pool(factory=_exiting_data_access, started=('uda',))
-
-        with self.assertRaisesRegex(RuntimeError, r"cannot start: .* \(exit code 0\)$"):
-            pool.fetch([_params('plain')])
-        pool._log_worker_records()
-
-        reasons = [record.getMessage() for record in records.records
-                   if record.getMessage().startswith("The data access process cannot start")]
-        self.assertTrue(reasons)
-        self.assertIn("SystemExit", reasons[0])
-
-    def test_the_log_waits_for_the_exit_code_of_a_worker_that_is_ending(self):
-        worker = _Worker(5, ended=True)
-        self.addCleanup(worker.close)
-
-        self.assertEqual(access_pool._ending(SimpleNamespace(_processes={1: worker})), " (exit code 5)")
-
-    def test_the_log_does_not_wait_for_a_worker_that_runs(self):
-        worker = _Worker(5, ended=False)
-        self.addCleanup(worker.close)
-        started = time.monotonic()
-
-        self.assertEqual(access_pool._ending(SimpleNamespace(_processes={1: worker})), "")
-        self.assertLess(time.monotonic() - started, access_pool._EXIT_CODE_WAIT_S / 2)
+        self.assertEqual([record.getMessage() for record in records.records], ["record from a worker"])
+        self.assertTrue(records.records[0].threadName.startswith('data access'))
 
     def test_workers_that_cannot_set_up_data_access_say_so(self):
         pool = self._own_pool(factory=_broken_data_access, started=('uda',))
@@ -544,116 +405,124 @@ class AccessPoolTests(unittest.TestCase):
         pool = _workers_started(AccessPool(1, data_access_factory=_worker_data_access), 'uda')
         stall = _params('stall')
         # The request reads for 30 s.
-        QTimer.singleShot(2000, pool.shutdown)
+        QTimer.singleShot(1000, pool.shutdown)
 
         started = time.perf_counter()
         results = pool.fetch([stall])
 
-        self.assertLess(time.perf_counter() - started, 15)
-        self.assertIsInstance(results[_key(stall)], Exception)
+        self.assertLess(time.perf_counter() - started, 10)
+        self.assertIsNone(results)
         with self.assertRaises(RuntimeError):
             pool.fetch([_params('plain')])
 
-    def test_requests_are_read_here_while_their_workers_start(self):
-        pool = self._own_pool(factory=_slow_data_access, started=())
-        uda, imas = _params('slow-pid'), _params('slow-pid', source='imas')
+    def test_the_application_does_not_wait_at_exit_for_a_read_in_progress(self):
+        started = time.perf_counter()
+        application = subprocess.run([sys.executable, '-c', _EXIT_WHILE_READING], capture_output=True, text=True,
+                                     timeout=60)
 
-        with patch.object(AccessHelper, 'da', _ParentDataAccessThatReads()):
-            results = pool.fetch([uda, imas])
+        # Importing iplotDataAccess may print before.
+        self.assertEqual(application.stdout.split()[-1:], ['reading'], application.stderr[-2000:])
+        self.assertEqual(application.returncode, 0)
+        # The read lasts 30 s.
+        self.assertLess(time.perf_counter() - started, 25)
 
-        # The workers take 10 s to start.
-        self.assertFalse(any(ready.done() for ready in pool._ready.values()))
-        self.assertEqual([results[_key(uda)]['d1'][0], results[_key(imas)]['d1'][0]], [os.getpid()] * 2)
-        self.assertEqual(set(pool._executors), {0, 1, access_pool._SERIAL_SLOT})
-
-    def test_a_request_still_to_read_here_goes_to_a_worker_that_started_meanwhile(self):
-        pool = self._own_pool(started=())
-        here = _ParentDataAccessThatReads()
-        here.started = lambda: any(ready.done() for ready in list(pool._ready.values()))
-        requests = [_params('until-started')] + [_params('slow-pid', end=T1 + n) for n in range(3)]
-
-        with patch.object(AccessHelper, 'da', here):
-            results = pool.fetch(requests)
-
-        self.assertEqual(here.asked, ['until-started'])
-        self.assertNotIn(os.getpid(), [results[_key(params)]['d1'][0] for params in requests[1:]])
-
-    def test_requests_go_to_the_workers_once_they_have_started(self):
-        pool = self._own_pool(started=())
-        first, then = _params('slow-pid', end=T1 + 1), _params('slow-pid', end=T1 + 2)
-
-        with patch.object(AccessHelper, 'da', _ParentDataAccessThatReads()):
-            here = pool.fetch([first])[_key(first)]['d1'][0]
-            _workers_started(pool)
-            there = pool.fetch([then])[_key(then)]['d1'][0]
-
-        self.assertEqual(here, os.getpid())
-        self.assertNotEqual(there, os.getpid())
-
-    def test_a_read_in_the_background_is_made_here_while_its_workers_start(self):
-        pool = self._own_pool(factory=_slow_data_access, started=())
+    def test_a_read_in_the_background_is_never_delivered_within_the_call_that_asks_for_it(self):
         delivered = []
 
-        with patch.object(AccessHelper, 'da', _ParentDataAccessThatReads()):
-            pending = pool.fetch_later([_params('slow-pid', source='imas')], delivered.append)
-        deadline = time.monotonic() + 5
-        while not delivered and time.monotonic() < deadline:
-            self.app.processEvents()
-            time.sleep(0.01)
+        self.pool.fetch_later([], delivered.append)
+        nothing_yet = list(delivered)
 
-        self.assertEqual(list(delivered[0].values())[0]['d1'][0], os.getpid())
+        self.assertEqual(nothing_yet, [])
+        self.assertEqual(self._arrived(delivered), [{}])
+
+    def test_a_read_in_the_background_is_delivered_once_all_its_requests_are_read(self):
+        delivered, threads = [], []
+        requests = [_params('slow', end=T1 + 40), _params('plain', end=T1 + 41), _params('plain', source='imas')]
+
+        def on_done(results):
+            threads.append(threading.current_thread())
+            delivered.append(results)
+
+        self.pool.fetch_later(requests, on_done)
+
+        results = self._arrived(delivered)[0]
+        self.assertEqual(set(results), {_key(params) for params in requests})
+        np.testing.assert_array_equal(results[_key(requests[0])]['d1'], [1.0, 2.0])
+        # The thread that asked, which can use its widgets, and not a worker.
+        self.assertEqual(threads, [threading.main_thread()])
+
+    def test_the_progress_of_a_wait_is_reported_in_the_waiting_thread(self):
+        threads = set()
+
+        self.pool.fetch([_params('slow', end=T1 + 43), _params('plain', source='imas', end=T1 + 44)],
+                        progress=lambda done, total: threads.add(threading.current_thread()))
+
+        self.assertEqual(threads, {threading.main_thread()})
+
+    def test_reads_of_a_data_source_that_is_not_read_in_parallel_take_turns_whatever_their_thread(self):
+        # As a read of this thread that was not made ahead does, while a worker reads the same data source.
+        _OverlapsRecorded.inside, _OverlapsRecorded.most = {}, {}
+        with patch.object(AccessHelper, 'da', _OverlapsRecorded()):
+            pool = self._own_pool(factory=_OverlapsRecorded, started=('imas',))
+            delivered = []
+            pool.fetch_later([_params('read', source='imas')], delivered.append)
+            time.sleep(0.2)
+
+            AccessHelper._request_data(**_params('here', source='imas'))
+            self._arrived(delivered)
+
+        self.assertEqual(_OverlapsRecorded.most, {'imas': 1})
+
+    def test_a_cancelled_read_in_the_background_is_not_delivered(self):
+        delivered = []
+
+        pending = self.pool.fetch_later([_params('slow', end=T1 + 42)], delivered.append)
+        pending.cancel()
+        time.sleep(1.5)
+        self.app.processEvents()
+
+        self.assertEqual(delivered, [])
         self.assertEqual(pending._futures, {})
 
-    def test_a_call_is_made_here_while_its_workers_start(self):
-        pool = self._own_pool(factory=_slow_data_access, started=())
+    def test_a_fetch_dropped_while_it_reads_leaves_the_worker_no_qt_object_to_destroy(self):
+        # The worker lets go of the future of its read once the read ends: a Qt object it held would be destroyed in
+        # the worker thread, and Qt objects can only be destroyed in their own.
+        pool = self._own_pool(started=('uda',), workers=1)
+        destroyed_in = []
+        before = [o for o in gc.get_objects() if isinstance(o, QObject)]
 
-        with patch.object(AccessHelper, 'da', _ParentDataAccessThatReads()):
-            reply, _ = self._in_thread(lambda: self._call('plain', pool))
+        pending = pool.fetch_later([_params('slow')], print)
+        _note_destructions([o for o in gc.get_objects() if isinstance(o, QObject) and all(o is not b for b in before)],
+                           destroyed_in)
+        del before
+        time.sleep(0.3)
+        pending.cancel()
+        del pending
+        gc.collect()
+        # Taken by the worker once it is done with the read.
+        pool.fetch([_params('plain')])
+        gc.collect()
 
-        # The workers take 10 s to start.
-        self.assertFalse(any(ready.done() for ready in pool._ready.values()))
-        self.assertEqual(reply.ydata[0], os.getpid())
+        self.assertEqual(set(destroyed_in) - {threading.main_thread()}, set())
 
-    def test_once_a_worker_has_started_requests_wait_for_it_to_start_again_after_it_stopped(self):
-        # Read here, a request that stopped a worker would stop the application too. The fetch reads the request
-        # once more in a worker, which it stops again; the call comes while that worker starts once more.
-        pool = _workers_started(AccessPool(1, data_access_factory=_worker_data_access), 'uda')
-        self.addCleanup(pool.shutdown)
-        here, crash = _ParentDataAccessThatReads(), _params('crash')
+    def test_a_read_in_the_background_is_not_delivered_once_the_pool_is_shut_down(self):
+        pool = self._own_pool(started=('uda',))
+        delivered = []
 
-        with patch.object(AccessHelper, 'da', here):
-            results = pool.fetch([crash])
-            error, _ = self._in_thread(lambda: self._call('crash', pool))
+        pool.fetch_later([_params('slow')], delivered.append)
+        pool.shutdown()
 
-        self.assertEqual(str(results[_key(crash)]), access_pool._STOPPED)
-        self.assertEqual(str(error), access_pool._STOPPED)
-        self.assertEqual(here.asked, [])
+        self.assertEqual(self._arrived(delivered, seconds=2), [])
 
-    def test_a_request_read_again_while_its_worker_starts_again_ends_when_the_pool_shuts_down(self):
-        marker = os.path.join(tempfile.mkdtemp(), 'set up')
-        self.addCleanup(os.rmdir, os.path.dirname(marker))
-        self.addCleanup(os.remove, marker)
-        crash = _params('crash')
+    def test_a_read_in_the_background_that_a_shutdown_stops_says_so_if_asked(self):
+        pool = self._own_pool(started=('uda',))
+        delivered, stopped = [], []
 
-        with patch.dict(os.environ, {'IPLOT_TEST_SET_UP': marker}):
-            pool = _workers_started(AccessPool(1, data_access_factory=_slow_to_start_again_data_access), 'uda')
-            # Once the request stopped the worker, while the worker takes 10 s to start again.
-            QTimer.singleShot(3000, pool.shutdown)
-            started = time.perf_counter()
-            results = pool.fetch([crash])
-            error, _ = self._in_thread(lambda: self._call('plain', pool))
+        pool.fetch_later([_params('slow')], delivered.append, on_stopped=lambda: stopped.append(True))
+        pool.shutdown()
 
-        self.assertLess(time.perf_counter() - started, 8)
-        self.assertEqual(str(results[_key(crash)]), access_pool._STOPPED)
-        self.assertIsInstance(error, RuntimeError)
-        self.assertIn("shut down", str(error))
-
-    def test_start_launches_the_workers_of_the_configured_sources(self):
-        pool = self._own_pool(started=())
-
-        pool.start()
-
-        self.assertEqual(set(pool._executors), {0, 1, access_pool._SERIAL_SLOT})
+        self.assertEqual(self._arrived(stopped, seconds=5), [True])
+        self.assertEqual(delivered, [])
 
     def test_prepare_starts_only_the_workers_of_the_data_sources_given(self):
         pool = self._own_pool(started=())
@@ -700,138 +569,13 @@ class AccessPoolTests(unittest.TestCase):
         self.assertEqual(serial, 300)
 
     def test_the_workers_leave_unconnected_the_data_sources_the_application_could_not_connect_to(self):
-        with patch.object(AccessHelper, 'da', _ParentDataAccessWithOneDown()):
+        with patch.object(AccessHelper, 'da', _ApplicationDataAccessWithOneDown()):
             pool = self._own_pool(factory=_worker_data_access_with_caches)
             parallel, _ = self._in_thread(lambda: pool.call('leave_unconnected', 'uda'))
             serial, _ = self._in_thread(lambda: pool.call('leave_unconnected', 'imas'))
 
         self.assertEqual(parallel, ['down'])
         self.assertEqual(serial, ['down'])
-
-    def test_workers_stop_when_the_application_is_killed(self):
-        application = subprocess.Popen([sys.executable, '-c', _APPLICATION], stdin=subprocess.PIPE,
-                                       stdout=subprocess.PIPE, text=True)
-        self.addCleanup(application.kill)
-        worker = next(int(line) for line in application.stdout if line.strip().isdigit())
-        self.assertTrue(_alive(worker))
-
-        application.kill()
-        application.wait()
-        deadline = time.monotonic() + 10
-        while _alive(worker) and time.monotonic() < deadline:
-            time.sleep(0.1)
-
-        self.assertFalse(_alive(worker))
-
-    def _watch(self, parent_checks: int):
-        """Runs the watch of a worker over a pipe from the application that has closed, while the application is
-        still its parent for `parent_checks` checks; gives the checks made before the worker ended and the log."""
-        reader, writer = multiprocessing.Pipe(duplex=False)
-        writer.close()
-        self.addCleanup(reader.close)
-        checks, ended = [], []
-        records = _CapturingHandler()
-        access_pool.logger.addHandler(records)
-        self.addCleanup(access_pool.logger.removeHandler, records)
-
-        def getppid():
-            checks.append(None)
-            return 100 if len(checks) <= parent_checks else 1
-
-        def exit_(code):
-            ended.append((len(checks), code))
-            raise SystemExit
-
-        with patch.object(access_pool, '_PARENT_SENTINEL_IS_A_PIPE', True), \
-                patch.object(access_pool, '_PARENT_GONE_WAIT_S', 0.3), \
-                patch.object(access_pool.multiprocessing, 'parent_process',
-                             lambda: SimpleNamespace(pid=100, sentinel=reader)), \
-                patch.object(access_pool.os, 'getppid', getppid), patch.object(access_pool.os, '_exit', exit_):
-            with self.assertRaises(SystemExit):
-                access_pool._watch_parent()
-        return ended, [record.getMessage() for record in records.records]
-
-    def test_a_worker_goes_on_while_the_application_runs_after_the_pipe_from_it_closed(self):
-        ended, messages = self._watch(parent_checks=8)
-
-        self.assertEqual(ended, [(9, 0)])
-        self.assertEqual(messages, ["The pipe from the application closed while it runs, the data access process "
-                                    "goes on"])
-
-    def test_a_worker_ends_with_the_application(self):
-        ended, messages = self._watch(parent_checks=0)
-
-        self.assertEqual(ended, [(1, 0)])
-        self.assertEqual(messages, [])
-
-    def test_a_worker_sends_its_log_to_the_application_before_anything_that_could_stop_it(self):
-        steps = []
-
-        def step(name):
-            return lambda *args, **kwargs: steps.append(name)
-
-        def enable_without_stderr():
-            steps.append('faulthandler')
-            raise RuntimeError("sys.stderr is None")
-
-        with patch.object(access_pool, '_forward_logging', step('log')), \
-                patch.object(access_pool.signal, 'signal', step('ctrl+c')), \
-                patch.object(access_pool, '_watch_parent', step('watch')), \
-                patch.object(access_pool.faulthandler, 'enable', enable_without_stderr), \
-                patch.object(access_pool, '_set_up_data_access', step('data access')), \
-                patch.object(access_pool, '_drop_log_handlers', step('handlers')), \
-                patch.object(access_pool, '_worker_data_access_factory', None), \
-                patch.object(access_pool, '_worker_source_types', None), \
-                patch.object(access_pool, '_worker_cache_share', 1), \
-                patch.object(access_pool, '_worker_leave_unconnected', frozenset()), \
-                patch.object(AccessHelper, 'num_samples', AccessHelper.num_samples), \
-                patch.object(AccessHelper, 'num_samples_override', AccessHelper.num_samples_override):
-            access_pool._init_worker(None, None, None, 1000, False, None, 1, frozenset())
-
-        self.assertEqual(steps[0], 'log')
-        self.assertIn('data access', steps)
-
-    def test_a_worker_goes_on_when_its_log_file_reports_a_full_disk(self):
-        class FullDiskFile(logging.Handler):
-            def close(self):
-                raise OSError(28, "No space left on device")
-
-        records = _CapturingHandler()
-        access_pool.logger.addHandler(records)
-        self.addCleanup(access_pool.logger.removeHandler, records)
-        root = logging.getLogger()
-        self.addCleanup(setattr, root, 'handlers', list(root.handlers))
-        self.addCleanup(logging.captureWarnings, False)
-        log_queue = SimpleNamespace(put_nowait=lambda record: None)
-
-        with patch.object(setupLogger.FileHandlerIplot, 'fhandler', FullDiskFile()), \
-                patch.object(access_pool, '_drop_log_handlers', lambda: None):
-            access_pool._forward_logging(log_queue, None)
-
-        self.assertTrue(any(getattr(handler, 'queue', None) is log_queue for handler in root.handlers))
-        self.assertEqual([record.getMessage() for record in records.records],
-                         ["Writing to the log file failed: [Errno 28] No space left on device"])
-
-    def test_a_worker_that_stops_while_it_is_given_a_request_blocks_no_thread(self):
-        # Python 3.12.1 and later fail the requests of a stopped worker holding the lock that submit() takes.
-        # The application bounds its wait for the request itself. The timeout only ends one that hangs before, and
-        # leaves it the minutes that starting Python and a worker can take on a loaded machine.
-        application = subprocess.run([sys.executable, '-c', _STOPPED_WHILE_GIVEN], capture_output=True, text=True,
-                                     timeout=2 * _START_TIMEOUT_S)
-
-        self.assertIn('given', application.stdout.split(), application.stdout + application.stderr[-2000:])
-
-    @unittest.skipUnless(os.name == 'posix', "Ctrl+C reaches every process of the console the same way on Windows")
-    def test_ctrl_c_is_left_to_the_application(self):
-        pid = self.pool.fetch([_params('slow-pid', end=T1 + 80)])
-        worker = int(list(pid.values())[0]['d1'][0])
-
-        os.kill(worker, signal.SIGINT)
-        time.sleep(0.5)
-
-        self.assertTrue(_alive(worker))
-        again = self.pool.fetch([_params('slow-pid', end=T1 + 80)])
-        self.assertEqual(int(list(again.values())[0]['d1'][0]), worker)
 
     def test_the_pool_keeps_no_result(self):
         result = self.pool.fetch([_params('plain', end=T1 + 90)])
@@ -845,11 +589,7 @@ class AccessPoolTests(unittest.TestCase):
     def test_a_read_in_the_background_keeps_no_result(self):
         delivered = []
         pending = self.pool.fetch_later([_params('plain', end=T1 + 91)], delivered.append)
-        deadline = time.monotonic() + 30
-        while not delivered and time.monotonic() < deadline:
-            self.app.processEvents()
-            time.sleep(0.01)
-        data = weakref.ref(list(delivered[0].values())[0]['d1'])
+        data = weakref.ref(list(self._arrived(delivered)[0].values())[0]['d1'])
 
         delivered.clear()
         gc.collect()
@@ -858,7 +598,7 @@ class AccessPoolTests(unittest.TestCase):
         self.assertEqual(pending._futures, {})
 
     def test_requests_read_before_by_one_worker_are_spread_when_read_together(self):
-        requests = [_params('slow-pid', end=T1 + 100 + i) for i in range(4)]
+        requests = [_params('slow-thread', end=T1 + 100 + i) for i in range(4)]
         for params in requests:
             self.pool.fetch([params])
 
@@ -866,39 +606,23 @@ class AccessPoolTests(unittest.TestCase):
 
         self.assertEqual(len({result['d1'][0] for result in results.values()}), 2)
 
-    def test_an_executor_whose_worker_stopped_while_it_sent_a_result_sees_it(self):
-        pool = self._own_pool(started=())
-        writer = SimpleNamespace(closed=False)
-        writer.close = lambda: setattr(writer, 'closed', True)
-        pool._executors[0] = SimpleNamespace(_processes={1: SimpleNamespace(is_alive=lambda: False)}, _broken=False,
-                                             _result_queue=SimpleNamespace(_writer=writer))
-        self.addCleanup(pool._executors.pop, 0, None)
-
-        with patch.object(access_pool.time, 'monotonic', side_effect=[100.0, 101.0, 100.0 + access_pool._STUCK_AFTER_S]):
-            pool._release_stuck_executors()
-            pool._release_stuck_executors()
-            self.assertFalse(writer.closed)
-            pool._release_stuck_executors()
-
-        self.assertTrue(writer.closed)
-
     def test_new_requests_read_one_at_a_time_take_turns_between_the_workers(self):
         # Each worker keeps its share of the cache of the data source (see _share_cache).
-        pids = set()
+        threads = set()
         for n in range(4):
-            params = _params('slow-pid', end=T1 + 300 + n)
-            pids.add(self.pool.fetch([params])[_key(params)]['d1'][0])
+            params = _params('slow-thread', end=T1 + 300 + n)
+            threads.add(self.pool.fetch([params])[_key(params)]['d1'][0])
 
-        self.assertEqual(len(pids), 2)
+        self.assertEqual(len(threads), 2)
 
     def test_a_request_read_before_goes_back_to_its_worker(self):
-        first, second = _params('slow-pid', end=T1 + 50), _params('slow-pid', end=T1 + 51)
-        pids = self.pool.fetch([first, second])
+        first, second = _params('slow-thread', end=T1 + 50), _params('slow-thread', end=T1 + 51)
+        threads = self.pool.fetch([first, second])
 
         again = self.pool.fetch([second])
 
-        self.assertNotEqual(pids[_key(first)]['d1'][0], pids[_key(second)]['d1'][0])
-        self.assertEqual(again[_key(second)]['d1'][0], pids[_key(second)]['d1'][0])
+        self.assertNotEqual(threads[_key(first)]['d1'][0], threads[_key(second)]['d1'][0])
+        self.assertEqual(again[_key(second)]['d1'][0], threads[_key(second)]['d1'][0])
 
     def _in_thread(self, target):
         """What `target` returns, or raises, run in another thread while this one runs its Qt events, and
@@ -928,17 +652,17 @@ class AccessPoolTests(unittest.TestCase):
         return (pool or self.pool).call('get_archive_window', 'uda', varname=varname, tsS='5', tsE='6', **kwargs)
 
     def test_a_call_from_another_thread_reads_in_a_worker_while_the_gui_thread_runs(self):
-        reply, stall = self._in_thread(lambda: self._call('gil'))
+        reply, stall = self._in_thread(lambda: self._call('sleep'))
 
-        pid, held, start = reply.ydata
-        self.assertNotEqual(pid, os.getpid())
+        reader, _, start = reply.ydata
+        self.assertNotEqual(reader, threading.get_ident())
         self.assertEqual((reply.xunit, reply.yunit, start), ('ns', 'A', 5.0))
         np.testing.assert_array_equal(reply.xdata, T0 + np.arange(3))
-        self.assertLess(stall, held / 2)
+        self.assertLess(stall, 0.4)
 
-    def test_the_same_read_in_a_thread_of_this_process_stops_the_gui_thread(self):
-        # What the worker processes spare the GUI thread: the read keeps the GIL.
-        reply, stall = self._in_thread(lambda: _WorkerDataAccess().get_archive_window('uda', varname='gil', tsS='5'))
+    def test_a_read_that_keeps_the_gil_stops_the_gui_thread_from_a_worker_too(self):
+        # What a worker thread cannot spare the GUI thread: a client that does not release the GIL while it reads.
+        reply, stall = self._in_thread(lambda: self._call('gil'))
 
         self.assertGreater(stall, reply.ydata[1] / 2)
 
@@ -961,25 +685,11 @@ class AccessPoolTests(unittest.TestCase):
         self.assertEqual(sorted(replies), sorted(thread * 100 + i for thread in range(4) for i in range(5)))
         self.assertTrue(all(reply.ydata[2] == start for start, reply in replies.items()))
         np.testing.assert_array_equal(list(fetched.values())[0]['d1'], [1.0, 2.0])
-        # The executors count a request out after they hand its reply over.
+        # The workers count a request out right after they hand its reply over.
         deadline = time.monotonic() + 5
         while any(self.pool._loads.values()) and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertEqual(set(self.pool._loads.values()), {0})
-
-    def test_a_call_whose_worker_stops_is_made_once_more(self):
-        marker = os.path.join(tempfile.mkdtemp(), 'stopped')
-        self.addCleanup(os.rmdir, os.path.dirname(marker))
-        self.addCleanup(os.remove, marker)
-        pool = self._own_pool(started=('uda',))
-
-        reply, _ = self._in_thread(lambda: self._call('crash-once', pool, marker=marker))
-        error, _ = self._in_thread(lambda: self._call('crash', pool))
-
-        self.assertTrue(os.path.exists(marker))
-        self.assertEqual(reply.ydata[2], 5.0)
-        self.assertIsInstance(error, DataAccessError)
-        self.assertEqual(str(error), access_pool._STOPPED)
 
     def test_a_method_that_fails_raises_its_message(self):
         with self.assertRaisesRegex(DataAccessError, "no archive for fail"):
@@ -988,12 +698,12 @@ class AccessPoolTests(unittest.TestCase):
     def test_a_call_still_waiting_when_the_pool_shuts_down_ends(self):
         pool = _workers_started(AccessPool(1, data_access_factory=_worker_data_access), 'uda')
         # The call reads for 30 s.
-        QTimer.singleShot(2000, pool.shutdown)
+        QTimer.singleShot(1000, pool.shutdown)
 
         started = time.perf_counter()
         error, _ = self._in_thread(lambda: self._call('stall', pool))
 
-        self.assertLess(time.perf_counter() - started, 15)
+        self.assertLess(time.perf_counter() - started, 10)
         self.assertIsInstance(error, DataAccessError)
         with self.assertRaises(RuntimeError):
             self._call('plain', pool)
@@ -1025,7 +735,7 @@ class AccessPoolTests(unittest.TestCase):
         for thread in threads:
             thread.start()
         # The first call reads for 30 s and the others wait.
-        QTimer.singleShot(2000, pool.shutdown)
+        QTimer.singleShot(1000, pool.shutdown)
         deadline = time.monotonic() + 20
         while any(thread.is_alive() for thread in threads) and time.monotonic() < deadline:
             self.app.processEvents()
@@ -1034,14 +744,54 @@ class AccessPoolTests(unittest.TestCase):
         self.assertFalse(any(thread.is_alive() for thread in threads))
         self.assertEqual([str(outcome) for outcome in outcomes], [access_pool._STOPPED] * 8)
 
-    def test_stopping_an_executor_ends_the_pipe_its_manager_thread_reads(self):
-        executor = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context('spawn'))
-        executor.submit(os.getpid).result(timeout=_START_TIMEOUT_S)
-        writer = executor._result_queue._writer
+    def test_a_call_that_a_worker_took_as_the_pool_shuts_down_is_not_made(self):
+        pool = _workers_started(AccessPool(1, data_access_factory=_worker_data_access), 'uda')
+        executor = pool._executors[0]
+        taken = threading.Event()
+        make = executor._make
 
-        access_pool._stop(executor)
+        def make_late(*call):
+            # The worker took the call from its queue, and the shutdown comes before the call starts.
+            taken.set()
+            time.sleep(0.5)
+            make(*call)
 
-        self.assertTrue(writer.closed)
+        executor._make = make_late
+        future = pool._submit(_key(_params('slow')), _params('slow'))
+        taken.wait(10)
+        pool.shutdown()
+        wait([future], timeout=10)
+
+        self.assertTrue(future.cancelled())
+
+    def test_a_fetch_made_while_the_workers_set_up_raises_if_they_cannot_read(self):
+        def fails_later():
+            time.sleep(1.0)
+            raise RuntimeError("the data access set-up failed")
+
+        pool = self._own_pool(factory=fails_later, started=())
+
+        # So that the application reads in the GUI thread instead, as it does once a worker reports it cannot read.
+        with self.assertRaisesRegex(RuntimeError, "cannot read"):
+            pool.fetch([_params('plain')])
+
+    def test_a_worker_that_cannot_connect_again_keeps_its_data_access(self):
+        set_ups = []
+
+        def connects_once():
+            set_ups.append(threading.current_thread())
+            if len(set_ups) > 1:
+                raise OSError(28, "No space left on device")
+            return _WorkerDataAccessOfUdaOnly()
+
+        with patch.object(AccessHelper, 'da', _ApplicationDataAccessOfTwoUda()):
+            pool = self._own_pool(factory=connects_once, started=('uda',), workers=1)
+            pool.fetch([_params('plain', source='uda2')])
+            plain = _params('plain', end=T1 + 80)
+            results = pool.fetch([plain])
+
+        self.assertEqual(len(set_ups), 2)
+        np.testing.assert_array_equal(results[_key(plain)]['d1'], [1.0, 2.0])
 
     def test_a_call_to_a_data_source_the_worker_does_not_have_says_so(self):
         # Rather than read its default data source, as the data access object would.
@@ -1063,66 +813,100 @@ class AccessPoolTests(unittest.TestCase):
         self.assertIn("could not be set up", str(error))
 
 
+class _DataAccess:
+    """iplotDataAccess's DataAccess as the worker makes it: it notes what it is made with."""
+    made = []
+    configured = True
+
+    def __init__(self, source_types=None, leave_unconnected=()):
+        _DataAccess.made.append((source_types, leave_unconnected))
+        self.unconnected = set(leave_unconnected)
+
+    def load_config(self, conf_file=None):
+        return _DataAccess.configured
+
+
+class _DataAccessOfEveryType:
+    """The DataAccess of an iplotDataAccess that sets up every data source type."""
+    made = 0
+
+    def __init__(self):
+        _DataAccessOfEveryType.made += 1
+
+    def load_config(self, conf_file=None):
+        return True
+
+
 class AppDataAccessTests(unittest.TestCase):
     """The data access a worker sets up, as the application's: for the data source types it reads."""
 
-    def _set_up(self, initialize):
-        with patch.object(access_pool, '_worker_source_types', frozenset({'IMAS'})), \
-                patch.object(AppDataAccess, 'initialize', staticmethod(initialize)):
-            access_pool.app_data_access()
+    def setUp(self):
+        _DataAccess.made = []
+        _DataAccess.configured = True
+        for name, value in dict(source_types=frozenset({'IMAS'}), leave_unconnected=frozenset(), cache_epoch=0,
+                                reconnected=set()).items():
+            setattr(access_pool._worker, name, value)
+        self.addCleanup(access_pool._worker.__dict__.clear)
+
+    def _set_up(self, data_access=_DataAccess):
+        with patch.object(ida_data_access, 'DataAccess', data_access):
+            return access_pool.app_data_access()
 
     def test_only_the_data_sources_of_the_types_the_worker_reads_are_set_up(self):
-        asked = []
+        self._set_up()
 
-        def initialize(config_file=None, source_types=None):
-            asked.append(source_types)
-            return True
+        self.assertEqual(_DataAccess.made, [(frozenset({'IMAS'}), frozenset())])
 
-        self._set_up(initialize)
+    def test_the_data_access_of_a_worker_is_not_the_one_of_the_application(self):
+        application = AppDataAccess.da
 
-        self.assertEqual(asked, [frozenset({'IMAS'})])
+        data_access = self._set_up()
+
+        self.assertIsInstance(data_access, _DataAccess)
+        self.assertIs(AppDataAccess.da, application)
 
     def test_an_iplotdataaccess_that_sets_up_every_type_is_asked_for_all(self):
-        asked = []
+        _DataAccessOfEveryType.made = 0
 
-        def initialize(config_file=None):
-            asked.append(config_file)
-            return True
+        self._set_up(_DataAccessOfEveryType)
 
-        self._set_up(initialize)
-
-        self.assertEqual(asked, [None])
+        self.assertEqual(_DataAccessOfEveryType.made, 1)
 
     def test_the_data_sources_the_application_could_not_connect_to_are_left_unconnected(self):
-        asked = []
+        access_pool._worker.leave_unconnected = frozenset({'down'})
 
-        def initialize(config_file=None, source_types=None, leave_unconnected=()):
-            asked.append((source_types, leave_unconnected))
-            return True
+        self._set_up()
 
-        with patch.object(access_pool, '_worker_leave_unconnected', frozenset({'down'})):
-            self._set_up(initialize)
-
-        self.assertEqual(asked, [(frozenset({'IMAS'}), frozenset({'down'}))])
+        self.assertEqual(_DataAccess.made, [(frozenset({'IMAS'}), frozenset({'down'}))])
 
     def test_a_worker_whose_data_sources_are_all_left_unconnected_reports_none_missing(self):
-        with patch.object(access_pool, '_worker_leave_unconnected', frozenset({'down'})), \
-                patch.object(AppDataAccess, 'da', SimpleNamespace(unconnected={'down'})), \
-                patch.object(access_pool.logger, 'error') as error:
-            self._set_up(lambda config_file=None, source_types=None, leave_unconnected=(): False)
+        access_pool._worker.leave_unconnected = frozenset({'down'})
+        _DataAccess.configured = False
+
+        with patch.object(access_pool.logger, 'error') as error:
+            self._set_up()
+
+        error.assert_not_called()
+
+    def test_a_worker_of_no_type_reports_no_missing_data_sources(self):
+        access_pool._worker.source_types = frozenset()
+        _DataAccess.configured = False
+
+        with patch.object(access_pool.logger, 'error') as error:
+            self._set_up()
 
         error.assert_not_called()
 
     def test_a_request_to_a_data_source_left_unconnected_does_not_set_data_access_up_again(self):
-        epoch = access_pool._worker_cache_epoch
-        with patch.object(AccessHelper, 'da', SimpleNamespace(get_connected_data_source_names=lambda: ['uda'])), \
-                patch.object(access_pool, '_worker_leave_unconnected', frozenset({'down'})), \
-                patch.object(access_pool, '_worker_reconnected', set()), \
-                patch.object(access_pool, '_set_up_data_access') as set_up:
-            access_pool._data_access('down', epoch)
+        access_pool._worker.leave_unconnected = frozenset({'down'})
+        self.addCleanup(AccessHelper.set_thread_data_access, None)
+        AccessHelper.set_thread_data_access(SimpleNamespace(get_connected_data_source_names=lambda: ['uda']))
+
+        with patch.object(access_pool, '_set_up_data_access') as set_up:
+            access_pool._data_access('down', 0)
             left_unconnected = set_up.call_count
             # One the application connected to, but the worker could not.
-            access_pool._data_access('lost', epoch)
+            access_pool._data_access('lost', 0)
 
         self.assertEqual(left_unconnected, 0)
         self.assertEqual(set_up.call_count, 1)
@@ -1132,14 +916,6 @@ class AppDataAccessTests(unittest.TestCase):
             self.assertEqual(AccessPool._serial_source_types(), frozenset())
         with patch.object(AccessHelper, 'da', SimpleNamespace()):
             self.assertIsNone(AccessPool._serial_source_types())
-
-    def test_a_worker_of_no_type_reports_no_missing_data_sources(self):
-        with patch.object(access_pool, '_worker_source_types', frozenset()), \
-                patch.object(AppDataAccess, 'initialize', staticmethod(lambda config_file=None, source_types=None: False)), \
-                patch.object(access_pool.logger, 'error') as error:
-            access_pool.app_data_access()
-
-        error.assert_not_called()
 
     def test_a_cache_keeps_its_share_when_data_access_is_set_up_again(self):
         data_access = SimpleNamespace(ds_list={'uda': SimpleNamespace(access_cache=_Cache(300))})

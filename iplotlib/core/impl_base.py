@@ -45,6 +45,9 @@ logger = Sl.get_logger(__name__)
 # that an expression evaluates once the data of its own variable arrive.
 _VIEW_READ_ROUNDS = 3
 
+#: What a place of the canvas shows while its plot waits for its data (see BackendParserBase.set_pending_places).
+PENDING_PLACE_TEXT = "Retrieving data..."
+
 
 @dataclass(frozen=True, eq=True)
 class ImplementationPlotCacheItem:
@@ -201,6 +204,10 @@ class BackendParserBase(ABC):
         # Called with how many views wait for data read in the background, whenever that number changes.
         self._on_view_reads_changed = None  # type: Optional[Callable[[int], None]]
         self._view_reads_told = 0
+        # The places of a canvas whose plots are drawn once their data are read, and the canvas (see
+        # set_pending_places).
+        self._pending_places = {}  # type: Dict[Tuple[int, int], Tuple[int, int]]
+        self._pending_canvas = None  # type: Optional[weakref.ref]
 
     @staticmethod
     def signal_lut_key(signal):
@@ -438,13 +445,15 @@ class BackendParserBase(ABC):
 
     def _read_canvas_data(self, canvas: Canvas) -> Optional[dict]:
         """The data the signals to draw need and do not have, read all at once by the worker
-        processes (AccessHelper.pool), if any, for AccessHelper.prefetched(); None if the
+        threads (AccessHelper.pool), if any, for AccessHelper.prefetched(); None if the
         application quits while they are read."""
         pool = AccessHelper.pool
         if canvas is None or pool is None or self._impl_flush_method is None:
             return {}
-        plots = [self._focus_plot] if self._focus_plot is not None else [plot for column in canvas.plots
-                                                                         for plot in column if plot is not None]
+        pending = self._pending_places_of(canvas)
+        plots = [self._focus_plot] if self._focus_plot is not None else [
+            plot for i, column in enumerate(canvas.plots) for j, plot in enumerate(column)
+            if plot is not None and (i, j) not in pending]
         requests = [params for plot in plots for stack in plot.signals.values() for signal in stack
                     if isinstance(signal, IplotSignalAdapter) for params in AccessHelper.data_requests(signal)]
         if not requests:
@@ -452,7 +461,7 @@ class BackendParserBase(ABC):
         try:
             return pool.fetch(requests)
         except Exception:
-            logger.exception("Reading in the worker processes failed, data are read in this thread from now on")
+            logger.exception("Reading in the worker threads failed, data are read in this thread from now on")
             AccessHelper.pool = None
             pool.shutdown()
             return {}
@@ -477,7 +486,8 @@ class BackendParserBase(ABC):
             self.canvas.focus_plot = self._focus_plot
             self.set_canvas_gridspec(1, 1)
 
-        # 3. Fill the canvas with plots.
+        # 3. Fill the canvas with plots, but those still to draw once their data are read.
+        pending = self._pending_places_of(canvas)
         for i, col in enumerate(canvas.plots):
             for j, plot in enumerate(col):
                 if self._focus_plot is not None:
@@ -486,8 +496,11 @@ class BackendParserBase(ABC):
                         self.process_ipl_plot(plot, 0, 0)
                     elif isinstance(plot, PlotXYWithSlider):
                         plot.slider = None
-                else:
+                elif (i, j) not in pending:
                     self.process_ipl_plot(plot, i, j)
+        if self._focus_plot is None:
+            for (i, j), (row_span, col_span) in pending.items():
+                self.show_pending_place(i, j, row_span, col_span)
 
         # 4. Update the title at the top of canvas.
         if self._pm.get_value(self.canvas, 'title') is not None:
@@ -550,10 +563,11 @@ class BackendParserBase(ABC):
             self._update = False
 
     @abstractmethod
-    def _x_axis_update_callback(self, current_plot: Any):
+    def _x_axis_update_callback(self, current_plot: Any, only: Collection = None):
         """
         Callback that updates the X axis limits when the axis bounds change in the corresponding plot implementation.
-        This callback ensures that all plots sharing the time axis are synchronized.
+        This callback ensures that all plots sharing the time axis are synchronized; with `only`, these implementation
+        plots of the group instead, as the group was before they were drawn (see _join_shared_x).
         """
         if self._update:
             return
@@ -647,7 +661,7 @@ class BackendParserBase(ABC):
             # from the other signals' buffers, so those must be refetched over the
             # new time window first.
             reprocess_followers = []
-            for impl_plot in shared_plots:
+            for impl_plot in shared_plots if only is None else only:
                 plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
 
                 if isinstance(plot, PlotXYWithSlider) and len(shared_plots) > 1:
@@ -732,7 +746,7 @@ class BackendParserBase(ABC):
     def _process_view_change(self, owner: Any, impl_plot: Any, step: Callable[[], None]):
         """Run `step`, which draws signals of `impl_plot` over the new range of its view.
 
-        With worker processes (AccessHelper.pool), the step draws the data the signals have and the
+        With worker threads (AccessHelper.pool), the step draws the data the signals have and the
         data for the new range are read in the background: the step runs again with them once they
         arrive. A change of the view for the same `owner` that needs other data, or a view reset
         drawn from memory, replaces a read still in progress.
@@ -776,7 +790,7 @@ class BackendParserBase(ABC):
                 self._view_reads_changed()
                 return
             except Exception:
-                logger.exception("Reading in the worker processes failed, data are read in this thread from now on")
+                logger.exception("Reading in the worker threads failed, data are read in this thread from now on")
                 AccessHelper.pool = None
                 pool.shutdown()
         reads.invalidate()
@@ -881,6 +895,112 @@ class BackendParserBase(ABC):
         self._undrawn_follows.clear()
         self._arrived_in_pan.clear()
         self._view_reads_changed()
+
+    def set_pending_places(self, canvas: Canvas, places: Dict[Tuple[int, int], Tuple[int, int]]):
+        """Leave the plots of `canvas` at `places`, (column, row) in canvas.plots, to draw once their data are read
+        (see draw_plot): a drawing of `canvas` shows instead that their data are read, over the rows and columns they
+        span, given as (row span, col span). Another canvas is drawn whole."""
+        self._pending_canvas = weakref.ref(canvas)
+        self._pending_places = dict(places)
+
+    def draw_plot(self, plot: Plot) -> bool:
+        """Draw `plot`, whose place the canvas shown left pending (see set_pending_places), now that its data are read.
+        False if it draws nothing: while another plot is focused, the drawing of the canvas that ends the focus draws
+        it, and a plot of no place pending in the canvas shown is left alone."""
+        place = self._place_of(plot)
+        if place is None or not self._resolve_pending_place(*place) or self._focus_plot is not None:
+            return False
+        self._join_shared_slider(plot)
+        self.process_ipl_plot(plot, *place)
+        self._join_shared_x(plot)
+        return True
+
+    def drop_pending_place(self, column: int, row: int) -> bool:
+        """Draw nothing at a place the canvas shown left pending: its plot has nothing to draw. Whether it was
+        pending."""
+        return self._resolve_pending_place(column, row)
+
+    def drop_pending_places(self):
+        """Wait no more for the plots of the places left pending, as when the canvas is drawn anew instead."""
+        for place in list(self._pending_places_of(self.canvas)):
+            self.hide_pending_place(*place)
+        self._pending_places = {}
+        self._pending_canvas = None
+
+    def _resolve_pending_place(self, column: int, row: int) -> bool:
+        """Wait no more for the plot of a place, if it is pending in the canvas shown. Whether it was."""
+        if (column, row) not in self._pending_places_of(self.canvas):
+            return False
+        del self._pending_places[(column, row)]
+        self.hide_pending_place(column, row)
+        return True
+
+    def _join_shared_slider(self, plot: Plot):
+        """Start the slider of a plot drawn after the others where the sliders it moves with are: they moved without
+        it while its data were read (see draw_plot)."""
+        if (not isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider))
+                or not self._pm.get_value(self.canvas, 'shared_x_axis')):
+            return
+        for other in self.get_shared_plot_xy_slider(plot):
+            if self._plot_impl_plot_lut.get(id(other)):
+                plot.slider_last_val = other.slider_last_val
+                return
+
+    def _join_shared_x(self, plot: Plot):
+        """Give a plot drawn after the others the window of the plots it shares the time axis with, if a zoom or a pan
+        on them moved it while its data were read (see draw_plot)."""
+        if not self._pm.get_value(self.canvas, 'shared_x_axis'):
+            return
+        own = self._plot_impl_plot_lut.get(id(plot), [])
+        for leader in self.get_canvas_plots():
+            item = self._impl_plot_cache_table.get_cache_item(leader)
+            leader_plot = item.plot() if item is not None else None
+            if (leader in own or leader_plot is None or isinstance(leader_plot, PlotXYWithSlider)
+                    or not self._plot_x_is_time(leader_plot) or not self._asked_for_window_of(plot, leader_plot)):
+                continue
+            window = leader_plot.axes[0].get_limits('current')
+            if window == leader_plot.axes[0].get_limits('original'):
+                return
+            if isinstance(plot, PlotXYWithSlider):
+                self.update_slider_limits(plot, *window)
+            else:
+                BackendParserBase._x_axis_update_callback(self, leader, only=own)
+            return
+
+    def _asked_for_window_of(self, plot: Plot, leader_plot: Plot) -> bool:
+        """Whether `plot` was asked for the window `leader_plot` was drawn over, as the plots that share its time axis
+        are: as for the plots the focus hides, the draw-time window is the one a zoom leaves untouched."""
+        begin, end = leader_plot.axes[0].get_limits('original')
+        if self._plot_x_is_time(plot):
+            return plot.axes[0].get_limits('original') == (begin, end)
+        if self._plot_x_expr_yields_time(plot):
+            return self._plot_first_x_near_range(plot, begin, end)
+        return begin is not None and end is not None and self._plot_shares_time_base(plot, (float(begin), float(end)))
+
+    @property
+    def pending_places(self) -> Dict[Tuple[int, int], Tuple[int, int]]:
+        """The places of the canvas whose plots wait for their data (see set_pending_places)."""
+        return dict(self._pending_places_of(self.canvas))
+
+    def show_pending_place(self, column: int, row: int, row_span: int, col_span: int):
+        """Show at a place of the canvas that its plot waits for its data."""
+
+    def hide_pending_place(self, column: int, row: int):
+        """Show no more at a place of the canvas that its plot waits for its data."""
+
+    def _pending_places_of(self, canvas: Optional[Canvas]) -> Dict[Tuple[int, int], Tuple[int, int]]:
+        pending = self._pending_canvas() if self._pending_canvas is not None else None
+        if canvas is None or pending is not canvas:
+            return {}
+        return self._pending_places
+
+    def _place_of(self, plot: Plot) -> Optional[Tuple[int, int]]:
+        """(column, row) of `plot` in the canvas, as in canvas.plots."""
+        for i, column in enumerate(getattr(self.canvas, 'plots', None) or []):
+            for j, candidate in enumerate(column):
+                if candidate is plot:
+                    return i, j
+        return None
 
     def _find_canvas_signal_by_alias(self, alias: str):
         """Signal registered in the canvas under the given alias, if any."""
@@ -2354,9 +2474,11 @@ class BackendParserBase(ABC):
         """
         shared = []
         base_begin, base_end = plot_with_slider.axes[0].get_limits('original')
-        for col in self.canvas.plots:
-            for plot in col:
-                if not (isinstance(plot, PlotXYWithSlider) or isinstance(plot,
+        # Those still waiting for their data take the value of the others once drawn (see draw_plot).
+        pending = self._pending_places_of(self.canvas)
+        for i, col in enumerate(self.canvas.plots):
+            for j, plot in enumerate(col):
+                if (i, j) in pending or not (isinstance(plot, PlotXYWithSlider) or isinstance(plot,
                                                                          PlotContourWithSlider)) or plot == plot_with_slider:
                     continue
 

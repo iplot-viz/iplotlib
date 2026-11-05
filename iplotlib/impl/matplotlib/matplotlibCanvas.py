@@ -25,6 +25,7 @@ from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
 from iplotlib.core.decimation import minmax_decimate
+from iplotlib.core.impl_base import PENDING_PLACE_TEXT
 from iplotlib.core import (Axis,
                            Canvas,
                            BackendParserBase,
@@ -95,6 +96,8 @@ class MatplotlibParser(BackendParserBase):
         """
         # Initialize before super().__init__() because it calls clear() via process_ipl_canvas
         self._tight_layout_requested = tight_layout
+        # Whether the margins fitted for the first plot drawn as their data arrive are kept (see hold_layout).
+        self._layout_held = False
         self.map_legend_to_ax = {}
         self._legend_signal_lut = {}  # legend_line -> Signal
         self._legend_full_text = {}  # legend name -> its text before a cut to the legend width
@@ -108,6 +111,7 @@ class MatplotlibParser(BackendParserBase):
         # interactive canvas sets it, an image export draws no buttons.
         self.legend_eye_images = None
         self._legend_eyes = {}  # MPLAxes -> the eye button of its legend
+        self._pending_texts = {}  # (column, row) -> what the place shows while its plot waits for its data
         self.legend_size = 8
         self._cursors = []
         self._rulers = []  # type: List[iplotMplRuler]
@@ -652,13 +656,8 @@ class MatplotlibParser(BackendParserBase):
         """
         Updates the X and Y view ranges of the Axes based on the most recent data received from the Streaming
         """
-        if self.figure.get_tight_layout():
-            # Per-flush tight layout dominates draw cost: fit margins once and freeze them.
-            try:
-                self.figure.tight_layout()
-            except Exception:
-                logger.debug("tight_layout failed; freezing current margins")
-            self.disable_tight_layout()
+        # Per-flush tight layout dominates draw cost.
+        self.freeze_layout()
 
         ax_window = impl_plot.get_xlim()[1] - impl_plot.get_xlim()[0]
 
@@ -961,10 +960,9 @@ class MatplotlibParser(BackendParserBase):
     def clear(self):
         super().clear()
 
-        # Undo the streaming-time layout freeze on rebuild.
-        if getattr(self, 'figure', None) is not None and self._tight_layout_requested \
-                and not self.figure.get_tight_layout():
-            self.enable_tight_layout()
+        # Undo the layout freeze of streaming, or of plots drawn as their data arrive, on rebuild.
+        if getattr(self, 'figure', None) is not None:
+            self.thaw_layout()
 
         # remove any active multi‑cursors
         for c in self._cursors:
@@ -996,6 +994,7 @@ class MatplotlibParser(BackendParserBase):
         self._legend_drops.clear()
         self._legend_eyes.clear()
         self._grid_spacing_annotations.clear()
+        self._pending_texts.clear()
         self._impl_plot_ranges_hash.clear()
 
         gc.collect()
@@ -1012,6 +1011,18 @@ class MatplotlibParser(BackendParserBase):
     def set_canvas_gridspec(self, rows: int, cols: int):
         """Set the canvas gridspec to the given rows and columns."""
         self._layout = self.figure.add_gridspec(rows, cols)
+
+    def show_pending_place(self, column: int, row: int, row_span: int, col_span: int):
+        # A text of the figure, not axes: the cursor and the mouse handlers take every axes for a plot.
+        place = self._layout[row: row + row_span, column: column + col_span].get_position(self.figure)
+        self._pending_texts[(column, row)] = self.figure.text(
+            (place.x0 + place.x1) / 2, (place.y0 + place.y1) / 2, PENDING_PLACE_TEXT, ha='center', va='center',
+            color='gray')
+
+    def hide_pending_place(self, column: int, row: int):
+        text = self._pending_texts.pop((column, row), None)
+        if text is not None:
+            text.remove()
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
 
@@ -1648,6 +1659,31 @@ class MatplotlibParser(BackendParserBase):
 
     def disable_tight_layout(self):
         self.figure.set_tight_layout("")
+
+    def freeze_layout(self):
+        """Fit the margins of the plots to their labels once, and keep them from then on: fitting them on every
+        drawing takes about as long as drawing the axes."""
+        if self.figure.get_tight_layout():
+            try:
+                self.figure.tight_layout()
+            except Exception:
+                logger.debug("tight_layout failed; freezing current margins")
+            self.disable_tight_layout()
+
+    def thaw_layout(self):
+        """Fit the margins on every drawing again, if the canvas asks for it (see freeze_layout)."""
+        self._layout_held = False
+        if self._tight_layout_requested and not self.figure.get_tight_layout():
+            self.enable_tight_layout()
+
+    def hold_layout(self):
+        """Keep, as plots are drawn one by one, the margins fitted for the first: the label of each new plot asks to
+        fit them again (see set_impl_y_axis_label_text), which takes longer with each plot."""
+        if self._layout_held:
+            self.disable_tight_layout()
+        else:
+            self.freeze_layout()
+            self._layout_held = True
 
     def set_focus_plot(self, mpl_axes):
         if isinstance(mpl_axes, MPLAxes):

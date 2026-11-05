@@ -20,6 +20,7 @@ from pyqtgraph import TextItem
 
 from iplotLogging import setupLogger
 from iplotlib.core.decimation import minmax_decimate
+from iplotlib.core.impl_base import PENDING_PLACE_TEXT
 from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
@@ -448,6 +449,7 @@ class PyQtGraphParser(BackendParserBase):
         self._rulers = []  # type: List[pyQtRuler]
         self._grid_spacing_labels = {}  # PlotItem -> TextItem
         self._cell_gl = {}
+        self._pending_cells = {}  # (column, row) -> the cell that shows that the place waits for its data
         self._layout_stacks = {}
         self._slider_placeholders = {}
         self._impl_plot_ranges_hash = dict()
@@ -485,6 +487,23 @@ class PyQtGraphParser(BackendParserBase):
             self.figure.addItem(cell_gl, row=layout_row, col=col, rowspan=rowspan, colspan=colspan)
             self._cell_gl[key] = cell_gl
         return cell_gl
+
+    def show_pending_place(self, column: int, row: int, row_span: int, col_span: int):
+        cell_gl = self._ensure_cell_layout(row, column, row_span, col_span)
+        cell_gl.addLabel(PENDING_PLACE_TEXT, row=0, col=0, color='#808080')
+        self._pending_cells[(column, row)] = cell_gl
+
+    def hide_pending_place(self, column: int, row: int):
+        cell_gl = self._pending_cells.pop((column, row), None)
+        if cell_gl is None:
+            return
+        # The plot lays out its place anew (see _ensure_cell_layout).
+        if self._cell_gl.get((row, column)) is cell_gl:
+            del self._cell_gl[(row, column)]
+        self.figure.removeItem(cell_gl)
+        # The grid drops what it had set for the rows and the columns of an item it removes: an empty place keeps
+        # its share, as it does in a canvas drawn whole.
+        self.set_canvas_gridspec(*self._grid_shape)
 
     def export_image(self, filename: str, **kwargs):
         canvas = kwargs.get('canvas')
@@ -1755,6 +1774,7 @@ class PyQtGraphParser(BackendParserBase):
         self._rulers.clear()
 
         self._cell_gl = {}
+        self._pending_cells = {}
         self._layout_stacks = {}
         self._slider_placeholders = {}
 
@@ -1906,46 +1926,43 @@ class PyQtGraphParser(BackendParserBase):
         vb = plot.vb
         vb.setMouseEnabled(x=False, y=False)
 
-    def set_view_box(self):
-        if self._cursor_active:
-            self.deactivate_cursor()
-        for stack in self._layout_stacks.values():
-            for plot in stack.values():
-                if not plot:
-                    continue
-                vb = plot.vb
-                vb.setMouseMode(vb.PanMode)
-                self.set_mouse(plot)
+    def _view_box_plots(self, impl_plots: list = None) -> list:
+        """These implementation plots, or else every one drawn."""
+        if impl_plots is not None:
+            return impl_plots
+        return [plot for stack in self._layout_stacks.values() for plot in stack.values() if plot]
 
-    def set_view_box_zoom(self):
+    def set_view_box(self, impl_plots: list = None):
         if self._cursor_active:
             self.deactivate_cursor()
-        for stack in self._layout_stacks.values():
-            for plot in stack.values():
-                if not plot:
-                    continue
-                iplot = self._impl_plot_cache_table.get_cache_item(plot).plot()
-                if isinstance(iplot, (PlotContour, PlotContourWithSlider)):
-                    logger.warning(f"Zoom action is not supported for {type(iplot).__name__}")
-                    continue
-                vb = plot.vb
-                vb.setMouseMode(vb.RectMode)
-                self.set_mouse(plot)
+        for plot in self._view_box_plots(impl_plots):
+            vb = plot.vb
+            vb.setMouseMode(vb.PanMode)
+            self.set_mouse(plot)
 
-    def set_view_box_pan(self):
+    def set_view_box_zoom(self, impl_plots: list = None):
         if self._cursor_active:
             self.deactivate_cursor()
-        for stack in self._layout_stacks.values():
-            for plot in stack.values():
-                if not plot:
-                    continue
-                iplot = self._impl_plot_cache_table.get_cache_item(plot).plot()
-                if isinstance(iplot, (PlotContour, PlotContourWithSlider)):
-                    logger.warning(f"Pan action is not supported for {type(iplot).__name__}")
-                    continue
-                vb = plot.vb
-                vb.setMouseMode(vb.PanMode)
-                vb.setMouseEnabled(x=True, y=True)
+        for plot in self._view_box_plots(impl_plots):
+            iplot = self._impl_plot_cache_table.get_cache_item(plot).plot()
+            if isinstance(iplot, (PlotContour, PlotContourWithSlider)):
+                logger.warning(f"Zoom action is not supported for {type(iplot).__name__}")
+                continue
+            vb = plot.vb
+            vb.setMouseMode(vb.RectMode)
+            self.set_mouse(plot)
+
+    def set_view_box_pan(self, impl_plots: list = None):
+        if self._cursor_active:
+            self.deactivate_cursor()
+        for plot in self._view_box_plots(impl_plots):
+            iplot = self._impl_plot_cache_table.get_cache_item(plot).plot()
+            if isinstance(iplot, (PlotContour, PlotContourWithSlider)):
+                logger.warning(f"Pan action is not supported for {type(iplot).__name__}")
+                continue
+            vb = plot.vb
+            vb.setMouseMode(vb.PanMode)
+            vb.setMouseEnabled(x=True, y=True)
 
     def set_view_box_crosshair(self):
         if self._cursor_active:

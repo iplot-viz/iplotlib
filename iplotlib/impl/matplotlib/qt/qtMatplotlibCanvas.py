@@ -11,11 +11,12 @@
 #               -Refactor and let superclass methods refresh, reset use set_canvas, get_canvas [Jaswant Sai Panchumarti]
 #   May 2022:   -Port to PySide6 and use new backend_qtagg from matplotlib[Leon Kos]
 import functools
+import time
 import typing
 from collections.abc import Collection
 
 import numpy as np
-from PySide6.QtCore import QMargins, Qt, Slot, Signal
+from PySide6.QtCore import QMargins, Qt, QTimer, Slot, Signal
 from PySide6.QtGui import QCursor, QKeyEvent
 from PySide6.QtWidgets import QApplication, QMessageBox, QSizePolicy, QSplitter, QToolTip, QVBoxLayout, QMenu
 
@@ -88,6 +89,11 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_renderer = FigureCanvas(self._parser.figure)
         self._mpl_renderer.setParent(self)
         self._mpl_renderer.setSizePolicy(self._mpl_size_pol)
+        # Renders the plots drawn as their data arrive (see _render_soon), and when and how long the last render took.
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.timeout.connect(self.render)
+        self._render_end = self._render_took = 0.0
         self._mpl_toolbar = NavigationToolbar(self._mpl_renderer, self)
         self._mpl_toolbar.setVisible(False)
 
@@ -193,7 +199,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _update_minimap(self):
         canvas = self.get_canvas()
-        show = canvas is not None and canvas.show_minimap and canvas.is_minimap_eligible()
+        show = self._minimap_eligible(canvas)
         self._minimap_renderer.setVisible(show)
         if show:
             total = max(self._splitter.height(), 1)
@@ -805,7 +811,36 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     @Slot()
     def render(self):
+        started = time.perf_counter()
         self._mpl_renderer.draw()
+        self._render_end = time.perf_counter()
+        self._render_took = self._render_end - started
+
+    def _plot_drawn(self, plot):
+        if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
+            # The cursor spans the plots drawn: the new one too.
+            self._parser.deactivate_cursor()
+            self._parser.activate_cursor()
+        self._update_minimap()
+        if self._parser.pending_places:
+            self._parser.hold_layout()
+            self._render_soon()
+
+    def _render_soon(self):
+        """Render the plots drawn since the last render once twice as long as it took has passed since it ended: a
+        render draws the whole figure, in a time that grows with its plots, and the window answers meanwhile."""
+        if self._render_timer.isActive():
+            return
+        waited = time.perf_counter() - self._render_end
+        self._render_timer.start(max(0, int((2 * self._render_took - waited) * 1000)))
+
+    def _place_done(self):
+        super()._place_done()
+        if not self._parser.pending_places:
+            # Once all are drawn, the layout fits them as it fits a canvas drawn whole.
+            self._render_timer.stop()
+            self._parser.thaw_layout()
+            self.render_deferred()
 
     def render_deferred(self):
         """Ask for a repaint instead of forcing one, so bursts of ruler changes

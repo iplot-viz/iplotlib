@@ -210,6 +210,13 @@ class IplotMultiCursor(Widget):
 
         self._update()
         self.disconnect()
+        # Hidden, they would stay in their axes, and the next cursor adds its own.
+        for artist in self.x_arrows + self.y_arrows + self.value_annotations + self.v_lines + self.h_lines:
+            try:
+                artist.remove()
+            except (NotImplementedError, ValueError):
+                # Its axes were cleared already.
+                pass
 
     def on_move(self, event):
         if self.ignore(event):

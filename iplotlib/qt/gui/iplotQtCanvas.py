@@ -70,6 +70,8 @@ class IplotQtCanvas(QWidget):
         self._stats_table = IplotQtStatistics()
 
         self.info_shared_x_dialog = False
+        # Whether the rulers wait for the drag of one to end to be drawn anew (see _redraw_rulers).
+        self._rulers_due = False
 
         # Drag shift state
         self._drag_shift_active = False
@@ -238,6 +240,9 @@ class IplotQtCanvas(QWidget):
         """Sets new version of iplotlib canvas and redraw"""
         if not canvas:
             return
+        # Once all its plots are drawn, when some wait for their data (see draw_plot).
+        if self._parser.pending_places:
+            return
 
         # Check if plots share time axis
         ranges = []
@@ -289,6 +294,75 @@ class IplotQtCanvas(QWidget):
 
                 box.setText(message)
                 box.exec_()
+
+    def set_pending_places(self, canvas: Canvas, places: dict):
+        """Leave the plots of `canvas` at `places` to draw once their data are read (see
+        BackendParserBase.set_pending_places): call it before set_canvas(canvas), and then draw_plot()
+        or drop_pending_place() for each place."""
+        self._parser.set_pending_places(canvas, places)
+
+    def draw_plot(self, plot) -> bool:
+        """Draw a plot whose place set_pending_places() left pending, now that its data are read. False if
+        it draws nothing (see BackendParserBase.draw_plot)."""
+        waited = bool(self._parser.pending_places)
+        drawn = False
+        try:
+            drawn = self._parser.draw_plot(plot)
+            if drawn:
+                self._plot_drawn(plot)
+                self._redraw_rulers()
+        finally:
+            if waited:
+                self._place_done()
+        return drawn
+
+    def drop_pending_place(self, column: int, row: int):
+        """Draw nothing at a place set_pending_places() left pending: its plot has nothing to draw."""
+        if self._parser.drop_pending_place(column, row):
+            self._place_done()
+
+    def drop_pending_places(self):
+        """Wait no more for the plots of the places set_pending_places() left pending, as when the canvas is
+        about to be drawn anew: the drawing they belonged to is not finished."""
+        self._parser.drop_pending_places()
+
+    def _plot_drawn(self, plot):
+        """Extend to the plot that draw_plot() just drew what the canvas does for every plot it draws."""
+
+    def _redraw_rulers(self):
+        """Draw the rulers anew, those of the plot just drawn and their echoes on it with the others: once the
+        drag of one ends, if one is dragged, as the drag moves its artist."""
+        if getattr(self, '_ruler_drag', None) is not None:
+            if not self._rulers_due:
+                self._rulers_due = True
+                QTimer.singleShot(100, self._redraw_rulers_due)
+            return
+        for name in {ruler.name for ruler in self._parser.get_rulers()}:
+            self._parser.remove_ruler_by_name(name)
+        IplotQtCanvas._repaint_rulers_from_canvas(self)
+
+    def _redraw_rulers_due(self):
+        self._rulers_due = False
+        self._redraw_rulers()
+
+    def _place_done(self):
+        """Once no place waits for its plot, finish what set_canvas() does once the plots are drawn: from the
+        event loop, as it may ask the user, and not while a plot is focused, as ending the focus draws the
+        canvas whole."""
+        canvas = self.get_canvas()
+        if self._parser.pending_places or canvas is None or canvas.focus_plot is not None:
+            return
+        QTimer.singleShot(0, lambda: self._finish_drawing(canvas))
+
+    def _finish_drawing(self, canvas: Canvas):
+        if canvas is self.get_canvas() and canvas.focus_plot is None and not self._parser.pending_places:
+            IplotQtCanvas.set_canvas(self, canvas)
+
+    def _minimap_eligible(self, canvas: Optional[Canvas]) -> bool:
+        """Whether the canvas shows the minimap: once its plots are drawn, but for a focused plot (see
+        set_pending_places)."""
+        return (canvas is not None and canvas.show_minimap and canvas.is_minimap_eligible()
+                and (canvas.focus_plot is not None or not self._parser.pending_places))
 
     def get_canvas(self) -> Canvas:
         """Gets current iplotlib canvas"""
@@ -650,6 +724,12 @@ class IplotQtCanvas(QWidget):
         cmd = self._staging_cmds.pop()
         cmd.new_lim = self._parser.get_view_cmd_limits(impl_plot)
         if len(cmd.new_lim) != len(cmd.old_lim):
+            # A plot drawn during the gesture, as its data arrived, has no limits from before it: undoing the
+            # gesture moves the others, and the plots sharing their time axis follow.
+            before = {id(limits.plot_ref()) for limits in cmd.old_lim if limits.plot_ref is not None}
+            cmd.new_lim = [limits for limits in cmd.new_lim
+                           if limits.plot_ref is not None and id(limits.plot_ref()) in before]
+        if len(cmd.new_lim) != len(cmd.old_lim):
             # The set of plots changed under the gesture (a redraw fired while
             # dragging), so there is no consistent before/after pair to undo.
             logger.debug(f"Dropped {cmd}: plots changed during the gesture")
@@ -672,13 +752,13 @@ class IplotQtCanvas(QWidget):
         """push a view command onto their history manager"""
         try:
             cmd = self._commitd_cmds.pop()
+            self._parser._hm.done(cmd)
+            # Data read in the background can arrive while the command is committed.
+            self._parser._update_view_cmd()
+            logger.debug(f"Pushed {cmd}")
+            self.cmdDone.emit(cmd)
         except IndexError:
             return
-        self._parser._hm.done(cmd)
-        # Data read in the background can arrive while the command is committed.
-        self._parser._update_view_cmd()
-        logger.debug(f"Pushed {cmd}")
-        self.cmdDone.emit(cmd)
 
     def _flush_view(self):
         """

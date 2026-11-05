@@ -26,7 +26,7 @@
 #              - The alignment modifies the data_store. After evaluation, restore the original buffers.
 #  Feb 2023:   Changes by Alberto Luengo
 #              - Re-alignment of signals with different shapes to allow plot X vs. Y variables
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, fields
 import numbers
 import numpy as np
@@ -986,7 +986,7 @@ class AccessHelper:
     """
         A simple wrapper providing data access.
         Data requests made by get_data() are blocking and occur sequentially i.e, first to enter, first to exit.
-        They can be read ahead, all at once, by worker processes (`pool`, an iplotlib.data_access.AccessPool):
+        They can be read ahead, all at once, by worker threads (`pool`, an iplotlib.data_access.AccessPool):
         see data_requests() and prefetched(), or put off to read in the background: see deferred().
         See fetch_data(), _submit_fetch(), on_fetch_done() and request_data()
         For ex. the input and output of request_data() are python builtins i.e, a dictionary
@@ -994,13 +994,18 @@ class AccessHelper:
     """
 
     da = None
-    #: Worker processes that read data ahead of the blocking requests (an iplotlib.data_access.AccessPool), if any.
+    #: Worker threads that read data ahead of the blocking requests (an iplotlib.data_access.AccessPool), if any.
     pool = None
     num_samples_override = False
     num_samples = 1000
     query_no = 0
-    # Per thread, the results read ahead that prefetched() serves and the reads deferred() puts off.
+    # Per thread, the results read ahead that prefetched() serves, the reads deferred() puts off and the data access
+    # object of a thread that has one of its own.
     _context = threading.local()
+    # Whether threads may read the data source at the same time, as AccessPool tells: the reads of the other data
+    # sources take turns, from whatever thread, as their client must not be called from two threads at once.
+    reads_in_parallel = staticmethod(lambda data_s_name: False)
+    _turns = threading.RLock()
 
     def __init__(self) -> None:
         pass
@@ -1023,6 +1028,17 @@ class AccessHelper:
             if ds is None or ds.source_type == 'CODAC_UDA':
                 params['retType'] = 'doubleCalibrated'
         return params
+
+    @staticmethod
+    def thread_data_access():
+        """The data access object of this thread, if it has one of its own instead of `da`, as a worker thread of
+        AccessPool does: data access objects are not safe to share between threads."""
+        return getattr(AccessHelper._context, 'da', None)
+
+    @staticmethod
+    def set_thread_data_access(data_access):
+        """Make `data_access` the data access object of this thread (see thread_data_access())."""
+        AccessHelper._context.da = data_access
 
     @staticmethod
     def request_key(params: dict) -> tuple:
@@ -1256,7 +1272,20 @@ class AccessHelper:
         AccessHelper._submit_fetch(signal)
 
     @staticmethod
+    def reading(data_s_name: str):
+        """What to hold while reading the data source (see reads_in_parallel)."""
+        return nullcontext() if AccessHelper.reads_in_parallel(data_s_name) else AccessHelper._turns
+
+    @staticmethod
     def _request_data(**da_params) -> dict:
+        with AccessHelper.reading(da_params.get('data_s_name')):
+            return AccessHelper._read_data(**da_params)
+
+    @staticmethod
+    def _read_data(**da_params) -> dict:
+        da = AccessHelper.thread_data_access()
+        if da is None:
+            da = AccessHelper.da
         ts_s = da_params.get('tsS')
         ts_e = da_params.get('tsE')
         pulse = da_params.get('pulse')
@@ -1282,11 +1311,11 @@ class AccessHelper:
         if (ts_s is not None and ts_e is not None) or pulse is not None:
 
             if envelope:
-                (d_env) = AccessHelper.da.get_envelope(**da_params)
+                (d_env) = da.get_envelope(**da_params)
                 if d_env.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval,' \
                                     ' use decimation or read data by chunks.':
                     da_params.update({'nbp': AccessHelper.num_samples})
-                    (d_env) = AccessHelper.da.get_envelope(**da_params)
+                    (d_env) = da.get_envelope(**da_params)
                     ds = True
                 if d_env.errcode < 0:
                     if d_env.errcode < 0:
@@ -1316,12 +1345,12 @@ class AccessHelper:
                 logger.debug(f"[UDA ] nbsMIN={len(d_env.ydata_min)} nbsMAX={len(d_env.ydata_max)}")
 
             else:
-                raw = AccessHelper.da.get_data(**da_params)
+                raw = da.get_data(**da_params)
                 if raw.errcode < 0:
                     if raw.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval,' \
                                       ' use decimation or read data by chunks.':
                         da_params.update({'nbp': AccessHelper.num_samples})
-                        raw = AccessHelper.da.get_data(**da_params)
+                        raw = da.get_data(**da_params)
                         ds = True
                     # if raw.errcode < 0: # try with fallback no. of points.
                     #     da_params.update({'nbp': AccessHelper.num_samples})
