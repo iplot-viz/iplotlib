@@ -12,7 +12,7 @@ from typing import Callable, List, Tuple, Optional
 
 import numpy as np
 from PySide6.QtCore import QEventLoop, QMetaObject, QSize, Qt, QTimer, Signal, Slot
-from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
+from PySide6.QtWidgets import QApplication, QMenu, QWidget, QMessageBox
 from iplotlib.core.signal import SignalXY
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY, PlotXYWithSlider, PlotContourWithSlider
@@ -25,7 +25,7 @@ from iplotlib.core.layout import Arrangement
 from iplotlib.core.ruler import Ruler
 import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
-from iplotlib.qt.gui.iplotQtArrangement import LAYOUT, PlotArranger
+from iplotlib.qt.gui.iplotQtArrangement import LAYOUT, UNSTACK, PlotArranger
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
 
@@ -834,6 +834,11 @@ class IplotQtCanvas(QWidget):
                 outcomes[(row, col)] = count - cells if joined[cells] else None
         return outcomes
 
+    def current_layout(self) -> Optional[Tuple[int, int]]:
+        """The rows and columns of the grid the plots are on; None without a canvas."""
+        canvas = self.get_canvas()
+        return layout.grid_size(canvas) if canvas is not None else None
+
     def lay_out(self, rows: int, cols: int):
         """Lay the plots out on a grid of `rows` by `cols` that the canvas keeps (see iplotlib.core.layout.laid_out),
         as a command that undo takes back. Nothing happens if they cannot be, or if they are so already."""
@@ -851,6 +856,36 @@ class IplotQtCanvas(QWidget):
             self._arranger.cancel()
         # Plots joined into one leave their places to it.
         self._apply_arrangement(LAYOUT, arrangement, current)
+
+    def unstack_arrangement(self, plot) -> Optional[Arrangement]:
+        """Where the plots go when each stack of `plot` takes a plot of its own (see iplotlib.core.layout.unstacked);
+        None if it cannot now."""
+        if not self._layout_allowed():
+            return None
+        # Each backend pairs the stacks with the Y axes in the order it draws them.
+        items = [self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+                 for impl_plot in self._parser._plot_impl_plot_lut.get(id(plot), [])]
+        order = [item.stack_key for item in items] if all(items) else None
+        return layout.unstacked(self.get_canvas(), plot, self.reserved_slots(), order)
+
+    def unstack(self, plot):
+        """Give each stack of `plot` a plot of its own, as a command that undo takes back. Nothing happens if it
+        cannot now."""
+        arrangement = self.unstack_arrangement(plot)
+        if arrangement is None:
+            return
+        if self._arranger is not None:
+            self._arranger.cancel()
+        # The plots of the stacks take the place of the plot.
+        self._apply_arrangement(UNSTACK, arrangement, layout.current(self.get_canvas()))
+
+    def _add_unstack_action(self, menu: QMenu, impl_plot):
+        """Offer in the context menu of a plot to give each of its stacks a plot of its own, greyed out unless it
+        can now."""
+        cache_item = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = cache_item.plot() if hasattr(cache_item, 'plot') else None
+        action = menu.addAction("Unstack", lambda: self.unstack(plot))
+        action.setEnabled(plot is not None and self.unstack_arrangement(plot) is not None)
 
     def _drop_allowed(self, source, mime) -> bool:
         """Whether what is dragged over the canvas can be dropped on a cell of its grid now: something the

@@ -19,7 +19,8 @@ LABEL_WIDTH = ScaledPixels(210)
 
 class LayoutPicker(QWidget):
     """Cells to pick a grid from: those from the top left one to the one under the mouse light up, the line below
-    names the grid, and a click picks it. A grid the plots cannot be laid out on shows grey and takes no click."""
+    names the grid, and a click picks it. A grid the plots cannot be laid out on shows grey and takes no click. The
+    cells of the grid the plots are on show tinted, and the line names it while the mouse is not on the cells."""
 
     # The largest grid offered.
     ROWS, COLS = 10, 6
@@ -31,6 +32,8 @@ class LayoutPicker(QWidget):
         # How many plots besides its own the last cell of each grid takes, by (rows, cols), None for a grid the plots
         # cannot be laid out on (see IplotQtCanvas.layout_outcomes). None for none now.
         self._outcomes = None  # type: Optional[Dict[Tuple[int, int], Optional[int]]]
+        # The rows and columns of the grid the plots are on, None for none now.
+        self.current = None  # type: Optional[Tuple[int, int]]
         self._cells = _Cells(self)
         self._label = QLabel(self)
         self._label.setWordWrap(True)
@@ -45,9 +48,12 @@ class LayoutPicker(QWidget):
         self._cells.clicked.connect(self._pick)
         self._show(None)
 
-    def set_outcomes(self, outcomes: Optional[Dict[Tuple[int, int], Optional[int]]]):
-        """What each grid would do, as IplotQtCanvas.layout_outcomes gives it: what the picker shows next."""
+    def set_outcomes(self, outcomes: Optional[Dict[Tuple[int, int], Optional[int]]],
+                     current: Optional[Tuple[int, int]] = None):
+        """What each grid would do, as IplotQtCanvas.layout_outcomes gives it, and the grid the plots are on: what the
+        picker shows next."""
         self._outcomes = outcomes if outcomes and any(value is not None for value in outcomes.values()) else None
+        self.current = current if self._outcomes is not None else None
         self._cells.hovered_size = None
         self._cells.update()
         self._show(None)
@@ -60,10 +66,11 @@ class LayoutPicker(QWidget):
             self._label.setText('Not while streaming or with a plot in focus')
             return
         if size is None:
-            self._label.setText('Pick the rows and columns of the grid')
+            self._label.setText(f'Current grid: {_name(*self.current)}' if self.current else
+                                'Pick the rows and columns of the grid')
             return
         rows, cols = size
-        name = f"{rows} {'row' if rows == 1 else 'rows'} × {cols} {'column' if cols == 1 else 'columns'}"
+        name = _name(rows, cols)
         joined = self.outcome(rows, cols)
         if joined is None:
             self._label.setText(f'{name}: the plots that do not fit cannot be merged into one')
@@ -75,6 +82,10 @@ class LayoutPicker(QWidget):
     def _pick(self, rows: int, cols: int):
         if self.outcome(rows, cols) is not None:
             self.picked.emit(rows, cols)
+
+
+def _name(rows: int, cols: int) -> str:
+    return f"{rows} {'row' if rows == 1 else 'rows'} × {cols} {'column' if cols == 1 else 'columns'}"
 
 
 class _Cells(QWidget):
@@ -127,15 +138,17 @@ class _Cells(QWidget):
         palette = self.palette()
         accent, neutral = palette.color(QPalette.ColorRole.Highlight), palette.color(QPalette.ColorRole.Mid)
         rows, cols = self.hovered_size or (0, 0)
+        current_rows, current_cols = self._picker.current or (0, 0)
         allowed = self._picker.outcome(rows, cols) is not None
         side, step, radius = CELL.px(), CELL.px() + GAP.px(), ScaledPixels(2).px()
         for row in range(LayoutPicker.ROWS):
             for col in range(LayoutPicker.COLS):
                 lit = row < rows and col < cols
-                color = accent if lit and allowed else neutral
+                now = row < current_rows and col < current_cols
+                color = accent if lit and allowed or now and not lit else neutral
                 fill = QColor(color)
-                fill.setAlpha(110 if lit else 0)
+                fill.setAlpha(110 if lit else 45)
                 painter.setPen(QPen(color, ScaledPixels(1).px()))
-                painter.setBrush(fill if lit else palette.color(QPalette.ColorRole.Base))
+                painter.setBrush(fill if lit or now else palette.color(QPalette.ColorRole.Base))
                 painter.drawRoundedRect(QRectF(col * step + 0.5, row * step + 0.5, side - 1, side - 1), radius, radius)
         painter.end()

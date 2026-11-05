@@ -23,6 +23,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QMenu
 
 from iplotlib.core import layout
+from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.display import MODE_FIXED, DisplayScale
 from iplotlib.core.plot import PlotXY
@@ -916,6 +917,100 @@ class TestArrangePlots(unittest.TestCase):
                 np.testing.assert_allclose(parser.get_oaw_axis_limits(self._impl(qt_canvas, canvas, '2.0'), 0),
                                            (5.0, 8.0))
 
+    def _menu_action(self, mouse, point, text: str):
+        """The action of the menu that a right click at the point opens, in the coordinates of the canvas widget. The
+        menus open before close first, and this one once the test is over."""
+        def menus():
+            return [widget for widget in QApplication.topLevelWidgets() if isinstance(widget, QMenu)
+                    and widget.isVisible()]
+        for menu in menus():
+            menu.close()
+        at = mouse._at(point)
+        QTest.mousePress(mouse.widget, Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier, at)
+        QTest.mouseRelease(mouse.widget, Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier, at)
+        self.app.processEvents()
+        menu, = menus()
+        self.addCleanup(menu.close)
+        return next(action for action in menu.actions() if action.text() == text)
+
+    @staticmethod
+    def _labels(canvas: Canvas) -> list:
+        return [[[signal.label for signal in signals] for signals in plot.signals.values()] if plot else None
+                for column in canvas.plots for plot in column]
+
+    def test_unstack_in_the_menu_of_a_stacked_plot_gives_each_stack_a_plot_of_its_own_and_undo_takes_it_back(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                parser = qt_canvas._parser
+                qt_canvas.lay_out(2, 1)
+                self.app.processEvents()
+                joined = canvas.plots[0][1]
+                views = [parser.get_plot_limits(impl) for impl in parser._plot_impl_plot_lut[id(joined)]]
+
+                self.assertFalse(self._menu_action(mouse, mouse.cell(0, 0), 'Unstack').isEnabled())
+                unstack = self._menu_action(mouse, mouse.cell(1, 0), 'Unstack')
+                self.assertTrue(unstack.isEnabled())
+                unstack.trigger()
+                self.app.processEvents()
+
+                self.assertEqual(self._labels(canvas), [[['s00']], [['s10']], [['s20']]])
+                self.assertEqual(qt_canvas.get_next_undo_cmd_name(), 'Unstack')
+                self.assertEqual({((before.row, before.col, before.stack_offset), (after.row, after.col,
+                                                                                   after.stack_offset))
+                                  for before, after in arranged[-1]}, {((1, 0, 1), (2, 0, 0))})
+                # Each plot shows the view its stack had.
+                for plot, view in zip(canvas.plots[0][1:], views):
+                    impl = parser._plot_impl_plot_lut[id(plot)][0]
+                    np.testing.assert_allclose(parser.get_oaw_axis_limits(impl, 0), view.axes_ranges[0].get_limits())
+                    np.testing.assert_allclose(parser.get_oaw_axis_limits(impl, 1), view.axes_ranges[1].get_limits())
+
+                qt_canvas.undo()
+                self.app.processEvents()
+                self.assertIs(canvas.plots[0][1], joined)
+                self.assertEqual(len(parser._plot_impl_plot_lut[id(joined)]), 2)
+                qt_canvas.redo()
+                self.app.processEvents()
+                self.assertEqual(self._labels(canvas), [[['s00']], [['s10']], [['s20']]])
+
+    def test_unstack_gives_each_plot_the_y_axis_of_its_stack_also_for_stacks_added_out_of_order(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                _, qt_canvas, mouse, arranged = self._qt_canvas(backend, columns=(1,))
+                canvas = Canvas(rows=1, cols=1, mouse_mode=Canvas.MOUSE_MODE_SELECT)
+                plot = PlotXY(plot_title='0.0', row=1, col=1, axes=[LinearAxis(), [LinearAxis(), LinearAxis()]])
+                for stack, low in ((2, 100.0), (1, 0.0)):
+                    signal = SignalXY(label=f'stack {stack}', uid=f'stack {stack}')
+                    signal.set_data([np.linspace(0.0, 9.0, 10), np.linspace(low, low + 9.0, 10)])
+                    plot.add_signal(signal, stack=stack)
+                canvas.add_plot(plot, 0)
+                qt_canvas.set_canvas(canvas)
+                self.app.processEvents()
+
+                qt_canvas.unstack(plot)
+                self.app.processEvents()
+
+                parser = qt_canvas._parser
+                for part, low in zip(canvas.plots[0], (0.0, 100.0)):
+                    impl = parser._plot_impl_plot_lut[id(part)][0]
+                    parser.set_plot_limits_to_original(impl)
+                    self.app.processEvents()
+                    bottom, top = parser.get_oaw_axis_limits(impl, 1)
+                    self.assertTrue(bottom <= low and low + 9.0 <= top < low + 50.0, (part.signals, bottom, top))
+
+    def test_unstack_is_greyed_out_while_a_plot_has_the_focus(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                qt_canvas.lay_out(1, 1)
+                self.app.processEvents()
+                qt_canvas._full_screen_mode_on(qt_canvas._parser._plot_impl_plot_lut[id(canvas.plots[0][0])][0])
+                self.app.processEvents()
+
+                # The plot in focus takes the whole canvas.
+                point = (qt_canvas.width() * 0.3, qt_canvas.height() * 0.2)
+                self.assertFalse(self._menu_action(mouse, point, 'Unstack').isEnabled())
+
     def test_undo_or_redo_that_takes_the_plot_in_focus_away_shows_all_the_plots(self):
         for backend in BACKENDS:
             with self.subTest(backend):
@@ -1000,11 +1095,14 @@ class TestArrangePlots(unittest.TestCase):
         self.assertEqual([picker.outcome(1, 1), picker.outcome(1, 2), picker.outcome(3, 1), picker.outcome(2, 2)],
                          [2, 1, 0, 0])
 
+        self.assertEqual(picker.current, (3, 1))
         picker.picked.emit(3, 2)
         self.app.processEvents()
         self.assertEqual(_titles(canvas), [['0.0', '1.0', '2.0'], []])
         self.assertEqual((canvas.rows, canvas.cols), (3, 2))
         self.assertEqual(win.toolBar.undoAction.text(), 'Undo Layout')
+        win.toolBar.layoutMenu.aboutToShow.emit()
+        self.assertEqual((picker.current, picker._label.text()), ((3, 2), 'Current grid: 3 rows × 2 columns'))
 
         canvas.streaming = True
         win.toolBar.layoutMenu.aboutToShow.emit()
@@ -1047,6 +1145,30 @@ class TestArrangePlots(unittest.TestCase):
 
         picker.set_outcomes(None)
         self.assertIn('streaming', picker._label.text())
+
+    def test_the_layout_picker_tints_and_names_the_grid_the_plots_are_on(self):
+        picker = LayoutPicker()
+        self.addCleanup(picker.close)
+        outcomes = {(rows, cols): 0 for rows in range(1, LayoutPicker.ROWS + 1)
+                    for cols in range(1, LayoutPicker.COLS + 1)}
+        picker.set_outcomes(outcomes, (2, 3))
+        picker.show()
+        self.app.processEvents()
+        step = CELL.px() + GAP.px()
+
+        def fill(row, col):
+            image = picker._cells.grab().toImage()
+            ratio = image.devicePixelRatio()
+            return image.pixelColor(round((col + 0.5) * step * ratio), round((row + 0.5) * step * ratio))
+
+        self.assertEqual(picker._label.text(), 'Current grid: 2 rows × 3 columns')
+        self.assertEqual(fill(1, 2), fill(0, 0))
+        self.assertNotEqual(fill(0, 0), fill(2, 0))
+        self.assertNotEqual(fill(0, 0), fill(0, 3))
+        # Streaming or with a plot in focus, no grid is offered and none is named.
+        picker.set_outcomes(None, (2, 3))
+        self.assertIsNone(picker.current)
+        self.assertEqual(fill(0, 0), fill(2, 0))
 
     # Dropping on the grid
 
