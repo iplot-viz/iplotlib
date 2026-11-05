@@ -1013,6 +1013,29 @@ class MatplotlibParser(BackendParserBase):
         """Set the canvas gridspec to the given rows and columns."""
         self._layout = self.figure.add_gridspec(rows, cols)
 
+    def relayout(self) -> bool:
+        # Each stack of a plot takes a row of its place, as process_ipl_plot lays them. A slider takes a row of its
+        # own, and contours and images a colorbar beside them: those plots are drawn again.
+        if self._focus_plot is not None:
+            return False
+        grid = self.figure.add_gridspec(self.canvas.rows, self.canvas.cols)
+        places = []
+        for col, column in enumerate(self.canvas.plots):
+            for row, plot in enumerate(column):
+                if plot is None:
+                    continue
+                axes = self._plot_impl_plot_lut.get(id(plot), [])
+                if not isinstance(plot, PlotXY) or isinstance(plot, PlotXYWithSlider) or \
+                        len(axes) != len(plot.signals):
+                    return False
+                stacks = grid[row: row + plot.row_span, col: col + plot.col_span].subgridspec(len(axes), 1, hspace=0)
+                places += [(mpl_axes, stacks[stack_id, 0]) for stack_id, mpl_axes in enumerate(axes)]
+        for mpl_axes, place in places:
+            mpl_axes.set_subplotspec(place)
+        self._layout = grid
+        self.figure.canvas.draw_idle()
+        return True
+
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
 
         self.figure.suptitle(title, fontsize=font_size, color=font_color)
