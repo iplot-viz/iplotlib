@@ -1230,6 +1230,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                                          lambda: self._full_screen_mode_on(impl_plot))
             else:
                 autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+            self._add_unstack_action(autoscale_menu, impl_plot)
             autoscale_menu.addSeparator()
             ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
             if ci:

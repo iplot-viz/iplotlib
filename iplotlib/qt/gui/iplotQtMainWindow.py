@@ -148,7 +148,8 @@ class IplotQtMainWindow(QMainWindow):
         """The grids the Layout tool offers for the plots of the current canvas, as its menu opens."""
         w = self.canvasStack.currentWidget()
         picker = self.toolBar.layoutPicker
-        picker.set_outcomes(w.layout_outcomes(picker.ROWS, picker.COLS) if w else None)
+        picker.set_outcomes(w.layout_outcomes(picker.ROWS, picker.COLS) if w else None,
+                            w.current_layout() if w else None)
 
     def lay_out(self, rows: int, cols: int):
         """Lay the plots of the current canvas out on a grid of `rows` by `cols` (see IplotQtCanvas.lay_out)."""
@@ -235,8 +236,8 @@ class IplotQtMainWindow(QMainWindow):
 
     def reserved_slots(self) -> list:
         """The slots of the grid of the canvas that the application reserves for plots it does not draw now, such as
-        those whose data could not be read: they move with the plots as plots do, and no plot moves or grows over them
-        (see iplotlib.core.layout). This window reserves none."""
+        those of rows added since it drew the canvas: they move with the plots as plots do, and no plot moves or grows
+        over them (see iplotlib.core.layout). This window reserves none."""
         return []
 
     def reserved_stacks(self) -> dict:

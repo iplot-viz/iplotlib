@@ -5,7 +5,7 @@ Where the plots of a canvas sit on its grid, and where they go when one of them 
 ``col_span`` columns from there. Rows and columns count from 0 in this module.
 
 An application can reserve slots of the grid for plots it does not draw now, as MINT does for the rows of its table
-whose data could not be read: a reserved slot moves and trades places as a plot does, and no plot moves or grows over
+added since it last drew it: a reserved slot moves and trades places as a plot does, and no plot moves or grows over
 it.
 
 The grid can also be chosen, rows by columns, for the plots to be laid out on it, which it keeps from then on (see
@@ -200,6 +200,58 @@ def laid_out(canvas: Canvas, rows: int, cols: int, reserved: Iterable[Slot] = ()
                     if offset or slot != last]
     return Arrangement(plots, rows, cols, changes,
                        [place for (other, _), place in zip(kept, places) if isinstance(other, _Reserved)], (rows, cols))
+
+
+def unstacked(canvas: Canvas, plot: Plot, reserved: Iterable[Slot] = (), order: Iterable[int] = None) \
+        -> Optional[Arrangement]:
+    """The plots of the canvas with each stack of `plot` in a plot of its own, from the top in the order of their
+    numbers: they share out the rows of the plot, and take more below it, as resized gives them, when the stacks
+    outnumber its rows. None if the plot has a single stack, is not a plot of curves along X, or cannot take the rows.
+
+    Each plot takes the Y axis of its stack, a copy of the X axis and the legend of its stack dragged or folded away;
+    the first one takes the rulers too, which the others echo when they share the X axis. The plot gives its Y axes to
+    its stacks in `order`, the order the backend that drew it draws them in, or else in the order they were added, as
+    a joined plot does (see _joined). The changes take the stacks from the slot of the plot as those that give joined
+    plots their stacks back do (see Arrangement.changes): the first plot keeps the numbers of the stacks it takes, and
+    each of the others has its stack numbered 1. The plot is left as it was, to take its stacks back."""
+    if type(plot) is not PlotXY or len(plot.signals) < 2 or len(plot.axes[1]) != len(plot.signals):
+        return None
+    slots = _occupants(canvas, reserved)
+    source = _slot(slots, plot)
+    if source is None:
+        return None
+    stacks = sorted(plot.signals)
+    order = list(order) if order is not None and sorted(order) == stacks else list(plot.signals)
+    if source.row_span >= len(stacks):
+        before = _arrangement(canvas, slots, {})
+        area = source
+    else:
+        before = resized(canvas, plot, len(stacks), source.col_span, reserved)
+        if before is None:
+            return None
+        area = _slot(before.slots, plot)
+    spans = [area.row_span // len(stacks) + (index < area.row_span % len(stacks)) for index in range(len(stacks))]
+    # Stacks the plot does not draw, as those of rows the application did not draw, go with the drawn stack before
+    # them, or with the first one.
+    offsets = [0] + [stack - 1 for stack in stacks[1:]]
+    plots = [(other, slot) for other, slot in before.slots if other is not plot]
+    changes = [(slot, after) for slot, after in before.changes if slot != source]
+    top = area.row
+    for index, (stack, span, offset) in enumerate(zip(stacks, spans, offsets)):
+        part = copy.copy(plot)
+        number = stack - offset
+        part.signals = {number: list(plot.signals[stack])}
+        part.axes = [copy.copy(plot.axes[0]), [plot.axes[1][order.index(stack)]]]
+        part.rulers = list(plot.rulers or []) if index == 0 else []
+        part.legend_anchor = {str(number): list(anchor) for key, anchor in (plot.legend_anchor or {}).items()
+                              if int(key) == stack} or None
+        part.legend_collapsed = [str(number) for key in plot.legend_collapsed or [] if int(key) == stack] or None
+        slot = Slot(top, area.col, span, area.col_span)
+        plots.append((part, slot))
+        if offset or slot != source:
+            changes.append((Slot(source.row, source.col, source.row_span, source.col_span, stack_offset=offset), slot))
+        top += span
+    return Arrangement(plots, before.rows, before.cols, changes, before.reserved, before.layout)
 
 
 def arrange(canvas: Canvas, arrangement: Arrangement):
