@@ -27,6 +27,7 @@ from iplotlib.core.display import ScaledPixels
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
+from matplotlib.widgets import SpanSelector
 
 from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider, PlotContourWithSlider
 from iplotlib.core.canvas import Canvas
@@ -102,6 +103,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._minimap_ylim_cid = None
         self._minimap_connected_main_ax = None
         self._minimap_signature = None
+        self._minimap_selector = None
 
         self._splitter = QSplitter(Qt.Orientation.Vertical, self)
         self._splitter.setContentsMargins(QMargins())
@@ -200,6 +202,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self._splitter.setSizes([total - minimap_h, minimap_h])
         if not show:
             self._disconnect_minimap_xlim()
+            self._drop_minimap_selector()
             self._minimap_figure.clear()
             self._minimap_axes = None
             self._minimap_viewport_patch = None
@@ -227,6 +230,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         signature = (id(target_plot), baseline, fs, ticks)
         if self._minimap_signature != signature or self._minimap_axes is None:
             self._disconnect_minimap_xlim()
+            self._drop_minimap_selector()
             self._minimap_figure.clear()
             ax = self._minimap_figure.add_subplot(111)
             for signals in target_plot.signals.values():
@@ -311,6 +315,8 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                              transform=ax.get_xaxis_transform(), clip_on=False)
             ax.add_patch(rect)
             self._minimap_viewport_patch = rect
+            self._minimap_selector = SpanSelector(ax, self._on_minimap_span, 'horizontal', useblit=True,
+                                                  button=MouseButton.LEFT, props=dict(facecolor='#1976d2', alpha=0.25))
             self._minimap_axes = ax
             self._minimap_figure.tight_layout()
             self._minimap_signature = signature
@@ -322,6 +328,29 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self._minimap_ylim_cid = main_ax.callbacks.connect('ylim_changed', update_rect)
             self._minimap_connected_main_ax = main_ax
         self._viewlims_update_rect(self._minimap_viewport_patch, main_ax)
+
+    def _drop_minimap_selector(self):
+        # Its event handlers stay connected to the mini-map canvas until disconnected.
+        if self._minimap_selector is not None:
+            self._minimap_selector.disconnect_events()
+            self._minimap_selector = None
+
+    def _on_minimap_span(self, begin: float, end: float):
+        """Zoom the plot above to the span selected on the mini-map, which keeps it within the range it shows."""
+        canvas = self.get_canvas()
+        main_ax = self._get_main_axes_for_minimap()
+        if canvas is None or main_ax is None or self._minimap_axes is None:
+            return
+        # A click selects an empty span. Mouse events count physical pixels.
+        (left, _), (right, _) = self._minimap_axes.transData.transform([(begin, 0), (end, 0)])
+        if right - left < self.MINIMAP_ZOOM_MIN_PX * self._minimap_renderer.device_pixel_ratio:
+            return
+        target_plot = canvas.get_minimap_target_plot()
+        if target_plot.axes and getattr(target_plot.axes[0], 'is_date', False):
+            begin, end = int(round(begin)), int(round(end))
+        else:
+            begin, end = float(begin), float(end)
+        self.zoom_plot_x_range(main_ax, begin, end)
 
     def _viewlims_update_rect(self, rect, ax):
         x_lo, x_hi = self._parser.get_oaw_axis_limits(ax, 0)
