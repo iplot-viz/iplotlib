@@ -960,7 +960,8 @@ class IplotSignalAdapter(ProcessingSignal):
             return
         xmin, xmax = self.x_data[0], self.x_data[-1]
         if all(e is not None for e in [xmin, xmax, self.ts_start, self.ts_end]):
-            return (xmin < self.ts_start < xmax) and (xmin < self.ts_end < xmax)
+            # Edges included: the view the samples were read for, as an undo back to it restores, needs no new read.
+            return (xmin <= self.ts_start <= xmax) and (xmin <= self.ts_end <= xmax)
         else:
             return False
 
