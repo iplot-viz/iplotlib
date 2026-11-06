@@ -806,11 +806,19 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def undo(self):
         self._parser.undo()
-        self.render()
+        self._render_restored_view()
 
     def redo(self):
         self._parser.redo()
-        self.render()
+        self._render_restored_view()
+
+    def _render_restored_view(self):
+        # The data that the view reads in the background bring a render of their own: until they arrive, this one
+        # folds into the draw already asked for instead of adding another.
+        if self._parser._view_reads:
+            self.render_deferred()
+        else:
+            self.render()
 
     @Slot()
     def render(self):
