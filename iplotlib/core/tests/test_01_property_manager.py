@@ -187,5 +187,34 @@ class TestPropertyManagerDisplayScale(unittest.TestCase):
         self.assertEqual(self.pm.get_raw_value(self.canvas, "font_size"), 8)
 
 
+class ThemeColorsTest(unittest.TestCase):
+    """A dark theme draws the plots in its colours where they have the shipped default ones, and as set otherwise."""
+
+    def setUp(self):
+        self.pm = PropertyManager()
+        property_manager.set_theme_colors({'background_color': '#2d2d2d', 'font_color': '#ffffff'})
+        self.addCleanup(property_manager.set_theme_colors, {})
+
+    def test_the_shipped_default_colours_are_drawn_in_those_of_the_theme(self):
+        canvas = Canvas()
+        plot = PlotXY()
+        canvas.add_plot(plot)
+        for obj in (canvas, plot):
+            with self.subTest(obj=type(obj).__name__):
+                self.assertEqual(self.pm.get_value(obj, 'background_color'), '#2d2d2d')
+                self.assertEqual(self.pm.get_value(obj, 'font_color'), '#ffffff')
+                # What is saved stays as configured.
+                self.assertEqual(self.pm.get_raw_value(obj, 'background_color'), '#FFFFFF')
+
+    def test_a_colour_left_at_its_default_follows_the_theme_and_another_is_kept(self):
+        canvas = Canvas(background_color='#ffffff', font_color='#0000FF')
+        self.assertEqual(self.pm.get_value(canvas, 'background_color'), '#2d2d2d')
+        self.assertEqual(self.pm.get_value(canvas, 'font_color'), '#0000FF')
+
+    def test_without_a_theme_the_colours_are_drawn_as_set(self):
+        property_manager.set_theme_colors({})
+        self.assertEqual(self.pm.get_value(Canvas(), 'background_color'), '#FFFFFF')
+
+
 if __name__ == "__main__":
     unittest.main()

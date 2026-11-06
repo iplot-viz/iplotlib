@@ -10,6 +10,7 @@ import matplotlib.style as mplstyle
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis, XAxis
 from matplotlib.axis import Axis as MPLAxis
+from matplotlib.colors import to_rgb
 from matplotlib.patches import Patch
 from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
@@ -36,6 +37,7 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
+from iplotlib.core.ruler import contrast_text_color
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter, \
     NiceNanosecondLocator, RelativeTimeLocator, LinearTickLocator, is_time_label
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor, get_values_from_line
@@ -49,6 +51,28 @@ STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre"
 
 # Performance defaults for dense line plots (path.simplify, simplify_threshold, chunksize).
 mplstyle.use('fast')
+
+#: The colours of a dark theme (see theme_colors) that matplotlib draws with what it draws in black and white
+#: in a light one, by rcParam.
+_THEME_RC = {'figure.facecolor': 'background', 'axes.facecolor': 'background', 'axes.edgecolor': 'text',
+             'axes.labelcolor': 'text', 'text.color': 'text', 'xtick.color': 'text', 'ytick.color': 'text',
+             'grid.color': 'grid', 'legend.edgecolor': 'grid'}
+#: Those rcParams as they are in a light theme.
+_LIGHT_RC = {}
+
+
+def apply_theme_rc(theme: Optional[dict]):
+    """Draw what matplotlib draws in black and white in the colours of a dark `theme`, or as before without one."""
+    if not _LIGHT_RC:
+        _LIGHT_RC.update({key: mpl.rcParams[key] for key in _THEME_RC})
+    mpl.rcParams.update(_LIGHT_RC if theme is None else {key: theme[color] for key, color in _THEME_RC.items()})
+
+
+def marker_label_props(color) -> dict:
+    """The look of the label of a marker of `color`: its name readable on its colour, in a frame of the text colour."""
+    r, g, b = (int(round(v * 255)) for v in to_rgb(color))
+    return dict(color=contrast_text_color((r, g, b)),
+                bbox=dict(boxstyle="round,pad=0.3", edgecolor=mpl.rcParams['text.color'], facecolor=color))
 
 # Above this point count, streamed lines are rendered via per-bucket min/max
 # decimation so the visible line preserves extremes at viewport resolution.
@@ -75,7 +99,8 @@ class _LegendEye(AnnotationBbox):
                          box_alignment=(1, 1), fontsize=fontsize, annotation_clip=False,
                          bboxprops=dict(boxstyle=f'round,pad={self.PAD},rounding_size=0.2'))
         # The look of the legend frame.
-        self.patch.set(facecolor='white', edgecolor='0.8', alpha=0.8)
+        self.patch.set(facecolor=mpl.rcParams['axes.facecolor'], edgecolor=mpl.rcParams['legend.edgecolor'],
+                       alpha=0.8)
         self.set_in_layout(False)
 
     def draw(self, renderer):
@@ -270,7 +295,7 @@ class MatplotlibParser(BackendParserBase):
         if mpl_axes not in self._grid_spacing_annotations:
             ann = mpl_axes.annotate(" ", xy=(1, 0), xycoords='axes fraction',
                                     ha='right', va='bottom', fontsize=fs,
-                                    color='black', alpha=0.8,
+                                    color=mpl.rcParams['text.color'], alpha=0.8,
                                     xytext=(-5, 5), textcoords='offset points')
             self._grid_spacing_annotations[mpl_axes] = ann
             # Connect to axis limit changes and draw event for dynamic updates
@@ -1486,9 +1511,7 @@ class MatplotlibParser(BackendParserBase):
                         impl_plot.annotate(text=marker.name,
                                            xy=(x, y),
                                            xytext=(x, y),
-                                           bbox=dict(boxstyle="round,pad=0.3",
-                                                     edgecolor="black",
-                                                     facecolor=marker.color))
+                                           **marker_label_props(marker.color))
                     else:
                         # Update position if annotation already exists
                         prev_annotation = [child for child in impl_plot.get_children() if isinstance(child,

@@ -87,10 +87,18 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._vlayout.addWidget(self._splitter)
 
         self.setLayout(self._vlayout)
+        self._take_theme()
         self.set_canvas(kwargs.get('canvas'))
 
         # Drag & Drop
         self.setAcceptDrops(True)
+
+    def _apply_theme(self, theme):
+        self._parser.figure.setBackground('w' if theme is None else theme['background'])
+        self._minimap_widget.setBackground('#f5f5f5' if theme is None else theme['minimap'])
+        for side in ('left', 'bottom'):
+            # Without a pen, the default foreground of pyqtgraph.
+            self._minimap_plot.getAxis(side).setTextPen(*(() if theme is None else (theme['text'],)))
 
     def set_canvas(self, canvas):
         prev_canvas = self._parser.canvas
