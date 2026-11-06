@@ -201,5 +201,26 @@ class RebasedTimeLimitsTest(unittest.TestCase):
         self.assertEqual((s.ts_start, s.ts_end), (self.START, self.END))
 
 
+class StatusPointsTest(unittest.TestCase):
+    """The status of a signal counts the points of all its lines: those of each column of a Y with one per line."""
+
+    def test_a_signal_counts_the_points_of_all_its_lines(self):
+        time = np.arange(0.0, 100.0)
+        for lines, y in ((1, np.ones(time.size)), (1, np.ones((time.size, 1))), (3, np.ones((time.size, 3)))):
+            with self.subTest(lines=lines, shape=y.shape):
+                s = SignalXY(label="s")
+                s.set_data([time, y])
+                self.assertEqual(str(s.status_info), f"Success|{100 * lines} points")
+                s.set_proc_success()
+                self.assertEqual(str(s.status_info), f"Success|{100 * lines} points")
+
+    def test_a_contour_counts_its_points_as_before(self):
+        x = np.array([0.0, 1.0, 2.0])
+        y = np.array([0.0, 1.0])
+        s = SignalContour(label="contour")
+        s.set_data([x, y, np.outer(y, x)])
+        self.assertEqual(s.status_info.num_points, 3)
+
+
 if __name__ == '__main__':
     unittest.main()
