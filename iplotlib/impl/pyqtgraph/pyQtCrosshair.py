@@ -3,7 +3,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph import PlotItem, InfiniteLine, TextItem, PlotDataItem
 from pyqtgraph.Qt import QtGui
-from iplotlib.core.impl_base import ImplementationPlotCacheTable
+from iplotlib.core.impl_base import ImplementationPlotCacheTable, line_samples
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter, _fmt_duration
 from PySide6.QtCore import QPointF
 
@@ -243,7 +243,7 @@ class pyQtCrosshair:
                 if not annotation.scene():
                     continue
                 line = annotation.line
-                x_data, y_data = line.getData()
+                x_data, y_data = line_samples(line) or line.getData()
                 if x_data is None or len(x_data) == 0:
                     annotation.setVisible(False)
                     continue
