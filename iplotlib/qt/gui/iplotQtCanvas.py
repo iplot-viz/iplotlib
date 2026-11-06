@@ -48,8 +48,10 @@ class IplotQtCanvas(QWidget):
         super().__init__(parent)
         self._mmode = None
         self._parser = None  # type: BackendParserBase
-        # The colours of the dark palette the plots were last drawn in, None in a light one (see _take_theme).
+        # The colours of the dark palette the plots were last drawn in, None in a light one (see _take_theme), and
+        # whether they are to be drawn in new ones (see changeEvent).
         self._theme = None
+        self._theme_draw_pending = False
         self._staging_cmds = []  # type: List[IplotAxesRangeCmd]
         self._commitd_cmds = []  # type: List[IplotAxesRangeCmd]
         self.dropInfo = DropInfo()
@@ -106,11 +108,13 @@ class IplotQtCanvas(QWidget):
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange) \
-                and self._parser is not None and self._take_theme():
+                and self._parser is not None and self._take_theme() and not self._theme_draw_pending:
             # Drawn once the new palette has reached every widget, not while Qt hands it out.
+            self._theme_draw_pending = True
             QTimer.singleShot(0, self._draw_in_theme)
 
     def _draw_in_theme(self):
+        self._theme_draw_pending = False
         if self.get_canvas() is not None:
             with self.view_retainer():
                 self.refresh()

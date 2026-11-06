@@ -4,6 +4,7 @@ A helpful icon loader.
 
 # Author: Jaswant Sai Panchumarti
 
+import functools
 import pkgutil
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
@@ -54,7 +55,16 @@ def create_icon(name, ext: str = 'png') -> QIcon:
     is loaded as is: tagging it with the device pixel ratio adds no detail, it
     only relabels an 18x18 image as fewer logical pixels, so the icon is drawn
     smaller rather than sharper.
+
+    Each icon is drawn once in each grey of the palette (see _in_palette) and shared.
     """
+    theme = theme_colors()
+    return _packaged_icon(name, ext, None if theme is None else theme['icon'])
+
+
+@functools.lru_cache(maxsize=None)
+def _packaged_icon(name: str, ext: str, _grey) -> QIcon:
+    # _grey only keys the cache: _in_palette draws the icon in the grey of the palette.
     data = pkgutil.get_data("iplotlib.qt", f"icons/{name}.{ext}")
     if ext.lower() == 'svg':
         return _icon_from_svg(data)

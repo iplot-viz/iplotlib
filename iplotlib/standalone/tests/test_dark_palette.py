@@ -16,6 +16,7 @@ from iplotlib.core.plot import PlotXY
 from iplotlib.core.signal import SignalXY
 from iplotlib.impl.matplotlib.matplotlibCanvas import apply_theme_rc
 from iplotlib.interface.iplotSignalAdapter import AccessHelper, ParserHelper
+from iplotlib.qt.gui.iplotCanvasToolbar import IplotQtCanvasToolbar
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.testing import ensure_qapp
 from iplotlib.qt.utils.icon_loader import svg_icon_image
@@ -114,6 +115,19 @@ class DarkPaletteTest(unittest.TestCase):
         dark = svg_icon_image('home', 32).pixelColor(16, 16)
         self.assertEqual(grey, '#3b3b3b')
         self.assertGreater(dark.lightness(), 150)
+
+    def test_the_tool_bar_draws_its_icons_again_only_when_their_colours_change(self):
+        toolbar = IplotQtCanvasToolbar()
+        self.addCleanup(toolbar.deleteLater)
+        home = toolbar.homeAction.icon().cacheKey()
+        light = QPalette(self.app.palette())
+        light.setColor(QPalette.ColorRole.Highlight, QColor('#ff8800'))
+        self.app.setPalette(light)
+        self._settle()
+        self.assertEqual(toolbar.homeAction.icon().cacheKey(), home)
+        self.app.setPalette(_dark_palette())
+        self._settle()
+        self.assertNotEqual(toolbar.homeAction.icon().cacheKey(), home)
 
 
 if __name__ == "__main__":

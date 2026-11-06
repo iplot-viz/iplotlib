@@ -19,6 +19,7 @@ from PySide6.QtGui import QAction, QActionGroup
 from iplotlib.core.canvas import Canvas
 from iplotlib.qt.utils.icon_loader import create_icon
 from iplotlib.qt.utils.icon_sizing import FontScaledIcons
+from iplotlib.qt.utils.palette import theme_colors
 
 from iplotLogging import setupLogger as Sl
 
@@ -31,8 +32,10 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
     def __init__(self, parent: typing.Optional[QWidget] = None):
         super().__init__(parent=parent)
 
-        # The actions with a packaged icon, drawn again in the colours of a new palette (see changeEvent).
+        # The actions with a packaged icon and the colours they are drawn in, drawn again in those of a new palette
+        # (see changeEvent).
         self._packaged_icons = {}
+        self._icons_theme = theme_colors()
         self._margins = QMargins()
         self._szPolicy = QSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Maximum)
@@ -135,6 +138,7 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
 
     def changeEvent(self, event):
         super().changeEvent(event)
-        if event.type() == QEvent.Type.PaletteChange:
+        if event.type() == QEvent.Type.PaletteChange and theme_colors() != self._icons_theme:
+            self._icons_theme = theme_colors()
             for action, (icon, ext) in self._packaged_icons.items():
                 action.setIcon(create_icon(icon, ext))
