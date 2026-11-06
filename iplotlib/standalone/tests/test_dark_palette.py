@@ -109,24 +109,23 @@ class DarkPaletteTest(unittest.TestCase):
                 self.assertEqual(self._colours(backend, parser, ipl_plot)[1], '#ffffe0')
 
     def test_the_icons_take_the_grey_of_the_palette(self):
+        toolbar = IplotQtCanvasToolbar()
+        self.addCleanup(toolbar.deleteLater)
+        home = toolbar.homeAction.icon().cacheKey()
+        changes = []
+        toolbar.homeAction.changed.connect(lambda *_: changes.append(1))
         grey = svg_icon_image('home', 32).pixelColor(16, 16).name()
+        # Another light palette: the tool bar keeps its icons.
+        light = QPalette(self.app.palette())
+        light.setColor(QPalette.ColorRole.Highlight, QColor('#ff8800'))
+        self.app.setPalette(light)
+        self._settle()
+        self.assertEqual(changes, [])
         self.app.setPalette(_dark_palette())
         self._settle()
         dark = svg_icon_image('home', 32).pixelColor(16, 16)
         self.assertEqual(grey, '#3b3b3b')
         self.assertGreater(dark.lightness(), 150)
-
-    def test_the_tool_bar_draws_its_icons_again_only_when_their_colours_change(self):
-        toolbar = IplotQtCanvasToolbar()
-        self.addCleanup(toolbar.deleteLater)
-        home = toolbar.homeAction.icon().cacheKey()
-        light = QPalette(self.app.palette())
-        light.setColor(QPalette.ColorRole.Highlight, QColor('#ff8800'))
-        self.app.setPalette(light)
-        self._settle()
-        self.assertEqual(toolbar.homeAction.icon().cacheKey(), home)
-        self.app.setPalette(_dark_palette())
-        self._settle()
         self.assertNotEqual(toolbar.homeAction.icon().cacheKey(), home)
 
 
