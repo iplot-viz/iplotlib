@@ -316,6 +316,10 @@ class IplotQtCanvas(QWidget):
                 self._place_done()
         return drawn
 
+    def show_pending_progress(self, column: int, row: int, done: int, total: int):
+        """Say at a place set_pending_places() left pending how many of the data of its plot are read."""
+        self._parser.show_pending_progress(column, row, done, total)
+
     def drop_pending_place(self, column: int, row: int):
         """Draw nothing at a place set_pending_places() left pending: its plot has nothing to draw."""
         if self._parser.drop_pending_place(column, row):

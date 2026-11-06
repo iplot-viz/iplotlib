@@ -320,12 +320,15 @@ class PendingFetch:
     """Requests that AccessPool.fetch_later() runs in the worker threads."""
 
     def __init__(self, pool: 'AccessPool', futures: Dict[tuple, Future],
-                 on_done: Callable[[Dict[tuple, object]], None], on_stopped: Optional[Callable[[], None]] = None):
+                 on_done: Callable[[Dict[tuple, object]], None], on_stopped: Optional[Callable[[], None]] = None,
+                 progress: Optional[Callable[[int, int], None]] = None):
         self._pool = pool
         self._futures = futures
         self._on_done = on_done
         self._on_stopped = on_stopped
+        self._progress = progress
         self._watch = _Watch(futures.values(), self._check)
+        self._tell()
 
     def cancel(self):
         """Call neither on_done nor on_stopped, and leave unread the requests no worker started yet."""
@@ -335,10 +338,21 @@ class PendingFetch:
 
     def _release(self):
         # The futures keep this object in their callbacks: it must not keep the data read with it.
-        self._futures, self._on_done, self._on_stopped = {}, None, None
+        self._futures, self._on_done, self._on_stopped, self._progress = {}, None, None, None
         self._watch.release()
 
+    def _tell(self):
+        if self._progress is not None and self._futures:
+            try:
+                self._progress(sum(future.done() for future in self._futures.values()), len(self._futures))
+            except Exception:
+                logger.exception("Cannot tell how many of the data read in the background are there")
+
     def _check(self):
+        if self._on_done is None:
+            return
+        # What it tells may cancel the read.
+        self._tell()
         if self._on_done is None or not all(future.done() for future in self._futures.values()):
             return
         futures, on_done, on_stopped = self._futures, self._on_done, self._on_stopped
@@ -425,18 +439,21 @@ class AccessPool:
         return {key: _outcome(future) for key, future in futures.items()}
 
     def fetch_later(self, requests: Iterable[dict], on_done: Callable[[Dict[tuple, object]], None],
-                    on_stopped: Optional[Callable[[], None]] = None) -> PendingFetch:
+                    on_stopped: Optional[Callable[[], None]] = None,
+                    progress: Optional[Callable[[int, int], None]] = None) -> PendingFetch:
         """Run data access requests in the worker threads without waiting for them.
 
         Once all are read, `on_done` is called in this thread, from its Qt event loop, with
         their results as fetch() returns them; never once the pool is shut down, which calls
-        `on_stopped` instead, if given, for the caller to read them on its own. Raises
-        RuntimeError if the worker threads cannot read.
+        `on_stopped` instead, if given, for the caller to read them on its own. `progress`, if
+        given, is called in this thread with the number of finished requests and their total,
+        as fetch() calls it: at once, and then as each finishes. Raises RuntimeError if the
+        worker threads cannot read.
         """
         self._check_workers()
         unique = self._unique(requests)
         return PendingFetch(self, {key: self._submit(key, params) for key, params in unique.items()}, on_done,
-                            on_stopped)
+                            on_stopped, progress)
 
     def call(self, method: str, data_s_name: str, **kwargs):
         """Call a method of the data access object in a worker thread and wait for its result:

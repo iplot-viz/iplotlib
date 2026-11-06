@@ -47,6 +47,9 @@ logger = Sl.get_logger(__name__)
 #: The mini-map must stay tall enough to read once the UI scale grows.
 MINIMAP_MIN_HEIGHT = ScaledPixels(110)
 
+#: The longest render, in seconds, that the progress of the places still waiting for their plots is worth on its own.
+PROGRESS_RENDER_S = 0.25
+
 
 def _rgba_array(image) -> np.ndarray:
     """An RGBA8888 QImage as the array matplotlib draws."""
@@ -833,6 +836,13 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             return
         waited = time.perf_counter() - self._render_end
         self._render_timer.start(max(0, int((2 * self._render_took - waited) * 1000)))
+
+    def show_pending_progress(self, column: int, row: int, done: int, total: int):
+        super().show_pending_progress(column, row, done, total)
+        # A render draws the whole figure: when that takes long, as with plots of many points, the progress waits for
+        # the render of the next plot drawn.
+        if (column, row) in self._parser.pending_places and self._render_took < PROGRESS_RENDER_S:
+            self._render_soon()
 
     def _place_done(self):
         super()._place_done()

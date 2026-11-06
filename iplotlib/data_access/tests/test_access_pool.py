@@ -451,6 +451,37 @@ class AccessPoolTests(unittest.TestCase):
         # The thread that asked, which can use its widgets, and not a worker.
         self.assertEqual(threads, [threading.main_thread()])
 
+    def test_a_read_in_the_background_tells_how_many_of_its_requests_are_read_until_it_is_delivered(self):
+        told, delivered = [], []
+        # Each read lasts a second: none is read before the call returns.
+        requests = [_params('slow', end=T1 + 45), _params('slow', end=T1 + 46), _params('slow', source='imas',
+                                                                                         end=T1 + 47)]
+
+        self.pool.fetch_later(requests, lambda results: delivered.append(len(told)),
+                              progress=lambda done, total: told.append((done, total, threading.current_thread())))
+        at_once = list(told)
+        self._arrived(delivered)
+
+        self.assertEqual(at_once, [(0, 3, threading.main_thread())])
+        counts = [done for done, _, _ in told]
+        self.assertEqual(counts, sorted(counts))
+        self.assertEqual(counts[-1], 3)
+        self.assertEqual({(total, thread) for _, total, thread in told}, {(3, threading.main_thread())})
+        # Told all of them before it delivers them.
+        self.assertEqual(delivered, [len(told)])
+
+    def test_a_read_in_the_background_whose_progress_cannot_be_told_is_delivered_anyway(self):
+        delivered = []
+
+        def failing(done, total):
+            raise RuntimeError("the place is gone")
+
+        with self.assertLogs('iplotlib.data_access.access_pool', level='ERROR'):
+            self.pool.fetch_later([_params('plain', end=T1 + 48)], delivered.append, progress=failing)
+            self._arrived(delivered)
+
+        self.assertEqual(len(delivered), 1)
+
     def test_the_progress_of_a_wait_is_reported_in_the_waiting_thread(self):
         threads = set()
 

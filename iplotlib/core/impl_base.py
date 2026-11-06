@@ -47,6 +47,8 @@ _VIEW_READ_ROUNDS = 3
 
 #: What a place of the canvas shows while its plot waits for its data (see BackendParserBase.set_pending_places).
 PENDING_PLACE_TEXT = "Retrieving data..."
+#: What it shows once it is told how many of them are read (see BackendParserBase.show_pending_progress).
+PENDING_PROGRESS_TEXT = "Retrieving data ({}/{}) .."
 
 
 @dataclass(frozen=True, eq=True)
@@ -987,6 +989,9 @@ class BackendParserBase(ABC):
 
     def hide_pending_place(self, column: int, row: int):
         """Show no more at a place of the canvas that its plot waits for its data."""
+
+    def show_pending_progress(self, column: int, row: int, done: int, total: int):
+        """Show at a place of the canvas whose plot waits for its data how many of them are read."""
 
     def _pending_places_of(self, canvas: Optional[Canvas]) -> Dict[Tuple[int, int], Tuple[int, int]]:
         pending = self._pending_canvas() if self._pending_canvas is not None else None

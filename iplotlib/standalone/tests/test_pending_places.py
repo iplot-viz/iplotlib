@@ -12,11 +12,12 @@ import numpy as np
 
 from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.impl_base import PENDING_PLACE_TEXT, BackendParserBase
+from iplotlib.core.impl_base import PENDING_PLACE_TEXT, PENDING_PROGRESS_TEXT, BackendParserBase
 from iplotlib.core.plot import PlotXY, PlotXYWithSlider
 from iplotlib.core.ruler import Ruler
 from iplotlib.core.signal import SignalXY
 from iplotlib.impl.matplotlib.qt import QtMatplotlibCanvas
+from iplotlib.impl.matplotlib.qt.qtMatplotlibCanvas import PROGRESS_RENDER_S
 from iplotlib.interface.iplotSignalAdapter import AccessHelper, ParserHelper
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.testing import ensure_qapp
@@ -189,6 +190,56 @@ class PendingPlacesTest(unittest.TestCase):
                 self.assertEqual(self._pending_shown(qt_canvas), set())
                 self.assertEqual(qt_canvas._parser.pending_places, {})
                 self.assertEqual(self._drawn(qt_canvas), whole)
+
+    def test_a_place_says_how_many_of_the_data_of_its_plot_are_read(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = _canvas()
+                qt_canvas = self._qt_canvas(backend, canvas, _places(canvas))
+
+                qt_canvas.show_pending_progress(0, 1, 1, 2)
+                self.app.processEvents()
+                told = self._pending_texts(qt_canvas)
+                qt_canvas.draw_plot(canvas.plots[0][1])
+
+                self.assertEqual(told, {(0, 0): PENDING_PLACE_TEXT, (0, 1): PENDING_PROGRESS_TEXT.format(1, 2),
+                                        (1, 0): PENDING_PLACE_TEXT})
+                self.assertEqual(PENDING_PROGRESS_TEXT.format(1, 2), "Retrieving data (1/2) ..")
+                self.assertEqual(set(self._pending_texts(qt_canvas)), {(0, 0), (1, 0)})
+
+    def test_the_progress_of_a_place_no_longer_pending_changes_nothing(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = _canvas()
+                qt_canvas = self._qt_canvas(backend, canvas, _places(canvas))
+                qt_canvas.draw_plot(canvas.plots[0][1])
+
+                qt_canvas.show_pending_progress(0, 1, 1, 2)
+
+                self.assertEqual(self._pending_texts(qt_canvas), {(0, 0): PENDING_PLACE_TEXT,
+                                                                  (1, 0): PENDING_PLACE_TEXT})
+
+    def test_the_progress_of_a_place_renders_the_figure_only_when_a_render_takes_little(self):
+        canvas = _canvas()
+        qt_canvas = self._qt_canvas('matplotlib', canvas, _places(canvas))
+        renders = []
+        for took in (PROGRESS_RENDER_S / 2, PROGRESS_RENDER_S * 4):
+            qt_canvas._render_timer.stop()
+            qt_canvas._render_took = took
+
+            qt_canvas.show_pending_progress(0, 1, 1, 2)
+
+            renders.append(qt_canvas._render_timer.isActive())
+        self.assertEqual(renders, [True, False])
+        self.assertEqual(self._pending_texts(qt_canvas)[(0, 1)], PENDING_PROGRESS_TEXT.format(1, 2))
+
+    @staticmethod
+    def _pending_texts(qt_canvas) -> dict:
+        """What each place that waits for its plot shows."""
+        parser = qt_canvas._parser
+        if hasattr(parser, '_pending_texts'):
+            return {place: text.get_text() for place, text in parser._pending_texts.items()}
+        return {place: cell.getItem(0, 0).text for place, cell in parser._pending_cells.items()}
 
     def test_a_place_dropped_shows_nothing(self):
         for backend in BACKENDS:
