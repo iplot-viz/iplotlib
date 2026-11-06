@@ -29,6 +29,7 @@ import weakref
 from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.decimation import bucket_reduce_lines
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits, IplSliderLimits
 from iplotlib.core.plot import Plot, PlotXY, PlotXYWithSlider, PlotContour, PlotImage, PlotContourWithSlider
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
@@ -45,10 +46,22 @@ logger = Sl.get_logger(__name__)
 # that an expression evaluates once the data of its own variable arrive.
 _VIEW_READ_ROUNDS = 3
 
+# The pixels a plot has across, at most (a 4K screen): a line of many more samples in the view is drawn with those
+# that draw each pixel (see bucket_reduce_lines).
+_LINE_BUCKETS = 4096
+
 #: What a place of the canvas shows while its plot waits for its data (see BackendParserBase.set_pending_places).
 PENDING_PLACE_TEXT = "Retrieving data..."
 #: What it shows once it is told how many of them are read (see BackendParserBase.show_pending_progress).
 PENDING_PROGRESS_TEXT = "Retrieving data ({}/{}) .."
+
+
+def line_samples(line) -> Optional[Tuple[Any, Any]]:
+    """The samples of its signal that a line stands for, when it draws fewer of them (see
+    BackendParserBase.do_impl_line_plot_xy): what reads the value of a sample or a statistic of the line takes
+    them; the fit of Y reads the line, whose fewer samples keep the lowest and the highest. None when the line
+    draws all those it stands for."""
+    return getattr(line, '_ipl_samples', None)
 
 
 @dataclass(frozen=True, eq=True)
@@ -1860,11 +1873,15 @@ class BackendParserBase(ABC):
 
     @staticmethod
     def _get_visible_data(xd, yd, lo, hi, beyond=False):
-        mask = (xd >= lo) & (xd <= hi)
-        if beyond and len(xd) > 1 and np.all(xd[1:] >= xd[:-1]):
-            # Also the sample before and the one after, so that a line between them crosses the view.
+        if len(xd) > 1 and np.all(xd[1:] >= xd[:-1]):
+            # In the order of X, those in the view are a slice of them: the Y of the signal is not copied. The X is,
+            # as it is made for each drawing when offset, and a slice of it would keep all of it.
             first, last = np.searchsorted(xd, lo, 'left'), np.searchsorted(xd, hi, 'right')
-            mask[max(first - 1, 0):last + 1] = True
+            if beyond:
+                # Also the sample before and the one after, so that a line between them crosses the view.
+                first, last = max(first - 1, 0), last + 1
+            return xd[first:last].copy(), yd[first:last]
+        mask = (xd >= lo) & (xd <= hi)
         x_displayed = xd[mask]
         y_displayed = yd[mask]
         return x_displayed, y_displayed
@@ -1939,7 +1956,8 @@ class BackendParserBase(ABC):
         # Processed signals already use the visible range.
         # Skip this step in case of streaming mode, as x_data and y_data may be empty and lead to errors.
 
-        if not signal.extremities and not self.canvas.streaming:
+        in_view = not signal.extremities and not self.canvas.streaming
+        if in_view:
             x_limits = self.get_impl_x_axis_limits(impl_plot)
             # While the data of a new range are read, those of the old one, coarser, must still cross the view.
             x_data, y_data = self._get_visible_data(x_data, y_data, *x_limits, beyond=self._previewing)
@@ -1947,6 +1965,12 @@ class BackendParserBase(ABC):
         # Flatten single-column 2D y_data so it routes through the 1D path
         if y_data.ndim == 2 and y_data.shape[1] == 1:
             y_data = y_data.ravel()
+
+        # Only the samples in the view are reduced: streaming reduces its own (see set_line_data). The lines keep
+        # those they stand for (see line_samples).
+        x_drawn, y_drawn = x_data, y_data
+        if in_view and not self._draws_every_sample(plot, signal):
+            x_drawn, y_drawn = bucket_reduce_lines(x_data, y_data, _LINE_BUCKETS)
 
         if plot_lines is not None:
             # Reflect downsampling in legend
@@ -1957,14 +1981,14 @@ class BackendParserBase(ABC):
                 if self.canvas.streaming and len(x_data) > 0:
                     plot_lines = self.update_plot_line_streaming(signal, impl_plot, plot_lines, x_data, y_data, style)
                 else:
-                    self.set_line_data(plot_lines[0], x_data, y_data)
+                    self.set_line_data(plot_lines[0], x_drawn, y_drawn)
                     self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
                 for i, line in enumerate(plot_lines):
                     if y_data.shape == (0, 0):  # Case: no data for 2 dim y_data
                         self.set_line_data(line, x_data, y_data)
                     else:
-                        self.set_line_data(line, x_data, y_data[:, i])
+                        self.set_line_data(line, x_drawn, y_drawn[:, i])
                     self._update_marker_by_point_count(line, x_data, style)
 
             if self.canvas.streaming:
@@ -1974,14 +1998,25 @@ class BackendParserBase(ABC):
 
         else:
             if x_data.ndim == 1 and y_data.ndim == 1:
-                plot_lines = self.create_plot_lines_1D(draw_fn, x_data, y_data, style)
+                plot_lines = self.create_plot_lines_1D(draw_fn, x_drawn, y_drawn, style)
                 self._update_marker_by_point_count(plot_lines[0], x_data, style)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                plot_lines = self.create_plot_lines_2D(draw_fn, signal, x_data, y_data, style)
+                plot_lines = self.create_plot_lines_2D(draw_fn, signal, x_drawn, y_drawn, style)
+
+        reduced = x_drawn is not x_data
+        for i, line in enumerate(plot_lines or []):
+            line._ipl_samples = (x_data, y_data if y_data.ndim == 1 else y_data[:, i]) if reduced else None
 
         signal.lines = plot_lines
 
         return plot_lines
+
+    def _draws_every_sample(self, plot: PlotXY, signal: SignalXY) -> bool:
+        """Whether the line of a signal draws all its samples in the view: with a marker on each, in steps, or on a
+        log scale, where the lowest sample of a bucket, if not positive, would hide the others."""
+        return (self._pm.get_value(signal, 'marker') not in (None, '', 'None')
+                or (self._pm.get_value(signal, 'step') or 'linear') not in ('linear', 'default')
+                or bool(self._pm.get_value(plot, 'log_scale')))
 
     @abstractmethod
     def visible_status(self, plot_lines, signal):

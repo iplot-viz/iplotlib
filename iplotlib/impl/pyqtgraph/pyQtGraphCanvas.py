@@ -20,7 +20,7 @@ from pyqtgraph import TextItem
 
 from iplotLogging import setupLogger
 from iplotlib.core.decimation import minmax_decimate
-from iplotlib.core.impl_base import PENDING_PLACE_TEXT, PENDING_PROGRESS_TEXT
+from iplotlib.core.impl_base import PENDING_PLACE_TEXT, PENDING_PROGRESS_TEXT, line_samples
 from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
@@ -2289,7 +2289,7 @@ class PyQtGraphParser(BackendParserBase):
                 item = line[0] if isinstance(line, list) else line
                 if not isinstance(item, PlotDataItem):
                     continue
-                x_data, y_data = item.getData()
+                x_data, y_data = line_samples(item) or item.getData()
                 if x_data is None or len(x_data) == 0:
                     continue
                 # Nearest sample (searchsorted+clamp, as the value labels do).

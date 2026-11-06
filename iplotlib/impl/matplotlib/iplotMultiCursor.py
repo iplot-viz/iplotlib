@@ -8,7 +8,7 @@ from matplotlib.text import Annotation
 from matplotlib.widgets import Widget
 
 from iplotlib.core import SignalContour
-from iplotlib.core.impl_base import ImplementationPlotCacheTable
+from iplotlib.core.impl_base import ImplementationPlotCacheTable, line_samples
 from iplotLogging import setupLogger
 
 logger = setupLogger.get_logger(__name__)
@@ -17,7 +17,7 @@ logger = setupLogger.get_logger(__name__)
 def get_values_from_line(lines, x_value):
     """Nearest (x, y) sample of a signal line (or envelope pair, averaged) to *x_value*."""
     if len(lines) == 1:
-        x, y = lines[0].get_xdata(), lines[0].get_ydata()
+        x, y = line_samples(lines[0]) or (lines[0].get_xdata(), lines[0].get_ydata())
     else:
         x = lines[0].get_xdata()
         y = (lines[0].get_ydata() + lines[1].get_ydata()) / 2
