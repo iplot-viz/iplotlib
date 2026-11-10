@@ -66,6 +66,24 @@ def _shared_pair() -> Canvas:
     return canvas
 
 
+def _pulse_pair() -> Canvas:
+    """Two plots of a pulse read to its end, that share their time axis, as MINT draws them when the data of their
+    sources end at different times: the signals ask for no end, and each plot is drawn up to its last sample."""
+    canvas = Canvas(2, 1)
+    for k, last in enumerate((3.5, 12.0)):
+        x_axis = LinearAxis()
+        x_axis.original_begin, x_axis.original_end = x_axis.begin, x_axis.end = 0, last
+        plot = PlotXY(axes=[x_axis, [LinearAxis()]])
+        signal = SignalXY(label=f"s{k}")
+        signal.ts_start, signal.ts_end = 0, None
+        time_s = np.linspace(0, last, 40)
+        signal.set_data([time_s, np.sin(time_s)])
+        plot.add_signal(signal, stack=1)
+        canvas.add_plot(plot, 0)
+    canvas.shared_x_axis = True
+    return canvas
+
+
 def _slider_pair() -> Canvas:
     """Two plots with a slider over the same frames, which move together."""
     canvas = Canvas(2, 1)
@@ -399,6 +417,24 @@ class PendingPlacesTest(unittest.TestCase):
 
                 self.assertEqual([self._x_window(qt_canvas, plot) for plot in canvas.plots[0]],
                                  [self._x_window(whole, plot) for plot in whole_canvas.plots[0]])
+
+    def test_a_plot_drawn_over_another_window_after_a_zoom_on_the_plots_it_shares_time_with_takes_their_window(self):
+        """mint#235: as a plot of a pulse drawn up to the last sample of another data source moves with a zoom."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = _pulse_pair()
+                qt_canvas = self._qt_canvas(backend, canvas, _places(canvas))
+                first, second = canvas.plots[0]
+                qt_canvas.draw_plot(first)
+
+                self._zoom(qt_canvas, first)
+                qt_canvas.draw_plot(second)
+                self.app.processEvents()
+
+                parser = qt_canvas._parser
+                windows = [parser.get_oaw_axis_limits(parser._plot_impl_plot_lut[id(plot)][0], 0)
+                           for plot in canvas.plots[0]]
+                np.testing.assert_allclose(windows[1], windows[0])
 
     def test_a_plot_drawn_with_no_zoom_meanwhile_keeps_the_window_it_was_drawn_over(self):
         for backend in BACKENDS:

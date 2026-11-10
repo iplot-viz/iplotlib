@@ -184,6 +184,8 @@ class BackendParserBase(ABC):
         self._impl_draw_thread = threading.current_thread()
         self._focus_plot = focus_plot
         self._focus_plot_stack_key = focus_plot_stack_key
+        # The plots that shared the time axis of the focused plot when it was focused (see set_focus_plot).
+        self._focus_group = []  # type: List[weakref.ref]
         self._layout = None
         self._axis_impl_plot_lut = weakref.WeakValueDictionary()  # type: Dict[int, Any] # key is id(Axis)
         self._plot_impl_plot_lut = defaultdict(list)  # type: Dict[int, List[Any]] # key is id(Plot)
@@ -987,7 +989,7 @@ class BackendParserBase(ABC):
         are: as for the plots the focus hides, the draw-time window is the one a zoom leaves untouched."""
         begin, end = leader_plot.axes[0].get_limits('original')
         if self._plot_x_is_time(plot):
-            return plot.axes[0].get_limits('original') == (begin, end)
+            return self._drawn_with(plot, begin, end)
         if self._plot_x_expr_yields_time(plot):
             return self._plot_first_x_near_range(plot, begin, end)
         return begin is not None and end is not None and self._plot_shares_time_base(plot, (float(begin), float(end)))
@@ -1442,15 +1444,29 @@ class BackendParserBase(ABC):
             if base_ts is not None and plot_ts is not None:
                 if plot_ts == base_ts:
                     shared.append(plot_item)
-            else:
-                begin, end = plot.axes[0].get_limits('original')
-                is_date = plot.axes[0].is_date
-                max_diff = self._pm.get_value(self.canvas, 'max_diff')
-                max_diff_ns = max_diff * 1e9 if is_date else max_diff
-                if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
-                    shared.append(plot_item)
+            elif self._drawn_near(plot, base_begin, base_end):
+                shared.append(plot_item)
 
         return shared
+
+    def _drawn_near(self, plot: Plot, begin, end) -> bool:
+        """Whether `plot` was drawn over a window within the canvas time-range difference ('max_diff') of (begin, end),
+        the tolerance time plots whose signals do not tell the range they asked for are grouped with."""
+        drawn_begin, drawn_end = plot.axes[0].get_limits('original')
+        max_diff = self._pm.get_value(self.canvas, 'max_diff')
+        max_diff = max_diff * 1e9 if plot.axes[0].is_date else max_diff
+        return abs(drawn_begin - begin) <= max_diff and abs(drawn_end - end) <= max_diff
+
+    def _drawn_with(self, plot: Plot, begin, end) -> bool:
+        """Whether `plot` shares the time axis of a plot drawn over the window (begin, end), as _impl_plots_sharing_x
+        groups them, judged on the windows they were drawn over, which a zoom leaves untouched: the same window or,
+        for a time plot whose signals do not tell the range they asked for, a window near it. Those of a pulse read
+        to its end are drawn up to their last sample, which differs between data sources."""
+        drawn = plot.axes[0].get_limits('original')
+        if drawn == (begin, end):
+            return True
+        return (self._plot_x_is_time(plot) and self._plot_signal_ts_range(plot) is None
+                and None not in drawn and None not in (begin, end) and self._drawn_near(plot, begin, end))
 
     def _carry_focus_window_to_hidden_plots(self):
         """
@@ -1458,8 +1474,9 @@ class BackendParserBase(ABC):
 
         Focus builds only the focused plot, so a zoom made there leaves the others
         behind. Window and signal ts go to their model, which the rebuild on unfocus
-        draws from. Membership is decided on the draw-time window, the only range a
-        zoom in focus leaves untouched.
+        draws from. Membership is the group the focused plot had when it was focused,
+        or is decided on the draw-time windows, the only ranges a zoom in focus leaves
+        untouched (see _drawn_with).
         """
         if not isinstance(self.canvas, Canvas) or not self._pm.get_value(self.canvas, 'shared_x_axis'):
             return
@@ -1484,13 +1501,26 @@ class BackendParserBase(ABC):
                     continue
                 if not plot.axes or not isinstance(plot.axes[0], RangeAxis):
                     continue
-                if plot.axes[0].get_limits('original') != drawn:
+                # Those whose X is data follow a zoom by being processed again over its window
+                # (see _follow_shared_time_window), which a plot that is not built cannot be.
+                in_group = any(member() is plot for member in self._focus_group) and (
+                    self._plot_x_is_time(plot) or self._plot_x_expr_yields_time(plot))
+                if not (in_group or self._drawn_with(plot, *drawn)):
                     continue
-                logger.debug(f"Carrying focus window [{begin}, {end}] to plot {id(plot)}")
-                plot.axes[0].set_limits(begin, end, 'current')
+                own = plot.axes[0].get_limits('original')
+                if own == drawn or (begin, end) != drawn:
+                    window, ts = (begin, end), ts_window
+                elif plot.axes[0].get_limits('current') != own:
+                    # The focused plot is back where it was drawn: the plots of the group drawn over windows of their
+                    # own go back to them, as Home takes them.
+                    window = ts = own
+                else:
+                    continue
+                logger.debug(f"Carrying focus window [{window[0]}, {window[1]}] to plot {id(plot)}")
+                plot.axes[0].set_limits(*window, 'current')
                 for stack in plot.signals.values():
                     for signal in stack:
-                        signal.set_limits(ts_window)
+                        signal.set_limits(ts)
 
     def refresh_rulers(self, impl_plot: Any = None):
         """Update the rulers of the plot (of every plot if None) to its view and data. Backends
@@ -2489,6 +2519,15 @@ class BackendParserBase(ABC):
         """
         if self._focus_plot is not None:
             self._carry_focus_window_to_hidden_plots()
+        if impl_plot is None:
+            self._focus_group = []
+        elif self._focus_plot is None:
+            # Once focused, the others are not built, nor do the ranges a zoom gives the signals of the focused plot
+            # tell which of them shared its time axis.
+            item = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            shared = self._get_all_shared_axes(impl_plot) if item is not None and item.plot() is not None else []
+            plots = (self._impl_plot_cache_table.get_cache_item(other).plot() for other in shared)
+            self._focus_group = [weakref.ref(plot) for plot in plots if plot is not None]
 
     def undo(self):
         """
