@@ -808,7 +808,7 @@ class IplotQtCanvas(QWidget):
             return
         dy_offset = current_y - self._drag_shift_start_y
         dx_offset = 0.0
-        if not self._drag_shift_is_datetime and self._drag_shift_start_x is not None and current_x is not None:
+        if self._drag_shift_start_x is not None and current_x is not None:
             dx_offset = current_x - self._drag_shift_start_x
         self._create_drag_preview(dy_offset, dx_offset)
 
@@ -820,10 +820,16 @@ class IplotQtCanvas(QWidget):
 
         dy = end_y - self._drag_shift_start_y
 
-        # Calculate X offset (only if X is not datetime)
+        # Calculate X offset
         dx = 0.0
-        if not self._drag_shift_is_datetime and self._drag_shift_start_x is not None and end_x is not None:
-            dx = end_x - self._drag_shift_start_x
+        if self._drag_shift_start_x is not None and end_x is not None:
+            if self._drag_shift_is_datetime:
+                # In the whole nanoseconds of the times, which the axis may show scaled from an offset.
+                impl_plot = self._drag_shift_impl_plot
+                dx = float(round(self._parser.transform_value(impl_plot, 0, end_x)
+                                 - self._parser.transform_value(impl_plot, 0, self._drag_shift_start_x)))
+            else:
+                dx = end_x - self._drag_shift_start_x
 
         # Remove preview line first
         self._remove_drag_preview()
