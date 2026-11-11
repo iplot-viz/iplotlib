@@ -679,6 +679,44 @@ class PyQtGraphParser(BackendParserBase):
             symbol = signal_style.get('symbol')
             marker_line.setSymbol(symbol or None)
 
+    def create_vertical_lines(self, impl_plot: PlotItem, signal, x_data, style: str):
+        color = self._pm.get_value(signal, 'color') or signal.original_color
+        pen = pg.mkPen(color=color, width=self._pm.get_value(signal, 'line_size') or 1,
+                       style=LINESTYLE_MAP.get(style, QtCore.Qt.PenStyle.SolidLine), cosmetic=True)
+        lines = []
+        for x in x_data:
+            line = pg.InfiniteLine(pos=float(x), angle=90, movable=False, pen=pen)
+            # They are not data: the autoscale leaves them out, as the rulers.
+            impl_plot.getViewBox().addItem(line, ignoreBounds=True)
+            lines.append(line)
+        return lines
+
+    def move_vertical_lines(self, lines, x_data) -> bool:
+        view_box = lines[0].getViewBox() if lines else None
+        if view_box is None:
+            return False
+        # As samples leave the view or come into it: fewer lines, or more like them.
+        while len(lines) > len(x_data):
+            view_box.removeItem(lines.pop())
+        while len(lines) < len(x_data):
+            line = pg.InfiniteLine(angle=90, movable=False, pen=lines[0].pen)
+            line.setVisible(lines[0].isVisible())
+            view_box.addItem(line, ignoreBounds=True)
+            lines.append(line)
+        for line, x in zip(lines, x_data):
+            line.setValue(float(x))
+        return True
+
+    def remove_vertical_lines(self, lines):
+        for line in lines:
+            view_box = line.getViewBox()
+            if view_box is not None:
+                view_box.removeItem(line)
+
+    def set_vertical_lines_visible(self, lines, visible: bool):
+        for line in lines:
+            line.setVisible(visible)
+
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
         # connect='finite' breaks the line at NaN samples (e.g. the archive/live
         # seam while streaming) instead of drawing across them; pyqtgraph's
