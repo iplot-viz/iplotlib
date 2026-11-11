@@ -56,7 +56,58 @@ STEP_MAP_PG = {
 IPLOT_PYQTGRAPH_OPENGL = os.environ.get('IPLOT_PYQTGRAPH_OPENGL', "").lower()
 use_open_gl = IPLOT_PYQTGRAPH_OPENGL in ("1", "true", "yes") if IPLOT_PYQTGRAPH_OPENGL else False
 
-pg.setConfigOptions(antialias=True, useOpenGL=use_open_gl)
+# OpenGL is turned on only once a graphics card is known to draw it: see opengl_in_use.
+pg.setConfigOptions(antialias=True, useOpenGL=False)
+
+# What OpenGL reports when the processor draws it instead of a graphics card, as in remote
+# desktops without a GPU driver: there each repaint takes seconds instead of milliseconds.
+SOFTWARE_RENDERERS = ('llvmpipe', 'softpipe', 'swrast', 'software', 'gdi generic', 'basic render')
+GL_RENDERER = 0x1F01
+_opengl_in_use = None
+
+
+def opengl_renderer() -> str:
+    """What draws OpenGL here, e.g. 'llvmpipe (LLVM 20.1.8, 256 bits)'; '' where there is no OpenGL."""
+    from PySide6.QtGui import QGuiApplication, QOffscreenSurface, QOpenGLContext
+    if QGuiApplication.instance() is None:
+        return ''
+    try:
+        context = QOpenGLContext()
+        if not context.create():
+            return ''
+        surface = QOffscreenSurface()
+        surface.setFormat(context.format())
+        surface.create()
+        try:
+            if not context.makeCurrent(surface):
+                return ''
+            renderer = context.functions().glGetString(GL_RENDERER) or ''
+            context.doneCurrent()
+            return str(renderer)
+        finally:
+            surface.destroy()
+    except Exception as e:
+        logger.debug(f"No OpenGL renderer: {e}")
+        return ''
+
+
+def opengl_in_use() -> bool:
+    """Whether pyqtgraph draws with OpenGL: asked for with IPLOT_PYQTGRAPH_OPENGL, and where a graphics card draws it.
+
+    Decided once, before the first plot widget is made.
+    """
+    global _opengl_in_use
+    if _opengl_in_use is None:
+        _opengl_in_use = False
+        if use_open_gl:
+            renderer = opengl_renderer()
+            _opengl_in_use = bool(renderer) and not any(name in renderer.lower() for name in SOFTWARE_RENDERERS)
+            if _opengl_in_use:
+                logger.info(f"pyqtgraph draws with OpenGL on {renderer}")
+            else:
+                logger.info(f"pyqtgraph draws without OpenGL: here the processor would draw it ({renderer or 'no OpenGL'})")
+        pg.setConfigOptions(useOpenGL=_opengl_in_use)
+    return _opengl_in_use
 
 # Above this point count, streamed lines are rendered via per-bucket min/max
 # decimation so the visible line preserves extremes at viewport resolution.
@@ -456,6 +507,7 @@ class PyQtGraphParser(BackendParserBase):
         super().__init__(canvas=canvas, focus_plot=focus_plot, focus_plot_stack_key=focus_plot_stack_key,
                          impl_flush_method=impl_flush_method)
 
+        opengl_in_use()
         self.figure = pg.GraphicsLayoutWidget()
         self.figure.setBackground('w')
 
