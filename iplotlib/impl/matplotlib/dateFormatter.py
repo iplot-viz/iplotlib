@@ -283,7 +283,7 @@ class ExponentScalarFormatter(ScalarFormatter):
 
 #: Room kept between two tick labels of an X axis, in points.
 LABEL_GAP_PT = 3
-#: Widest a character can be, in em: a bound that spares measuring labels that clearly fit.
+#: Upper bound of a date-label character's width, in em: labels that fit by it are not measured.
 MAX_CHAR_EM = 0.9
 # Label widths in points by (label, font): from one draw to the next most labels are the same.
 _widths = {}

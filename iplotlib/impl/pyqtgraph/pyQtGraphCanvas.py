@@ -67,7 +67,7 @@ _opengl_in_use = None
 
 
 def opengl_renderer() -> str:
-    """What draws OpenGL here, e.g. 'llvmpipe (LLVM 20.1.8, 256 bits)'; '' where there is no OpenGL."""
+    """What draws OpenGL here, e.g. 'llvmpipe (LLVM 20.1.8, 256 bits)'; '' without OpenGL or a QGuiApplication."""
     from PySide6.QtGui import QGuiApplication, QOffscreenSurface, QOpenGLContext
     if QGuiApplication.instance() is None:
         return ''
