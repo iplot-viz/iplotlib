@@ -22,6 +22,8 @@ TS_1 = 1705322096789000000
 TS_1_NS = 1705322096789123456
 # 2024-06-15 18:45:30.000 UTC.
 TS_2 = 1718477130000000000
+# 2024-10-29 07:05:29 UTC, the start of a day of cryo data.
+TS_DAY = 1730185529 * 10 ** 9
 
 
 class FormatterSegmentsTest(unittest.TestCase):
@@ -178,6 +180,40 @@ class LinearTickLocatorTest(unittest.TestCase):
         # Without an axis the label check fails and the fallback answers.
         ticks = [t for t in RelativeTimeLocator(5).tick_values(-0.0045, 0.0028) if -0.0045 <= t <= 0.0028]
         self.assertGreaterEqual(len(ticks), 5)
+
+
+class ThinOverlappingLabelsTest(unittest.TestCase):
+    """A narrow plot hides the date labels that would overlap, as pyqtgraph does, and keeps every tick."""
+
+    VALUES = [TS_DAY + h * 3 * 3600 * 10 ** 9 for h in range(9)]
+
+    def labels(self, width_inches):
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+        figure = Figure(figsize=(width_inches, 2), dpi=100)
+        FigureCanvasAgg(figure)
+        axes = figure.add_subplot()
+        axes.set_xlim(self.VALUES[0], self.VALUES[-1])
+        formatter = NanosecondDateFormatter(ax_idx=0)
+        axes.xaxis.set_major_formatter(formatter)
+        return formatter.format_ticks(self.VALUES), axes
+
+    def test_a_wide_plot_keeps_every_label(self):
+        labels, _ = self.labels(20)
+        self.assertTrue(all(labels), labels)
+
+    def test_a_narrow_plot_hides_labels_at_a_regular_step(self):
+        labels, _ = self.labels(4)
+        self.assertEqual(len(labels), len(self.VALUES), 'one label, maybe empty, per tick')
+        shown = [i for i, label in enumerate(labels) if label]
+        self.assertTrue(1 < len(shown) < len(labels), labels)
+        self.assertEqual(len({b - a for a, b in zip(shown, shown[1:])}), 1, labels)
+
+    def test_a_vertical_axis_is_left_alone(self):
+        from iplotlib.impl.matplotlib.dateFormatter import thin_overlapping_labels
+        _, axes = self.labels(1)
+        labels = ['2024-10-29T09:00'] * 5
+        self.assertEqual(thin_overlapping_labels(axes.yaxis, [0, 1, 2, 3, 4], labels), labels)
 
 
 if __name__ == '__main__':
