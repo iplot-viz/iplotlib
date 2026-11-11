@@ -283,6 +283,20 @@ class ExponentScalarFormatter(ScalarFormatter):
 
 #: Room kept between two tick labels of an X axis, in points.
 LABEL_GAP_PT = 3
+#: Widest a character can be, in em: a bound that spares measuring labels that clearly fit.
+MAX_CHAR_EM = 0.9
+# Label widths in points by (label, font): from one draw to the next most labels are the same.
+_widths = {}
+
+
+def _width(label: str, font) -> float:
+    key = (label, hash(font))
+    width = _widths.get(key)
+    if width is None:
+        if len(_widths) > 4096:
+            _widths.clear()
+        width = _widths[key] = text_to_path.get_text_width_height_descent(label, font, ismath=False)[0]
+    return width
 
 
 def thin_overlapping_labels(axis, values, labels):
@@ -293,14 +307,16 @@ def thin_overlapping_labels(axis, values, labels):
     if not isinstance(axis, XAxis) or len(labels) < 3:
         return labels
     try:
-        positions = axis.axes.transData.transform([(value, 0.0) for value in values])[:, 0]
+        positions = axis.axes.transData.transform(np.column_stack([values, np.zeros(len(values))]))[:, 0]
         font = axis.get_major_ticks(1)[0].label1.get_fontproperties()
         points = axis.axes.figure.dpi / 72.0
-        widths = [text_to_path.get_text_width_height_descent(label, font, ismath=False)[0] * points
-                  for label in labels]
     except Exception:  # an axis not laid out yet: nothing to measure against
         return labels
     gap = LABEL_GAP_PT * points
+    widest = max(len(label) for label in labels) * MAX_CHAR_EM * font.get_size_in_points() * points
+    if np.min(np.abs(np.diff(positions))) >= widest + gap:
+        return labels
+    widths = [_width(label, font) * points for label in labels]
     step = 1
     while step < len(labels) - 1:
         kept = range(0, len(labels), step)
