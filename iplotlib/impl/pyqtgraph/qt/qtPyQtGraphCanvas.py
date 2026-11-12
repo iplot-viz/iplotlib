@@ -93,8 +93,16 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._vlayout.addWidget(self._splitter)
 
         self.setLayout(self._vlayout)
+        self._take_theme()
         self.set_canvas(kwargs.get('canvas'))
         self._install_arranger(self._parser.figure.viewport())
+
+    def _apply_theme(self, theme):
+        self._parser.figure.setBackground('w' if theme is None else theme['background'])
+        self._minimap_widget.setBackground('#f5f5f5' if theme is None else theme['minimap'])
+        for side in ('left', 'bottom'):
+            # Without a pen, the default foreground of pyqtgraph.
+            self._minimap_plot.getAxis(side).setTextPen(*(() if theme is None else (theme['text'],)))
 
     def set_canvas(self, canvas):
         prev_canvas = self._parser.canvas
@@ -119,20 +127,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             if canvas:
                 self.set_mouse_mode(self._mmode or canvas.mouse_mode)
 
-            # Connect events for each plot - only connect if not already connected
-            for stack in self._parser._layout_stacks.values():
-                for plot in stack.values():
-                    vb = plot.getViewBox()
-                    if vb not in self._connected_viewboxes:
-                        vb.pressed.connect(self._impl_mouse_press_handler)
-                        vb.released.connect(self._impl_mouse_release_handler)
-                        vb.dragged.connect(self._impl_mouse_drag_handler)
-                        vb.dragStarted.connect(self._impl_mouse_drag_started_handler)
-                        vb.dragFinished.connect(self._impl_mouse_drag_finished_handler)
-                        # Ruler labels are positioned in scene coordinates; a widget
-                        # resize moves the axes without a range change, so re-project.
-                        vb.sigResized.connect(self._on_viewbox_resized)
-                        self._connected_viewboxes.add(vb)
+            self._connect_view_boxes()
 
             super().set_canvas(canvas)
             self._repaint_rulers_from_canvas()
@@ -192,7 +187,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def _update_minimap(self):
         canvas = self.get_canvas()
-        show = canvas is not None and canvas.show_minimap and canvas.is_minimap_eligible()
+        show = self._minimap_eligible(canvas)
         self._minimap_widget.setVisible(show)
         if show:
             total = max(self._splitter.height(), 1)
@@ -853,18 +848,8 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._preview_ruler_identity = None
             self._disconnect_preview_scene()
 
-        if mode == Canvas.MOUSE_MODE_SELECT:
-            self._parser.set_view_box()
-        elif mode == Canvas.MOUSE_MODE_CROSSHAIR:
-            self._parser.set_view_box_crosshair()
-        elif mode == Canvas.MOUSE_MODE_PAN:
-            self._parser.set_view_box_pan()
-        elif mode == Canvas.MOUSE_MODE_ZOOM:
-            self._parser.set_view_box_zoom()
-        elif mode == Canvas.MOUSE_MODE_DIST:
-            self._parser.set_view_box()
-        elif mode == Canvas.MOUSE_MODE_MARKER:
-            self._parser.set_view_box()
+        self._apply_view_box_mode(mode)
+        if mode == Canvas.MOUSE_MODE_MARKER:
             if not self._marker_window.isVisible():
                 self._marker_window.show()
             elif self._marker_window.isMinimized():
@@ -873,7 +858,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                 self._marker_window.raise_()
                 self._marker_window.activateWindow()
         elif mode == Canvas.MOUSE_MODE_RULER:
-            self._parser.set_view_box()
             self._connect_preview_scene()
             if not self._ruler_window.isVisible():
                 self._ruler_window.show()
@@ -883,6 +867,46 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._ruler_window.lower()
             self.window().activateWindow()
             self.window().raise_()
+
+    def _apply_view_box_mode(self, mode: str, impl_plots: list = None):
+        """Make the plots drawn, or these implementation plots of them, respond to the mouse as `mode` says. The
+        crosshair spans them all."""
+        if mode == Canvas.MOUSE_MODE_CROSSHAIR:
+            self._parser.set_view_box_crosshair()
+        elif mode == Canvas.MOUSE_MODE_PAN:
+            self._parser.set_view_box_pan(impl_plots)
+        elif mode == Canvas.MOUSE_MODE_ZOOM:
+            self._parser.set_view_box_zoom(impl_plots)
+        elif mode in (Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_MARKER,
+                      Canvas.MOUSE_MODE_RULER):
+            self._parser.set_view_box(impl_plots)
+
+    def _connect_view_boxes(self):
+        """Connect the mouse events of the plots drawn, of each once."""
+        for stack in self._parser._layout_stacks.values():
+            for plot in stack.values():
+                vb = plot.getViewBox()
+                if vb not in self._connected_viewboxes:
+                    vb.pressed.connect(self._impl_mouse_press_handler)
+                    vb.released.connect(self._impl_mouse_release_handler)
+                    vb.dragged.connect(self._impl_mouse_drag_handler)
+                    vb.dragStarted.connect(self._impl_mouse_drag_started_handler)
+                    vb.dragFinished.connect(self._impl_mouse_drag_finished_handler)
+                    # Ruler labels are positioned in scene coordinates; a widget
+                    # resize moves the axes without a range change, so re-project.
+                    vb.sigResized.connect(self._on_viewbox_resized)
+                    self._connected_viewboxes.add(vb)
+
+    def _plot_drawn(self, plot):
+        self._parser.figure.ci.layout.activate()
+        self._connect_view_boxes()
+        if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
+            # The cursor spans the plots drawn: the new one too.
+            self._parser.deactivate_cursor()
+        # The new plot takes the mouse mode of the others.
+        if self._mmode is not None:
+            self._apply_view_box_mode(self._mmode, self._parser._plot_impl_plot_lut.get(id(plot), []))
+        self._update_minimap()
 
     def undo(self):
         self._parser.undo()
@@ -1097,7 +1121,9 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     if any([dx, dy, dz]):
                         # Get visible signals from the current plot only
                         plot_signals = self.get_visible_plot_signals(plot)
-                        dx_numeric = 0.0 if is_date else float(dx)
+                        # Along a time axis dx is text: the dialog takes the time measured, in nanoseconds.
+                        dist = self._dist_calculator
+                        dx_numeric = float(abs(dist.p2[0] - dist.p1[0])) if is_date else float(dx)
                         dialog = SignalShiftDialog(
                             self,
                             dx=dx_numeric,

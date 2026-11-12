@@ -12,7 +12,7 @@ This module is deprecated and unused.
 
 import typing
 
-from PySide6.QtCore import QMargins, Signal
+from PySide6.QtCore import QEvent, QMargins, Signal
 from PySide6.QtWidgets import QMenu, QSizePolicy, QToolBar, QToolButton, QWidget, QWidgetAction
 from PySide6.QtGui import QAction, QActionGroup
 
@@ -20,6 +20,7 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.qt.gui.iplotQtLayoutPicker import LayoutPicker
 from iplotlib.qt.utils.icon_loader import create_icon
 from iplotlib.qt.utils.icon_sizing import FontScaledIcons
+from iplotlib.qt.utils.palette import theme_colors
 
 from iplotLogging import setupLogger as Sl
 
@@ -32,6 +33,10 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
     def __init__(self, parent: typing.Optional[QWidget] = None):
         super().__init__(parent=parent)
 
+        # The actions with a packaged icon and the colours they are drawn in, drawn again in those of a new palette
+        # (see changeEvent).
+        self._packaged_icons = {}
+        self._icons_theme = theme_colors()
         self._margins = QMargins()
         self._szPolicy = QSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Maximum)
@@ -63,10 +68,10 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         self.addSeparator()
 
         # Statistics
-        self.statistics = QAction(create_icon('stats_icon'), 'Statistics', self)
+        self.statistics = self._packaged_action('stats_icon', 'png', 'Statistics')
         self.addAction(self.statistics)
 
-        self.minimapAction = QAction(create_icon('minimap', 'svg'), 'Mini-map', self)
+        self.minimapAction = self._packaged_action('minimap', 'svg', 'Mini-map')
         self.minimapAction.setCheckable(True)
         self.minimapAction.setEnabled(False)
         self.minimapAction.setToolTip('Show mini-map (available when a single plot is visible, '
@@ -80,7 +85,7 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         picker_action.setDefaultWidget(self.layoutPicker)
         self.layoutMenu.addAction(picker_action)
         self.layoutPicker.picked.connect(lambda *_: self.layoutMenu.close())
-        self.layoutAction = QAction(create_icon('layout', 'svg'), 'Layout', self)
+        self.layoutAction = self._packaged_action('layout', 'svg', 'Layout')
         self.layoutAction.setToolTip('Lay the plots out on a grid of the rows and columns you pick')
         self.layoutAction.setMenu(self.layoutMenu)
         self.addAction(self.layoutAction)
@@ -90,32 +95,32 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         self.addSeparator()
 
         # Command-history management
-        self.undoAction = QAction(create_icon('undo', 'svg'), '&Undo', self)
-        self.redoAction = QAction(create_icon('redo', 'svg'), '&Redo', self)
+        self.undoAction = self._packaged_action('undo', 'svg', '&Undo')
+        self.redoAction = self._packaged_action('redo', 'svg', '&Redo')
         self.addAction(self.undoAction)
         self.addAction(self.redoAction)
 
         # Restore every plot to the range captured at draw time.
-        self.homeAction = QAction(create_icon('home', 'svg'), '&Home', self)
+        self.homeAction = self._packaged_action('home', 'svg', '&Home')
         self.homeAction.setToolTip('Resets all plots to the original view')
         self.addAction(self.homeAction)
 
         # Saving, etc..
-        self.importAction = QAction(create_icon('open_file', 'svg'), '&Import Workspace', self)
-        self.exportAction = QAction(create_icon('save_as', 'svg'), '&Export Workspace', self)
-        self.exportDataAction = QAction(create_icon('export', 'svg'), '&Export Data', self)
+        self.importAction = self._packaged_action('open_file', 'svg', '&Import Workspace')
+        self.exportAction = self._packaged_action('save_as', 'svg', '&Export Workspace')
+        self.exportDataAction = self._packaged_action('export', 'svg', '&Export Data')
         self.addAction(self.importAction)
         self.addAction(self.exportAction)
         self.addAction(self.exportDataAction)
 
         # Save canvas as image
-        self.saveImageAction = QAction(create_icon('screenshot', 'svg'), '&Save Canvas as Image', self)
+        self.saveImageAction = self._packaged_action('screenshot', 'svg', '&Save Canvas as Image')
         self.addAction(self.saveImageAction)
 
         # Pulse creation. Hidden by default — the host application decides
         # whether to show it based on data-source capabilities (see
         # MTMainWindow feature-gating against UdaAccess.is_write_capable()).
-        self.createPulseAction = QAction(create_icon('create_pulse', 'svg'), '&Create Pulse', self)
+        self.createPulseAction = self._packaged_action('create_pulse', 'svg', '&Create Pulse')
         self.createPulseAction.setToolTip('Create Pulse')
         self.createPulseAction.setStatusTip(
             'Create a UDA pulse from the currently visible time range')
@@ -123,7 +128,7 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         self.addAction(self.createPulseAction)
 
         # Pulse update. Hidden by default; same gating as createPulseAction.
-        self.updatePulseAction = QAction(create_icon('update_pulse', 'svg'), '&Update Pulse', self)
+        self.updatePulseAction = self._packaged_action('update_pulse', 'svg', '&Update Pulse')
         self.updatePulseAction.setToolTip('Update Pulse')
         self.updatePulseAction.setStatusTip(
             'Search for an existing UDA pulse and update its time range, status or description')
@@ -131,13 +136,25 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         self.addAction(self.updatePulseAction)
 
         # Draw..
-        self.redrawAction = QAction(create_icon('rotate180', 'svg'), '&Redraw', self)
+        self.redrawAction = self._packaged_action('rotate180', 'svg', '&Redraw')
         # self.addAction(self.redrawAction)
 
         # Configuration..
-        self.configureAction = QAction(create_icon('options', 'svg'), '&Preferences')
+        self.configureAction = self._packaged_action('options', 'svg', '&Preferences')
         self.addAction(self.configureAction)
 
         # Detach..
         self.detachAction = QAction('Detach', self)
         self.addAction(self.detachAction)
+
+    def _packaged_action(self, icon: str, ext: str, text: str) -> QAction:
+        action = QAction(create_icon(icon, ext), text, self)
+        self._packaged_icons[action] = (icon, ext)
+        return action
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.PaletteChange and theme_colors() != self._icons_theme:
+            self._icons_theme = theme_colors()
+            for action, (icon, ext) in self._packaged_icons.items():
+                action.setIcon(create_icon(icon, ext))
