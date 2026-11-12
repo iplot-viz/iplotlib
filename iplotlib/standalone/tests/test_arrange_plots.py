@@ -38,6 +38,13 @@ from iplotlib.qt.testing import ensure_qapp
 BACKENDS = ('matplotlib', 'pyqt')
 
 
+def _destroy(widget):
+    """Destroy a widget a test closed: a closed one is only hidden, and a change of palette draws every canvas left
+    alive again (see IplotQtCanvas.changeEvent)."""
+    widget.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 def _canvas(columns, labels: dict = None, points: int = 10, empty=()) -> Canvas:
     """A canvas with a column of plots for each count of plots in `columns`: each plot draws a rising line of
     `points` points from 0 to 9, which leaves its top left corner empty, and is titled by its place. `labels` names
@@ -130,6 +137,7 @@ class TestArrangePlots(unittest.TestCase):
         canvas = _canvas(columns, labels, points, empty)
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
         self._shown = qt_canvas
+        self.addCleanup(_destroy, qt_canvas)
         self.addCleanup(qt_canvas.close)
         qt_canvas.resize(800, 900)
         qt_canvas.show()
@@ -1039,6 +1047,7 @@ class TestArrangePlots(unittest.TestCase):
         for backend in BACKENDS:
             with self.subTest(backend):
                 win = IplotQtMainWindow()
+                self.addCleanup(_destroy, win)
                 self.addCleanup(win.close)
                 canvas = _canvas((3,))
                 qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
@@ -1060,6 +1069,7 @@ class TestArrangePlots(unittest.TestCase):
 
     def test_the_mini_map_comes_with_the_one_plot_a_layout_leaves_and_goes_on_undo(self):
         win = IplotQtMainWindow()
+        self.addCleanup(_destroy, win)
         self.addCleanup(win.close)
         canvas = _canvas((2,))
         qt_canvas = IplotQtCanvasFactory.new('matplotlib', canvas=canvas)
@@ -1083,6 +1093,7 @@ class TestArrangePlots(unittest.TestCase):
 
     def test_the_toolbar_lays_the_plots_out_on_the_grid_picked_in_its_menu(self):
         win = IplotQtMainWindow()
+        self.addCleanup(_destroy, win)
         self.addCleanup(win.close)
         canvas = _canvas((3,))
         qt_canvas = IplotQtCanvasFactory.new('matplotlib', canvas=canvas)
@@ -1216,6 +1227,7 @@ class TestArrangePlots(unittest.TestCase):
                 canvas = Canvas(mouse_mode=Canvas.MOUSE_MODE_SELECT)
                 qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
                 self._shown = qt_canvas
+                self.addCleanup(_destroy, qt_canvas)
                 self.addCleanup(qt_canvas.close)
                 qt_canvas.resize(800, 900)
                 qt_canvas.show()
