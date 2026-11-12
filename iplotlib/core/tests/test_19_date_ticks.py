@@ -6,9 +6,13 @@ import datetime
 import unittest
 
 from iplotlib.core.date_ticks import (
+    date_label_sample,
+    fitting_count,
+    fitting_date_count,
     generate_ticks,
     label_unit,
     linear_ticks,
+    number_label_sample,
     pick_interval,
     relative_ticks,
     segments_for_interval,
@@ -231,6 +235,61 @@ class LabelUnitTests(unittest.TestCase):
                            (self.YEAR, self.YEAR), (self.MONTH, self.MONTH),
                            (self.DAY, self.DAY)):
             self.assertEqual(label_unit(start, end), '', (start, end))
+
+
+class FittingCountTests(unittest.TestCase):
+    """The configured count is a minimum while the labels fit along the axis; with less room, the ladders get a
+    count whose ticks fit, since they can give more than twice the count asked for."""
+
+    def test_a_count_whose_ticks_fit_is_kept(self):
+        self.assertEqual(fitting_count(lambda n: linear_ticks(0, 100, n), 5, lambda ticks: 20), 5)
+
+    def test_with_less_room_the_ticks_are_no_more_than_fit(self):
+        count = fitting_count(lambda n: linear_ticks(-1.1, 1.1, n), 6, lambda ticks: 4)
+
+        self.assertLessEqual(len(linear_ticks(-1.1, 1.1, count)), 4)
+        # The ladder alone gives 11 ticks for 6 asked over this range.
+        self.assertEqual(len(linear_ticks(-1.1, 1.1, 6)), 11)
+
+    def test_the_room_follows_the_labels_of_the_ticks(self):
+        # Labels of two digits fit eleven along the axis; seven characters, five.
+        room_for = lambda ticks: 60 // (len(number_label_sample(ticks)) * 2)
+
+        self.assertEqual(len(linear_ticks(0, 10, fitting_count(lambda n: linear_ticks(0, 10, n), 10, room_for))), 11)
+        self.assertEqual(number_label_sample(linear_ticks(-1, 1, 10)), '-0.8')
+        self.assertEqual(number_label_sample(linear_ticks(0, 10, 10)), '10')
+
+    def test_a_date_axis_measures_the_labels_it_draws(self):
+        week = (T0, T0 + 7 * _DAY)
+        sample = date_label_sample(*week, _DAY, 'day')
+        # Day ticks over one month show the day only, with no unit.
+        self.assertEqual(sample, '00')
+
+        def room_for(label):
+            return 400 // (len(label) * 7 + 10)
+
+        count = fitting_date_count(*week, 7, 0, room_for)
+
+        step, kind = pick_interval(*week, count, 0)
+        self.assertLessEqual(len(generate_ticks(*week, step, kind)), room_for(date_label_sample(*week, step, kind)))
+        self.assertEqual(count, 7)
+
+    def test_a_short_date_axis_takes_fewer_ticks(self):
+        hour = (T0, T0 + _HOUR)
+
+        count = fitting_date_count(*hour, 7, 0, lambda label: 3)
+
+        step, kind = pick_interval(*hour, count, 0)
+        self.assertLessEqual(len(generate_ticks(*hour, step, kind)), 3)
+
+    def test_an_axis_of_unknown_length_keeps_the_count(self):
+        self.assertEqual(fitting_date_count(T0, T0 + _DAY, 6, 0, lambda label: None), 6)
+
+    def test_the_sample_label_shows_the_segments_that_change(self):
+        # Ten-minute ticks within one hour show the minute with its unit; six-hour ticks over two days show the
+        # day and the time.
+        self.assertEqual(date_label_sample(T0, T0 + 50 * _MIN, 10 * _MIN, 'fixed'), '00min')
+        self.assertEqual(date_label_sample(T0, T0 + 2 * _DAY, 6 * _HOUR, 'fixed'), '00T00:00')
 
 
 if __name__ == "__main__":
