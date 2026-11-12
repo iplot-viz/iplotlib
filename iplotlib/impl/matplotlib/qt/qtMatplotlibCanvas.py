@@ -33,7 +33,7 @@ from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider, PlotC
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.core.ruler import Ruler
-from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser
+from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser, apply_theme_rc, marker_label_props
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, NiceNanosecondLocator, \
     ExponentScalarFormatter, RelativeTimeLocator, is_time_label
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
@@ -87,8 +87,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._parser = MatplotlibParser(tight_layout=tight_layout, impl_flush_method=self.draw_in_main_thread, **kwargs)
         self._parser._on_view_data_read = self._view_data_drawn
         self._parser._on_view_reads_changed = self.viewReadsChanged.emit
-        self._parser.legend_eye_images = {state: _rgba_array(svg_icon_image(name, 48))
-                                          for state, name in (('open', 'eye'), ('closed', 'eye_closed'))}
+        self._set_legend_eye_images()
         self._mpl_renderer = FigureCanvas(self._parser.figure)
         self._mpl_renderer.setParent(self)
         self._mpl_renderer.setSizePolicy(self._mpl_size_pol)
@@ -134,10 +133,21 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_renderer.mpl_connect('figure_leave_event', lambda _: self._reset_legend_hover())
 
         self.setLayout(self._vlayout)
+        self._take_theme()
         self.set_canvas(kwargs.get('canvas'))
         self.setAcceptDrops(True)
 
         self._mouse_impl = None
+
+    def _set_legend_eye_images(self):
+        self._parser.legend_eye_images = {state: _rgba_array(svg_icon_image(name, 48))
+                                          for state, name in (('open', 'eye'), ('closed', 'eye_closed'))}
+
+    def _apply_theme(self, theme):
+        apply_theme_rc(theme)
+        for figure in (self._parser.figure, self._minimap_figure):
+            figure.set_facecolor(plt.rcParams['figure.facecolor'])
+        self._set_legend_eye_images()
 
     # Implement basic superclass functionality
     def set_canvas(self, canvas: Canvas):
@@ -270,7 +280,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             ax.set_autoscalex_on(False)
             ax.tick_params(axis='x', labelsize=fs)
             ax.tick_params(axis='y', labelsize=fs)
-            ax.set_facecolor('#f5f5f5')
+            ax.set_facecolor('#f5f5f5' if self._theme is None else self._theme['minimap'])
             main_x_formatter = main_ax.xaxis.get_major_formatter()
             if isinstance(main_x_formatter, NanosecondDateFormatter):
                 # Give the minimap its OWN nice locator over the fixed baseline
@@ -359,7 +369,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                 ax.annotate(text=marker_name,
                             xy=(x, y),
                             xytext=(x, y),
-                            bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=color))
+                            **marker_label_props(color))
 
                 # Get marker row
                 row = self.get_marker_row(signal, marker_name)
@@ -375,7 +385,9 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     for annotation in annotations:
                         if annotation.get_text() == marker_name:
                             # Set new color property
-                            annotation.set_bbox(dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor=color))
+                            props = marker_label_props(color)
+                            annotation.set_color(props['color'])
+                            annotation.set_bbox(props['bbox'])
                             # Get marker row
                             row = self.get_marker_row(signal, marker_name)
                             signal.markers_list[row].color = color

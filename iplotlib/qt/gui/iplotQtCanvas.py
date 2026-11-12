@@ -10,8 +10,9 @@ from contextlib import contextmanager
 from typing import List, Tuple, Optional
 
 import numpy as np
-from PySide6.QtCore import QEventLoop, QMetaObject, QSize, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QEvent, QEventLoop, QMetaObject, QSize, Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
+from iplotlib.core.property_manager import set_theme_colors
 from iplotlib.core.signal import SignalXY
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.plot import PlotXY, PlotXYWithSlider, PlotContourWithSlider
@@ -24,6 +25,7 @@ import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
+from iplotlib.qt.utils.palette import theme_colors
 
 logger = Sl.get_logger(__name__)
 
@@ -49,6 +51,10 @@ class IplotQtCanvas(QWidget):
         super().__init__(parent)
         self._mmode = None
         self._parser = None  # type: BackendParserBase
+        # The colours of the dark palette the plots were last drawn in, None in a light one (see _take_theme), and
+        # whether they are to be drawn in new ones (see changeEvent).
+        self._theme = None
+        self._theme_draw_pending = False
         self._staging_cmds = []  # type: List[IplotAxesRangeCmd]
         self._commitd_cmds = []  # type: List[IplotAxesRangeCmd]
         self.dropInfo = DropInfo()
@@ -88,6 +94,35 @@ class IplotQtCanvas(QWidget):
         self._signal_flush_timer = QTimer(self)
         self._signal_flush_timer.setSingleShot(True)
         self._signal_flush_timer.timeout.connect(self._flush_pending_signals_now)
+
+    def _take_theme(self) -> bool:
+        """Take the colours of the application palette for the plots: in a dark one, those that draw what a light one
+        draws in black and white (see theme_colors). Whether they changed since the plots were drawn."""
+        theme = theme_colors()
+        set_theme_colors({} if theme is None else {'background_color': theme['background'],
+                                                   'font_color': theme['text']})
+        if theme == self._theme:
+            return False
+        self._theme = theme
+        self._apply_theme(theme)
+        return True
+
+    def _apply_theme(self, theme: Optional[dict]):
+        """Give the colours of the theme to what the backend draws besides the plots (see theme_colors)."""
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange) \
+                and self._parser is not None and self._take_theme() and not self._theme_draw_pending:
+            # Drawn once the new palette has reached every widget, not while Qt hands it out.
+            self._theme_draw_pending = True
+            QTimer.singleShot(0, self._draw_in_theme)
+
+    def _draw_in_theme(self):
+        self._theme_draw_pending = False
+        if self.get_canvas() is not None:
+            with self.view_retainer():
+                self.refresh()
 
     @abstractmethod
     def undo(self):

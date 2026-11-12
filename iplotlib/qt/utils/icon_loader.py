@@ -4,17 +4,30 @@ A helpful icon loader.
 
 # Author: Jaswant Sai Panchumarti
 
+import functools
 import pkgutil
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import QIcon, QImage, QPainter, QPixmap
 
+from iplotlib.qt.utils.palette import theme_colors
+
 #: Logical sizes rendered from an SVG source. Covers 1x/1.5x/2x/3x of the 16-24
 #: px range Qt asks for in tool bars and menus.
 _SVG_RENDER_SIZES = (16, 24, 32, 48, 64)
 
+#: The grey the packaged SVG icons are drawn in.
+_ICON_GREY = b'#3b3b3b'
+
+
+def _in_palette(data: bytes) -> bytes:
+    """An SVG icon in the grey of a dark application palette (see theme_colors), as it is in a light one."""
+    theme = theme_colors()
+    return data if theme is None else data.replace(_ICON_GREY, theme['icon'].encode())
+
 
 def _icon_from_svg(data: bytes) -> QIcon:
+    data = _in_palette(data)
     try:
         from PySide6.QtSvg import QSvgRenderer
     except ImportError:
@@ -42,7 +55,16 @@ def create_icon(name, ext: str = 'png') -> QIcon:
     is loaded as is: tagging it with the device pixel ratio adds no detail, it
     only relabels an 18x18 image as fewer logical pixels, so the icon is drawn
     smaller rather than sharper.
+
+    Each icon is drawn once in each grey of the palette (see _in_palette) and shared.
     """
+    theme = theme_colors()
+    return _packaged_icon(name, ext, None if theme is None else theme['icon'])
+
+
+@functools.lru_cache(maxsize=None)
+def _packaged_icon(name: str, ext: str, _grey) -> QIcon:
+    # _grey only keys the cache: _in_palette draws the icon in the grey of the palette.
     data = pkgutil.get_data("iplotlib.qt", f"icons/{name}.{ext}")
     if ext.lower() == 'svg':
         return _icon_from_svg(data)
@@ -61,7 +83,7 @@ def svg_icon_image(name: str, size: int) -> QImage:
     image.fill(Qt.GlobalColor.transparent)
     painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    QSvgRenderer(QByteArray(pkgutil.get_data("iplotlib.qt", f"icons/{name}.svg"))).render(
+    QSvgRenderer(QByteArray(_in_palette(pkgutil.get_data("iplotlib.qt", f"icons/{name}.svg")))).render(
         painter, QRectF(0, 0, size, size))
     painter.end()
     return image

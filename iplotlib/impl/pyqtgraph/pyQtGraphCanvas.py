@@ -38,6 +38,7 @@ from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
 from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem, NanosecondDateFormatter, is_time_label
 from iplotlib.qt.utils.icon_loader import svg_icon_image
+from iplotlib.qt.utils.palette import theme_colors
 
 logger = setupLogger.get_logger(__name__)
 
@@ -148,6 +149,16 @@ class QtViewBox(pg.ViewBox):
         ev.ignore()
 
 
+def legend_frame() -> tuple:
+    """The fill and the pen of a legend frame: translucent white and black, or in the colours of a dark theme."""
+    theme = theme_colors()
+    if theme is None:
+        return pg.mkBrush(255, 255, 255, 120), pg.mkPen(color='k')
+    fill = pg.mkColor(theme['background'])
+    fill.setAlpha(120)
+    return pg.mkBrush(fill), pg.mkPen(color=theme['text'])
+
+
 class _LegendEye(QtWidgets.QGraphicsRectItem):
     """The eye button that folds the legend of a plot away and unfolds it. It stays in
     the top right corner of the plot, where an upper right legend begins, whether the
@@ -169,8 +180,9 @@ class _LegendEye(QtWidgets.QGraphicsRectItem):
         self._icon = QtWidgets.QGraphicsPixmapItem(self)
         self._icon.setPos(self.PAD, self.PAD)
         # The look of the legend frame.
-        self.setPen(pg.mkPen(color='k'))
-        self.setBrush(pg.mkBrush(255, 255, 255, 120))
+        fill, pen = legend_frame()
+        self.setPen(pen)
+        self.setBrush(fill)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setZValue(1000)  # above the legend and the curves
         self.set_collapsed(False)
@@ -1529,8 +1541,9 @@ class PyQtGraphParser(BackendParserBase):
         legend.sigSampleClicked.connect(self._on_legend_sample_clicked)
 
         # Set aspect legend
-        legend.setBrush(pg.mkBrush(255, 255, 255, 120))
-        legend.setPen(pg.mkPen(color='k'))
+        fill, pen = legend_frame()
+        legend.setBrush(fill)
+        legend.setPen(pen)
         legend.setVisible(not self.legend_collapsed(plot))
         if self.legend_eyes:
             font = QFont()
