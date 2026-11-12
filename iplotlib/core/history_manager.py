@@ -16,7 +16,7 @@ callable.
 # Author: Jaswant Sai Panchumarti
 
 from collections import deque
-from typing import Deque
+from typing import Deque, Optional
 from iplotlib.core.command import IplotCommand
 import iplotLogging.setupLogger as Sl
 
@@ -98,6 +98,12 @@ class HistoryManager:
         Return True if redo is possible.
         """
         return bool(self._redo_stack)
+
+    def get_next_undo_cmd(self) -> Optional[IplotCommand]:
+        """
+        Peek at the next undo command.
+        """
+        return self._undo_stack[-1] if self.can_undo() else None
 
     def get_next_undo_cmd_name(self) -> str:
         """

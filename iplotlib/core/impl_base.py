@@ -23,12 +23,13 @@ import numpy as np
 from queue import Empty, Queue
 import re
 import threading
-from typing import Any, Callable, Collection, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Collection, Dict, List, Optional, Set, Tuple, Union
 import weakref
 
 from iplotProcessing.core import BufferObject
 from iplotlib.core.axis import Axis, RangeAxis, LinearAxis
 from iplotlib.core.canvas import Canvas
+from iplotlib.core.decimation import bucket_reduce_lines
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits, IplSliderLimits
 from iplotlib.core.plot import Plot, PlotXY, PlotXYWithSlider, PlotContour, PlotImage, PlotContourWithSlider
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
@@ -36,8 +37,31 @@ import iplotLogging.setupLogger as Sl
 
 from iplotlib.core.history_manager import HistoryManager
 from iplotlib.core.property_manager import PropertyManager
+from iplotlib.interface.iplotSignalAdapter import AccessHelper, DeferredReads, IplotSignalAdapter
 
 logger = Sl.get_logger(__name__)
+
+# Background reads in a row for one change of the view: each next one reads what the previous one
+# showed to be missing, e.g. the signals' own range that undo restores after the view's, or an alias
+# that an expression evaluates once the data of its own variable arrive.
+_VIEW_READ_ROUNDS = 3
+
+# The pixels a plot has across, at most (a 4K screen): a line of many more samples in the view is drawn with those
+# that draw each pixel (see bucket_reduce_lines).
+_LINE_BUCKETS = 4096
+
+#: What a place of the canvas shows while its plot waits for its data (see BackendParserBase.set_pending_places).
+PENDING_PLACE_TEXT = "Retrieving data..."
+#: What it shows once it is told how many of them are read (see BackendParserBase.show_pending_progress).
+PENDING_PROGRESS_TEXT = "Retrieving data ({}/{}) .."
+
+
+def line_samples(line) -> Optional[Tuple[Any, Any]]:
+    """The samples of its signal that a line stands for, when it draws fewer of them (see
+    BackendParserBase.do_impl_line_plot_xy): what reads the value of a sample or a statistic of the line takes
+    them; the fit of Y reads the line, whose fewer samples keep the lowest and the highest. None when the line
+    draws all those it stands for."""
+    return getattr(line, '_ipl_samples', None)
 
 
 @dataclass(frozen=True, eq=True)
@@ -163,6 +187,8 @@ class BackendParserBase(ABC):
         self._impl_draw_thread = threading.current_thread()
         self._focus_plot = focus_plot
         self._focus_plot_stack_key = focus_plot_stack_key
+        # The plots that shared the time axis of the focused plot when it was focused (see set_focus_plot).
+        self._focus_group = []  # type: List[weakref.ref]
         self._layout = None
         self._axis_impl_plot_lut = weakref.WeakValueDictionary()  # type: Dict[int, Any] # key is id(Axis)
         self._plot_impl_plot_lut = defaultdict(list)  # type: Dict[int, List[Any]] # key is id(Plot)
@@ -173,12 +199,36 @@ class BackendParserBase(ABC):
             lambda: defaultdict(dict))  # type: Dict[Any, int] # key is id(impl_plot)
         self._update = False
         self._restoring_view = False
+        self._previewing = False
         self._interactive_pan = False
         self._interactive_pan_pending = None
         self._streaming_impl_plot_lut = defaultdict(lambda: [None, None])
         self._pending_signal_refs = {}  # type: Dict[Any, weakref.ref]
         self._pending_signal_lock = threading.Lock()
         self._signal_flush_scheduled = False
+        # Data read in the background for views that changed, by what they redraw (see _process_view_change).
+        self._view_reads = {}  # type: Dict[Any, Any]
+        # Their requests, until the view is drawn with their data (see DeferredReads.waiting).
+        self._view_requests = {}  # type: Dict[Any, frozenset]
+        # Their implementation plots, and the reads whose plot fits its Y range again once they are drawn (see
+        # autoscale_y_axis).
+        self._view_plots = {}  # type: Dict[Any, Any]
+        self._view_fits = set()  # type: Set[Any]
+        # Y fits, by signal key, and follows of the shared time window by plots of one signal versus another, still
+        # due for plots that the focus hides: done once a redraw draws them (see process_ipl_canvas).
+        self._undrawn_fits = set()  # type: Set[str]
+        self._undrawn_follows = {}  # type: Dict[Tuple[int, str], Tuple[weakref.ref, str]]
+        # Drawing of the data that arrived while the view was dragged, by what they redraw.
+        self._arrived_in_pan = {}  # type: Dict[Any, Callable[[], None]]
+        # Called once the data read in the background for a view that changed are drawn.
+        self._on_view_data_read = None  # type: Optional[Callable[[], None]]
+        # Called with how many views wait for data read in the background, whenever that number changes.
+        self._on_view_reads_changed = None  # type: Optional[Callable[[int], None]]
+        self._view_reads_told = 0
+        # The places of a canvas whose plots are drawn once their data are read, and the canvas (see
+        # set_pending_places).
+        self._pending_places = {}  # type: Dict[Tuple[int, int], Tuple[int, int]]
+        self._pending_canvas = None  # type: Optional[weakref.ref]
 
     @staticmethod
     def signal_lut_key(signal):
@@ -295,6 +345,9 @@ class BackendParserBase(ABC):
         """
         This function rescales the y-axis based on the data that is visible given the current limits of the X-axis
         """
+        # A plot whose view is still read fits its Y range again once those data are drawn, as it would had they
+        # been read at once.
+        self._view_fits.update(owner for owner, plot in self._view_plots.items() if plot is impl_plot)
         lines, lo, hi = self.get_impl_lines(impl_plot)
         bot, top = np.inf, -np.inf
 
@@ -356,6 +409,7 @@ class BackendParserBase(ABC):
         with self._pending_signal_lock:
             self._pending_signal_refs.clear()
             self._signal_flush_scheduled = False
+        self.drop_view_reads()
 
     def process_ipl_canvas(self, canvas: Canvas):
         """
@@ -364,6 +418,77 @@ class BackendParserBase(ABC):
         :param canvas: A Canvas instance
         :type canvas: Canvas
         """
+        fits = self._view_fits | self._undrawn_fits
+        # The plots of one signal versus another that still have to follow the shared time window with the data read
+        # for it (see _x_axis_update_callback). The redraw makes new implementation plots: they are keyed by plot and
+        # stack.
+        follows = dict(self._undrawn_follows)
+        for owner, impl_plot in self._view_plots.items():
+            item = self._impl_plot_cache_table.get_cache_item(impl_plot) if owner is impl_plot else None
+            if item is not None and item.plot() is not None:
+                follows[(id(item.plot()), item.stack_key)] = (item.plot, item.stack_key)
+        results = self._read_canvas_data(canvas)
+        if results is None:
+            # The application quits while they are read: reading them again in this thread would only delay it.
+            return
+        with AccessHelper.prefetched(results):
+            self._process_ipl_canvas(canvas)
+        # The redraw dropped those reads: they follow the window again over the data drawn now, as when the reads
+        # arrive (see _view_data_read); those that the focus hides, once a redraw draws them.
+        updating, self._update = self._update, True
+        try:
+            for key, (plot_ref, stack_key) in follows.items():
+                plot = plot_ref()
+                if plot is None:
+                    continue
+                impl_plots = [impl_plot for impl_plot in self._plot_impl_plot_lut.get(id(plot), [])
+                              if self._impl_plot_cache_table.get_cache_item(impl_plot).stack_key == stack_key]
+                for impl_plot in impl_plots:
+                    refs = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
+                    signal = refs[0]() if refs else None
+                    if signal is not None:
+                        self._process_view_change(impl_plot, impl_plot, partial(
+                            self._follow_shared_time_window, impl_plot, plot, signal.ts_start, signal.ts_end))
+                if not impl_plots and self._focus_plot is not None:
+                    self._undrawn_follows[key] = (plot_ref, stack_key)
+        finally:
+            self._update = updating
+        # Plots due to fit their Y range to the data read for their view fit it to the data the redraw drew instead.
+        # Those that the focus hides do so once a redraw draws them: the key of a signal outlives the redraw.
+        plots = set()
+        for owner in fits:
+            impl_plot = self._signal_impl_plot_lut.get(owner)
+            if impl_plot is not None:
+                plots.add(impl_plot)
+            elif self._focus_plot is not None and isinstance(owner, str):
+                self._undrawn_fits.add(owner)
+        for impl_plot in plots:
+            self.autoscale_y_axis(impl_plot)
+
+    def _read_canvas_data(self, canvas: Canvas) -> Optional[dict]:
+        """The data the signals to draw need and do not have, read all at once by the worker
+        threads (AccessHelper.pool), if any, for AccessHelper.prefetched(); None if the
+        application quits while they are read."""
+        pool = AccessHelper.pool
+        if canvas is None or pool is None or self._impl_flush_method is None:
+            return {}
+        pending = self._pending_places_of(canvas)
+        plots = [self._focus_plot] if self._focus_plot is not None else [
+            plot for i, column in enumerate(canvas.plots) for j, plot in enumerate(column)
+            if plot is not None and (i, j) not in pending]
+        requests = [params for plot in plots for stack in plot.signals.values() for signal in stack
+                    if isinstance(signal, IplotSignalAdapter) for params in AccessHelper.data_requests(signal)]
+        if not requests:
+            return {}
+        try:
+            return pool.fetch(requests)
+        except Exception:
+            logger.exception("Reading in the worker threads failed, data are read in this thread from now on")
+            AccessHelper.pool = None
+            pool.shutdown()
+            return {}
+
+    def _process_ipl_canvas(self, canvas: Canvas):
         if canvas is None:
             self.canvas = canvas
             self.clear()
@@ -383,7 +508,8 @@ class BackendParserBase(ABC):
             self.canvas.focus_plot = self._focus_plot
             self.set_canvas_gridspec(1, 1)
 
-        # 3. Fill the canvas with plots.
+        # 3. Fill the canvas with plots, but those still to draw once their data are read.
+        pending = self._pending_places_of(canvas)
         for i, col in enumerate(canvas.plots):
             for j, plot in enumerate(col):
                 if self._focus_plot is not None:
@@ -392,8 +518,11 @@ class BackendParserBase(ABC):
                         self.process_ipl_plot(plot, 0, 0)
                     elif isinstance(plot, PlotXYWithSlider):
                         plot.slider = None
-                else:
+                elif (i, j) not in pending:
                     self.process_ipl_plot(plot, i, j)
+        if self._focus_plot is None:
+            for (i, j), (row_span, col_span) in pending.items():
+                self.show_pending_place(i, j, row_span, col_span)
 
         # 4. Update the title at the top of canvas.
         if self._pm.get_value(self.canvas, 'title') is not None:
@@ -456,10 +585,11 @@ class BackendParserBase(ABC):
             self._update = False
 
     @abstractmethod
-    def _x_axis_update_callback(self, current_plot: Any):
+    def _x_axis_update_callback(self, current_plot: Any, only: Collection = None):
         """
         Callback that updates the X axis limits when the axis bounds change in the corresponding plot implementation.
-        This callback ensures that all plots sharing the time axis are synchronized.
+        This callback ensures that all plots sharing the time axis are synchronized; with `only`, these implementation
+        plots of the group instead, as the group was before they were drawn (see _join_shared_x).
         """
         if self._update:
             return
@@ -492,7 +622,12 @@ class BackendParserBase(ABC):
         # the selected X range maps back to a time window. Otherwise
         # (non-monotonic X, or a data-independent expression such as
         # 'np.ones(10)') the zoom stays local and the other plots are untouched.
+        # Undo and redo restore the recorded window of the time plots themselves:
+        # mapping the X range back to time would replace it with an estimate, made
+        # from the samples of the view undone while the data of the restored one
+        # are read in the background.
         if (use_shared
+                and not getattr(self.canvas, 'undo_redo', False)
                 and not self._plot_x_is_time(current_ipl_plot)
                 and not self._plot_x_expr_yields_time(current_ipl_plot)):
             base_impl = self._find_shared_time_base_impl(current_ipl_plot)
@@ -548,7 +683,7 @@ class BackendParserBase(ABC):
             # from the other signals' buffers, so those must be refetched over the
             # new time window first.
             reprocess_followers = []
-            for impl_plot in shared_plots:
+            for impl_plot in shared_plots if only is None else only:
                 plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
 
                 if isinstance(plot, PlotXYWithSlider) and len(shared_plots) > 1:
@@ -582,13 +717,15 @@ class BackendParserBase(ABC):
                         # emptied the plots of sources that hold the whole pulse.
                         if not isinstance(plot, PlotXYWithSlider) and not self._interactive_pan:
                             signal.set_limits((new_start, new_end))
-                        self.process_ipl_signal(signal)
+                        self._process_view_change(self.signal_lut_key(signal), impl_plot,
+                                                  partial(self.process_ipl_signal, signal))
 
             if self._interactive_pan:
                 self._interactive_pan_pending = current_plot
             else:
                 for impl_plot, plot in reprocess_followers:
-                    self._follow_shared_time_window(impl_plot, plot, new_start, new_end)
+                    self._process_view_change(impl_plot, impl_plot, partial(
+                        self._follow_shared_time_window, impl_plot, plot, new_start, new_end))
         finally:
             # Never leave the re-entrancy guard set: a failure while propagating to
             # one plot must not disable axis synchronization for the whole session.
@@ -616,13 +753,279 @@ class BackendParserBase(ABC):
         pending = self._interactive_pan_pending
         self._interactive_pan = False
         self._interactive_pan_pending = None
-        if pending is None:
+        if pending is not None:
+            # The backend overrides take their own event object and their
+            # extras (grid label, rulers) already ran during the drag, so the
+            # base propagation is re-driven directly with the impl plot.
+            BackendParserBase._x_axis_update_callback(self, pending)
+        # Data that arrived during the drag, for the views it left as they were.
+        arrived, self._arrived_in_pan = self._arrived_in_pan, {}
+        for owner, draw in arrived.items():
+            if owner not in self._view_reads:
+                draw()
+        return pending is not None
+
+    def _process_view_change(self, owner: Any, impl_plot: Any, step: Callable[[], None]):
+        """Run `step`, which draws signals of `impl_plot` over the new range of its view.
+
+        With worker threads (AccessHelper.pool), the step draws the data the signals have and the
+        data for the new range are read in the background: the step runs again with them once they
+        arrive. A change of the view for the same `owner` that needs other data, or a view reset
+        drawn from memory, replaces a read still in progress.
+        """
+        if AccessHelper.pool is None or self._impl_flush_method is None:
+            self._cancel_view_read(owner)
+            step()
+            return
+        reads = DeferredReads(waiting=self._view_requests.get(owner, frozenset()))
+        self._previewing = True
+        try:
+            with AccessHelper.deferred(reads):
+                step()
+        finally:
+            self._previewing = False
+        fit = False
+        if reads.requests or self._restoring_view:
+            # A Y fit still due for the data that this read replaces is due for the new data, unless the view is
+            # restored with its own Y range.
+            fit = (owner in self._view_fits and not self._restoring_view
+                   and not getattr(self.canvas, 'undo_redo', False))
+            self._cancel_view_read(owner)
+        self._read_in_background(owner, impl_plot, step, reads, fit, 1, {})
+
+    def _read_in_background(self, owner: Any, impl_plot: Any, step: Callable[[], None], reads: DeferredReads,
+                            fit: bool, rounds: int, read: dict):
+        """Read `reads` for the change of the view that `step` draws; `read` holds what its earlier rounds read, and
+        `fit` says whether the Y range of `impl_plot` is fitted again once they are drawn (see autoscale_y_axis)."""
+        if not reads.requests:
+            return
+        pool = AccessHelper.pool
+        if pool is not None:
+            try:
+                self._view_reads[owner] = pool.fetch_later(
+                    reads.requests.values(), partial(self._view_data_read, owner, impl_plot, step, reads, rounds,
+                                                     read))
+                self._view_requests[owner] = frozenset(reads.requests)
+                self._view_plots[owner] = impl_plot
+                if fit:
+                    self._view_fits.add(owner)
+                self._view_reads_changed()
+                return
+            except Exception:
+                logger.exception("Reading in the worker threads failed, data are read in this thread from now on")
+                AccessHelper.pool = None
+                pool.shutdown()
+        reads.invalidate()
+        step()
+
+    def _view_data_read(self, owner: Any, impl_plot: Any, step: Callable[[], None], reads: DeferredReads,
+                        rounds: int, read: dict, results: dict):
+        """Run `step` again with the data read in the background for it (see _process_view_change)."""
+        self._view_reads.pop(owner, None)
+        self._view_reads_changed()
+        # The signals that the step reads again get what the earlier rounds read, as an expression
+        # does once the alias it needs arrives.
+        results = {**read, **results}
+        if self._interactive_pan:
+            # The view is still moving: drawn when it stops, unless it then needs other data.
+            self._arrived_in_pan[owner] = partial(self._view_data_read, owner, impl_plot, step, reads, rounds, {},
+                                                  results)
+            return
+        self._view_requests.pop(owner, None)
+        self._view_plots.pop(owner, None)
+        fit = owner in self._view_fits
+        self._view_fits.discard(owner)
+        reads.invalidate()
+        more = DeferredReads()
+        updating, self._update = self._update, True
+        try:
+            with AccessHelper.prefetched(results), AccessHelper.deferred(more):
+                step()
+        finally:
+            self._update = updating
+        if rounds < _VIEW_READ_ROUNDS:
+            self._read_in_background(owner, impl_plot, step, more, fit, rounds + 1, results)
+        elif more.requests:
+            logger.warning(f"The data of the view were still incomplete after {rounds} reads in the background")
+            # Read the next time the view is drawn.
+            more.invalidate()
+        if fit:
+            # Its new Y range runs the Y axis callback of the backend, as a change of the view does.
+            self.autoscale_y_axis(impl_plot)
+            self._update_view_cmd()
+        self.refresh_rulers(impl_plot)
+        if self._on_view_data_read is not None:
+            self._on_view_data_read()
+
+    def _view_reads_changed(self):
+        """Tell _on_view_reads_changed how many views wait for data read in the background, if that changed: right as
+        it changes, so that what fails next, such as drawing the data that arrived, cannot leave it untold."""
+        if len(self._view_reads) != self._view_reads_told and self._on_view_reads_changed is not None:
+            self._view_reads_told = len(self._view_reads)
+            self._on_view_reads_changed(self._view_reads_told)
+
+    def _update_view_cmd(self):
+        """Keep in the last view command of the history the limits of the view once the data read in the
+        background after it are drawn, as long as it still describes the view: redo then shows what it
+        showed, as when the data are read at once."""
+        cmd = self._hm.get_next_undo_cmd()
+        recorded = getattr(cmd, 'new_lim', None)
+        if not recorded:
+            return
+        current = []
+        for limits in recorded:
+            impl_plot = self._impl_plot_of(limits)
+            if impl_plot is None:
+                return
+            now = self.get_plot_limits(impl_plot)
+            if now.axes_ranges[0].get_limits() != limits.axes_ranges[0].get_limits():
+                return
+            current.append(now)
+        cmd.new_lim = current
+
+    def _fit_due(self, impl_plot: Any) -> bool:
+        """Whether `impl_plot` fits its Y range again once the data read for its view are drawn."""
+        return any(self._view_plots.get(owner) is impl_plot for owner in self._view_fits)
+
+    def _refit_y(self, impl_plot: Any, limits: IplPlotViewLimits):
+        """Fit again the Y range of a view restored from `limits`, recorded while its data were still read, once
+        those data are drawn, as the change of the view that `limits` records did."""
+        self.autoscale_y_axis(impl_plot)
+        if not self._fit_due(impl_plot):
+            # The data of the view are there: the limits keep the Y range fitted to them.
+            limits.axes_ranges[1] = IplAxisLimits(*self.get_oaw_axis_limits(impl_plot, 1))
+            limits.refit_y = False
+
+    def _cancel_view_read(self, owner: Any):
+        self._view_requests.pop(owner, None)
+        self._view_plots.pop(owner, None)
+        self._view_fits.discard(owner)
+        pending = self._view_reads.pop(owner, None)
+        if pending is not None:
+            pending.cancel()
+        self._view_reads_changed()
+
+    def drop_view_reads(self):
+        """Forget the data still being read in the background for views that changed."""
+        for pending in self._view_reads.values():
+            pending.cancel()
+        self._view_reads.clear()
+        self._view_requests.clear()
+        self._view_plots.clear()
+        self._view_fits.clear()
+        self._undrawn_fits.clear()
+        self._undrawn_follows.clear()
+        self._arrived_in_pan.clear()
+        self._view_reads_changed()
+
+    def set_pending_places(self, canvas: Canvas, places: Dict[Tuple[int, int], Tuple[int, int]]):
+        """Leave the plots of `canvas` at `places`, (column, row) in canvas.plots, to draw once their data are read
+        (see draw_plot): a drawing of `canvas` shows instead that their data are read, over the rows and columns they
+        span, given as (row span, col span). Another canvas is drawn whole."""
+        self._pending_canvas = weakref.ref(canvas)
+        self._pending_places = dict(places)
+
+    def draw_plot(self, plot: Plot) -> bool:
+        """Draw `plot`, whose place the canvas shown left pending (see set_pending_places), now that its data are read.
+        False if it draws nothing: while another plot is focused, the drawing of the canvas that ends the focus draws
+        it, and a plot of no place pending in the canvas shown is left alone."""
+        place = self._place_of(plot)
+        if place is None or not self._resolve_pending_place(*place) or self._focus_plot is not None:
             return False
-        # The backend overrides take their own event object and their
-        # extras (grid label, rulers) already ran during the drag, so the
-        # base propagation is re-driven directly with the impl plot.
-        BackendParserBase._x_axis_update_callback(self, pending)
+        self._join_shared_slider(plot)
+        self.process_ipl_plot(plot, *place)
+        self._join_shared_x(plot)
         return True
+
+    def drop_pending_place(self, column: int, row: int) -> bool:
+        """Draw nothing at a place the canvas shown left pending: its plot has nothing to draw. Whether it was
+        pending."""
+        return self._resolve_pending_place(column, row)
+
+    def drop_pending_places(self):
+        """Wait no more for the plots of the places left pending, as when the canvas is drawn anew instead."""
+        for place in list(self._pending_places_of(self.canvas)):
+            self.hide_pending_place(*place)
+        self._pending_places = {}
+        self._pending_canvas = None
+
+    def _resolve_pending_place(self, column: int, row: int) -> bool:
+        """Wait no more for the plot of a place, if it is pending in the canvas shown. Whether it was."""
+        if (column, row) not in self._pending_places_of(self.canvas):
+            return False
+        del self._pending_places[(column, row)]
+        self.hide_pending_place(column, row)
+        return True
+
+    def _join_shared_slider(self, plot: Plot):
+        """Start the slider of a plot drawn after the others where the sliders it moves with are: they moved without
+        it while its data were read (see draw_plot)."""
+        if (not isinstance(plot, (PlotXYWithSlider, PlotContourWithSlider))
+                or not self._pm.get_value(self.canvas, 'shared_x_axis')):
+            return
+        for other in self.get_shared_plot_xy_slider(plot):
+            if self._plot_impl_plot_lut.get(id(other)):
+                plot.slider_last_val = other.slider_last_val
+                return
+
+    def _join_shared_x(self, plot: Plot):
+        """Give a plot drawn after the others the window of the plots it shares the time axis with, if a zoom or a pan
+        on them moved it while its data were read (see draw_plot)."""
+        if not self._pm.get_value(self.canvas, 'shared_x_axis'):
+            return
+        own = self._plot_impl_plot_lut.get(id(plot), [])
+        for leader in self.get_canvas_plots():
+            item = self._impl_plot_cache_table.get_cache_item(leader)
+            leader_plot = item.plot() if item is not None else None
+            if (leader in own or leader_plot is None or isinstance(leader_plot, PlotXYWithSlider)
+                    or not self._plot_x_is_time(leader_plot) or not self._asked_for_window_of(plot, leader_plot)):
+                continue
+            window = leader_plot.axes[0].get_limits('current')
+            if window == leader_plot.axes[0].get_limits('original'):
+                return
+            if isinstance(plot, PlotXYWithSlider):
+                self.update_slider_limits(plot, *window)
+            else:
+                BackendParserBase._x_axis_update_callback(self, leader, only=own)
+            return
+
+    def _asked_for_window_of(self, plot: Plot, leader_plot: Plot) -> bool:
+        """Whether `plot` was asked for the window `leader_plot` was drawn over, as the plots that share its time axis
+        are: as for the plots the focus hides, the draw-time window is the one a zoom leaves untouched."""
+        begin, end = leader_plot.axes[0].get_limits('original')
+        if self._plot_x_is_time(plot):
+            return self._drawn_with(plot, begin, end)
+        if self._plot_x_expr_yields_time(plot):
+            return self._plot_first_x_near_range(plot, begin, end)
+        return begin is not None and end is not None and self._plot_shares_time_base(plot, (float(begin), float(end)))
+
+    @property
+    def pending_places(self) -> Dict[Tuple[int, int], Tuple[int, int]]:
+        """The places of the canvas whose plots wait for their data (see set_pending_places)."""
+        return dict(self._pending_places_of(self.canvas))
+
+    def show_pending_place(self, column: int, row: int, row_span: int, col_span: int):
+        """Show at a place of the canvas that its plot waits for its data."""
+
+    def hide_pending_place(self, column: int, row: int):
+        """Show no more at a place of the canvas that its plot waits for its data."""
+
+    def show_pending_progress(self, column: int, row: int, done: int, total: int):
+        """Show at a place of the canvas whose plot waits for its data how many of them are read."""
+
+    def _pending_places_of(self, canvas: Optional[Canvas]) -> Dict[Tuple[int, int], Tuple[int, int]]:
+        pending = self._pending_canvas() if self._pending_canvas is not None else None
+        if canvas is None or pending is not canvas:
+            return {}
+        return self._pending_places
+
+    def _place_of(self, plot: Plot) -> Optional[Tuple[int, int]]:
+        """(column, row) of `plot` in the canvas, as in canvas.plots."""
+        for i, column in enumerate(getattr(self.canvas, 'plots', None) or []):
+            for j, candidate in enumerate(column):
+                if candidate is plot:
+                    return i, j
+        return None
 
     def _find_canvas_signal_by_alias(self, alias: str):
         """Signal registered in the canvas under the given alias, if any."""
@@ -1046,15 +1449,29 @@ class BackendParserBase(ABC):
             if base_ts is not None and plot_ts is not None:
                 if plot_ts == base_ts:
                     shared.append(plot_item)
-            else:
-                begin, end = plot.axes[0].get_limits('original')
-                is_date = plot.axes[0].is_date
-                max_diff = self._pm.get_value(self.canvas, 'max_diff')
-                max_diff_ns = max_diff * 1e9 if is_date else max_diff
-                if abs(begin - base_begin) <= max_diff_ns and abs(end - base_end) <= max_diff_ns:
-                    shared.append(plot_item)
+            elif self._drawn_near(plot, base_begin, base_end):
+                shared.append(plot_item)
 
         return shared
+
+    def _drawn_near(self, plot: Plot, begin, end) -> bool:
+        """Whether `plot` was drawn over a window within the canvas time-range difference ('max_diff') of (begin, end),
+        the tolerance time plots whose signals do not tell the range they asked for are grouped with."""
+        drawn_begin, drawn_end = plot.axes[0].get_limits('original')
+        max_diff = self._pm.get_value(self.canvas, 'max_diff')
+        max_diff = max_diff * 1e9 if plot.axes[0].is_date else max_diff
+        return abs(drawn_begin - begin) <= max_diff and abs(drawn_end - end) <= max_diff
+
+    def _drawn_with(self, plot: Plot, begin, end) -> bool:
+        """Whether `plot` shares the time axis of a plot drawn over the window (begin, end), as _impl_plots_sharing_x
+        groups them, judged on the windows they were drawn over, which a zoom leaves untouched: the same window or,
+        for a time plot whose signals do not tell the range they asked for, a window near it. Those of a pulse read
+        to its end are drawn up to their last sample, which differs between data sources."""
+        drawn = plot.axes[0].get_limits('original')
+        if drawn == (begin, end):
+            return True
+        return (self._plot_x_is_time(plot) and self._plot_signal_ts_range(plot) is None
+                and None not in drawn and None not in (begin, end) and self._drawn_near(plot, begin, end))
 
     def _carry_focus_window_to_hidden_plots(self):
         """
@@ -1062,8 +1479,9 @@ class BackendParserBase(ABC):
 
         Focus builds only the focused plot, so a zoom made there leaves the others
         behind. Window and signal ts go to their model, which the rebuild on unfocus
-        draws from. Membership is decided on the draw-time window, the only range a
-        zoom in focus leaves untouched.
+        draws from. Membership is the group the focused plot had when it was focused,
+        or is decided on the draw-time windows, the only ranges a zoom in focus leaves
+        untouched (see _drawn_with).
         """
         if not isinstance(self.canvas, Canvas) or not self._pm.get_value(self.canvas, 'shared_x_axis'):
             return
@@ -1088,13 +1506,30 @@ class BackendParserBase(ABC):
                     continue
                 if not plot.axes or not isinstance(plot.axes[0], RangeAxis):
                     continue
-                if plot.axes[0].get_limits('original') != drawn:
+                # Those whose X is data follow a zoom by being processed again over its window
+                # (see _follow_shared_time_window), which a plot that is not built cannot be.
+                in_group = any(member() is plot for member in self._focus_group) and (
+                    self._plot_x_is_time(plot) or self._plot_x_expr_yields_time(plot))
+                if not (in_group or self._drawn_with(plot, *drawn)):
                     continue
-                logger.debug(f"Carrying focus window [{begin}, {end}] to plot {id(plot)}")
-                plot.axes[0].set_limits(begin, end, 'current')
+                own = plot.axes[0].get_limits('original')
+                if own == drawn or (begin, end) != drawn:
+                    window, ts = (begin, end), ts_window
+                elif plot.axes[0].get_limits('current') != own:
+                    # The focused plot is back where it was drawn: the plots of the group drawn over windows of their
+                    # own go back to them, as Home takes them.
+                    window = ts = own
+                else:
+                    continue
+                logger.debug(f"Carrying focus window [{window[0]}, {window[1]}] to plot {id(plot)}")
+                plot.axes[0].set_limits(*window, 'current')
                 for stack in plot.signals.values():
                     for signal in stack:
-                        signal.set_limits(ts_window)
+                        signal.set_limits(ts)
+
+    def refresh_rulers(self, impl_plot: Any = None):
+        """Update the rulers of the plot (of every plot if None) to its view and data. Backends
+        with ruler support override this."""
 
     def _ruler_signal_values(self, impl_plot: Any, x: float) -> Dict[str, float]:
         """Value of each signal at the ruler X keyed by its label. Backends with
@@ -1477,7 +1912,15 @@ class BackendParserBase(ABC):
             self.set_impl_x_axis_label_text(impl_plot, x_text)
 
     @staticmethod
-    def _get_visible_data(xd, yd, lo, hi):
+    def _get_visible_data(xd, yd, lo, hi, beyond=False):
+        if len(xd) > 1 and np.all(xd[1:] >= xd[:-1]):
+            # In the order of X, those in the view are a slice of them: the Y of the signal is not copied. The X is,
+            # as it is made for each drawing when offset, and a slice of it would keep all of it.
+            first, last = np.searchsorted(xd, lo, 'left'), np.searchsorted(xd, hi, 'right')
+            if beyond:
+                # Also the sample before and the one after, so that a line between them crosses the view.
+                first, last = max(first - 1, 0), last + 1
+            return xd[first:last].copy(), yd[first:last]
         mask = (xd >= lo) & (xd <= hi)
         x_displayed = xd[mask]
         y_displayed = yd[mask]
@@ -1553,13 +1996,21 @@ class BackendParserBase(ABC):
         # Processed signals already use the visible range.
         # Skip this step in case of streaming mode, as x_data and y_data may be empty and lead to errors.
 
-        if not signal.extremities and not self.canvas.streaming:
+        in_view = not signal.extremities and not self.canvas.streaming
+        if in_view:
             x_limits = self.get_impl_x_axis_limits(impl_plot)
-            x_data, y_data = self._get_visible_data(x_data, y_data, *x_limits)
+            # While the data of a new range are read, those of the old one, coarser, must still cross the view.
+            x_data, y_data = self._get_visible_data(x_data, y_data, *x_limits, beyond=self._previewing)
 
         # Flatten single-column 2D y_data so it routes through the 1D path
         if y_data.ndim == 2 and y_data.shape[1] == 1:
             y_data = y_data.ravel()
+
+        # Only the samples in the view are reduced: streaming reduces its own (see set_line_data). The lines keep
+        # those they stand for (see line_samples).
+        x_drawn, y_drawn = x_data, y_data
+        if in_view and not self._draws_every_sample(plot, signal):
+            x_drawn, y_drawn = bucket_reduce_lines(x_data, y_data, _LINE_BUCKETS)
 
         if plot_lines is not None:
             # Reflect downsampling in legend
@@ -1570,7 +2021,7 @@ class BackendParserBase(ABC):
                 if self.canvas.streaming and len(x_data) > 0:
                     plot_lines = self.update_plot_line_streaming(signal, impl_plot, plot_lines, x_data, y_data, style)
                 else:
-                    self.set_line_data(plot_lines[0], x_data, y_data)
+                    self.set_line_data(plot_lines[0], x_drawn, y_drawn)
                     self._update_marker_by_point_count(plot_lines[0], x_data, style)
                     self._update_vertical_lines(signal, impl_plot, x_data, y_data)
             elif x_data.ndim == 1 and y_data.ndim == 2:
@@ -1578,7 +2029,7 @@ class BackendParserBase(ABC):
                     if y_data.shape == (0, 0):  # Case: no data for 2 dim y_data
                         self.set_line_data(line, x_data, y_data)
                     else:
-                        self.set_line_data(line, x_data, y_data[:, i])
+                        self.set_line_data(line, x_drawn, y_drawn[:, i])
                     self._update_marker_by_point_count(line, x_data, style)
 
             if self.canvas.streaming:
@@ -1588,15 +2039,26 @@ class BackendParserBase(ABC):
 
         else:
             if x_data.ndim == 1 and y_data.ndim == 1:
-                plot_lines = self.create_plot_lines_1D(draw_fn, x_data, y_data, style)
+                plot_lines = self.create_plot_lines_1D(draw_fn, x_drawn, y_drawn, style)
                 self._update_marker_by_point_count(plot_lines[0], x_data, style)
                 self._update_vertical_lines(signal, impl_plot, x_data, y_data)
             elif x_data.ndim == 1 and y_data.ndim == 2:
-                plot_lines = self.create_plot_lines_2D(draw_fn, signal, x_data, y_data, style)
+                plot_lines = self.create_plot_lines_2D(draw_fn, signal, x_drawn, y_drawn, style)
+
+        reduced = x_drawn is not x_data
+        for i, line in enumerate(plot_lines or []):
+            line._ipl_samples = (x_data, y_data if y_data.ndim == 1 else y_data[:, i]) if reduced else None
 
         signal.lines = plot_lines
 
         return plot_lines
+
+    def _draws_every_sample(self, plot: PlotXY, signal: SignalXY) -> bool:
+        """Whether the line of a signal draws all its samples in the view: with a marker on each, in steps, or on a
+        log scale, where the lowest sample of a bucket, if not positive, would hide the others."""
+        return (self._pm.get_value(signal, 'marker') not in (None, '', 'None')
+                or (self._pm.get_value(signal, 'step') or 'linear') not in ('linear', 'default')
+                or bool(self._pm.get_value(plot, 'log_scale')))
 
     @abstractmethod
     def visible_status(self, plot_lines, signal):
@@ -2132,6 +2594,15 @@ class BackendParserBase(ABC):
         """
         if self._focus_plot is not None:
             self._carry_focus_window_to_hidden_plots()
+        if impl_plot is None:
+            self._focus_group = []
+        elif self._focus_plot is None:
+            # Once focused, the others are not built, nor do the ranges a zoom gives the signals of the focused plot
+            # tell which of them shared its time axis.
+            item = self._impl_plot_cache_table.get_cache_item(impl_plot)
+            shared = self._get_all_shared_axes(impl_plot) if item is not None and item.plot() is not None else []
+            plots = (self._impl_plot_cache_table.get_cache_item(other).plot() for other in shared)
+            self._focus_group = [weakref.ref(plot) for plot in plots if plot is not None]
 
     def undo(self):
         """
@@ -2157,9 +2628,11 @@ class BackendParserBase(ABC):
         """
         shared = []
         base_begin, base_end = plot_with_slider.axes[0].get_limits('original')
-        for col in self.canvas.plots:
-            for plot in col:
-                if not (isinstance(plot, PlotXYWithSlider) or isinstance(plot,
+        # Those still waiting for their data take the value of the others once drawn (see draw_plot).
+        pending = self._pending_places_of(self.canvas)
+        for i, col in enumerate(self.canvas.plots):
+            for j, plot in enumerate(col):
+                if (i, j) in pending or not (isinstance(plot, PlotXYWithSlider) or isinstance(plot,
                                                                          PlotContourWithSlider)) or plot == plot_with_slider:
                     continue
 
@@ -2359,6 +2832,10 @@ class BackendParserBase(ABC):
         if isinstance(plot, PlotXYWithSlider) or isinstance(plot, PlotContourWithSlider):
             plot_lims.sliders_ranges.append(IplSliderLimits(plot.slider_last_min, plot.slider_last_max))
 
+        # A Y range shown fitted to the data drawn while those of the view are read: restoring it fits it again (see
+        # set_plot_limits).
+        plot_lims.refit_y = (plot_lims.axes_ranges[1].get_limits() == (y_oaw_begin, y_oaw_end)
+                             and self._fit_due(impl_plot))
         return plot_lims
 
     def set_plot_limits(self, limits: IplPlotViewLimits):
@@ -2370,13 +2847,7 @@ class BackendParserBase(ABC):
         plot = limits.plot_ref()
         ax_limits = limits.axes_ranges
         signal_limits = limits.signals_ranges
-        impl_plot = None
-
-        # Resolve the implementation plot from the recorded signals.
-        for signal_limit in signal_limits:
-            signal = signal_limit.signal_ref()
-            if impl_plot is None:
-                impl_plot = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))
+        impl_plot = self._impl_plot_of(limits)
 
         # Set X limits first. Setting the implementation limits fires the shared-x
         # propagation callback while every plot still holds its pre-restore ts
@@ -2425,11 +2896,23 @@ class BackendParserBase(ABC):
             for signal_ref in self._impl_plot_cache_table.get_cache_item(impl_plot).signals:
                 signal = signal_ref()
                 if signal is not None:
-                    self.process_ipl_signal(signal)
+                    self._process_view_change(self.signal_lut_key(signal), impl_plot,
+                                              partial(self.process_ipl_signal, signal))
+
+        if has_impl and limits.refit_y:
+            self._refit_y(impl_plot, limits)
 
         # Restore slider-specific limits, if the plot has one
         if isinstance(plot, PlotXYWithSlider) and self._pm.get_value(self.canvas, 'shared_x_axis'):
             self.set_impl_plot_slider_limits(plot, *limits.sliders_ranges[0].get_limits())
+
+    def _impl_plot_of(self, limits: IplPlotViewLimits) -> Any:
+        """The implementation plot of recorded limits, found from their signals; None for a plot the focus hides."""
+        for signal_limit in limits.signals_ranges:
+            impl_plot = self._signal_impl_plot_lut.get(self.signal_lut_key(signal_limit.signal_ref()))
+            if impl_plot is not None:
+                return impl_plot
+        return None
 
     def _set_model_plot_limits(self, plot, ax_limits, signal_limits):
         """
