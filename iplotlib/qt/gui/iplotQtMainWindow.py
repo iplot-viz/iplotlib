@@ -185,6 +185,11 @@ class IplotQtMainWindow(QMainWindow):
         QApplication.restoreOverrideCursor()
         self.check_history(w)
 
+    def drop_view_reads(self):
+        w = self.canvasStack.currentWidget()
+        if w:
+            w.drop_view_reads()
+
     def check_history(self, w: IplotQtCanvas):
         """
         Check the current state of history and set the style and text of undo, redo buttons.
