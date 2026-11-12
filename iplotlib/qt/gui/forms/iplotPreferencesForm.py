@@ -207,6 +207,12 @@ class IplotPreferencesForm(QWidget):
             {"Solid": "Solid", "Dotted": "Dotted", "Dashed": "Dashed", "None": "None"})
 
     @staticmethod
+    def default_vertical_lines_widget():
+        # The line styles, None first: a value not set shows as the first one, and draws no vertical lines.
+        return IplotPreferencesForm.create_combo_box(
+            {"None": "None", "Solid": "Solid", "Dotted": "Dotted", "Dashed": "Dashed"})
+
+    @staticmethod
     def default_marker_widget():
         return IplotPreferencesForm.create_combo_box({"None": "None", "o": "o", "x": "x"})
 

@@ -2,7 +2,8 @@
 #   Jan 2023:   -Added support for legend position and layout [Alberto Luengo]
 from datetime import datetime
 from functools import partial
-from typing import Any, Callable, Collection, Dict, List, Optional
+from typing import Any, Callable, Collection, Dict, List, Optional, Tuple
+import weakref
 import pandas
 import gc
 import numpy as np
@@ -11,12 +12,13 @@ import matplotlib.style as mplstyle
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis, XAxis
 from matplotlib.axis import Axis as MPLAxis
+from matplotlib.colors import to_rgb
 from matplotlib.patches import Patch
 from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpecFromSubplotSpec, SubplotSpec
 from matplotlib.lines import Line2D
-from matplotlib.offsetbox import AnnotationBbox, OffsetImage
+from matplotlib.offsetbox import AnnotationBbox, OffsetBox, OffsetImage, VPacker
 from matplotlib.transforms import offset_copy
 from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
@@ -25,6 +27,7 @@ from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
 from iplotlib.core.decimation import minmax_decimate
+from iplotlib.core.impl_base import PENDING_PLACE_TEXT, PENDING_PROGRESS_TEXT
 from iplotlib.core import (Axis,
                            Canvas,
                            BackendParserBase,
@@ -37,12 +40,18 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
+from iplotlib.core.ruler import contrast_text_color
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter, \
     NiceNanosecondLocator, RelativeTimeLocator, LinearTickLocator, is_time_label
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor, get_values_from_line
 from iplotlib.impl.matplotlib.iplotMplRuler import iplotMplRuler
 
 logger = setupLogger.get_logger(__name__)
+
+try:
+    from matplotlib.layout_engine import TightLayoutEngine
+except ImportError:  # matplotlib before 3.6, whose figures have no layout engine
+    TightLayoutEngine = None
 
 STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre": "steps-pre",
             "default": None, "steps-mid": "mid", "steps-post": "post", "steps-pre": "pre"}
@@ -51,10 +60,73 @@ STEP_MAP = {"linear": "default", "mid": "steps-mid", "post": "steps-post", "pre"
 # Performance defaults for dense line plots (path.simplify, simplify_threshold, chunksize).
 mplstyle.use('fast')
 
+#: The colours of a dark theme (see theme_colors) that matplotlib draws with what it draws in black and white
+#: in a light one, by rcParam.
+_THEME_RC = {'figure.facecolor': 'background', 'axes.facecolor': 'background', 'axes.edgecolor': 'text',
+             'axes.labelcolor': 'text', 'text.color': 'text', 'xtick.color': 'text', 'ytick.color': 'text',
+             'grid.color': 'grid', 'legend.edgecolor': 'grid'}
+#: Those rcParams as they are in a light theme.
+_LIGHT_RC = {}
+
+
+def apply_theme_rc(theme: Optional[dict]):
+    """Draw what matplotlib draws in black and white in the colours of a dark `theme`, or as before without one."""
+    if not _LIGHT_RC:
+        _LIGHT_RC.update({key: mpl.rcParams[key] for key in _THEME_RC})
+    mpl.rcParams.update(_LIGHT_RC if theme is None else {key: theme[color] for key, color in _THEME_RC.items()})
+
+
+def marker_label_props(color) -> dict:
+    """The look of the label of a marker of `color`: its name readable on its colour, in a frame of the text colour."""
+    r, g, b = (int(round(v * 255)) for v in to_rgb(color))
+    return dict(color=contrast_text_color((r, g, b)),
+                bbox=dict(boxstyle="round,pad=0.3", edgecolor=mpl.rcParams['text.color'], facecolor=color))
+
 # Above this point count, streamed lines are rendered via per-bucket min/max
 # decimation so the visible line preserves extremes at viewport resolution.
 _STREAM_DECIMATE_THRESHOLD = 4000
 _STREAM_DECIMATE_TARGET_PAIRS = 2000
+
+
+class _MeasuredEntry(OffsetBox):
+    """An entry of a legend, measured once: the packers lay it out by its size alone."""
+
+    def __init__(self, entry: OffsetBox, renderer):
+        super().__init__()
+        self._bbox = entry.get_bbox(renderer)
+        self.set_visible(entry.get_visible())
+
+    def get_bbox(self, renderer):
+        return self._bbox
+
+
+if TightLayoutEngine is not None:
+    class _TightLayout(TightLayoutEngine):
+        """The layout of set_tight_layout(), followed by what has to follow the margins it sets before the figure is
+        drawn (see MatplotlibParser._lay_out_legends_for_drawing)."""
+
+        def __init__(self, laid_out: Callable[[], bool], **kwargs):
+            super().__init__(**kwargs)
+            # Weak, as the parser holds the figure, which holds its layout engine.
+            self._laid_out = weakref.WeakMethod(laid_out)
+
+        def execute(self, fig):
+            laid_out = self._laid_out()
+            try:
+                super().execute(fig)
+            finally:
+                # Also when the margins cannot be fitted, as the legends were laid out after any drawing.
+                if laid_out is not None:
+                    # A legend that moved asked for the figure to be drawn again, which fitted the margins once more
+                    # before the legends followed them: so it is done here, still before anything is drawn.
+                    for _ in range(3):
+                        if not laid_out():
+                            break
+                        super().execute(fig)
+                    else:
+                        laid_out()
+else:
+    _TightLayout = None
 
 
 class _LegendEye(AnnotationBbox):
@@ -76,7 +148,8 @@ class _LegendEye(AnnotationBbox):
                          box_alignment=(1, 1), fontsize=fontsize, annotation_clip=False,
                          bboxprops=dict(boxstyle=f'round,pad={self.PAD},rounding_size=0.2'))
         # The look of the legend frame.
-        self.patch.set(facecolor='white', edgecolor='0.8', alpha=0.8)
+        self.patch.set(facecolor=mpl.rcParams['axes.facecolor'], edgecolor=mpl.rcParams['legend.edgecolor'],
+                       alpha=0.8)
         self.set_in_layout(False)
 
     def draw(self, renderer):
@@ -95,6 +168,8 @@ class MatplotlibParser(BackendParserBase):
         """
         # Initialize before super().__init__() because it calls clear() via process_ipl_canvas
         self._tight_layout_requested = tight_layout
+        # Whether the margins fitted for the first plot drawn as their data arrive are kept (see hold_layout).
+        self._layout_held = False
         self.map_legend_to_ax = {}
         self._legend_signal_lut = {}  # legend_line -> Signal
         self._legend_full_text = {}  # legend name -> its text before a cut to the legend width
@@ -108,6 +183,7 @@ class MatplotlibParser(BackendParserBase):
         # interactive canvas sets it, an image export draws no buttons.
         self.legend_eye_images = None
         self._legend_eyes = {}  # MPLAxes -> the eye button of its legend
+        self._pending_texts = {}  # (column, row) -> what the place shows while its plot waits for its data
         self.legend_size = 8
         self._cursors = []
         self._rulers = []  # type: List[iplotMplRuler]
@@ -271,7 +347,7 @@ class MatplotlibParser(BackendParserBase):
         if mpl_axes not in self._grid_spacing_annotations:
             ann = mpl_axes.annotate(" ", xy=(1, 0), xycoords='axes fraction',
                                     ha='right', va='bottom', fontsize=fs,
-                                    color='black', alpha=0.8,
+                                    color=mpl.rcParams['text.color'], alpha=0.8,
                                     xytext=(-5, 5), textcoords='offset points')
             self._grid_spacing_annotations[mpl_axes] = ann
             # Connect to axis limit changes and draw event for dynamic updates
@@ -366,24 +442,29 @@ class MatplotlibParser(BackendParserBase):
         case = leg_ver if plot_leg_layout == 'vertical' else leg_hor
         start, stop = case
         step = 1 if start < stop else -1
-        leg = None
-        for col in range(start, stop + step, step):
-            leg = mpl_axes.legend(handles=handles, prop=legend_props, ncol=col, **placement)
+        columns = list(range(start, stop + step, step))
+
+        def build(ncol):
+            built = mpl_axes.legend(handles=handles, prop=legend_props, ncol=ncol, **placement)
             if self.figure.get_tight_layout():
-                leg.set_in_layout(False)
-            # Check if the legend's edges are outside the axes' bounds in the figure
-            legend_bbox = leg.get_window_extent()
-            axes_bbox = mpl_axes.get_window_extent()
-            legend_bbox = legend_bbox.transformed(self.figure.transFigure.inverted())
-            axes_bbox = axes_bbox.transformed(self.figure.transFigure.inverted())
-            legend_outside = (
-                    legend_bbox.xmin < axes_bbox.xmin or
-                    legend_bbox.xmax > axes_bbox.xmax or
-                    legend_bbox.ymin < axes_bbox.ymin or
-                    legend_bbox.ymax > axes_bbox.ymax
-            )
-            if not legend_outside:
-                break
+                built.set_in_layout(False)
+            return built
+
+        col = columns[0]
+        leg = build(col)
+        if len(columns) > 1 and not self._legend_inside(mpl_axes, leg):
+            # Building a legend of many entries takes long: the other numbers of columns are tried on this one.
+            tried = self._columns_that_fit(mpl_axes, leg, columns[1:])
+            if tried is not None:
+                col, fits = tried
+                leg = build(col)
+                if self._legend_inside(mpl_axes, leg) != fits:
+                    tried = None
+            if tried is None:
+                for col in columns[1:]:
+                    leg = build(col)
+                    if self._legend_inside(mpl_axes, leg):
+                        break
 
         # Check the text of the legend lines in case there is a '$' to be escaped
         for line in leg.texts:
@@ -408,6 +489,60 @@ class MatplotlibParser(BackendParserBase):
         self._fit_legend_width(mpl_axes, plot, leg, col)
         self._add_legend_eye(mpl_axes, leg, fs)
         self._keep_legend_clear_of_eye(mpl_axes)
+
+    def _legend_inside(self, mpl_axes: MPLAxes, leg) -> bool:
+        """Whether the edges of `leg` are within the bounds of its axes in the figure."""
+        legend_bbox = leg.get_window_extent()
+        axes_bbox = mpl_axes.get_window_extent()
+        legend_bbox = legend_bbox.transformed(self.figure.transFigure.inverted())
+        axes_bbox = axes_bbox.transformed(self.figure.transFigure.inverted())
+        return not (legend_bbox.xmin < axes_bbox.xmin or legend_bbox.xmax > axes_bbox.xmax or
+                    legend_bbox.ymin < axes_bbox.ymin or legend_bbox.ymax > axes_bbox.ymax)
+
+    def _columns_that_fit(self, mpl_axes: MPLAxes, leg, columns: list) -> Optional[Tuple[int, bool]]:
+        """(The first of `columns` with which the entries of `leg` lie within its axes, True), or else (the last,
+        False). The entries, measured once, are laid out in each number of columns by the packers of matplotlib as a
+        legend lays them out, the first columns one entry longer, instead of building the legend for each. None when
+        `leg` is not laid out that way, and only building the legend tells."""
+        box = getattr(leg, '_legend_handle_box', None)
+        get_renderer = getattr(self.figure.canvas, 'get_renderer', None)
+        if box is None or get_renderer is None:
+            return None
+        laid_out = box.get_children()
+        if laid_out is not box.get_children() or not laid_out or \
+                not all(isinstance(column, VPacker) for column in laid_out):
+            return None
+        shown = list(laid_out)
+        shape = shown[0]
+        try:
+            renderer = get_renderer()
+            entries = [_MeasuredEntry(entry, renderer) for column in shown for entry in column.get_children()]
+
+            def lay_out(ncol):
+                rows, longer = divmod(len(entries), ncol)
+                laid_out[:] = []
+                begin = 0
+                for index in range(ncol):
+                    end = begin + rows + (1 if index < longer else 0)
+                    if end > begin:
+                        laid_out.append(VPacker(pad=shape.pad, sep=shape.sep, align=shape.align,
+                                                children=entries[begin:end]))
+                    begin = end
+
+            built = leg.get_window_extent()
+            lay_out(len(shown))
+            if not np.allclose(leg.get_window_extent().bounds, built.bounds):
+                return None
+            for ncol in columns:
+                lay_out(ncol)
+                if self._legend_inside(mpl_axes, leg):
+                    return ncol, True
+            return columns[-1], False
+        except Exception:
+            logger.debug("Cannot try the numbers of columns of a legend on its entries", exc_info=True)
+            return None
+        finally:
+            laid_out[:] = shown
 
     def _add_legend_eye(self, mpl_axes: MPLAxes, leg, fs):
         """The eye button of the legend, which folds it away and unfolds it."""
@@ -515,6 +650,21 @@ class MatplotlibParser(BackendParserBase):
             self._legend_fit_canvas.mpl_connect('draw_event', self._refit_legends)
 
     def _refit_legends(self, _event):
+        if _TightLayout is not None and isinstance(self.figure.get_layout_engine(), _TightLayout) \
+                and not self.figure.canvas.is_saving():
+            return  # The layout laid them out before this drawing.
+        if self._lay_out_legends():
+            self.figure.canvas.draw_idle()
+
+    def _lay_out_legends_for_drawing(self) -> bool:
+        """Lay the legends out for the margins that the layout has just set, before the figure is drawn: laid out
+        after the drawing, a legend that moves asks for the whole figure to be drawn again. True when one moved. A
+        picture being saved is left as before."""
+        return not self.figure.canvas.is_saving() and self._lay_out_legends()
+
+    def _lay_out_legends(self) -> bool:
+        """Fit the legends to their axes as they are laid out: their names to the width set for them, and clear of
+        their eye buttons. True when one changed."""
         changed = False
         for mpl_axes, (plot, ncol) in list(self._legends_to_fit.items()):
             leg = mpl_axes.get_legend()
@@ -527,8 +677,7 @@ class MatplotlibParser(BackendParserBase):
         for mpl_axes in list(self._legend_eyes):
             if mpl_axes.figure is self.figure:
                 changed = self._keep_legend_clear_of_eye(mpl_axes) or changed
-        if changed:
-            self.figure.canvas.draw_idle()
+        return changed
 
     def _cut_legend_text(self, text, budget: float):
         """Shorten `text` to `budget` pixels, replacing its middle with '…': the start and
@@ -640,6 +789,26 @@ class MatplotlibParser(BackendParserBase):
             marker_line.set_marker(signal_style.get('marker') or "")
             marker_line.set_markersize(signal_style.get('markersize'))
 
+    def create_vertical_lines(self, impl_plot: MPLAxes, signal, x_data, style: str):
+        from matplotlib.collections import LineCollection
+        # From the bottom of the plot to its top, whatever its Y limits, which they leave alone: vlines() widened
+        # them before matplotlib 3.8.
+        lines = LineCollection([[(x, 0), (x, 1)] for x in x_data], transform=impl_plot.get_xaxis_transform(),
+                               colors=self._pm.get_value(signal, 'color'), linestyles=style,
+                               linewidths=self._pm.get_value(signal, 'line_size') or 1)
+        impl_plot.add_collection(lines, autolim=False)
+        return lines
+
+    def move_vertical_lines(self, lines, x_data) -> bool:
+        lines.set_segments([[(x, 0), (x, 1)] for x in x_data])
+        return True
+
+    def remove_vertical_lines(self, lines):
+        lines.remove()
+
+    def set_vertical_lines_visible(self, lines, visible: bool):
+        lines.set_visible(visible)
+
     def visible_status(self, plot_lines, signal):
         self.figure.canvas.draw_idle()
 
@@ -652,13 +821,8 @@ class MatplotlibParser(BackendParserBase):
         """
         Updates the X and Y view ranges of the Axes based on the most recent data received from the Streaming
         """
-        if self.figure.get_tight_layout():
-            # Per-flush tight layout dominates draw cost: fit margins once and freeze them.
-            try:
-                self.figure.tight_layout()
-            except Exception:
-                logger.debug("tight_layout failed; freezing current margins")
-            self.disable_tight_layout()
+        # Per-flush tight layout dominates draw cost.
+        self.freeze_layout()
 
         ax_window = impl_plot.get_xlim()[1] - impl_plot.get_xlim()[0]
 
@@ -961,10 +1125,9 @@ class MatplotlibParser(BackendParserBase):
     def clear(self):
         super().clear()
 
-        # Undo the streaming-time layout freeze on rebuild.
-        if getattr(self, 'figure', None) is not None and self._tight_layout_requested \
-                and not self.figure.get_tight_layout():
-            self.enable_tight_layout()
+        # Undo the layout freeze of streaming, or of plots drawn as their data arrive, on rebuild.
+        if getattr(self, 'figure', None) is not None:
+            self.thaw_layout()
 
         # remove any active multi‑cursors
         for c in self._cursors:
@@ -996,6 +1159,7 @@ class MatplotlibParser(BackendParserBase):
         self._legend_drops.clear()
         self._legend_eyes.clear()
         self._grid_spacing_annotations.clear()
+        self._pending_texts.clear()
         self._impl_plot_ranges_hash.clear()
 
         gc.collect()
@@ -1012,6 +1176,23 @@ class MatplotlibParser(BackendParserBase):
     def set_canvas_gridspec(self, rows: int, cols: int):
         """Set the canvas gridspec to the given rows and columns."""
         self._layout = self.figure.add_gridspec(rows, cols)
+
+    def show_pending_place(self, column: int, row: int, row_span: int, col_span: int):
+        # A text of the figure, not axes: the cursor and the mouse handlers take every axes for a plot.
+        place = self._layout[row: row + row_span, column: column + col_span].get_position(self.figure)
+        self._pending_texts[(column, row)] = self.figure.text(
+            (place.x0 + place.x1) / 2, (place.y0 + place.y1) / 2, PENDING_PLACE_TEXT, ha='center', va='center',
+            color='gray')
+
+    def hide_pending_place(self, column: int, row: int):
+        text = self._pending_texts.pop((column, row), None)
+        if text is not None:
+            text.remove()
+
+    def show_pending_progress(self, column: int, row: int, done: int, total: int):
+        text = self._pending_texts.get((column, row))
+        if text is not None:
+            text.set_text(PENDING_PROGRESS_TEXT.format(done, total))
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
 
@@ -1468,9 +1649,7 @@ class MatplotlibParser(BackendParserBase):
                         impl_plot.annotate(text=marker.name,
                                            xy=(x, y),
                                            xytext=(x, y),
-                                           bbox=dict(boxstyle="round,pad=0.3",
-                                                     edgecolor="black",
-                                                     facecolor=marker.color))
+                                           **marker_label_props(marker.color))
                     else:
                         # Update position if annotation already exists
                         prev_annotation = [child for child in impl_plot.get_children() if isinstance(child,
@@ -1644,10 +1823,40 @@ class MatplotlibParser(BackendParserBase):
             plot.slider.ax.axvspan(new_start, new_end, color='red', alpha=0.3)
 
     def enable_tight_layout(self):
-        self.figure.set_tight_layout("True")
+        if _TightLayout is None:
+            self.figure.set_tight_layout("True")
+        else:
+            self.figure.set_layout_engine(_TightLayout(self._lay_out_legends_for_drawing))
 
     def disable_tight_layout(self):
         self.figure.set_tight_layout("")
+
+    def freeze_layout(self):
+        """Fit the margins of the plots to their labels once, and keep them from then on: fitting them on every
+        drawing takes about as long as drawing the axes."""
+        if self.figure.get_tight_layout():
+            try:
+                self.figure.tight_layout()
+            except Exception:
+                logger.debug("tight_layout failed; freezing current margins")
+            self.disable_tight_layout()
+            # Laid out for the margins now set before the figure is drawn (see _lay_out_legends_for_drawing).
+            self._lay_out_legends()
+
+    def thaw_layout(self):
+        """Fit the margins on every drawing again, if the canvas asks for it (see freeze_layout)."""
+        self._layout_held = False
+        if self._tight_layout_requested and not self.figure.get_tight_layout():
+            self.enable_tight_layout()
+
+    def hold_layout(self):
+        """Keep, as plots are drawn one by one, the margins fitted for the first: the label of each new plot asks to
+        fit them again (see set_impl_y_axis_label_text), which takes longer with each plot."""
+        if self._layout_held:
+            self.disable_tight_layout()
+        else:
+            self.freeze_layout()
+            self._layout_held = True
 
     def set_focus_plot(self, mpl_axes):
         if isinstance(mpl_axes, MPLAxes):

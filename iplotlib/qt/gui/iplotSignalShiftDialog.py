@@ -68,10 +68,16 @@ class SignalShiftDialog(QDialog):
         values_layout = QFormLayout()
 
         self._dx_spin = QDoubleSpinBox()
-        self._dx_spin.setRange(-1e12, 1e12)
-        self._dx_spin.setDecimals(6)
-        self._dx_spin.setValue(float(self._dx_raw) if not self._dx_is_datetime else 0.0)
-        self._dx_spin.setEnabled(not self._dx_is_datetime)
+        if self._dx_is_datetime:
+            # In seconds to the nanosecond, the unit of the times along the axis.
+            self._dx_spin.setRange(-1e9, 1e9)
+            self._dx_spin.setDecimals(9)
+            self._dx_spin.setSuffix(' s')
+            self._dx_spin.setValue(float(self._dx_raw) / 1e9)
+        else:
+            self._dx_spin.setRange(-1e12, 1e12)
+            self._dx_spin.setDecimals(6)
+            self._dx_spin.setValue(float(self._dx_raw))
 
         self._dy_spin = QDoubleSpinBox()
         self._dy_spin.setRange(-1e12, 1e12)
@@ -80,11 +86,6 @@ class SignalShiftDialog(QDialog):
 
         values_layout.addRow("Shift X:", self._dx_spin)
         values_layout.addRow("Shift Y:", self._dy_spin)
-
-        if self._dx_is_datetime:
-            note = QLabel("Note: X shift disabled for datetime axis")
-            note.setStyleSheet("color: gray; font-style: italic;")
-            values_layout.addRow(note)
 
         shift_layout.addLayout(values_layout)
         layout.addWidget(shift_group)
@@ -134,6 +135,9 @@ class SignalShiftDialog(QDialog):
                 pulse_nb = pulse_nb[0] if pulse_nb else ''
             pulse_nb = str(pulse_nb) if pulse_nb else ''
             dx = self._dx_spin.value()
+            if self._dx_is_datetime:
+                # The shift of times in whole nanoseconds.
+                dx = float(round(dx * 1e9))
             dy = self._dy_spin.value()
             duplicate = self._duplicate_checkbox.isChecked()
             self.shiftRequested.emit(signal_uid, signal_name, data_source, pulse_nb, dx, dy, duplicate)

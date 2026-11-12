@@ -10,6 +10,7 @@ import iplotLogging.setupLogger as Sl
 from pyqtgraph import PlotItem
 
 from iplotlib.core import PlotXYWithSlider, PlotContourWithSlider
+from iplotlib.core.impl_base import line_samples
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter as MPLDateFormatter
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter as PGDateFormatter
 from iplotlib.impl.matplotlib.dateFormatter import _fmt_duration
@@ -41,6 +42,9 @@ def _line_source_data(line):
     """Source arrays of a backend line, in data units. pyqtgraph's
     ``getData()`` returns log10-mapped display data in log mode, so statistics
     must read the original dataset instead."""
+    samples = line_samples(line)
+    if samples is not None:
+        return samples
     getter = getattr(line, 'getOriginalDataset', None)  # pyqtgraph PlotDataItem
     if getter is not None:
         x_data, y_data = getter()

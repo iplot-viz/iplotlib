@@ -20,6 +20,7 @@ from pyqtgraph import TextItem
 
 from iplotLogging import setupLogger
 from iplotlib.core.decimation import minmax_decimate
+from iplotlib.core.impl_base import PENDING_PLACE_TEXT, PENDING_PROGRESS_TEXT, line_samples
 from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
@@ -37,6 +38,7 @@ from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
 from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem, NanosecondDateFormatter, is_time_label
 from iplotlib.qt.utils.icon_loader import svg_icon_image
+from iplotlib.qt.utils.palette import theme_colors
 
 logger = setupLogger.get_logger(__name__)
 
@@ -147,6 +149,16 @@ class QtViewBox(pg.ViewBox):
         ev.ignore()
 
 
+def legend_frame() -> tuple:
+    """The fill and the pen of a legend frame: translucent white and black, or in the colours of a dark theme."""
+    theme = theme_colors()
+    if theme is None:
+        return pg.mkBrush(255, 255, 255, 120), pg.mkPen(color='k')
+    fill = pg.mkColor(theme['background'])
+    fill.setAlpha(120)
+    return pg.mkBrush(fill), pg.mkPen(color=theme['text'])
+
+
 class _LegendEye(QtWidgets.QGraphicsRectItem):
     """The eye button that folds the legend of a plot away and unfolds it. It stays in
     the top right corner of the plot, where an upper right legend begins, whether the
@@ -168,8 +180,9 @@ class _LegendEye(QtWidgets.QGraphicsRectItem):
         self._icon = QtWidgets.QGraphicsPixmapItem(self)
         self._icon.setPos(self.PAD, self.PAD)
         # The look of the legend frame.
-        self.setPen(pg.mkPen(color='k'))
-        self.setBrush(pg.mkBrush(255, 255, 255, 120))
+        fill, pen = legend_frame()
+        self.setPen(pen)
+        self.setBrush(fill)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setZValue(1000)  # above the legend and the curves
         self.set_collapsed(False)
@@ -448,6 +461,7 @@ class PyQtGraphParser(BackendParserBase):
         self._rulers = []  # type: List[pyQtRuler]
         self._grid_spacing_labels = {}  # PlotItem -> TextItem
         self._cell_gl = {}
+        self._pending_cells = {}  # (column, row) -> the cell that shows that the place waits for its data
         self._layout_stacks = {}
         self._slider_placeholders = {}
         self._impl_plot_ranges_hash = dict()
@@ -485,6 +499,28 @@ class PyQtGraphParser(BackendParserBase):
             self.figure.addItem(cell_gl, row=layout_row, col=col, rowspan=rowspan, colspan=colspan)
             self._cell_gl[key] = cell_gl
         return cell_gl
+
+    def show_pending_place(self, column: int, row: int, row_span: int, col_span: int):
+        cell_gl = self._ensure_cell_layout(row, column, row_span, col_span)
+        cell_gl.addLabel(PENDING_PLACE_TEXT, row=0, col=0, color='#808080')
+        self._pending_cells[(column, row)] = cell_gl
+
+    def show_pending_progress(self, column: int, row: int, done: int, total: int):
+        cell_gl = self._pending_cells.get((column, row))
+        if cell_gl is not None:
+            cell_gl.getItem(0, 0).setText(PENDING_PROGRESS_TEXT.format(done, total), color='#808080')
+
+    def hide_pending_place(self, column: int, row: int):
+        cell_gl = self._pending_cells.pop((column, row), None)
+        if cell_gl is None:
+            return
+        # The plot lays out its place anew (see _ensure_cell_layout).
+        if self._cell_gl.get((row, column)) is cell_gl:
+            del self._cell_gl[(row, column)]
+        self.figure.removeItem(cell_gl)
+        # The grid drops what it had set for the rows and the columns of an item it removes: an empty place keeps
+        # its share, as it does in a canvas drawn whole.
+        self.set_canvas_gridspec(*self._grid_shape)
 
     def export_image(self, filename: str, **kwargs):
         canvas = kwargs.get('canvas')
@@ -679,6 +715,44 @@ class PyQtGraphParser(BackendParserBase):
         else:
             symbol = signal_style.get('symbol')
             marker_line.setSymbol(symbol or None)
+
+    def create_vertical_lines(self, impl_plot: PlotItem, signal, x_data, style: str):
+        color = self._pm.get_value(signal, 'color') or signal.original_color
+        pen = pg.mkPen(color=color, width=self._pm.get_value(signal, 'line_size') or 1,
+                       style=LINESTYLE_MAP.get(style, QtCore.Qt.PenStyle.SolidLine), cosmetic=True)
+        lines = []
+        for x in x_data:
+            line = pg.InfiniteLine(pos=float(x), angle=90, movable=False, pen=pen)
+            # They are not data: the autoscale leaves them out, as the rulers.
+            impl_plot.getViewBox().addItem(line, ignoreBounds=True)
+            lines.append(line)
+        return lines
+
+    def move_vertical_lines(self, lines, x_data) -> bool:
+        view_box = lines[0].getViewBox() if lines else None
+        if view_box is None:
+            return False
+        # As samples leave the view or come into it: fewer lines, or more like them.
+        while len(lines) > len(x_data):
+            view_box.removeItem(lines.pop())
+        while len(lines) < len(x_data):
+            line = pg.InfiniteLine(angle=90, movable=False, pen=lines[0].pen)
+            line.setVisible(lines[0].isVisible())
+            view_box.addItem(line, ignoreBounds=True)
+            lines.append(line)
+        for line, x in zip(lines, x_data):
+            line.setValue(float(x))
+        return True
+
+    def remove_vertical_lines(self, lines):
+        for line in lines:
+            view_box = line.getViewBox()
+            if view_box is not None:
+                view_box.removeItem(line)
+
+    def set_vertical_lines_visible(self, lines, visible: bool):
+        for line in lines:
+            line.setVisible(visible)
 
     def create_plot_lines_1D(self, draw_fn, x_data, y_data, style):
         # connect='finite' breaks the line at NaN samples (e.g. the archive/live
@@ -1467,8 +1541,9 @@ class PyQtGraphParser(BackendParserBase):
         legend.sigSampleClicked.connect(self._on_legend_sample_clicked)
 
         # Set aspect legend
-        legend.setBrush(pg.mkBrush(255, 255, 255, 120))
-        legend.setPen(pg.mkPen(color='k'))
+        fill, pen = legend_frame()
+        legend.setBrush(fill)
+        legend.setPen(pen)
         legend.setVisible(not self.legend_collapsed(plot))
         if self.legend_eyes:
             font = QFont()
@@ -1755,6 +1830,7 @@ class PyQtGraphParser(BackendParserBase):
         self._rulers.clear()
 
         self._cell_gl = {}
+        self._pending_cells = {}
         self._layout_stacks = {}
         self._slider_placeholders = {}
 
@@ -1906,46 +1982,43 @@ class PyQtGraphParser(BackendParserBase):
         vb = plot.vb
         vb.setMouseEnabled(x=False, y=False)
 
-    def set_view_box(self):
-        if self._cursor_active:
-            self.deactivate_cursor()
-        for stack in self._layout_stacks.values():
-            for plot in stack.values():
-                if not plot:
-                    continue
-                vb = plot.vb
-                vb.setMouseMode(vb.PanMode)
-                self.set_mouse(plot)
+    def _view_box_plots(self, impl_plots: list = None) -> list:
+        """These implementation plots, or else every one drawn."""
+        if impl_plots is not None:
+            return impl_plots
+        return [plot for stack in self._layout_stacks.values() for plot in stack.values() if plot]
 
-    def set_view_box_zoom(self):
+    def set_view_box(self, impl_plots: list = None):
         if self._cursor_active:
             self.deactivate_cursor()
-        for stack in self._layout_stacks.values():
-            for plot in stack.values():
-                if not plot:
-                    continue
-                iplot = self._impl_plot_cache_table.get_cache_item(plot).plot()
-                if isinstance(iplot, (PlotContour, PlotContourWithSlider)):
-                    logger.warning(f"Zoom action is not supported for {type(iplot).__name__}")
-                    continue
-                vb = plot.vb
-                vb.setMouseMode(vb.RectMode)
-                self.set_mouse(plot)
+        for plot in self._view_box_plots(impl_plots):
+            vb = plot.vb
+            vb.setMouseMode(vb.PanMode)
+            self.set_mouse(plot)
 
-    def set_view_box_pan(self):
+    def set_view_box_zoom(self, impl_plots: list = None):
         if self._cursor_active:
             self.deactivate_cursor()
-        for stack in self._layout_stacks.values():
-            for plot in stack.values():
-                if not plot:
-                    continue
-                iplot = self._impl_plot_cache_table.get_cache_item(plot).plot()
-                if isinstance(iplot, (PlotContour, PlotContourWithSlider)):
-                    logger.warning(f"Pan action is not supported for {type(iplot).__name__}")
-                    continue
-                vb = plot.vb
-                vb.setMouseMode(vb.PanMode)
-                vb.setMouseEnabled(x=True, y=True)
+        for plot in self._view_box_plots(impl_plots):
+            iplot = self._impl_plot_cache_table.get_cache_item(plot).plot()
+            if isinstance(iplot, (PlotContour, PlotContourWithSlider)):
+                logger.warning(f"Zoom action is not supported for {type(iplot).__name__}")
+                continue
+            vb = plot.vb
+            vb.setMouseMode(vb.RectMode)
+            self.set_mouse(plot)
+
+    def set_view_box_pan(self, impl_plots: list = None):
+        if self._cursor_active:
+            self.deactivate_cursor()
+        for plot in self._view_box_plots(impl_plots):
+            iplot = self._impl_plot_cache_table.get_cache_item(plot).plot()
+            if isinstance(iplot, (PlotContour, PlotContourWithSlider)):
+                logger.warning(f"Pan action is not supported for {type(iplot).__name__}")
+                continue
+            vb = plot.vb
+            vb.setMouseMode(vb.PanMode)
+            vb.setMouseEnabled(x=True, y=True)
 
     def set_view_box_crosshair(self):
         if self._cursor_active:
@@ -2267,7 +2340,7 @@ class PyQtGraphParser(BackendParserBase):
                 item = line[0] if isinstance(line, list) else line
                 if not isinstance(item, PlotDataItem):
                     continue
-                x_data, y_data = item.getData()
+                x_data, y_data = line_samples(item) or item.getData()
                 if x_data is None or len(x_data) == 0:
                     continue
                 # Nearest sample (searchsorted+clamp, as the value labels do).
