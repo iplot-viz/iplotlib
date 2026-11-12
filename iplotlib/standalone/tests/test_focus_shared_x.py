@@ -10,6 +10,7 @@ import unittest
 
 import numpy as np
 
+from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.impl_base import BackendParserBase
 from iplotlib.core.plot import PlotXY
@@ -21,6 +22,7 @@ BACKENDS = ('matplotlib', 'pyqt')
 TS_START = 1_754_463_600_000_000_000
 TS_END = 1_754_503_200_000_000_000
 SECOND = 1_000_000_000
+PULSE_ENDS = (3.5, 12.0)
 
 
 class FocusSharedXTest(unittest.TestCase):
@@ -39,6 +41,26 @@ class FocusSharedXTest(unittest.TestCase):
             sig.ts_start = TS_START
             sig.ts_end = TS_END
             sig.set_data([time, np.sin(time * 1e-18 + i)])
+            plot.add_signal(sig)
+            canvas.add_plot(plot, 0)
+        qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+        qt_canvas.set_canvas(canvas)
+        qt_canvas.resize(600, 400)
+        self.app.processEvents()
+        return canvas, qt_canvas
+
+    def _build_pulse(self, backend: str):
+        """Two plots of a pulse read to its end, as MINT draws them when the data of their sources end at different
+        times: the signals ask for no end, and each plot is drawn up to its last sample."""
+        canvas = Canvas(2, 1, title="focus_shared_x_pulse", shared_x_axis=True)
+        for i, last in enumerate(PULSE_ENDS):
+            x_axis = LinearAxis()
+            x_axis.original_begin, x_axis.original_end = x_axis.begin, x_axis.end = 0, last
+            plot = PlotXY(axes=[x_axis, [LinearAxis()]])
+            sig = SignalXY(label=f"s{i}")
+            sig.ts_start, sig.ts_end = 0, None
+            time = np.linspace(0, last, 200)
+            sig.set_data([time, np.sin(time + i)])
             plot.add_signal(sig)
             canvas.add_plot(plot, 0)
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
@@ -233,6 +255,85 @@ class FocusSharedXTest(unittest.TestCase):
                 restored_y = self._y_window(sibling)
                 self.assertAlmostEqual(restored_y[0], drawn_y[0], places=3)
                 self.assertAlmostEqual(restored_y[1], drawn_y[1], places=3)
+
+    def test_zoom_in_focus_moves_the_plots_drawn_over_another_window_on_unfocus(self):
+        """mint#235: a zoom made without focus moves the plot of a pulse drawn up to the last sample of another data
+        source, so one made in focus must too, also once a zoom gave its signals the range of a window."""
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build_pulse(backend)
+                focused, other = canvas.plots[0]
+
+                for zoom_in_focus in ((0.5, 2.0), (1.0, 1.5)):
+                    qt_canvas._full_screen_mode_on(self._impl_of(qt_canvas, focused))
+                    self.app.processEvents()
+                    self._zoom(qt_canvas, focused, zoom_in_focus)
+                    qt_canvas._full_screen_mode_off()
+                    self.app.processEvents()
+
+                    np.testing.assert_allclose(self._x_window(other), zoom_in_focus)
+                    self.assertEqual(self._ts_window(other), self._ts_window(focused))
+
+    def test_the_plots_drawn_over_another_window_leave_it_only_with_the_focused_plot(self):
+        """Leaving the focus with the focused plot where it was drawn leaves the plot drawn over another window
+        where it is: it goes back to that window only if it had left it, as Home takes it."""
+        window = (0.5, 2.0)
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas, qt_canvas = self._build_pulse(backend)
+                focused, other = canvas.plots[0]
+
+                qt_canvas._full_screen_mode_on(self._impl_of(qt_canvas, focused))
+                self.app.processEvents()
+                qt_canvas._full_screen_mode_off()
+                self.app.processEvents()
+                np.testing.assert_allclose(self._x_window(other), (0, PULSE_ENDS[1]))
+                self.assertEqual(self._ts_window(other), (0, None))
+
+                self._zoom(qt_canvas, focused, window)
+                np.testing.assert_allclose(self._x_window(other), window)
+                qt_canvas._full_screen_mode_on(self._impl_of(qt_canvas, focused))
+                self.app.processEvents()
+                qt_canvas.reset_plot_view(self._impl_of(qt_canvas, focused))
+                self.app.processEvents()
+                qt_canvas._full_screen_mode_off()
+                self.app.processEvents()
+
+                np.testing.assert_allclose(self._x_window(focused), (0, PULSE_ENDS[0]))
+                np.testing.assert_allclose(self._x_window(other), (0, PULSE_ENDS[1]))
+
+    def test_a_plot_whose_x_is_data_keeps_its_x_range_on_unfocus(self):
+        """A plot drawing data on X follows a zoom by being processed again over the window, which a plot the focus
+        hid cannot be: leaving the focus must not give its X axis the time window."""
+        zoom_in_focus = (TS_START + 100 * SECOND, TS_START + 200 * SECOND)
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = Canvas(2, 1, title="focus_shared_x_xy", shared_x_axis=True)
+                time = np.linspace(TS_START, TS_END, 200).astype(np.int64)
+                for label, x_expr, data in (("t", "${self}.time", [time, np.sin(time * 1e-18)]),
+                                            ("xy", "${T}.data", [np.linspace(5, 295, 150), np.linspace(0, 50, 150)])):
+                    plot = PlotXY()
+                    sig = SignalXY(label=label, x_expr=x_expr)
+                    sig.processing_enabled = False
+                    sig.ts_start, sig.ts_end = TS_START, TS_END
+                    sig.set_data(data)
+                    plot.add_signal(sig)
+                    canvas.add_plot(plot, 0)
+                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
+                qt_canvas.set_canvas(canvas)
+                qt_canvas.resize(600, 400)
+                self.app.processEvents()
+                focused, xy_plot = canvas.plots[0]
+                drawn = self._x_window(xy_plot)
+
+                qt_canvas._full_screen_mode_on(self._impl_of(qt_canvas, focused))
+                self.app.processEvents()
+                self._zoom(qt_canvas, focused, zoom_in_focus)
+                qt_canvas._full_screen_mode_off()
+                self.app.processEvents()
+
+                self.assertLess(drawn[1], 10_000)
+                self.assertEqual(self._x_window(xy_plot), drawn)
 
     def _zoom_with_history(self, qt_canvas, plot, window):
         """Zoom through the staging/commit/push flow a mouse release goes through."""

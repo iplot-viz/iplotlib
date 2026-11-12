@@ -96,6 +96,33 @@ class SetLimitsTest(unittest.TestCase):
         self.assertEqual(s.ts_end, 1999)
 
 
+class ContainedViewTest(unittest.TestCase):
+    """The samples in memory of a signal that is not decimated serve every view within them, their first and last
+    included: the view they were read for, as an undo back to it restores, reads nothing again."""
+
+    @staticmethod
+    def _read_signal():
+        time = np.arange(1000, 2001, 10, dtype=np.int64)
+        s = SignalXY(label="t")
+        s.set_data([time, np.ones(time.size)])
+        s._needs_refresh()
+        return s
+
+    def test_a_view_within_the_samples_reads_nothing(self):
+        s = self._read_signal()
+        for view in ((1200, 1500), (1000, 1500), (1500, 2000), (1000, 2000)):
+            with self.subTest(view=view):
+                s.set_xranges(view)
+                self.assertFalse(s._needs_refresh())
+
+    def test_a_view_beyond_the_samples_reads_them(self):
+        s = self._read_signal()
+        for view in ((990, 2000), (1000, 2010), (990, 2010)):
+            with self.subTest(view=view):
+                s.set_xranges(view)
+                self.assertTrue(s._needs_refresh())
+
+
 class RebasedTimeLimitsTest(unittest.TestCase):
     """X re-bases time ('${self}.time - T0'): its view maps back to a time
     window through the samples in memory, which must not stop a wider view

@@ -79,6 +79,44 @@ def minmax_decimate(x, y, target_pairs):
     return np.concatenate(out_x), np.concatenate(out_y)
 
 
+def bucket_reduce_lines(x, y, buckets):
+    """Reduce lines of many more samples than ``buckets`` to what draws them at
+    that resolution: of the samples in each of ``buckets`` equal spans of X,
+    the first, the lowest, the highest and the last (the M4 reduction). The
+    extremes take the X of the middle sample of their span, so that the lines
+    of a 2D ``y``, one per column, keep one X; within a span narrower than a
+    pixel neither their X nor their order shows. Lines of fewer than
+    ``8 * buckets`` samples, whose X does not increase or with gaps (NaN) are
+    returned as they are."""
+    n = len(x)
+    if buckets <= 0 or n < 8 * buckets or np.ndim(x) != 1 or len(y) != n:
+        return x, y
+    xs = np.asarray(x)
+    if not (np.isfinite(xs[0]) and np.isfinite(xs[-1]) and xs[-1] > xs[0] and np.all(xs[1:] >= xs[:-1])):
+        return x, y
+    lines = np.asarray(y).reshape(n, -1)
+    # The first sample of each span that has any: the spans without are skipped.
+    starts = np.unique(np.searchsorted(xs, np.linspace(xs[0], xs[-1], buckets + 1)[:-1]))
+    ends = np.append(starts[1:], n)
+    if lines.shape[1] == 1:
+        low = np.minimum.reduceat(lines[:, 0], starts)[:, None]
+        high = np.maximum.reduceat(lines[:, 0], starts)[:, None]
+    else:
+        # Span by span, numpy reduces the rows of each at once: reduceat along
+        # the first axis of a 2D array is over ten times slower.
+        low = np.empty((len(starts), lines.shape[1]), dtype=lines.dtype)
+        high = np.empty_like(low)
+        for i, (start, end) in enumerate(zip(starts, ends)):
+            lines[start:end].min(axis=0, out=low[i])
+            lines[start:end].max(axis=0, out=high[i])
+    if not (np.isfinite(low).all() and np.isfinite(high).all()):
+        return x, y
+    out_y = np.stack((lines[starts], low, high, lines[ends - 1]), axis=1)
+    middle = xs[(starts + ends - 1) // 2]
+    out_x = np.stack((xs[starts], middle, middle, xs[ends - 1]), axis=1).ravel()
+    return out_x, out_y.reshape((len(out_x),) + np.shape(y)[1:])
+
+
 def bucket_reduce_envelope(x, y_min, y_max, y_avg, target_points):
     """Reduce envelope buffers to ``target_points``: per-bucket min of dmin,
     max of dmax and mean of davg, stamped at the bucket's last timestamp. The
