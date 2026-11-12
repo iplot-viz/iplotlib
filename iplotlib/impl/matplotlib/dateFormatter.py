@@ -4,6 +4,7 @@ import re as _re
 
 from matplotlib.ticker import ScalarFormatter, Locator, MaxNLocator
 from matplotlib.axis import XAxis
+from matplotlib.textpath import text_to_path
 import numpy as np
 import pandas
 
@@ -280,6 +281,51 @@ class ExponentScalarFormatter(ScalarFormatter):
         return super().get_offset()
 
 
+#: Room kept between two tick labels of an X axis, in points.
+LABEL_GAP_PT = 3
+#: Upper bound of a date-label character's width, in em: labels that fit by it are not measured.
+MAX_CHAR_EM = 0.9
+# Label widths in points by (label, font): from one draw to the next most labels are the same.
+_widths = {}
+
+
+def _width(label: str, font) -> float:
+    key = (label, hash(font))
+    width = _widths.get(key)
+    if width is None:
+        if len(_widths) > 4096:
+            _widths.clear()
+        width = _widths[key] = text_to_path.get_text_width_height_descent(label, font, ismath=False)[0]
+    return width
+
+
+def thin_overlapping_labels(axis, values, labels):
+    """Blank labels at a regular step until the ones left do not overlap, as pyqtgraph hides them.
+
+    Only the labels go: the ticks stay, since their number is a minimum the preferences promise.
+    """
+    if not isinstance(axis, XAxis) or len(labels) < 3:
+        return labels
+    try:
+        positions = axis.axes.transData.transform(np.column_stack([values, np.zeros(len(values))]))[:, 0]
+        font = axis.get_major_ticks(1)[0].label1.get_fontproperties()
+        points = axis.axes.figure.dpi / 72.0
+    except Exception:  # an axis not laid out yet: nothing to measure against
+        return labels
+    gap = LABEL_GAP_PT * points
+    widest = max(len(label) for label in labels) * MAX_CHAR_EM * font.get_size_in_points() * points
+    if np.min(np.abs(np.diff(positions))) >= widest + gap:
+        return labels
+    widths = [_width(label, font) * points for label in labels]
+    step = 1
+    while step < len(labels) - 1:
+        kept = range(0, len(labels), step)
+        if all(abs(positions[j] - positions[i]) >= (widths[i] + widths[j]) / 2 + gap for i, j in zip(kept, kept[1:])):
+            break
+        step += 1
+    return [label if i % step == 0 else '' for i, label in enumerate(labels)]
+
+
 class NanosecondDateFormatter(ScalarFormatter):
     """Date axis formatter that takes into account ns offset if it is defined on this formatter axis
     Additionally it formats date as common_part + postfix and includes nanosecond precision if data is given as int64"""
@@ -354,6 +400,10 @@ class NanosecondDateFormatter(ScalarFormatter):
         else:
             ts = int(self.offset_ns) + int(x)
         return self.date_fmt(ts, start, end) + _label_unit(start, end)
+
+    def format_ticks(self, values):
+        # A narrow plot (two columns, a panel open beside the canvas) has no room for every date.
+        return thin_overlapping_labels(self.axis, values, super().format_ticks(values))
 
     def format_data_short(self, value):
         # Used by the crosshair / coordinate readout (Axes.format_xdata).
