@@ -365,6 +365,14 @@ class IplotQtCanvas(QWidget):
         about to be drawn anew: the drawing they belonged to is not finished."""
         self._parser.drop_pending_places()
 
+    def cancel_pending_places(self):
+        """Wait no more for the plots of the places set_pending_places() left pending, whose data are read no
+        more: each place says so until the canvas is drawn anew, and the plots drawn are finished as drawn."""
+        waited = bool(self._parser.pending_places)
+        self._parser.cancel_pending_places()
+        if waited:
+            self._place_done()
+
     def _plot_drawn(self, plot):
         """Extend to the plot that draw_plot() just drew what the canvas does for every plot it draws."""
 

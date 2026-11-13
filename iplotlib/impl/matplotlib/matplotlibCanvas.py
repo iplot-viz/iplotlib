@@ -27,7 +27,7 @@ from pandas.plotting import register_matplotlib_converters
 
 from iplotLogging import setupLogger
 from iplotlib.core.decimation import minmax_decimate
-from iplotlib.core.impl_base import PENDING_PLACE_TEXT, PENDING_PROGRESS_TEXT
+from iplotlib.core.impl_base import PENDING_PLACE_TEXT
 from iplotlib.core import (Axis,
                            Canvas,
                            BackendParserBase,
@@ -1189,10 +1189,10 @@ class MatplotlibParser(BackendParserBase):
         if text is not None:
             text.remove()
 
-    def show_pending_progress(self, column: int, row: int, done: int, total: int):
-        text = self._pending_texts.get((column, row))
-        if text is not None:
-            text.set_text(PENDING_PROGRESS_TEXT.format(done, total))
+    def show_pending_text(self, column: int, row: int, text: str):
+        shown = self._pending_texts.get((column, row))
+        if shown is not None:
+            shown.set_text(text)
 
     def set_suptitle(self, title: str, font_size: int = None, font_color: str = 'black'):
 

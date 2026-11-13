@@ -1094,5 +1094,102 @@ class AppDataAccessTests(unittest.TestCase):
         self.assertEqual(data_access.ds_list['uda'].access_cache.maxsize, 150)
 
 
+
+class _CancellableDataAccess(_WorkerDataAccess):
+    """Reads 'held' until cancel() stops the read, as the UDA clients that can cancel do, or the test releases it."""
+    started = threading.Event()
+    released = threading.Event()
+    cancels = []
+
+    def __init__(self):
+        super().__init__()
+        self._stopped = threading.Event()
+
+    def get_data(self, data_s_name, **kwargs):
+        if kwargs['varname'] == 'held':
+            type(self).started.set()
+            while not (self._stopped.is_set() or self.released.is_set()):
+                time.sleep(0.01)
+            if self._stopped.is_set():
+                self._stopped.clear()
+                raise RuntimeError("The read was cancelled")
+        return super().get_data(data_s_name, **kwargs)
+
+    def cancel(self):
+        type(self).cancels.append(threading.get_ident())
+        self._stopped.set()
+        return True
+
+
+class StopReadingTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = ensure_qapp()
+        cls._da = AccessHelper.da
+        AccessHelper.da = _ApplicationDataAccess()
+
+    @classmethod
+    def tearDownClass(cls):
+        AccessHelper.da = cls._da
+
+    def setUp(self):
+        _CancellableDataAccess.started.clear()
+        _CancellableDataAccess.released.clear()
+        _CancellableDataAccess.cancels.clear()
+        self.addCleanup(_CancellableDataAccess.released.set)
+        self.pool = _workers_started(AccessPool(1, data_access_factory=_CancellableDataAccess), 'uda')
+        self.addCleanup(self.pool.shutdown)
+
+    def _reading(self, *varnames):
+        delivered = []
+        pending = self.pool.fetch_later([_params(name) for name in varnames], delivered.append)
+        self.assertTrue(_CancellableDataAccess.started.wait(10))
+        return pending, delivered
+
+    def test_a_cancel_that_stops_reading_stops_the_read_its_worker_started(self):
+        pending, delivered = self._reading('held')
+
+        pending.cancel(stop_reading=True)
+        start = time.monotonic()
+        results = self.pool.fetch([_params('next')])
+
+        self.assertLess(time.monotonic() - start, 5)
+        self.assertNotIsInstance(list(results.values())[0], Exception)
+        self.assertEqual(len(_CancellableDataAccess.cancels), 1)
+        self.app.processEvents()
+        self.assertEqual(delivered, [])
+
+    def test_a_cancel_alone_lets_the_read_end(self):
+        pending, delivered = self._reading('held')
+
+        pending.cancel()
+        _CancellableDataAccess.released.set()
+        self.pool.fetch([_params('next')])
+
+        self.assertEqual(_CancellableDataAccess.cancels, [])
+        self.app.processEvents()
+        self.assertEqual(delivered, [])
+
+    def test_stopping_the_reads_of_a_fetch_leaves_alone_the_read_of_another(self):
+        reading, _ = self._reading('held')
+        waiting = self.pool.fetch_later([_params('next')], lambda results: None)
+
+        waiting.cancel(stop_reading=True)
+
+        self.assertEqual(_CancellableDataAccess.cancels, [])
+        reading.cancel(stop_reading=True)
+        self.assertEqual(len(_CancellableDataAccess.cancels), 1)
+
+    def test_a_data_access_that_cannot_stop_a_read_lets_it_end(self):
+        pool = _workers_started(AccessPool(1, data_access_factory=_worker_data_access), 'uda')
+        self.addCleanup(pool.shutdown)
+        pending = pool.fetch_later([_params('slow')], lambda results: None)
+        time.sleep(0.2)
+
+        pending.cancel(stop_reading=True)
+
+        self.assertEqual(len(pool.fetch([_params('next')])), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

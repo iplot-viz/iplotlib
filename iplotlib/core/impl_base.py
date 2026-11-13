@@ -54,6 +54,8 @@ _LINE_BUCKETS = 4096
 PENDING_PLACE_TEXT = "Retrieving data..."
 #: What it shows once it is told how many of them are read (see BackendParserBase.show_pending_progress).
 PENDING_PROGRESS_TEXT = "Retrieving data ({}/{}) .."
+#: What the place of a plot shows once its data are read no more (see cancel_pending_places).
+PENDING_CANCELLED_TEXT = "Cancelled"
 
 
 def line_samples(line) -> Optional[Tuple[Any, Any]]:
@@ -942,6 +944,14 @@ class BackendParserBase(ABC):
         pending."""
         return self._resolve_pending_place(column, row)
 
+    def cancel_pending_places(self):
+        """Wait no more for the plots of the places left pending, whose data are read no more: each place says so until
+        the canvas is drawn anew."""
+        for column, row in list(self._pending_places_of(self.canvas)):
+            self.show_pending_text(column, row, PENDING_CANCELLED_TEXT)
+        self._pending_places = {}
+        self._pending_canvas = None
+
     def drop_pending_places(self):
         """Wait no more for the plots of the places left pending, as when the canvas is drawn anew instead."""
         for place in list(self._pending_places_of(self.canvas)):
@@ -1012,6 +1022,12 @@ class BackendParserBase(ABC):
 
     def show_pending_progress(self, column: int, row: int, done: int, total: int):
         """Show at a place of the canvas whose plot waits for its data how many of them are read."""
+        # A place that waits no more keeps what it says, as Cancelled.
+        if (column, row) in self._pending_places_of(self.canvas):
+            self.show_pending_text(column, row, PENDING_PROGRESS_TEXT.format(done, total))
+
+    def show_pending_text(self, column: int, row: int, text: str):
+        """Show `text` at a place of the canvas whose plot waits for its data, instead of what it shows."""
 
     def _pending_places_of(self, canvas: Optional[Canvas]) -> Dict[Tuple[int, int], Tuple[int, int]]:
         pending = self._pending_canvas() if self._pending_canvas is not None else None
