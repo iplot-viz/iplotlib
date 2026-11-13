@@ -843,6 +843,143 @@ class AccessPoolTests(unittest.TestCase):
         self.assertIsInstance(error, RuntimeError)
         self.assertIn("could not be set up", str(error))
 
+    def test_a_call_runs_a_function_given_the_data_access_object_of_a_worker(self):
+        made, _ = self._in_thread(lambda: self.pool.call(_report_steps, 'uda', steps=0))
+
+        thread, source, data_access = made
+        self.assertNotIn(thread, (threading.get_ident(), threading.main_thread().ident))
+        self.assertEqual(source, 'uda')
+        self.assertIsInstance(data_access, _WorkerDataAccess)
+
+    def _call_later(self, pool, method, seconds=30, **kwargs):
+        """What on_done is given once the call made in the background ends, the progress reported until then with
+        the thread it was reported in, and the longest time this thread could not run its Qt events meanwhile."""
+        done, reported, ticks = [], [], []
+        timer = QTimer()
+        timer.timeout.connect(lambda: ticks.append(time.perf_counter()))
+        timer.start(10)
+        ticks.append(time.perf_counter())
+        pool.call_later(method, 'uda', lambda result: done.append((result, list(reported))),
+                        progress=lambda *args: reported.append((args, threading.current_thread())), **kwargs)
+        self._arrived(done, seconds)
+        ticks.append(time.perf_counter())
+        timer.stop()
+        self.assertTrue(done, "The call made in the background did not end")
+        result, reported_before = done[0]
+        return result, reported_before, max(b - a for a, b in zip(ticks, ticks[1:]))
+
+    def test_a_call_in_the_background_reports_its_progress_in_this_thread_before_its_result(self):
+        result, reported, stall = self._call_later(self.pool, _report_steps, steps=5, pause=0.2)
+
+        self.assertNotEqual(result[0], threading.get_ident())
+        self.assertEqual(result[1], 'uda')
+        self.assertEqual(reported, [((step, 'uda'), threading.main_thread()) for step in range(5)])
+        # The worker took a second, without the GIL.
+        self.assertLess(stall, 0.5)
+
+    def test_a_call_in_the_background_is_never_delivered_within_the_call_that_asks_for_it(self):
+        done = []
+
+        self.pool.call_later(_report_steps, 'uda', done.append, steps=0)
+        nothing_yet = list(done)
+
+        self.assertEqual(nothing_yet, [])
+        self.assertEqual(self._arrived(done)[0][1], 'uda')
+
+    def test_a_call_in_the_background_that_fails_gives_its_error(self):
+        result, _, _ = self._call_later(self.pool, _fail)
+
+        self.assertIsInstance(result, DataAccessError)
+        self.assertIn("cannot export", str(result))
+
+    def test_a_call_in_the_background_does_not_stop_this_thread_while_its_worker_sets_up(self):
+        pool = self._own_pool(factory=_slow_worker_data_access, started=())
+
+        result, _, stall = self._call_later(pool, _report_steps, steps=1)
+
+        # The worker takes a second to set its data access up.
+        self.assertEqual(result[1], 'uda')
+        self.assertLess(stall, 0.5)
+
+    def test_a_call_in_the_background_cancelled_before_it_starts_is_not_made(self):
+        pool = self._own_pool(started=('uda',), workers=1)
+        done, done_cancelled, reported = [], [], []
+
+        pool.call_later(_report_steps, 'uda', done.append, steps=1, pause=1.0)
+        cancelled = pool.call_later(_report_steps, 'uda', done_cancelled.append,
+                                    progress=lambda *args: reported.append(args), steps=1)
+        cancelled.cancel()
+        pool.call_later(_report_steps, 'uda', done.append, steps=0)
+        deadline = time.monotonic() + 30
+        while len(done) < 2 and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.01)
+        self._arrived([], seconds=0.3)
+
+        self.assertEqual(len(done), 2)
+        self.assertEqual(done_cancelled, [])
+        self.assertEqual(reported, [])
+
+    def test_a_call_in_the_background_cancelled_while_it_runs_reports_nothing_more(self):
+        pool = self._own_pool(started=('uda',), workers=1)
+        done, reported = [], []
+        started = threading.Event()
+
+        pending = pool.call_later(_report_steps, 'uda', done.append, progress=lambda *args: reported.append(args),
+                                  steps=3, pause=0.3, started=started)
+        self.assertTrue(started.wait(30))
+        pending.cancel()
+        # Made after the one cancelled, which runs to its end first.
+        after = []
+        pool.call_later(_report_steps, 'uda', after.append, steps=0)
+        self._arrived(after)
+
+        self.assertEqual(done, [])
+        self.assertEqual(reported, [])
+
+    def test_a_call_in_the_background_that_a_shutdown_leaves_unmade_or_unfinished_ends_too(self):
+        pool = _workers_started(AccessPool(1, data_access_factory=_worker_data_access), 'uda')
+        running, waiting = [], []
+
+        pool.call_later(_report_steps, 'uda', running.append, steps=1, pause=30)
+        pool.call_later(_report_steps, 'uda', waiting.append, steps=0)
+        QTimer.singleShot(500, pool.shutdown)
+        self._arrived(running, seconds=10)
+        self._arrived(waiting, seconds=5)
+
+        self.assertIsInstance(running[0], DataAccessError)
+        self.assertEqual(str(running[0]), access_pool._STOPPED)
+        self.assertIsInstance(waiting[0], DataAccessError)
+        self.assertEqual(str(waiting[0]), access_pool._STOPPED)
+
+    def test_a_call_in_the_background_to_a_shut_down_pool_says_so(self):
+        pool = self._own_pool(started=('uda',))
+        pool.shutdown()
+
+        with self.assertRaises(RuntimeError):
+            pool.call_later(_report_steps, 'uda', print, steps=0)
+
+
+def _report_steps(data_access, data_s_name, steps, pause=0.0, started=None, progress=None):
+    """A call that takes long, as an export does: it reports each of `steps` steps after sleeping `pause` seconds,
+    without the GIL, and gives the thread it ran in, its data source and its data access object."""
+    if started is not None:
+        started.set()
+    for step in range(steps):
+        time.sleep(pause)
+        if progress is not None:
+            progress(step, data_s_name)
+    return threading.get_ident(), data_s_name, data_access
+
+
+def _fail(data_access, data_s_name, progress=None):
+    raise ValueError("cannot export")
+
+
+def _slow_worker_data_access():
+    time.sleep(1.0)
+    return _WorkerDataAccess()
+
 
 class _DataAccess:
     """iplotDataAccess's DataAccess as the worker makes it: it notes what it is made with."""

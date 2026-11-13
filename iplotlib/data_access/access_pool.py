@@ -144,8 +144,9 @@ def _read(params: dict, cache_epoch: int) -> dict:
         raise _failure(e, params.get('varname')) from None
 
 
-def _call(method: str, name: str, kwargs: dict, cache_epoch: int):
-    """`method` of the data access object, called for the data source `name` (see AccessPool.call)."""
+def _call(method, name: str, kwargs: dict, cache_epoch: int, progress: Optional[Callable] = None):
+    """`method` of the data access object, or a function given that object, called for the data source `name` (see
+    AccessPool.call); a function is also given ``progress=``, if given, to report its progress with."""
     data_access = _data_access(name, cache_epoch)
     sources = getattr(data_access, 'ds_list', None)
     if sources is not None and name not in sources:
@@ -153,7 +154,11 @@ def _call(method: str, name: str, kwargs: dict, cache_epoch: int):
         raise DataAccessError(f"The data access thread has no data source {name}")
     try:
         with AccessHelper.reading(name):
-            return getattr(data_access, method)(name, **kwargs)
+            if not callable(method):
+                return getattr(data_access, method)(name, **kwargs)
+            if progress is not None:
+                kwargs = dict(kwargs, progress=progress)
+            return method(data_access, name, **kwargs)
     except DataAccessError:
         raise
     except BaseException as e:
@@ -366,6 +371,61 @@ class PendingFetch:
             logger.exception("Cannot draw the data read in the background")
 
 
+class PendingCall:
+    """A call that AccessPool.call_later() makes in a worker thread."""
+
+    def __init__(self, on_done: Callable[[object], None], progress: Optional[Callable] = None):
+        self._future = None  # type: Optional[Future]
+        self._on_done = on_done
+        self._progress = progress
+        self._relay = _gui_relay()
+        self._watch = None  # type: Optional[_Watch]
+
+    def _reporter(self) -> Callable:
+        """What the call is given to report its progress with, from its worker: what it reports goes through the
+        relay that then tells this thread the call ended, so it arrives first."""
+        return lambda *args: self._relay.posted.emit(partial(self._report, args))
+
+    def _watch_future(self, future: Future):
+        self._future = future
+        self._watch = _Watch([future], self._check)
+
+    def cancel(self):
+        """Call neither on_done nor progress, and leave the call unmade if no worker started it yet: one started runs
+        to its end, as a thread cannot be stopped."""
+        if self._future is not None:
+            self._future.cancel()
+        self._release()
+
+    def _release(self):
+        # The future keeps this object in its callbacks: it must not keep the result with it.
+        self._future, self._on_done, self._progress = None, None, None
+        if self._watch is not None:
+            self._watch.release()
+
+    def _report(self, args: tuple):
+        if self._progress is None:
+            return
+        try:
+            self._progress(*args)
+        except Exception:
+            logger.exception("Cannot report the progress of a call made in the background")
+
+    def _check(self):
+        if self._on_done is None or not self._future.done():
+            return
+        future, on_done = self._future, self._on_done
+        self._release()
+        result = _outcome(future)
+        if isinstance(result, CancelledError):
+            # Left unmade by a shutdown.
+            result = DataAccessError(_STOPPED)
+        try:
+            on_done(result)
+        except Exception:
+            logger.exception("Cannot take the result of a call made in the background")
+
+
 class AccessPool:
     """Runs AccessHelper data access requests in worker threads.
 
@@ -377,7 +437,8 @@ class AccessPool:
 
     A request read before goes back to the worker that read it, whose data access cache may
     still hold the data; new requests go to the worker with the fewest requests to read.
-    call() runs other methods of the data access object, from any thread.
+    call() runs other methods of the data access object, or functions given it, from any thread;
+    call_later() runs them without waiting for them, for those that take long.
     """
 
     def __init__(self, workers: int, data_access_factory: Callable = app_data_access):
@@ -455,10 +516,12 @@ class AccessPool:
         return PendingFetch(self, {key: self._submit(key, params) for key, params in unique.items()}, on_done,
                             on_stopped, progress)
 
-    def call(self, method: str, data_s_name: str, **kwargs):
+    def call(self, method, data_s_name: str, **kwargs):
         """Call a method of the data access object in a worker thread and wait for its result:
         ``call('get_archive_window', 'codacuda', varname=...)`` returns what
-        ``get_archive_window('codacuda', varname=...)`` returns.
+        ``get_archive_window('codacuda', varname=...)`` returns. `method` can also be a function,
+        called with the data access object of the worker: ``method(data_access, data_s_name,
+        **kwargs)``.
 
         A thread that does not run Qt waits without holding the GIL; the thread that runs Qt waits as
         fetch() does. Raises DataAccessError if the method fails, the worker has no such data source
@@ -476,6 +539,25 @@ class AccessPool:
         if isinstance(result, Exception):
             raise result
         return result
+
+    def call_later(self, method, data_s_name: str, on_done: Callable[[object], None],
+                   progress: Optional[Callable] = None, **kwargs) -> PendingCall:
+        """Make in a worker thread the call that call() makes, without waiting for it: for one that
+        takes long, such as an export.
+
+        Once made, `on_done` is called in this thread, from its Qt event loop, with its result or
+        the DataAccessError it raised, which a shutdown that leaves it unmade raises too. With
+        `progress`, a function given as `method` is also given ``progress=``, a callable whose
+        arguments are given to `progress` in this thread, in the order reported and before the
+        result. Raises RuntimeError if the worker threads cannot read or the pool is shut down.
+        """
+        self._check_workers()
+        pending = PendingCall(on_done, progress)
+        with self._lock:
+            future = self._run(self._free_slot(data_s_name), _call, method, data_s_name, kwargs, self._cache_epoch,
+                               pending._reporter() if progress is not None else None)
+        pending._watch_future(future)
+        return pending
 
     def clear_cache(self):
         """Make every worker clear its data access cache before its next request."""
