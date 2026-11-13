@@ -20,7 +20,7 @@ from pyqtgraph import TextItem
 
 from iplotLogging import setupLogger
 from iplotlib.core.decimation import minmax_decimate
-from iplotlib.core.impl_base import PENDING_PLACE_TEXT, PENDING_PROGRESS_TEXT, line_samples
+from iplotlib.core.impl_base import PENDING_PLACE_TEXT, line_samples
 from iplotlib.core import (Axis,
                            RangeAxis,
                            Canvas,
@@ -505,10 +505,10 @@ class PyQtGraphParser(BackendParserBase):
         cell_gl.addLabel(PENDING_PLACE_TEXT, row=0, col=0, color='#808080')
         self._pending_cells[(column, row)] = cell_gl
 
-    def show_pending_progress(self, column: int, row: int, done: int, total: int):
+    def show_pending_text(self, column: int, row: int, text: str):
         cell_gl = self._pending_cells.get((column, row))
         if cell_gl is not None:
-            cell_gl.getItem(0, 0).setText(PENDING_PROGRESS_TEXT.format(done, total), color='#808080')
+            cell_gl.getItem(0, 0).setText(text, color='#808080')
 
     def hide_pending_place(self, column: int, row: int):
         cell_gl = self._pending_cells.pop((column, row), None)

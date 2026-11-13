@@ -187,6 +187,8 @@ class _WorkerThread(Executor):
         # Set by a shutdown that cancels the calls not started, the one a worker took and did not start yet too.
         self._cancelling = False
         self._running = None  # type: Optional[Future]
+        # The data access object of the thread when it started the call in progress (see interrupt).
+        self._running_access = None
         #: Done once the thread is set up, with the error that kept it from it.
         self.ready = Future()
         threading.Thread(target=self._work, args=(set_up,), name=name, daemon=True).start()
@@ -240,6 +242,7 @@ class _WorkerThread(Executor):
             if not future.set_running_or_notify_cancel():
                 return
             self._running = future
+            self._running_access = AccessHelper.thread_data_access()
         try:
             result = fn(*args, **kwargs)
         except BaseException as error:
@@ -248,7 +251,23 @@ class _WorkerThread(Executor):
             _settle(future, result=result)
         finally:
             with self._lock:
-                self._running = None
+                self._running, self._running_access = None, None
+
+    def interrupt(self, future: Future):
+        """Ask the data access object of the thread to stop the read in progress, if it is the call of `future`
+        that runs: its read then fails, where the data access can stop it (see iplotDataAccess
+        DataAccess.cancel)."""
+        with self._lock:
+            # Under the lock: the thread cannot start another call meanwhile, whose read it would stop.
+            if self._running is not future:
+                return
+            cancel = getattr(self._running_access, 'cancel', None)
+            if cancel is None:
+                return
+            try:
+                cancel()
+            except Exception:
+                logger.exception("Cannot stop the read of the data access thread")
 
 
 def _cancel(future: Future):
@@ -335,10 +354,13 @@ class PendingFetch:
         self._watch = _Watch(futures.values(), self._check)
         self._tell()
 
-    def cancel(self):
-        """Call neither on_done nor on_stopped, and leave unread the requests no worker started yet."""
+    def cancel(self, stop_reading: bool = False):
+        """Call neither on_done nor on_stopped, and leave unread the requests no worker started yet. With
+        `stop_reading`, the workers also stop the reads of those they started, where their data access can: a
+        read stopped makes the next one on the data source slower, as it connects anew."""
         for future in self._futures.values():
-            future.cancel()
+            if not future.cancel() and stop_reading:
+                self._pool.interrupt(future)
         self._release()
 
     def _release(self):
@@ -558,6 +580,13 @@ class AccessPool:
                                pending._reporter() if progress is not None else None)
         pending._watch_future(future)
         return pending
+
+    def interrupt(self, future: Future):
+        """Stop the read of the request of `future` that a worker runs, where its data access can."""
+        with self._lock:
+            executors = list(self._executors.values())
+        for executor in executors:
+            executor.interrupt(future)
 
     def clear_cache(self):
         """Make every worker clear its data access cache before its next request."""
