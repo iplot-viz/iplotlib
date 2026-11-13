@@ -114,6 +114,13 @@ def _as_python_number(value):
     return value.item() if isinstance(value, np.generic) else value
 
 
+def _num_points(x, y) -> int:
+    """The points of the lines of a signal: its samples, times the columns of a Y that has one per line."""
+    if np.ndim(x) == 1 and np.ndim(y) == 2 and len(y) == len(x):
+        return int(np.size(y))
+    return len(x)
+
+
 @dataclass
 class IplotSignalAdapter(ProcessingSignal):
     """
@@ -435,7 +442,7 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.reset()
         self.status_info.stage = Stage.DA
         self.status_info.result = Result.SUCCESS
-        self.status_info.num_points = len(self.data_store[0])
+        self.status_info.num_points = _num_points(self.data_store[0], self.data_store[1])
         self.status_info.inf = int(np.sum(np.isinf(np.asarray(self.data_store[1], dtype=float))))
 
     def set_da_fail(self, msg: str = ''):
@@ -449,7 +456,7 @@ class IplotSignalAdapter(ProcessingSignal):
     def set_proc_success(self):
         self.status_info.reset()
         self.status_info.stage = Stage.PROC
-        self.status_info.num_points = len(self.x_data)
+        self.status_info.num_points = _num_points(self.x_data, self.y_data)
         self.status_info.inf = int(np.sum(np.isinf(np.asarray(self.y_data, dtype=float))))
         self.status_info.result = Result.SUCCESS
 
