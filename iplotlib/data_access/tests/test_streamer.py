@@ -12,11 +12,9 @@ from unittest.mock import MagicMock, call, patch
 import numpy as np
 from iplotDataAccess.dataCommon import DataObj
 
-import iplotlib.data_access.access_pool as access_pool_module
 import iplotlib.data_access.streamer as streamer_module
 from iplotlib.data_access.access_pool import AccessPool
 from iplotlib.data_access.streamer import CanvasStreamer, _inject_period_s
-from iplotlib.data_access.tests.test_access_pool import _START_TIMEOUT_S
 from iplotlib.interface.iplotSignalAdapter import AccessHelper, DataAccessError
 from iplotlib.qt.testing import ensure_qapp
 
@@ -1566,7 +1564,7 @@ class ReceiverLoopTests(unittest.TestCase):
 
 
 class _ArchiveDataAccess:
-    """Data access of the application and of its worker processes: the archive window of a variable is a
+    """Data access of the application and of its worker threads: the archive window of a variable is a
     ramp over the requested range."""
 
     ds_list = {'ds': SimpleNamespace(source_type='CODAC_UDA')}
@@ -1586,10 +1584,10 @@ def _archive_data_access():
     return _ArchiveDataAccess()
 
 
-class ArchiveInWorkerProcessesTests(unittest.TestCase):
-    """With the worker processes of the application, the archive is read in them, with the
+class ArchiveInWorkerThreadsTests(unittest.TestCase):
+    """With the worker threads of the application, the archive is read in them, with the
     arguments and the replies of a read in the streaming threads; without them, or for a data
-    access of its own, the streaming reads it itself as before."""
+    access of its own, the streaming reads it itself."""
 
     def setUp(self):
         for name in ('da', 'pool'):
@@ -1636,7 +1634,7 @@ class ArchiveInWorkerProcessesTests(unittest.TestCase):
         pool.call.assert_not_called()
 
     def test_when_the_workers_cannot_read_the_archive_the_streaming_threads_read_it_from_then_on(self):
-        for error in (RuntimeError("The data access processes cannot start"), OSError(12, "Cannot allocate memory")):
+        for error in (RuntimeError("The data access threads cannot read"), OSError(12, "Cannot allocate memory")):
             with self.subTest(error=type(error).__name__):
                 AccessHelper.pool = pool = MagicMock()
                 pool.call.side_effect = error
@@ -1664,14 +1662,11 @@ class ArchiveInWorkerProcessesTests(unittest.TestCase):
         self.assertIn("Archive fetch failed for var: no data for var", logs.output[0])
         self.da.get_archive_window.assert_not_called()
 
-    def test_a_backfill_with_worker_processes_injects_the_archive_reply(self):
+    def test_a_backfill_with_worker_threads_injects_the_archive_reply(self):
         ensure_qapp()
         AccessHelper.da = data_access = _ArchiveDataAccess()
         AccessHelper.pool = pool = AccessPool(1, data_access_factory=_archive_data_access)
         self.addCleanup(pool.shutdown)
-        # Until its worker has started, the pool makes the call in the streaming thread.
-        pool.prepare('ds')
-        pool._ready[0].result(timeout=_START_TIMEOUT_S)
         calls = []
         call_in_worker = pool.call
 
@@ -1685,10 +1680,8 @@ class ArchiveInWorkerProcessesTests(unittest.TestCase):
         streamer._max_points = 0
         callback = MagicMock()
 
-        with patch.object(access_pool_module, '_call_here', wraps=access_pool_module._call_here) as here:
-            streamer._archive_backfill({'ds': [signal]}, 3600 * int(1e9), callback)
+        streamer._archive_backfill({'ds': [signal]}, 3600 * int(1e9), callback)
 
-        here.assert_not_called()
         (method, ds, kwargs), = calls
         expected = data_access.get_archive_window(ds, **kwargs)
         injected = signal.inject_external.call_args.kwargs

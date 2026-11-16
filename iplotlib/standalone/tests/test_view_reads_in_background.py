@@ -1,4 +1,4 @@
-"""With worker processes, a change of the view draws at once the data the signals have and reads
+"""With worker threads, a change of the view draws at once the data the signals have and reads
 the data of the new range in the background; the signals are drawn again when they arrive."""
 
 import unittest
@@ -20,13 +20,13 @@ HOUR = 3600 * 10**9
 ZOOM = (T0 + 600 * 10**9, T0 + 660 * 10**9)
 _SAMPLE_LIMIT = ('Number of samples in reply exceeds available limit. Reduce request interval, use decimation '
                  'or read data by chunks.')
-_read_in_this_process = AccessHelper._request_data
+_read_here = AccessHelper._request_data
 
 
 class _DataAccess:
     """Asks for decimation, as a large archive would, and answers with the width of the
     requested range in seconds: what is drawn tells which range was read. Records the reads
-    made in this thread apart from those made for the worker processes."""
+    made in this thread apart from those made for the worker threads."""
 
     def __init__(self):
         self.reads, self.worker_reads = [], []
@@ -71,7 +71,7 @@ class _PendingFetch:
 def _read_for_workers(requests):
     AccessHelper.da.for_workers = True
     try:
-        return {AccessHelper.request_key(params): _read_in_this_process(**dict(params)) for params in requests}
+        return {AccessHelper.request_key(params): _read_here(**dict(params)) for params in requests}
     finally:
         AccessHelper.da.for_workers = False
 
@@ -98,24 +98,24 @@ class _Pool:
 
 
 class _FailingPool(_Pool):
-    """Worker processes that cannot read."""
+    """Worker threads that cannot read."""
 
     def __init__(self):
         super().__init__()
         self.shut_down = False
 
     def fetch(self, requests, progress=None):
-        raise RuntimeError("the worker processes cannot start")
+        raise RuntimeError("the worker threads cannot read")
 
     def fetch_later(self, requests, on_done):
-        raise RuntimeError("the worker processes cannot start")
+        raise RuntimeError("the worker threads cannot read")
 
     def shutdown(self):
         self.shut_down = True
 
 
 class _QuittingPool(_Pool):
-    """Worker processes whose wait ends because the application quits."""
+    """Worker threads whose wait ends because the application quits."""
 
     def fetch(self, requests, progress=None):
         return None
@@ -235,7 +235,7 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
                 parser.set_oaw_axis_limits(impls[0], 0, ZOOM)
                 self.app.processEvents()
 
-                # Each read whose data fail to draw fails alone, as the reads of the worker processes do.
+                # Each read whose data fail to draw fails alone, as the reads of the worker threads do.
                 with patch.object(qt_canvas, 'stats', side_effect=RuntimeError("cannot draw")):
                     for fetch in pool.pending():
                         with self.assertRaises(RuntimeError):
@@ -578,7 +578,7 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
 
                 self.assertEqual(sorted(row[0].name for row in fill_table.call_args.args[0]), ['VAR-A', 'VAR-B'])
 
-    def test_worker_processes_that_cannot_read_a_view_are_shut_down_and_it_is_read_here(self):
+    def test_worker_threads_that_cannot_read_a_view_are_shut_down_and_it_is_read_here(self):
         for backend in ('pyqt', 'matplotlib'):
             with self.subTest(backend=backend):
                 qt_canvas, parser, impls, signals = self._draw(backend)
@@ -592,7 +592,7 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
                 self.assertTrue(pool.shut_down)
                 self.assertEqual(sorted(self.da.reads), [('VAR-A', *ZOOM), ('VAR-B', *ZOOM)])
 
-    def test_worker_processes_that_cannot_read_for_a_redraw_are_shut_down_and_it_reads_here(self):
+    def test_worker_threads_that_cannot_read_for_a_redraw_are_shut_down_and_it_reads_here(self):
         for backend in ('pyqt', 'matplotlib'):
             with self.subTest(backend=backend):
                 qt_canvas, parser, impls, signals = self._draw(backend)
@@ -620,7 +620,7 @@ class ViewReadsInBackgroundTest(unittest.TestCase):
 
                 self.assertEqual(self.da.reads, [])
 
-    def test_without_worker_processes_a_zoom_reads_at_once(self):
+    def test_without_worker_threads_a_zoom_reads_at_once(self):
         for backend in ('pyqt', 'matplotlib'):
             with self.subTest(backend=backend):
                 qt_canvas, parser, impls, signals = self._draw(backend)

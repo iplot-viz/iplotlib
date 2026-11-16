@@ -1,5 +1,5 @@
 """
-Data access infrastructure for iplotlib: real-time streaming and data access in worker processes.
+Data access infrastructure for iplotlib: real-time streaming and data access in worker threads.
 """
 
 from .access_pool import AccessPool

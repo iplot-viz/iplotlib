@@ -28,7 +28,8 @@ dependencies = [
     "packaging>=20.0",
     "matplotlib >= 3.5.1",
     "pandas >= 2.2.0",
-    "PySide6 >= 6.9.3",
+    # 6.12.0 makes Python older than 3.12 abort on Linux
+    "PySide6 >= 6.9.3, < 6.12",
     "pyqtgraph >= 0.14.0",
 ]
 dynamic = ["version"]

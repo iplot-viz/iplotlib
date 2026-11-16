@@ -62,6 +62,36 @@ def _configure_display_scale(config: dict):
 _configure_display_scale(properties)
 
 
+def _shipped_colors() -> dict:
+    """The colours of the shipped defaults that a theme replaces: an exported configuration may set others."""
+    try:
+        with open(file_name, "r") as f:
+            shipped = json.load(f)
+    except Exception:
+        return {}
+    return {name: str(shipped[name]).lower() for name in ('background_color', 'font_color') if shipped.get(name)}
+
+
+_SHIPPED_COLORS = _shipped_colors()
+#: The colours a theme draws with instead of those of _SHIPPED_COLORS, by property (see set_theme_colors).
+_theme_colors = {}
+
+
+def set_theme_colors(colors: dict):
+    """Draw the properties named in `colors` with the colour given for each where they have their shipped default
+    colour, as in a dark theme. With none, they are drawn as set."""
+    _theme_colors.clear()
+    _theme_colors.update(colors)
+
+
+def themed_value(attr_name: str, value):
+    """A property value as drawn in the current theme (see set_theme_colors)."""
+    if _theme_colors and attr_name in _theme_colors and isinstance(value, str) \
+            and value.lower() == _SHIPPED_COLORS.get(attr_name):
+        return _theme_colors[attr_name]
+    return value
+
+
 class PropertyManager:
     """
     This class provides an API that returns attributes in the iplotlib hierarchy.
@@ -91,6 +121,8 @@ class PropertyManager:
         Size-like properties (see
         :data:`~iplotlib.core.display.SCALED_PROPERTIES`) come back multiplied
         by the UI scale factor, so a canvas configured for FullHD stays legible
-        on a 4K panel without every call site knowing about DPI.
+        on a 4K panel without every call site knowing about DPI. Colours left
+        at their shipped default come back in those of the theme (see
+        set_theme_colors).
         """
-        return self._scale.apply(attr_name, self.get_raw_value(obj, attr_name))
+        return self._scale.apply(attr_name, themed_value(attr_name, self.get_raw_value(obj, attr_name)))

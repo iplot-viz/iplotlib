@@ -12,11 +12,12 @@ Map a python object's attributes to an index (index used by a data widget mapper
 import typing
 
 from PySide6.QtCore import QModelIndex, QObject, Qt
-from PySide6.QtGui import QStandardItemModel
+from PySide6.QtGui import QColor, QStandardItemModel
 from PySide6.QtWidgets import QComboBox
 
 from iplotlib.core import PropertyManager, SignalXY, RangeAxis
 from iplotlib.core.display import DisplayScale
+from iplotlib.core.property_manager import themed_value
 from iplotlib.qt.models.beanItem import BeanItem, BeanPrototype
 from iplotlib.qt.utils.conversions import ConversionHelper
 
@@ -105,6 +106,12 @@ class BeanItemModel(QStandardItemModel):
                     value = ConversionHelper.asType(value, type(raw))
                     value = raw if value == scale.apply(property_name, raw) \
                         else scale.unapply(property_name, value)
+                elif isinstance(value, str):
+                    # Likewise, a colour left alone keeps its configured value, not the one of the theme it shows.
+                    raw = PropertyManager().get_raw_value(self._pyObject, property_name)
+                    shown = themed_value(property_name, raw)
+                    if shown is not raw and QColor(value) == QColor(shown):
+                        value = raw
 
                 setattr(self._pyObject, property_name, value)
 

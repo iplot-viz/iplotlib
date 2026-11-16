@@ -141,6 +141,7 @@ class Canvas(ABC):
     marker: str = None
     marker_size: int = None
     step: str = None
+    vertical_lines: str = None
     legend: bool = None
     legend_position: str = None
     legend_layout: str = None
@@ -226,6 +227,7 @@ class Canvas(ABC):
         self.marker = Canvas.marker
         self.marker_size = Canvas.marker_size
         self.step = Canvas.step
+        self.vertical_lines = Canvas.vertical_lines
         self.legend = Canvas.legend
         self.legend_position = Canvas.legend_position
         self.legend_layout = Canvas.legend_layout
@@ -278,6 +280,7 @@ class Canvas(ABC):
         self.marker = old_canvas['marker']
         self.marker_size = old_canvas['marker_size']
         self.step = old_canvas['step']
+        self.vertical_lines = old_canvas.get('vertical_lines', Canvas.vertical_lines)
         self.legend = old_canvas['legend']
         self.legend_position = old_canvas['legend_position']
         self.legend_layout = old_canvas['legend_layout']
@@ -305,32 +308,28 @@ class Canvas(ABC):
         self.max_diff = old_canvas['max_diff']
         self.show_minimap = old_canvas.get('show_minimap', False)
 
+        map_old_signals = self._old_signals(old_canvas)
         for idxColumn, columns in enumerate(self.plots):
             for idxPlot, plot in enumerate(columns):
-                if plot and idxColumn < len(old_canvas['plots']) and idxPlot < len(old_canvas['plots'][idxColumn]):
-                    # Found matching plot
-                    old_plot_properties = old_canvas['plots'][idxColumn][idxPlot]
-                    if not old_plot_properties:
-                        continue
+                if plot:
+                    self._merge_plot(plot, idxColumn, idxPlot, old_canvas, map_old_signals)
 
-                    if type(plot).__name__ == old_plot_properties['_type'].split(".")[-1]:
-                        plot.merge(old_plot_properties)
-                    else:
-                        # Handle when it is a plot of a different type.
-                        # Simplest way: Warning that a plot has been drawn where before there was a plot of a
-                        # different type, therefore, the properties cannot be kept to make a merge. In this way,
-                        # the new plot is drawn with its default properties.
-                        logger.warning("Merge with different type of plots")
+    def merge_plot(self, plot: Plot, column: int, row: int, old_canvas: dict):
+        """Merge into `plot`, at (column, row) of the plots, the properties of the plot at the same place of
+        `old_canvas`, and into its signals those of the same signals in `old_canvas`, wherever they were: what merge()
+        does for each plot, for a plot added once the others are merged."""
+        self._merge_plot(plot, column, row, old_canvas, self._old_signals(old_canvas))
 
-        # Gather all old signals into a map with uid as key
-        def compute_signal_uniqkey(computed_signal: Signal | dict):
-            # Consider signal is same if it has the same row uid, name
-            if isinstance(computed_signal, Signal):
-                signal_key = computed_signal.uid + ";" + computed_signal.name
-            else:
-                signal_key = computed_signal['uid'] + ";" + computed_signal['name']
-            return signal_key
+    @staticmethod
+    def _signal_key(computed_signal: Union[Signal, dict]) -> str:
+        # Consider signal is same if it has the same row uid, name
+        if isinstance(computed_signal, Signal):
+            return computed_signal.uid + ";" + computed_signal.name
+        return computed_signal['uid'] + ";" + computed_signal['name']
 
+    @staticmethod
+    def _old_signals(old_canvas: dict) -> Dict[str, dict]:
+        """The signals of `old_canvas`, by _signal_key()."""
         map_old_signals: Dict[str, dict] = {}
         for columns in old_canvas['plots']:
             for old_plot in columns:
@@ -338,18 +337,30 @@ class Canvas(ABC):
                     continue
                 for old_signals in old_plot['signals'].values():
                     for old_signal in old_signals:
-                        key = compute_signal_uniqkey(old_signal)
-                        map_old_signals[key] = old_signal
+                        map_old_signals[Canvas._signal_key(old_signal)] = old_signal
+        return map_old_signals
 
-        # Merge signals at canvas level to handle move between plots
-        for columns in self.plots:
-            for plot in columns:
-                if plot:
-                    for signals in plot.signals.values():
-                        for signal in signals:
-                            key = compute_signal_uniqkey(signal)
-                            if key in map_old_signals:
-                                signal.merge(map_old_signals[key])
+    @staticmethod
+    def _merge_plot(plot: Plot, column: int, row: int, old_canvas: dict, map_old_signals: Dict[str, dict]):
+        if column < len(old_canvas['plots']) and row < len(old_canvas['plots'][column]):
+            # Found matching plot
+            old_plot_properties = old_canvas['plots'][column][row]
+            if old_plot_properties:
+                if type(plot).__name__ == old_plot_properties['_type'].split(".")[-1]:
+                    plot.merge(old_plot_properties)
+                else:
+                    # Handle when it is a plot of a different type.
+                    # Simplest way: Warning that a plot has been drawn where before there was a plot of a
+                    # different type, therefore, the properties cannot be kept to make a merge. In this way,
+                    # the new plot is drawn with its default properties.
+                    logger.warning("Merge with different type of plots")
+
+        # Signals are merged by their key, not their place, to handle moves between plots.
+        for signals in plot.signals.values():
+            for signal in signals:
+                key = Canvas._signal_key(signal)
+                if key in map_old_signals:
+                    signal.merge(map_old_signals[key])
 
     def is_minimap_eligible(self) -> bool:
         # The mini-map is a frozen overview of the window captured at draw time. A

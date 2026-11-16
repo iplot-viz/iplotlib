@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from iplotlib.core.decimation import bucket_reduce_envelope, minmax_decimate
+from iplotlib.core.decimation import bucket_reduce_envelope, bucket_reduce_lines, minmax_decimate
 
 
 class MinMaxDecimateTests(unittest.TestCase):
@@ -126,6 +126,76 @@ class MinMaxDecimateTests(unittest.TestCase):
             hi = np.concatenate([hi, np.ones(30)])
             avg = np.concatenate([avg, np.full(30, 0.5)])
         self.assertEqual(x[0], 0)
+
+
+class BucketReduceLinesTests(unittest.TestCase):
+
+    def test_keeps_the_first_extremes_and_last_of_each_bucket(self):
+        x = np.arange(4000, dtype=np.int64)
+        y = np.sin(np.linspace(0, 60, 4000))
+        y[1234] = -5.0
+        y[2345] = 7.0
+        ox, oy = bucket_reduce_lines(x, y, 100)
+        self.assertEqual(len(ox), 400)
+        self.assertEqual(len(oy), 400)
+        self.assertTrue(np.all(np.diff(ox) >= 0))
+        buckets = y.reshape(100, 40)
+        self.assertTrue(np.array_equal(oy[0::4], buckets[:, 0]))
+        self.assertTrue(np.array_equal(oy[1::4], buckets.min(axis=1)))
+        self.assertTrue(np.array_equal(oy[2::4], buckets.max(axis=1)))
+        self.assertTrue(np.array_equal(oy[3::4], buckets[:, -1]))
+        self.assertEqual((ox[0], ox[-1]), (0, 3999))
+        # The extremes at the X of the middle sample of their span, the first and the last at their own.
+        starts = np.arange(0, 4000, 40)
+        self.assertTrue(np.array_equal(ox[0::4], x[starts]))
+        self.assertTrue(np.array_equal(ox[1::4], x[starts + 19]))
+        self.assertTrue(np.array_equal(ox[2::4], x[starts + 19]))
+        self.assertTrue(np.array_equal(ox[3::4], x[starts + 39]))
+
+    def test_lines_of_a_2d_y_share_their_x(self):
+        rng = np.random.default_rng(3)
+        x = np.linspace(0.0, 10.0, 5000)
+        y = rng.standard_normal((5000, 3))
+        ox, oy = bucket_reduce_lines(x, y, 200)
+        self.assertEqual(oy.shape, (800, 3))
+        for column in range(3):
+            cx, cy = bucket_reduce_lines(x, np.ascontiguousarray(y[:, column]), 200)
+            self.assertTrue(np.array_equal(cx, ox))
+            self.assertTrue(np.array_equal(cy, oy[:, column]))
+
+    def test_a_span_without_samples_draws_nothing(self):
+        # Samples until 2000 s and again from 10000 s: nothing is drawn in between.
+        x = np.concatenate((np.arange(0.0, 2000.0), np.arange(10000.0, 12000.0)))
+        rng = np.random.default_rng(5)
+        for name, y in (('1D', np.sin(x)), ('2D', rng.standard_normal((len(x), 3)))):
+            with self.subTest(name):
+                ox, oy = bucket_reduce_lines(x, y, 100)
+                self.assertFalse(np.any((ox > 1999.0) & (ox < 10000.0)))
+                self.assertEqual((ox[0], ox[-1]), (0.0, 11999.0))
+                self.assertTrue(np.array_equal(oy.min(axis=0), y.min(axis=0)))
+                self.assertTrue(np.array_equal(oy.max(axis=0), y.max(axis=0)))
+
+    def test_lines_it_does_not_reduce_are_returned_as_they_are(self):
+        x = np.arange(4000, dtype=float)
+        y = np.ones(4000)
+        gap = y.copy()
+        gap[10] = np.nan
+        endless = y.copy()
+        endless[20] = np.inf
+        backwards = x[::-1].copy()
+        one_step_back = x.copy()
+        one_step_back[2000] = one_step_back[1998]
+        infinite_end = x.copy()
+        infinite_end[-1] = np.inf
+        for name, (lx, ly, buckets) in {'few samples': (x, y, 501), 'gap': (x, gap, 100),
+                                        'infinite': (x, endless, 100), 'x back': (backwards, y, 100),
+                                        'x one step back': (one_step_back, y, 100),
+                                        'x ends at infinity': (infinite_end, y, 100),
+                                        'y shorter': (x, y[:-1], 100)}.items():
+            with self.subTest(name):
+                ox, oy = bucket_reduce_lines(lx, ly, buckets)
+                self.assertIs(ox, lx)
+                self.assertIs(oy, ly)
 
 
 if __name__ == '__main__':

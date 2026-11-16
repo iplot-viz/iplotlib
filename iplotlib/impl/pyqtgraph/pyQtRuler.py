@@ -8,6 +8,7 @@ from pyqtgraph import InfiniteLine, PlotItem, TextItem
 from pyqtgraph.Qt import QtCore, QtGui
 from PySide6.QtCore import QPointF
 
+from iplotlib.core.impl_base import line_samples
 from iplotlib.core.ruler import contrast_text_color
 from iplotlib.impl.pyqtgraph.dateFormatter import NanosecondDateFormatter
 
@@ -167,7 +168,7 @@ class pyQtRuler:
         for label in self.value_labels:
             shown = False
             if self.visible and self.show_val_label and in_x and label.scene() is not None:
-                x_data, y_data = label.line.getData()
+                x_data, y_data = line_samples(label.line) or label.line.getData()
                 if x_data is not None and len(x_data) > 0:
                     idx = np.searchsorted(x_data, x, side="left")
                     if 0 < idx < len(x_data) and abs(x - x_data[idx - 1]) < abs(x - x_data[idx]):

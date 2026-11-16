@@ -169,7 +169,7 @@ class CanvasStreamer:
         self._hold_semantics = set()
         self._last_refresh_any = 0.0
         self._qt_threads = []
-        # Set once the worker processes cannot read the archive (see _read_archive).
+        # Set once the worker threads cannot read the archive (see _read_archive).
         self._read_archive_here = False
 
     def _spawn(self, name: str, target):
@@ -242,9 +242,9 @@ class CanvasStreamer:
         return x, y, None, None
 
     def _read_archive(self, method: str, ds: str, **kwargs):
-        """Call ``method`` of the data access object, which reads the archive. With the worker
-        processes of the application, the call runs in one of them: a data access client can keep
-        the GIL for as long as it reads, which would stop the GUI thread too."""
+        """Call ``method`` of the data access object, which reads the archive: in a worker thread of
+        the application, if it has them, through a data access object of its own, as data access
+        objects are not safe to share between threads; else in this streaming thread."""
         pool = AccessHelper.pool
         if pool is not None and self.da is AccessHelper.da and not self._read_archive_here:
             try:
@@ -252,7 +252,7 @@ class CanvasStreamer:
             except DataAccessError:
                 raise
             except Exception as exc:
-                # The read did not fail: the worker processes cannot make it.
+                # The read did not fail: the worker threads cannot make it.
                 logger.warning(f"The archive is read in the streaming threads from now on: {exc}")
                 self._read_archive_here = True
         return getattr(self.da, method)(ds, **kwargs)
