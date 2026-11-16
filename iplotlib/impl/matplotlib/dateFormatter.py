@@ -1,7 +1,12 @@
 import datetime
+import functools
 import math
 import re as _re
+from typing import Optional
 
+import matplotlib
+from matplotlib.font_manager import FontProperties
+from matplotlib.textpath import TextToPath
 from matplotlib.ticker import ScalarFormatter, Locator, MaxNLocator
 from matplotlib.axis import XAxis
 import numpy as np
@@ -12,12 +17,67 @@ from iplotlib.core.date_ticks import (
     generate_ticks as _generate_ticks,
     relative_ticks as _rel_time_ticks,
     linear_ticks as _linear_ticks,
+    fitting_count as _fit_count,
+    fitting_date_count as _fit_date_count,
+    number_label_sample as _number_label_sample,
     segments_for_interval as _segments_for_interval,
     label_unit as _label_unit,
 )
 import iplotLogging.setupLogger as Sl
 
 logger = Sl.get_logger(__name__)
+
+def tick_room(axis, sample: str) -> Optional[int]:
+    """How many tick labels fit along `axis` without overlapping, at least 2, as on the pyqtgraph backend: a label
+    takes the width of `sample` along a horizontal axis and a line along a vertical one. None if the axis is not
+    laid out yet."""
+    if axis is None or getattr(axis, 'axes', None) is None:
+        return None
+    try:
+        horizontal = axis.axis_name == 'x'
+        length = axis.axes.bbox.width if horizontal else axis.axes.bbox.height
+        size = _tick_label_points(axis)
+        # Side by side, labels keep half the font size apart; a line of text takes 1.2 times the font size, its
+        # leading included.
+        slot = _text_width_points(sample, size) + size / 2 if horizontal else size * 1.2
+        slot *= axis.figure.dpi / 72
+    except Exception:
+        return None
+    if not (length > 0 and slot > 0):
+        return None
+    return max(2, int(length / slot))
+
+
+def _fitting_count(axis, ticks_for, target: int, sample_for=None) -> int:
+    """The count to ask a tick ladder for on `axis` (see date_ticks.fitting_count): `sample_for(ticks)` is a label as
+    wide as theirs, by default the widest the formatter of the axis writes. Along a vertical axis a label takes a
+    line, whatever it says."""
+    if getattr(axis, 'axis_name', None) != 'x':
+        sample_for = lambda ticks: ''
+    sample_for = sample_for or (lambda ticks: _formatted_sample(axis, ticks))
+    return _fit_count(ticks_for, target, lambda ticks: tick_room(axis, sample_for(ticks)))
+
+
+def _formatted_sample(axis, ticks) -> str:
+    """The widest label the formatter of `axis` writes for the ticks: the common part and the power of ten it moves
+    to the corner of the axis left out."""
+    try:
+        labels = axis.get_major_formatter().format_ticks(list(ticks))
+    except Exception:
+        return _number_label_sample(ticks)
+    return max(labels, key=len, default='0')
+
+
+def _tick_label_points(axis) -> float:
+    params = axis.get_tick_params() if hasattr(axis, 'get_tick_params') else {}
+    size = params.get('labelsize', matplotlib.rcParams[f'{axis.axis_name}tick.labelsize'])
+    return FontProperties(size=size).get_size_in_points()
+
+
+@functools.lru_cache(maxsize=64)
+def _text_width_points(text: str, size: float) -> float:
+    width, _, _ = TextToPath().get_text_width_height_descent(text, FontProperties(size=size), ismath=False)
+    return width
 
 # ---------------------------------------------------------------------------
 # Engineering time-unit decomposition for a *relative* (seconds) X axis.
@@ -135,7 +195,8 @@ class LinearTickLocator(MaxNLocator):
                 or not (math.isfinite(vmin) and math.isfinite(vmax))):
             return super().tick_values(vmin, vmax)
         lo, hi = (vmin, vmax) if vmin <= vmax else (vmax, vmin)
-        return self.raise_if_exceeds(np.asarray(_linear_ticks(lo, hi, self._target)))
+        count = _fitting_count(self.axis, lambda n: _linear_ticks(lo, hi, n), self._target)
+        return self.raise_if_exceeds(np.asarray(_linear_ticks(lo, hi, count)))
 
 
 class RelativeTimeLocator(Locator):
@@ -176,8 +237,13 @@ class RelativeTimeLocator(Locator):
             return self._fallback.tick_values(vmin, vmax)
         if vmin == vmax:
             return [vmin]
-        ticks_ns = _rel_time_ticks(int(round(float(vmin) * 1e9)),
-                                   int(round(float(vmax) * 1e9)), self.nbins)
+        lo_ns, hi_ns = int(round(float(vmin) * 1e9)), int(round(float(vmax) * 1e9))
+
+        def widest_label(ticks):
+            labels = eng_time_axis_labels(vmin, vmax, [tick / 1e9 for tick in ticks])[1].values()
+            return max(labels, key=len, default='0')
+        count = _fitting_count(self.axis, lambda n: _rel_time_ticks(lo_ns, hi_ns, n), self.nbins, widest_label)
+        ticks_ns = _rel_time_ticks(lo_ns, hi_ns, count)
         return [t / 1e9 for t in ticks_ns]
 
 
@@ -513,7 +579,8 @@ class NiceNanosecondLocator(Locator):
         # In 100 us-unit mode the axis cannot resolve below 100 us, so never
         # choose a finer step (keeps back-conversion on exact integers).
         min_step = 100_000 if self.offset_ns == 100_000 else 0
-        step, kind = _pick_interval(lo, hi, self.target_ticks, min_step)
+        count = _fit_date_count(lo, hi, self.target_ticks, min_step, lambda sample: tick_room(self.axis, sample))
+        step, kind = _pick_interval(lo, hi, count, min_step)
         self._last_interval = (step, kind)
         ticks_abs = _generate_ticks(lo, hi, step, kind)
         return self.raise_if_exceeds([self._to_axis(t) for t in ticks_abs])
