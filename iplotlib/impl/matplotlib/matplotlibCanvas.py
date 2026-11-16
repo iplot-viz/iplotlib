@@ -1667,6 +1667,9 @@ class MatplotlibParser(BackendParserBase):
         lo, hi = impl_plot.get_xlim()
         return lines, lo, hi
 
+    def impl_line_shown(self, line) -> bool:
+        return line.get_visible()
+
     def autoscale_y_axis(self, impl_plot: MPLAxes, padding=0.1):
         """
         This function rescales the y-axis based on the data that is visible given the current xlim of the axis.
@@ -1698,7 +1701,7 @@ class MatplotlibParser(BackendParserBase):
     def _min_positive_visible(self, impl_plot: MPLAxes):
         """Smallest strictly positive Y sample within the current X window, or
         None when nothing positive is visible."""
-        lines, lo, hi = self.get_impl_lines(impl_plot)
+        lines, lo, hi = self.shown_impl_lines(impl_plot)
         best = None
         for line in lines:
             xd, yd = self.get_impl_data(line)

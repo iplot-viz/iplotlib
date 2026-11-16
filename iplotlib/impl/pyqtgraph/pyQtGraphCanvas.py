@@ -2042,6 +2042,9 @@ class PyQtGraphParser(BackendParserBase):
         lo, hi = vb.viewRange()[0]
         return lines, lo, hi
 
+    def impl_line_shown(self, line) -> bool:
+        return line.isVisible()
+
     def autoscale_y_axis(self, impl_plot: PlotItem, padding=0.1):
         """
         This function rescales the y-axis based on the data that is visible given the current limits of the viewbox.
