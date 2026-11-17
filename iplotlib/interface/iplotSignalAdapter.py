@@ -59,11 +59,31 @@ CONTINUOUS_RATE_THRESHOLD_HZ = 100.0
 # Dedup key (source, target, len_src, len_tgt, case): same mismatch across signals warns once.
 _TRUNCATE_WARN_KEYS: typing.Set[tuple] = set()
 
+#: The values of its row an expression reads as ${name}, besides the signals: the start and the end of the time range
+#: the table gives the row, and its pulse. Each with what the row lacks when it has no value for it.
+ROW_VALUES = {'startTime': 'a start time', 'endTime': 'an end time', 'pulseID': 'a pulse'}
+
 IplotSignalAdapterT = typing.TypeVar('IplotSignalAdapterT', bound='IplotSignalAdapter')
 
 
 class DataAccessError(Exception):
     pass
+
+
+class ExpressionError(Exception):
+    """An x, y or z expression of a signal that can't be evaluated; `key` says which."""
+
+    def __init__(self, key: str, error: Exception):
+        super().__init__(f"the {key} expression failed: {error}")
+        self.key = key
+
+
+class _RowValue:
+    """A value of the row in an expression. The parser reads the data of a variable written alone, as ${startTime},
+    or the part of an envelope it computes: the value is all of them."""
+
+    def __init__(self, value):
+        self.data = self.dmin = self.dmax = self.davg = value
 
 
 class Result:
@@ -88,6 +108,8 @@ class StatusInfo:
     sep = '|'
     stage: str = Stage.INIT
     inf: int = 0
+    #: The x, y or z expression whose failure the status gives, if it gives one.
+    expression: str = ''
 
     def reset(self):
         self.msg = ''
@@ -96,6 +118,7 @@ class StatusInfo:
         self.stage = Stage.INIT
         self.sep = '|'
         self.inf = 0
+        self.expression = ''
 
     def __str__(self) -> str:
         if self.result == Result.BUSY or self.result == Result.INVALID:
@@ -165,6 +188,8 @@ class IplotSignalAdapter(ProcessingSignal):
         if string_classifier.is_non_empty(self.ts_end):
             self.ts_end = np.datetime64(self.ts_end, 'ns').astype('int64').item()
 
+        # The range the table gives: the expressions read it as ${startTime} and ${endTime} whatever a zoom reads.
+        self._table_range = (self.ts_start, self.ts_end)
         self.ts_relative = string_classifier.is_non_empty(self.pulse_nb)
         self._local_env = dict()
 
@@ -208,6 +233,14 @@ class IplotSignalAdapter(ProcessingSignal):
         # 5. Initialize dependencies
         self.depends_on = ParserHelper.get_dependencies([self.x_expr, self.y_expr, self.z_expr])
 
+        if self.alias in ROW_VALUES:
+            # The expressions would read the value of the row instead of this signal.
+            self.status_info.reset()
+            self.status_info.msg = (f"The alias '{self.alias}' is taken: expressions read ${{{self.alias}}} as a value "
+                                    f"of the row. Choose another one.")
+            self.status_info.result = Result.INVALID
+            logger.warning(self.status_info.msg)
+
         if self.status_info.result == Result.INVALID:
             return
         else:
@@ -220,6 +253,20 @@ class IplotSignalAdapter(ProcessingSignal):
 
     def calculate_data_hash(self):
         return hash_code(self, ["ts_start", "ts_end", "pulse_nb", "calibrated"])
+
+    def row_values(self, names) -> dict:
+        """The values of the row (see ROW_VALUES) among the variables `names` of an expression, to evaluate it: the
+        time range the table gives the signal, which a zoom leaves as it is, and its pulse. Raises InvalidExpression
+        for one the row has no value for."""
+        start, end = self._table_range
+        values = {'startTime': start, 'endTime': end, 'pulseID': self.pulse_nb}
+        bound = {}
+        for name in ROW_VALUES.keys() & set(names):
+            if values[name] is None or values[name] == '':
+                raise InvalidExpression(f"${{{name}}} has no value: neither the row nor the time range gives "
+                                        f"{ROW_VALUES[name]}.")
+            bound[name] = _RowValue(values[name])
+        return bound
 
     def get_data(self):
         # 1. Populate time, data_primary, data_secondary (if needed)
@@ -319,34 +366,36 @@ class IplotSignalAdapter(ProcessingSignal):
         return source
 
     def compute(self, **kwargs) -> dict:
+        """The arrays of the x, y and z that `kwargs` give expressions for. Raises ExpressionError for one that can't
+        be evaluated. A variable read without samples leaves nothing to evaluate, as ${self}.time[0]: each is the
+        empty buffer of its axis."""
         data_arrays = dict()
         correspondance = {"x": 0, "y": 1, "z": 2}
         defaults = {"x": IplotSignalAdapter.x_expr, "y": IplotSignalAdapter.y_expr, "z": IplotSignalAdapter.z_expr}
+        nothing_read = string_classifier.is_non_empty(self.name) and len(self.data_store[0]) == 0
 
-        # Evaluate each expression.
-        for key, expr in kwargs.items():
-            try:
+        try:
+            for key, expr in kwargs.items():
                 # An expression left at its default reads its buffer as is, whatever
                 # the other axes do: an envelope signal has no 'data' alias to evaluate.
-                if expr == defaults.get(key):
+                if expr == defaults.get(key) or nothing_read:
                     logger.debug(f"No processing needed to compute key={key} expr={expr}")
                     data_arrays.update({key: self.data_store[correspondance[key]]})
-                else:
-                    logger.debug(f" in compute key={key} expr={expr}")
+                    continue
+                logger.debug(f" in compute key={key} expr={expr}")
+                try:
                     result = ParserHelper.evaluate(self, expr)
-                    r_dbg = np.asarray(result)
-                    logger.debug(f"mint#120: compute '{getattr(self, 'label', '?')}' {key}={expr} -> "
-                                f"n={r_dbg.size} dtype={r_dbg.dtype} "
-                                f"unit={getattr(result, 'unit', '?')} "
-                                f"min={r_dbg.min() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'} "
-                                f"max={r_dbg.max() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'}")
-                    data_arrays.update({key: result})
-            except Exception as e:
-                logger.error(f"Error {e} in {expr}")
-                continue
-
-        # Clear the dictionary result
-        ParserHelper.dict_result.clear()
+                except Exception as e:
+                    raise ExpressionError(key, e) from e
+                r_dbg = np.asarray(result)
+                logger.debug(f"mint#120: compute '{getattr(self, 'label', '?')}' {key}={expr} -> "
+                             f"n={r_dbg.size} dtype={r_dbg.dtype} "
+                             f"unit={getattr(result, 'unit', '?')} "
+                             f"min={r_dbg.min() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'} "
+                             f"max={r_dbg.max() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'}")
+                data_arrays.update({key: result})
+        finally:
+            ParserHelper.dict_result.clear()
 
         return data_arrays
 
@@ -453,11 +502,12 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.inf = int(np.sum(np.isinf(np.asarray(self.y_data, dtype=float))))
         self.status_info.result = Result.SUCCESS
 
-    def set_proc_fail(self, msg: str = ''):
+    def set_proc_fail(self, msg: str = '', expression: str = ''):
         self.status_info.reset()
         self.status_info.stage = Stage.PROC
         self.status_info.result = Result.FAIL
         self.status_info.msg = msg
+        self.status_info.expression = expression
         self.status_info.num_points = 0
         logger.warning(f"Processing Error in {self._signal_context()}: {msg}")
 
@@ -510,7 +560,7 @@ class IplotSignalAdapter(ProcessingSignal):
         if not p.is_valid:
             return
 
-        keys = set(p.var_map.keys())
+        keys = set(p.var_map.keys()).difference(ROW_VALUES)  # the values of the row are not signals to read
         keys.discard('self')  # don't bother with self here.
         for key in keys:
             value = ParserHelper.env.get(key)
@@ -737,6 +787,7 @@ class IplotSignalAdapter(ProcessingSignal):
 
             # 2.3 Evaluate 'self.name'. It is an expression combining multiple other signals
             try:
+                tmp_local_env.update(self.row_values(Parser.get_var_expression(self.name)))
                 p = Parser()
                 p.inject(Parser.get_member_list(type(self)))
                 p.inject(self.alias_map)
@@ -792,7 +843,11 @@ class IplotSignalAdapter(ProcessingSignal):
 
         # 3. Finally, apply x, y, z expressions to populate `x_data`, `y_data` and `z_data` respectively
         # self.compute evaluates expressions (IDV-333)
-        data_arrays = self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
+        try:
+            data_arrays = self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
+        except ExpressionError as e:
+            self.set_proc_fail(msg=str(e), expression=e.key)
+            return
         self._finalize_xyz_data([data_arrays.get('x'), data_arrays.get('y'), data_arrays.get('z')])
         # logger.debug("[UDA x={} y={} z={} ] ".format(len(data_arrays.get('x')),len(data_arrays.get('y')),
         # len(data_arrays.get('z'))))
@@ -1535,6 +1590,7 @@ class ParserHelper:
 
         p.clear_expr()
         p.set_expression(expression, True)
+        tmp_local_env.update(signal.row_values(p.var_map))
         p.substitute_var(tmp_local_env, ParserHelper.dict_result)
         p.eval_expr()
         if p.has_time_units:
@@ -1634,4 +1690,5 @@ class ParserHelper:
                 replc = 'X'
                 expr = expr.replace(match, replc)
                 dependencies.add(var)
-        return dependencies
+        # The values of the row are not signals to depend on.
+        return dependencies.difference(ROW_VALUES)

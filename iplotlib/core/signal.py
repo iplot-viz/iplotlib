@@ -9,6 +9,7 @@ for when you wish to take over the data customization.
 """
 
 import numbers
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List
@@ -17,6 +18,9 @@ import numpy as np
 
 from iplotlib.core.marker import Marker
 from iplotlib.interface import IplotSignalAdapter
+
+#: An X expression that reads a time buffer of some alias, e.g. '${T}.time'.
+X_EXPR_TIME_ACCESSOR = re.compile(r'\$\{[^}]+\}\.time\b')
 
 
 @dataclass
@@ -178,8 +182,10 @@ class SignalXY(Signal, IplotSignalAdapter):
             if self._is_requested_window(signal_begin, signal_end):
                 return
             self.set_xranges([signal_begin, signal_end])
-        else:
+        elif not len(self.x_data) or X_EXPR_TIME_ACCESSOR.search(self.x_expr):
             self.set_xranges(ranges)
+        # Otherwise the samples of X are no time, as an index or the data of another signal: their window has no time
+        # to read over, and the data read stay.
 
     def restore_xranges(self, ranges):
         """Restore a recorded request window.
@@ -225,10 +231,16 @@ class SignalXY(Signal, IplotSignalAdapter):
             return cast(time[edge]) + (int(round(shift)) if exact else shift)
 
         lower, upper = cast(bounds[0]), cast(bounds[1])
+        # The slope is only as exact as the X values, as those of timestamps held as floats: an edge extended to within
+        # a sampling step of what was drawn is taken to it.
         if ranges[0] < x[0]:
             begin = min(max(along_edge(0, 1, ranges[0]), lower), cast(time[0]))
+            if begin - lower < abs(cast(time[1]) - cast(time[0])):
+                begin = lower
         if ranges[1] > x[-1]:
             end = max(min(along_edge(-1, -2, ranges[1]), upper), cast(time[-1]))
+            if upper - end < abs(cast(time[-1]) - cast(time[-2])):
+                end = upper
         return begin, end
 
     def _is_requested_window(self, begin, end):
