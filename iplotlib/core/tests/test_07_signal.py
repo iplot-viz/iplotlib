@@ -126,6 +126,17 @@ class SetLimitsTest(unittest.TestCase):
         self.assertEqual(s.ts_start, 1111)
         self.assertEqual(s.ts_end, 1999)
 
+    def test_keeps_the_window_read_when_x_is_no_time(self):
+        # A window of sample indexes, or of the data of another signal, is no time to read over.
+        time = np.linspace(1000, 2000, 100).astype(np.int64)
+        for x_expr, x_data in (('np.arange(np.size(${self}.data)-1)', np.arange(99.0)),
+                               ('${A}.data', np.linspace(-1.0, 1.0, 50))):
+            with self.subTest(x_expr=x_expr):
+                s = self._make_signal(x_expr=x_expr, x_data=x_data, data_store_time=time)
+                s.set_xranges((1000, 2000))
+                s.set_limits((40, 70))
+                self.assertEqual((s.ts_start, s.ts_end), (1000, 2000))
+
 
 class ContainedViewTest(unittest.TestCase):
     """The samples in memory of a signal that is not decimated serve every view within them, their first and last

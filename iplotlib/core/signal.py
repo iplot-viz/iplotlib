@@ -9,6 +9,7 @@ for when you wish to take over the data customization.
 """
 
 import numbers
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List
@@ -17,6 +18,9 @@ import numpy as np
 
 from iplotlib.core.marker import Marker
 from iplotlib.interface import IplotSignalAdapter
+
+#: An X expression that reads a time buffer of some alias, e.g. '${T}.time'.
+X_EXPR_TIME_ACCESSOR = re.compile(r'\$\{[^}]+\}\.time\b')
 
 
 @dataclass
@@ -178,8 +182,10 @@ class SignalXY(Signal, IplotSignalAdapter):
             if self._is_requested_window(signal_begin, signal_end):
                 return
             self.set_xranges([signal_begin, signal_end])
-        else:
+        elif not len(self.x_data) or X_EXPR_TIME_ACCESSOR.search(self.x_expr):
             self.set_xranges(ranges)
+        # Otherwise the samples of X are no time, as an index or the data of another signal: their window has no time
+        # to read over, and the data read stay.
 
     def restore_xranges(self, ranges):
         """Restore a recorded request window.
