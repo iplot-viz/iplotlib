@@ -70,6 +70,14 @@ class DataAccessError(Exception):
     pass
 
 
+class ExpressionError(Exception):
+    """An x, y or z expression of a signal that can't be evaluated; `key` says which."""
+
+    def __init__(self, key: str, error: Exception):
+        super().__init__(f"the {key} expression failed: {error}")
+        self.key = key
+
+
 class _RowValue:
     """A value of the row in an expression. The parser reads the data of a variable written alone, as ${startTime},
     or the part of an envelope it computes: the value is all of them."""
@@ -100,6 +108,8 @@ class StatusInfo:
     sep = '|'
     stage: str = Stage.INIT
     inf: int = 0
+    #: The x, y or z expression whose failure the status gives, if it gives one.
+    expression: str = ''
 
     def reset(self):
         self.msg = ''
@@ -108,6 +118,7 @@ class StatusInfo:
         self.stage = Stage.INIT
         self.sep = '|'
         self.inf = 0
+        self.expression = ''
 
     def __str__(self) -> str:
         if self.result == Result.BUSY or self.result == Result.INVALID:
@@ -355,34 +366,36 @@ class IplotSignalAdapter(ProcessingSignal):
         return source
 
     def compute(self, **kwargs) -> dict:
+        """The arrays of the x, y and z that `kwargs` give expressions for. Raises ExpressionError for one that can't
+        be evaluated. A variable read without samples leaves nothing to evaluate, as ${self}.time[0]: each is the
+        empty buffer of its axis."""
         data_arrays = dict()
         correspondance = {"x": 0, "y": 1, "z": 2}
         defaults = {"x": IplotSignalAdapter.x_expr, "y": IplotSignalAdapter.y_expr, "z": IplotSignalAdapter.z_expr}
+        nothing_read = string_classifier.is_non_empty(self.name) and len(self.data_store[0]) == 0
 
-        # Evaluate each expression.
-        for key, expr in kwargs.items():
-            try:
+        try:
+            for key, expr in kwargs.items():
                 # An expression left at its default reads its buffer as is, whatever
                 # the other axes do: an envelope signal has no 'data' alias to evaluate.
-                if expr == defaults.get(key):
+                if expr == defaults.get(key) or nothing_read:
                     logger.debug(f"No processing needed to compute key={key} expr={expr}")
                     data_arrays.update({key: self.data_store[correspondance[key]]})
-                else:
-                    logger.debug(f" in compute key={key} expr={expr}")
+                    continue
+                logger.debug(f" in compute key={key} expr={expr}")
+                try:
                     result = ParserHelper.evaluate(self, expr)
-                    r_dbg = np.asarray(result)
-                    logger.debug(f"mint#120: compute '{getattr(self, 'label', '?')}' {key}={expr} -> "
-                                f"n={r_dbg.size} dtype={r_dbg.dtype} "
-                                f"unit={getattr(result, 'unit', '?')} "
-                                f"min={r_dbg.min() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'} "
-                                f"max={r_dbg.max() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'}")
-                    data_arrays.update({key: result})
-            except Exception as e:
-                logger.error(f"Error {e} in {expr}")
-                continue
-
-        # Clear the dictionary result
-        ParserHelper.dict_result.clear()
+                except Exception as e:
+                    raise ExpressionError(key, e) from e
+                r_dbg = np.asarray(result)
+                logger.debug(f"mint#120: compute '{getattr(self, 'label', '?')}' {key}={expr} -> "
+                             f"n={r_dbg.size} dtype={r_dbg.dtype} "
+                             f"unit={getattr(result, 'unit', '?')} "
+                             f"min={r_dbg.min() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'} "
+                             f"max={r_dbg.max() if r_dbg.size and np.issubdtype(r_dbg.dtype, np.number) else '-'}")
+                data_arrays.update({key: result})
+        finally:
+            ParserHelper.dict_result.clear()
 
         return data_arrays
 
@@ -489,11 +502,12 @@ class IplotSignalAdapter(ProcessingSignal):
         self.status_info.inf = int(np.sum(np.isinf(np.asarray(self.y_data, dtype=float))))
         self.status_info.result = Result.SUCCESS
 
-    def set_proc_fail(self, msg: str = ''):
+    def set_proc_fail(self, msg: str = '', expression: str = ''):
         self.status_info.reset()
         self.status_info.stage = Stage.PROC
         self.status_info.result = Result.FAIL
         self.status_info.msg = msg
+        self.status_info.expression = expression
         self.status_info.num_points = 0
         logger.warning(f"Processing Error in {self._signal_context()}: {msg}")
 
@@ -829,7 +843,11 @@ class IplotSignalAdapter(ProcessingSignal):
 
         # 3. Finally, apply x, y, z expressions to populate `x_data`, `y_data` and `z_data` respectively
         # self.compute evaluates expressions (IDV-333)
-        data_arrays = self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
+        try:
+            data_arrays = self.compute(x=self.x_expr, y=self.y_expr, z=self.z_expr)
+        except ExpressionError as e:
+            self.set_proc_fail(msg=str(e), expression=e.key)
+            return
         self._finalize_xyz_data([data_arrays.get('x'), data_arrays.get('y'), data_arrays.get('z')])
         # logger.debug("[UDA x={} y={} z={} ] ".format(len(data_arrays.get('x')),len(data_arrays.get('y')),
         # len(data_arrays.get('z'))))
