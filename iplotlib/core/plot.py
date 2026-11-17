@@ -21,6 +21,11 @@ from iplotlib.core.ruler import Ruler
 from iplotlib.core.signal import Signal, SignalXY, SignalContour
 
 
+def _own_legend_value(value):
+    """A legend position or layout of a plot; older workspaces wrote 'same as canvas' where it has none of its own."""
+    return None if value == 'same as canvas' else value
+
+
 @dataclass
 class Plot(ABC):
     """
@@ -93,6 +98,8 @@ class Plot(ABC):
             self.rulers = []
         if self.axes is None:
             self.axes = [LinearAxis(), [LinearAxis()]]
+        self.legend_position = _own_legend_value(self.legend_position)
+        self.legend_layout = _own_legend_value(self.legend_layout)
 
         self.axes[0].parent = weakref.ref(self)
         for axe in self.axes[1]:
@@ -144,8 +151,8 @@ class Plot(ABC):
     def merge(self, old_plot: dict):
         self.plot_title = old_plot['plot_title']
         self.legend = old_plot['legend']
-        self.legend_position = old_plot['legend_position']
-        self.legend_layout = old_plot['legend_layout']
+        self.legend_position = _own_legend_value(old_plot['legend_position'])
+        self.legend_layout = _own_legend_value(old_plot['legend_layout'])
         self.legend_anchor = old_plot.get('legend_anchor', Plot.legend_anchor)
         self.legend_width = old_plot.get('legend_width', Plot.legend_width)
         self.legend_collapsed = old_plot.get('legend_collapsed', Plot.legend_collapsed)
