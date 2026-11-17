@@ -86,16 +86,13 @@ class MainWindowSmokeTest(unittest.TestCase):
             win.close()
 
     def test_toolbar_exposes_mouse_mode_actions(self):
-        """Each canvas mouse mode has a checkable action in the toolbar."""
+        """Each canvas mouse mode has a checkable action in the toolbar, and only those: the rulers took the place of
+        the markers."""
         win = IplotQtMainWindow()
         try:
-            action_texts = {a.text() for a in win.toolBar._actions.actions()}
             # Actions are added stripping the "MM_" prefix.
-            for mode in (Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_CROSSHAIR,
-                         Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM,
-                         Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_MARKER):
-                self.assertIn(mode[3:], action_texts,
-                              f"{mode} action missing from toolbar")
+            self.assertEqual([a.text() for a in win.toolBar._actions.actions()],
+                             ['SELECT', 'CROSSHAIR', 'PAN', 'ZOOM', 'DIST', 'RULER'])
             for a in win.toolBar._actions.actions():
                 self.assertTrue(a.isCheckable())
         finally:

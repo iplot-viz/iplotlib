@@ -933,9 +933,6 @@ class PyQtGraphParser(BackendParserBase):
 
         return style
 
-    def get_line_label(self, line: PlotDataItem):
-        return line.name()
-
     def get_ysub_data(self, plot: PlotXYWithSlider, y_data):
         return y_data[plot.slider.value()]
 
@@ -1807,44 +1804,6 @@ class PyQtGraphParser(BackendParserBase):
             logger.error(f"PlotItem not found for signal {signal}. Unexpected error. signal_id: {id(signal)}")
             return
         return plot
-
-    def process_ipl_signal_annotations(self, signal: Signal, impl_plot: PlotItem):
-        if not isinstance(signal, SignalXY):
-            return
-
-        if impl_plot.listDataItems() and impl_plot.listDataItems()[0].opts['symbol'] is None:
-            return
-
-        if signal.markers_list:
-            annotations_names = [child.toPlainText() for child in impl_plot.items if isinstance(child, TextItem)]
-            for marker in signal.markers_list:
-                if marker.visible:
-                    # Draw marker with correct offset to right display
-                    x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
-                    y = marker.xy[1]
-                    # Marker coordinates are data-space; the log-mode view is log10.
-                    if impl_plot.getAxis('left').logMode and y > 0:
-                        y = np.log10(y)
-
-                    # Create annotation if not present (import case)
-                    if marker.name not in annotations_names:
-                        marker_text = TextItem(anchor=(0.5, 0.5),
-                                               html=f"""<div style="
-                                               background-color:{marker.color};
-                                               color:black;
-                                               border:1px solid black;
-                                               border-radius:4px;
-                                               padding:2px 5px;
-                                               font-size:12pt;
-                                               text-align:center;
-                                                ">{marker.name}</div>""")
-                        marker_text.setPos(x, y)
-                        impl_plot.addItem(marker_text)
-                    else:
-                        # Update position if annotation already exists
-                        prev_annotation = [child for child in impl_plot.items if isinstance(child,
-                                                                                            TextItem) and child.toPlainText() == marker.name]  # type: List[TextItem]
-                        prev_annotation[0].setPos(x, y)
 
     def clear(self):
         """

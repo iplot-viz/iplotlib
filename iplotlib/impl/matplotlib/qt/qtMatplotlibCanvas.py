@@ -34,7 +34,7 @@ from iplotlib.core import PlotContour, SignalXY, PlotXY, PlotXYWithSlider, PlotC
 from iplotlib.core.canvas import Canvas
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.core.ruler import Ruler
-from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser, apply_theme_rc, marker_label_props
+from iplotlib.impl.matplotlib.matplotlibCanvas import MatplotlibParser, apply_theme_rc
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, NiceNanosecondLocator, \
     ExponentScalarFormatter, RelativeTimeLocator, is_time_label
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
@@ -384,65 +384,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         rect.set_x(x_lo)
         rect.set_width(x_hi - x_lo)
         self._minimap_renderer.draw_idle()
-
-    def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
-        signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: MPLAxes
-
-        # Creation of the annotations
-        if isinstance(signal, SignalXY) and ax:
-            if not modify:
-                # Create and draw marker
-                x = self._parser.transform_value(ax, 0, xy[0], inverse=True)
-                y = xy[1]
-                ax.annotate(text=marker_name,
-                            xy=(x, y),
-                            xytext=(x, y),
-                            **marker_label_props(color))
-
-                # Get marker row
-                row = self.get_marker_row(signal, marker_name)
-
-                # Set marker visibility
-                signal.markers_list[row].visible = True
-                signal.markers_list[row].color = color
-                self._parser.figure.canvas.draw()
-            else:
-                # Change marker color when it is visible
-                annotations = [child for child in ax.get_children() if isinstance(child, plt.Annotation)]
-                if annotations:
-                    for annotation in annotations:
-                        if annotation.get_text() == marker_name:
-                            # Set new color property
-                            props = marker_label_props(color)
-                            annotation.set_color(props['color'])
-                            annotation.set_bbox(props['bbox'])
-                            # Get marker row
-                            row = self.get_marker_row(signal, marker_name)
-                            signal.markers_list[row].color = color
-                            self._parser.figure.canvas.draw()
-
-    def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
-        signal, ax = self.get_signal_marker(plot_id, signal_uid)
-
-        # Get annotations from the axis
-        annotations = [child for child in ax.get_children() if isinstance(child, plt.Annotation)]
-
-        # Get marker row
-        row = self.get_marker_row(signal, marker_name)
-
-        # Indicate if the marker will be removed or hidden
-        if delete:
-            signal.delete_marker(row)
-        else:
-            signal.markers_list[row].visible = False
-
-        # Remove annotations
-        if annotations:
-            for annotation in annotations:
-                if annotation.get_text() == marker_name:
-                    annotation.remove()
-                    self._parser.figure.canvas.draw()
-                    return
 
     def _get_plot_by_id(self, plot_id):
         return self._plot_at_canvas_position(plot_id)
@@ -826,14 +767,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self._mpl_toolbar.pan()
         elif mode == Canvas.MOUSE_MODE_ZOOM:
             self._mpl_toolbar.zoom()
-        elif mode == Canvas.MOUSE_MODE_MARKER:
-            if not self._marker_window.isVisible():
-                self._marker_window.show()
-            elif self._marker_window.isMinimized():
-                self._marker_window.showNormal()
-            else:
-                self._marker_window.raise_()
-                self._marker_window.activateWindow()
         elif mode == Canvas.MOUSE_MODE_RULER:
             if not self._ruler_window.isVisible():
                 self._ruler_window.show()
@@ -1333,40 +1266,6 @@ class QtMatplotlibCanvas(IplotQtCanvas):
                     self.push_view_lim_cmd()
 
                 self.render()
-            elif self._mmode == Canvas.MOUSE_MODE_MARKER and event.button == MouseButton.LEFT:
-                mpl_axes = event.inaxes
-                if not isinstance(mpl_axes, MPLAxes):
-                    return
-                ci = self._parser._impl_plot_cache_table.get_cache_item(event.inaxes)
-                if not hasattr(ci, 'plot'):
-                    return
-                plot = ci.plot()
-                x_value = event.xdata
-                y_value = event.ydata
-
-                # Markers can only be created if the property 'marker' is not None
-                if mpl_axes.get_lines()[0].get_marker() != 'None':
-                    # Check if the marker coordinates are correct and if the marker has not already been created
-                    new_marker, marker_signal, label_line = self._parser.add_marker_scaled(mpl_axes, plot, x_value,
-                                                                                           y_value)
-                    if new_marker is not None:
-                        if new_marker not in self._marker_window.get_markers():
-                            self._marker_window.add_marker(marker_signal, new_marker, label_line)
-                            if not self._marker_window.isVisible():
-                                self._marker_window.show()
-                            elif self._marker_window.isMinimized():
-                                self._marker_window.showNormal()
-                            else:
-                                self._marker_window.raise_()
-                                self._marker_window.activateWindow()
-                        else:
-                            logger.warning(f"The marker {new_marker} is already created")
-                    else:
-                        logger.warning(
-                            f"Cannot add marker {new_marker}: found {marker_signal} samples, but the maximum allowed"
-                            f" is 100")
-                else:
-                    logger.warning("Markers must be enabled in the plot to create signal markers")
         else:
             if event.inaxes is None:
                 return

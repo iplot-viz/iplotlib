@@ -512,15 +512,6 @@ class RulerPyQtGraphRegressionTest(unittest.TestCase):
         finally:
             widget.deleteLater()
 
-    def test_marker_window_remains_independent_from_ruler_window(self):
-        widget = QtPyQtGraphCanvas(canvas=_build_canvas())
-        try:
-            self.assertIsNotNone(widget._marker_window)
-            self.assertIsNotNone(widget._ruler_window)
-            self.assertIsNot(widget._marker_window, widget._ruler_window)
-        finally:
-            widget.deleteLater()
-
 
 class RulerPyQtGraphFocusTest(unittest.TestCase):
     """Focusing a plot rebuilds the canvas with that plot alone at (0, 0): its

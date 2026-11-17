@@ -10,12 +10,10 @@ for when you wish to take over the data customization.
 
 import numbers
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import List
+from dataclasses import dataclass
 
 import numpy as np
 
-from iplotlib.core.marker import Marker
 from iplotlib.interface import IplotSignalAdapter
 
 
@@ -112,7 +110,6 @@ class SignalXY(Signal, IplotSignalAdapter):
     marker_size: int = None
     step: str = None
     vertical_lines: str = None
-    markers_list: List[Marker] = field(default_factory=list)
     hidden: bool = False
 
     def __post_init__(self):
@@ -151,12 +148,6 @@ class SignalXY(Signal, IplotSignalAdapter):
         self.step = old_signal['step']
         self.vertical_lines = old_signal.get('vertical_lines', SignalXY.vertical_lines)
         self.hidden = old_signal.get('hidden', SignalXY.hidden)
-
-    def add_marker(self, marker: Marker):
-        self.markers_list.append(marker)
-
-    def delete_marker(self, index):
-        self.markers_list.pop(index)
 
     def set_limits(self, ranges):
         if self._x_maps_samples_to_time():

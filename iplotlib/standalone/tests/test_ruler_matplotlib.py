@@ -450,13 +450,6 @@ class RulerMatplotlibRegressionTest(unittest.TestCase):
         finally:
             widget.deleteLater()
 
-    def test_marker_and_ruler_windows_are_independent(self):
-        widget = QtMatplotlibCanvas(canvas=_build_canvas())
-        try:
-            self.assertIsNot(widget._marker_window, widget._ruler_window)
-        finally:
-            widget.deleteLater()
-
     def test_zoom_with_legend_and_ruler_keeps_axis_callback_alive(self):
         """Ruler '_RulerLine' helpers must not be counted as signal lines: if they
         are, zooming a legend plot raises inside the axis-update callback and

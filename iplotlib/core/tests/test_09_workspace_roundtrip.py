@@ -81,6 +81,18 @@ class TestWorkspaceRoundtrip(unittest.TestCase):
         self.assertEqual(restored.cols, 1)
         self.assertEqual(restored.title, "empty")
 
+    def test_a_workspace_saved_with_markers_still_opens(self):
+        saved = _build_sample_canvas().to_dict()
+        signal = next(iter(saved['plots'][0][0]['signals'].values()))[0]
+        signal['markers_list'] = [{'name': 'A', 'xy': [1.0, 2.0], 'color': '#ffffff', 'visible': True,
+                                   '_type': 'iplotlib.core.marker.Marker'}]
+
+        restored = Canvas.from_dict(json.loads(json.dumps(saved)))
+
+        self.assertIsInstance(restored, Canvas)
+        self.assertEqual(restored.title, "roundtrip")
+        self.assertEqual(next(iter(restored.plots[0][0].signals.values()))[0].label, "signal_a")
+
 
 if __name__ == '__main__':
     unittest.main()

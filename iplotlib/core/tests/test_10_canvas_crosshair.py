@@ -1,4 +1,4 @@
-"""Tests for canvas crosshair and marker state (mouse mode and enable_crosshair)."""
+"""Tests for canvas crosshair state (mouse mode and enable_crosshair)."""
 
 import unittest
 
@@ -27,15 +27,10 @@ class TestCanvasCrosshair(unittest.TestCase):
         c.set_mouse_mode(Canvas.MOUSE_MODE_CROSSHAIR)
         self.assertEqual(c.mouse_mode, Canvas.MOUSE_MODE_CROSSHAIR)
 
-    def test_mouse_mode_marker(self):
-        c = Canvas()
-        c.set_mouse_mode(Canvas.MOUSE_MODE_MARKER)
-        self.assertEqual(c.mouse_mode, Canvas.MOUSE_MODE_MARKER)
-
     def test_mouse_mode_constants_distinct(self):
         modes = {Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_CROSSHAIR,
                  Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM,
-                 Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_MARKER}
+                 Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_RULER}
         # All six modes must be distinct string constants.
         self.assertEqual(len(modes), 6)
 
