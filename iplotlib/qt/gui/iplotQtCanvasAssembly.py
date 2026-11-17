@@ -29,8 +29,9 @@ class IplotQtCanvasAssembly(QStackedWidget):
 
     def __init__(self, parent: typing.Optional[QWidget] = None):
         super().__init__(parent=parent)
+        # The rows go to the model itself. A Python wrapper kept of its root item, which Qt creates and deletes with the
+        # model, would outlive it, and shiboken could hand it back for another object made at the same address.
         self._model = QStandardItemModel(parent=self)
-        self._parentItem = self._model.invisibleRootItem()
 
     def refreshLinks(self):
         """
@@ -58,7 +59,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
             self.setCurrentIndex(idx)
             canvasItem = CanvasItem(f'Canvas {idx + 1}')
             canvasItem.setEditable(False)
-            self._parentItem.appendRow(canvasItem)
+            self._model.appendRow(canvasItem)
             self.set_canvas_data(idx, canvas)
             self.canvasAdded.emit(idx, canvas)
 
@@ -70,7 +71,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
             super().insertWidget(idx, canvas)
             canvasItem = CanvasItem(f'Canvas {idx + 1}')
             canvasItem.setEditable(False)
-            self._parentItem.insertRow(idx, canvasItem)
+            self._model.insertRow(idx, canvasItem)
             self.set_canvas_data(idx, canvas)
             self.canvasAdded.emit(idx, canvas)
 
@@ -78,7 +79,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
         idx = self.indexOf(canvas)
         if idx >= 0:
             self.removeWidget(canvas)
-            removed = self._parentItem.takeRow(idx)
+            removed = self._model.takeRow(idx)
             assert len(removed) > 0
             assert removed[0] == canvas
             self.canvasRemoved.emit(idx, canvas)
