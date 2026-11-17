@@ -132,6 +132,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         self._mpl_renderer.mpl_connect('button_release_event', self._mpl_mouse_release_handler)
         self._mpl_renderer.mpl_connect('motion_notify_event', self._mpl_mouse_motion_handler)
         self._mpl_renderer.mpl_connect('figure_leave_event', lambda _: self._reset_legend_hover())
+        self._mpl_renderer.mpl_connect('scroll_event', self._mpl_scroll_handler)
 
         self.setLayout(self._vlayout)
         self._take_theme()
@@ -907,6 +908,18 @@ class QtMatplotlibCanvas(IplotQtCanvas):
 
     def _flush_view(self):
         self.render()
+
+    def _flush_view_soon(self):
+        self.render_deferred()
+
+    def _mpl_scroll_handler(self, event):
+        """Zoom the time axis with the wheel, around the mouse (see wheel_zoom). Qt tells the angle of the wheel; a
+        scroll that comes from elsewhere tells its steps."""
+        if event.inaxes is None or event.xdata is None:
+            return
+        gui = event.guiEvent
+        angle = gui.angleDelta().y() if gui is not None and hasattr(gui, 'angleDelta') else round(event.step * 120)
+        self.wheel_zoom(event.inaxes, event.xdata, angle)
 
     def _grid_bounds(self):
         gridspec = getattr(self._parser, '_layout', None)

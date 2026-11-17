@@ -69,6 +69,9 @@ class IplotQtCanvas(QWidget):
         self._theme_draw_pending = False
         self._staging_cmds = []  # type: List[IplotAxesRangeCmd]
         self._commitd_cmds = []  # type: List[IplotAxesRangeCmd]
+        # The zoom of the last turn of the wheel, and when it was last turned (see wheel_zoom).
+        self._wheel_cmd = None  # type: Optional[IplotAxesRangeCmd]
+        self._wheel_time = 0.0
 
         # Iplotlib markers
         self._marker_window = IplotQtMarker()
@@ -875,18 +878,73 @@ class IplotQtCanvas(QWidget):
         # tells nothing (see set_plot_limits).
         view = [self._parser.transform_value(impl_plot, 0, value, inverse=True) for value in (begin, end)]
         self._parser.set_impl_x_axis_limits(impl_plot, tuple(view))
-        if self._parser._pm.get_value(self.get_canvas(), 'autoscale'):
-            # A zoom made with the mouse sets the Y axis too, which fits it to the data then. Each stack, since
-            # pyqtgraph tells nothing of a Y range that stays the same.
-            plot = self._parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
-            for stack in self._parser._plot_impl_plot_lut.get(id(plot)):
-                self._parser.autoscale_y_axis(stack)
+        self._fit_y_after_x_zoom(impl_plot)
         while len(self._staging_cmds):
             self.commit_view_lim_cmd(impl_plot)
         while len(self._commitd_cmds):
             self.push_view_lim_cmd()
         self._flush_view()
         self.stats(self.get_canvas())
+
+    def _fit_y_after_x_zoom(self, impl_plot):
+        """With autoscale on, fit the Y axis of the plot, and of the plots that share its time axis, to what they show
+        after a zoom of their time axis alone: a zoom made with the mouse sets the Y axis too, which fits it then."""
+        canvas = self.get_canvas()
+        if not self._parser._pm.get_value(canvas, 'autoscale'):
+            return
+        group = (self._parser._get_all_shared_axes(impl_plot) if self._parser._pm.get_value(canvas, 'shared_x_axis')
+                 else [impl_plot])
+        for member in group or [impl_plot]:
+            cache_item = self._parser._impl_plot_cache_table.get_cache_item(member)
+            plot = cache_item.plot() if hasattr(cache_item, 'plot') else None
+            # Each stack, since pyqtgraph tells nothing of a Y range that stays the same.
+            for stack in self._parser._plot_impl_plot_lut.get(id(plot), []) if plot is not None else []:
+                self._parser.autoscale_y_axis(stack)
+
+    #: The time axis shows 1.02 ** 15, about 1.35 times, less or more of itself at each notch of the wheel (an angle of
+    #: 120): the step pyqtgraph zooms by.
+    WHEEL_STEP = 1.02 ** (1 / 8)
+    #: Notches closer in time than this, in seconds, are one turn of the wheel, and one zoom to undo.
+    WHEEL_TURN_S = 1.0
+
+    def wheel_zoom(self, impl_plot, x: float, angle: int) -> bool:
+        """Zoom the time axis of a plot, and of the plots that share it, around `x`, in the coordinates of its view: in
+        as the wheel turns away from the user by `angle` (in eighths of a degree), out as it turns back. The notches of
+        a turn are one zoom to undo. False where the wheel zooms nothing: while streaming, on a contour, during a drag
+        or another zoom."""
+        canvas = self.get_canvas()
+        cache_item = self._parser._impl_plot_cache_table.get_cache_item(impl_plot) if self._parser else None
+        plot = cache_item.plot() if hasattr(cache_item, 'plot') else None
+        if (not angle or canvas is None or canvas.streaming or not isinstance(plot, PlotXY) or self._staging_cmds
+                or QApplication.mouseButtons() != Qt.MouseButton.NoButton):
+            return False
+        last = self._parser._hm.get_next_undo_cmd()
+        turning = (last is not None and last is self._wheel_cmd
+                   and time.monotonic() - self._wheel_time < self.WHEEL_TURN_S)
+        if not turning:
+            self.stage_view_lim_cmd(impl_plot, name='Zoom')
+        lo, hi = self._parser.get_impl_x_axis_limits(impl_plot)
+        scale = self.WHEEL_STEP ** -angle
+        self._parser.set_impl_x_axis_limits(impl_plot, (x - (x - lo) * scale, x + (hi - x) * scale))
+        self._fit_y_after_x_zoom(impl_plot)
+        if turning:
+            last.new_lim = self._parser.get_view_cmd_limits(impl_plot)
+        else:
+            while len(self._staging_cmds):
+                self.commit_view_lim_cmd(impl_plot)
+            while len(self._commitd_cmds):
+                self.push_view_lim_cmd()
+            # None if nothing changed, and so nothing was pushed.
+            pushed = self._parser._hm.get_next_undo_cmd()
+            self._wheel_cmd = pushed if pushed is not last else None
+        self._wheel_time = time.monotonic()
+        self._flush_view_soon()
+        self.stats(canvas)
+        return True
+
+    def _flush_view_soon(self):
+        """Redraw after a view-limit change, once the events waiting are done: a turn of the wheel brings several."""
+        self._flush_view()
 
     def reset_all_views(self):
         """
