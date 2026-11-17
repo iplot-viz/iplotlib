@@ -4,6 +4,9 @@ import unittest
 from unittest import mock
 
 import numpy as np
+from iplotlib.core.canvas import Canvas
+from iplotlib.core.plot import PlotXY
+from iplotlib.core.property_manager import PropertyManager
 from iplotlib.core.signal import SignalXY, SignalContour
 
 
@@ -22,6 +25,34 @@ class TestSignalXY(unittest.TestCase):
     def test_color_is_stored(self):
         s = SignalXY(label="s", color="#ff0000")
         self.assertEqual(s.color, "#ff0000")
+
+
+class ResetPreferencesTest(unittest.TestCase):
+    """Reset hands a signal back the color its plot gave it, not the one of the configuration."""
+
+    @staticmethod
+    def _canvas_with_two_signals():
+        canvas = Canvas(1, 1)
+        plot = PlotXY()
+        for label in ('first', 'second'):
+            plot.add_signal(SignalXY(label=label))  # the plot gives each its color of the palette
+        canvas.add_plot(plot, 0)
+        return canvas, plot.signals[1][1]
+
+    def test_reset_gives_back_the_color_of_the_palette(self):
+        _, signal = self._canvas_with_two_signals()
+        palette = signal.color
+        signal.color, signal.new_color = '#00ff00', True  # as chosen in the preferences
+        signal.reset_preferences()
+        self.assertEqual(signal.color, palette)
+        self.assertFalse(signal.new_color)
+
+    def test_reset_color_does_not_depend_on_the_configured_default(self):
+        canvas, signal = self._canvas_with_two_signals()
+        palette = signal.color
+        canvas.reset_preferences()
+        with mock.patch.dict(PropertyManager().default, {'color': '#123456'}):
+            self.assertEqual(PropertyManager().get_value(signal, 'color'), palette)
 
 
 class TestSignalContour(unittest.TestCase):

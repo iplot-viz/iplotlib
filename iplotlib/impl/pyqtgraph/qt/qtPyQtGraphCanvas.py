@@ -1,15 +1,19 @@
 import os
+import weakref
+from types import SimpleNamespace
+from typing import Optional
 
-from PySide6.QtCore import QMargins, Qt, Signal, QEvent, QTimer
+from PySide6.QtCore import QMargins, QPoint, Qt, Signal, QEvent, QTimer
 from PySide6.QtGui import QFont, QFontMetricsF
-from PySide6.QtWidgets import QVBoxLayout, QMenu, QMessageBox, QSplitter
+from PySide6.QtWidgets import QGraphicsProxyWidget, QVBoxLayout, QMenu, QMessageBox, QSplitter
 
 import numpy as np
 from iplotlib.core import Canvas, PlotXY, PlotContour, SignalXY, PlotContourWithSlider
+from iplotlib.core import layout
 from iplotlib.core.display import ScaledPixels
 from iplotlib.core.distance import DistanceCalculator
 from iplotlib.core.ruler import Ruler
-from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser
+from iplotlib.impl.pyqtgraph.pyQtGraphCanvas import PyQtGraphParser, _Legend, _LegendEye
 from iplotlib.core.date_ticks import (
     pick_interval,
     generate_ticks,
@@ -32,10 +36,48 @@ logger = Sl.get_logger(__name__)
 MINIMAP_MIN_HEIGHT = ScaledPixels(110)
 
 
+class _MinimapViewBox(pg.ViewBox):
+    """The view of the mini-map. A left drag across it selects a span of the time axis,
+    drawn while it is dragged; the mouse moves nothing in the mini-map."""
+
+    spanSelected = Signal(float, float)
+
+    def __init__(self):
+        super().__init__(enableMenu=False)
+        self._span = None
+        self._start = None
+
+    def mouseDragEvent(self, ev, axis=None):
+        # An axis passes on the drags that start on it: only those across the view count, as with matplotlib.
+        if ev.button() != Qt.MouseButton.LeftButton or axis is not None:
+            ev.ignore()
+            return
+        ev.accept()
+        if ev.isStart():
+            # Qt keeps where the last button pressed went down only: another one pressed during the drag would
+            # move its start.
+            self._start = ev.buttonDownPos()
+        elif self._start is None:
+            # The drag ended when its button was released, with another one still down.
+            return
+        begin, end = sorted((self.mapToView(self._start).x(), self.mapToView(ev.pos()).x()))
+        if self._span is None:
+            self._span = pg.LinearRegionItem(movable=False, brush=pg.mkBrush(25, 118, 210, 64),
+                                             pen=pg.mkPen('#1976d2'))
+            self._span.setZValue(20)
+            self.addItem(self._span, ignoreBounds=True)
+        self._span.setRegion((begin, end))
+        if ev.isFinish():
+            self.removeItem(self._span)
+            self._span = None
+            start, self._start = self._start, None
+            if abs(ev.pos().x() - start.x()) >= IplotQtCanvas.MINIMAP_ZOOM_MIN_PX:
+                self.spanSelected.emit(begin, end)
+
+
 class QtPyQtGraphCanvas(IplotQtCanvas):
     """Qt widget that internally uses a matplotlib canvas backend"""
 
-    dropSignal = Signal(object)
     _PREVIEW_RULER_NAME = "__preview__"
 
     def __init__(self, parent=None, tight_layout=True, **kwargs):
@@ -57,14 +99,16 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._parser._on_view_reads_changed = self.viewReadsChanged.emit
         self._parser.legend_eyes = True
 
-        # Track connected ViewBoxes to avoid duplicate connections
-        self._connected_viewboxes = set()
+        # Track connected ViewBoxes to avoid duplicate connections. By the objects themselves: a ViewBox made by a
+        # redraw can take the id of one the redraw freed.
+        self._connected_viewboxes = weakref.WeakSet()
 
         self._minimap_widget = pg.GraphicsLayoutWidget()
         self._minimap_widget.setMinimumHeight(MINIMAP_MIN_HEIGHT.px())
         self._minimap_widget.setVisible(False)
         self._minimap_widget.setBackground('#f5f5f5')
-        self._minimap_plot = self._minimap_widget.addPlot(row=0, col=0)
+        self._minimap_plot = self._minimap_widget.addPlot(row=0, col=0, viewBox=_MinimapViewBox())
+        self._minimap_plot.getViewBox().spanSelected.connect(self._on_minimap_span)
         self._minimap_plot.setMouseEnabled(x=False, y=False)
         self._minimap_plot.showAxis('left')
         self._minimap_plot.showAxis('bottom')
@@ -91,9 +135,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self.setLayout(self._vlayout)
         self._take_theme()
         self.set_canvas(kwargs.get('canvas'))
-
-        # Drag & Drop
-        self.setAcceptDrops(True)
+        self._install_arranger(self._parser.figure.viewport())
 
     def _apply_theme(self, theme):
         self._parser.figure.setBackground('w' if theme is None else theme['background'])
@@ -424,6 +466,24 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         if main_plot is None or self._minimap_viewport_item is None:
             return
         self._on_main_x_range_changed(main_plot, main_plot.getViewBox().viewRange())
+
+    def _on_minimap_span(self, begin: float, end: float):
+        """Zoom the plot above to the span selected on the mini-map, within the range it shows."""
+        canvas = self.get_canvas()
+        main_plot = self._get_main_plot_for_minimap()
+        baseline = canvas.get_minimap_baseline() if canvas is not None else None
+        if main_plot is None or baseline is None:
+            return
+        target_plot = canvas.get_minimap_target_plot()
+        if target_plot.axes and getattr(target_plot.axes[0], 'is_date', False):
+            # The mini-map shows a date axis from an integer offset (see _update_minimap).
+            begin, end = self._minimap_offset + int(round(begin)), self._minimap_offset + int(round(end))
+            low, high = int(baseline[0]), int(baseline[1])
+        else:
+            low, high = float(baseline[0]), float(baseline[1])
+        begin, end = max(begin, low), min(end, high)
+        if begin < end:
+            self.zoom_plot_x_range(main_plot, begin, end)
 
     def get_base_plot(self) -> PlotItem:
         for stack in self._parser._layout_stacks.values():
@@ -884,8 +944,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         for stack in self._parser._layout_stacks.values():
             for plot in stack.values():
                 vb = plot.getViewBox()
-                vb_id = id(vb)
-                if vb_id not in self._connected_viewboxes:
+                if vb not in self._connected_viewboxes:
                     vb.pressed.connect(self._impl_mouse_press_handler)
                     vb.released.connect(self._impl_mouse_release_handler)
                     vb.dragged.connect(self._impl_mouse_drag_handler)
@@ -894,7 +953,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     # Ruler labels are positioned in scene coordinates; a widget
                     # resize moves the axes without a range change, so re-project.
                     vb.sigResized.connect(self._on_viewbox_resized)
-                    self._connected_viewboxes.add(vb_id)
+                    self._connected_viewboxes.add(vb)
 
     def _plot_drawn(self, plot):
         self._parser.figure.ci.layout.activate()
@@ -912,6 +971,61 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def redo(self):
         self._parser.redo()
+
+    def _grid_bounds(self):
+        canvas = self.get_canvas()
+        parser = self._parser
+        # A grid of no plot, as one just laid out for them, is shared evenly by its cells.
+        if canvas is None or parser._focus_plot is not None:
+            return None
+        rows, cols = layout.grid_size(canvas)
+        view = parser.figure
+        origin = view.viewport().mapTo(self, QPoint(0, 0))
+        # Where the cells of the plots begin and end, by row and by column.
+        tops, bottoms, lefts, rights = [None] * rows, [None] * rows, [None] * cols, [None] * cols
+        for _, slot in layout.slots_of(canvas):
+            cell = parser._cell_gl.get((slot.row, slot.col))
+            if cell is None:
+                continue
+            rect = view.mapFromScene(cell.sceneBoundingRect()).boundingRect()
+            tops[slot.row] = origin.y() + rect.top()
+            bottoms[slot.bottom - 1] = origin.y() + rect.top() + rect.height()
+            lefts[slot.col] = origin.x() + rect.left()
+            rights[slot.right - 1] = origin.x() + rect.left() + rect.width()
+        # The outer rows and columns reach the edges of the view; a bound no cell gives is taken evenly between
+        # those around it.
+        return (_bounds(tops, bottoms, origin.y(), origin.y() + view.viewport().height()),
+                _bounds(lefts, rights, origin.x(), origin.x() + view.viewport().width()))
+
+    def _press_taken(self, point) -> bool:
+        view = self._parser.figure
+        scene_point = view.mapToScene(view.viewport().mapFrom(self, point.toPoint()))
+        for item in view.scene().items(scene_point):
+            while item is not None:
+                if isinstance(item, (_Legend, _LegendEye, QGraphicsProxyWidget)):
+                    return True
+                item = item.parentItem()
+        return False
+
+    def _press_shifts(self, point) -> bool:
+        view = self._parser.figure
+        scene_point = view.mapToScene(view.viewport().mapFrom(self, point.toPoint()))
+        for item in view.scene().items(scene_point):
+            if isinstance(item, pg.ViewBox):
+                signal = self._find_signal_at_event(item, SimpleNamespace(scenePos=lambda: scene_point))[0]
+                return signal is not None and not signal.envelope
+        return False
+
+    def _stack_at(self, point, plot) -> Optional[int]:
+        view = self._parser.figure
+        scene_point = view.mapToScene(view.viewport().mapFrom(self, point.toPoint()))
+        for item in self._parser._plot_impl_plot_lut.get(id(plot), []):
+            if item.sceneBoundingRect().contains(scene_point):
+                return self._parser._impl_plot_cache_table.get_cache_item(item).stack_key
+        return None
+
+    def _drag_taken(self) -> bool:
+        return super()._drag_taken() or self._ruler_drag is not None
 
     def _full_screen_mode_on(self, impl_plot):
         self._parser.set_focus_plot(impl_plot)
@@ -1142,6 +1256,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                                          lambda: self._full_screen_mode_on(impl_plot))
             else:
                 autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
+            self._add_unstack_action(autoscale_menu, impl_plot)
             autoscale_menu.addSeparator()
             ci = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
             if ci:
@@ -1268,6 +1383,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             x_min, x_max = x_data.min(), x_data.max()
             if not (x_min - tol_x <= click_x <= x_max + tol_x):
                 return None
+            x_data, y_data = self._points_near(x_data, y_data, click_x - tol_x, click_x + tol_x)
             pixel_coords = np.column_stack([x_data * sx, y_data * sy])
             return pixel_coords, click_norm
 
@@ -1327,3 +1443,27 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             except Exception:
                 pass
             self._drag_shift_preview_line = None
+
+
+def _bounds(starts: list, ends: list, first: float, last: float) -> list:
+    """The bounds of the rows (or the columns) of the grid, given where cells start and end in each of them (None
+    where none does) and the first and the last bound. Between two rows the bound halves the gap the cells leave;
+    where no cell tells, the bounds are spread evenly between those known."""
+    count = len(starts)
+    bounds = [first] + [None] * (count - 1) + [last]
+    for index in range(1, count):
+        known = [value for value in (ends[index - 1], starts[index]) if value is not None]
+        if known:
+            bounds[index] = sum(known) / len(known)
+    index = 1
+    while index < count:
+        if bounds[index] is None:
+            end = index
+            while bounds[end] is None:
+                end += 1
+            low, high = bounds[index - 1], bounds[end]
+            for unknown in range(index, end):
+                bounds[unknown] = low + (high - low) * (unknown - index + 1) / (end - index + 1)
+            index = end
+        index += 1
+    return bounds

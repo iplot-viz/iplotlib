@@ -42,6 +42,11 @@ class Canvas(ABC):
     cols : int
         Number of columns in the grid. If specified the space for this number of columns should be reserved when
         rendering canvas since some plots may be empty
+    layout_rows : int
+        Rows of the grid chosen with the Layout tool (see iplotlib.core.layout.laid_out): the grid keeps at least
+        that many, the empty ones too. None when none was chosen
+    layout_cols : int
+        Columns of the grid chosen with the Layout tool, as layout_rows
     title : str
         It is shown above the canvas grid centered horizontally
     round_hour : bool
@@ -101,6 +106,8 @@ class Canvas(ABC):
     MOUSE_MODE_RULER = 'MM_RULER'
     rows: int = 1
     cols: int = 1
+    layout_rows: int = None
+    layout_cols: int = None
     title: str = None
     ticks_position: bool = None
     mouse_mode: str = MOUSE_MODE_SELECT

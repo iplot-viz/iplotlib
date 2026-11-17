@@ -816,6 +816,8 @@ class IplotSignalAdapter(ProcessingSignal):
         if deferred is not None:
             deferred.signals.append(self)
 
+        # Kept to skip reads within a range that failed (see _failed_over_range).
+        self._read_range = (self.ts_start, self.ts_end, self.pulse_nb, self.calibrated)
         # Set appropriate status
         self.status_info.reset()
 
@@ -931,7 +933,9 @@ class IplotSignalAdapter(ProcessingSignal):
         elif self._access_md5sum != target_md5sum:
             self._access_md5sum = target_md5sum
 
-            if AccessHelper.num_samples_override or self.isDownsampled:
+            if self._failed_over_range():
+                return False
+            elif AccessHelper.num_samples_override or self.isDownsampled:
                 return True
             elif self.x_expr != "${self}.time":
                 if ts_is_time_window:
@@ -951,6 +955,21 @@ class IplotSignalAdapter(ProcessingSignal):
             else:
                 return True
         else:
+            return False
+
+    def _failed_over_range(self) -> bool:
+        """Whether the last read failed over a range that holds the current one, so that reading again would fail too."""
+        read = getattr(self, '_read_range', None)
+        if read is None or self.status_info.result != Result.FAIL or self.status_info.stage != Stage.DA:
+            return False
+        begin, end, pulse_nb, calibrated = read
+        if pulse_nb != self.pulse_nb or calibrated != self.calibrated:
+            return False
+        # An empty text or None leaves the range open on that side, as for a whole pulse.
+        try:
+            return ((begin in (None, '') or self.ts_start not in (None, '') and begin <= self.ts_start)
+                    and (end in (None, '') or self.ts_end not in (None, '') and self.ts_end <= end))
+        except TypeError:
             return False
 
     def _contained_bounds(self):
