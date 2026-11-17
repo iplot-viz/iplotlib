@@ -645,5 +645,58 @@ class RulerPyQtGraphFocusTest(unittest.TestCase):
             self.assertEqual(self._drawn(), mirrored)
 
 
+class RulerPyQtGraphLogScaleTest(unittest.TestCase):
+    """A Y axis in log mode shows the log10 of the values: a ruler keeps, shows and lists the values, as in
+    matplotlib."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def setUp(self):
+        self.canvas = Canvas(1, 1)
+        self.plot = PlotXY(log_scale=True)
+        signal = SignalXY(label='decades')
+        x = np.linspace(0.0, 10.0, 101)
+        signal.set_data([x, 10.0 ** x])
+        self.plot.add_signal(signal)
+        self.canvas.add_plot(self.plot, 0)
+        self.widget = QtPyQtGraphCanvas(canvas=self.canvas)
+        self.impl_plot = self.widget._get_impl_plot_for_plot(self.plot)
+
+    def tearDown(self):
+        self.widget._ruler_window.close()
+        self.widget.deleteLater()
+
+    def _ruler(self):
+        return self.widget._parser.get_rulers(self.widget._get_impl_plot_for_plot(self.plot))[0]
+
+    def test_a_ruler_dropped_keeps_shows_and_lists_the_value_there(self):
+        # A double-click at the height of 10**5 hands the canvas its view coordinate, 5.
+        self.widget._add_ruler_at(self.impl_plot, self.plot, 5.0, 5.0)
+
+        self.assertAlmostEqual(self.plot.rulers[0].xy[1], 1e5)
+        self.assertEqual(self._ruler().y_label.toPlainText(), '100000')
+        self.assertEqual([label.toPlainText() for label in self._ruler().value_labels], ['100000'])
+        self.assertEqual(self.widget._ruler_window._rows[0]['signal_values'], {'decades': 1e5})
+
+    def test_a_ruler_of_a_workspace_is_drawn_at_its_value(self):
+        self.plot.add_ruler(Ruler(name='A', xy=(5.0, 1e5), color='#00FF00', visible=True))
+
+        self.widget.set_canvas(self.canvas)
+
+        self.assertAlmostEqual(self._ruler().h_line.value(), 5.0)
+        self.assertEqual(self._ruler().y_label.toPlainText(), '100000')
+
+    def test_a_value_the_log_axis_cannot_show_leaves_the_ruler_without_its_horizontal_line(self):
+        self.plot.add_ruler(Ruler(name='A', xy=(5.0, -1.0), color='#00FF00', visible=True))
+
+        self.widget.set_canvas(self.canvas)
+        self.app.processEvents()
+
+        self.assertTrue(self._ruler().v_line.isVisible())
+        self.assertFalse(self._ruler().h_line.isVisible())
+
+
 if __name__ == '__main__':
     unittest.main()

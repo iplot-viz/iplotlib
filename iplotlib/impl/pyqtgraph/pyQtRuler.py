@@ -135,7 +135,9 @@ class pyQtRuler:
         self.x_label.setPos(axis_b.mapFromScene(QPointF(x_scene, y_scene)))
 
         axis_l = plot.getAxis("left")
-        self.y_label.setText(f"{y:.6g}")
+        # A Y axis in log mode shows the log10 of the values.
+        y_value = 10.0 ** min(y, 300.0) if axis_l.logMode else y
+        self.y_label.setText(f"{y_value:.6g}")
         y_scene = vb.mapViewToScene(QPointF(xmin, y)).y()
         x_scene = vr.left()
         self.y_label.setPos(axis_l.mapFromScene(QPointF(x_scene, y_scene)))
@@ -168,15 +170,19 @@ class pyQtRuler:
         for label in self.value_labels:
             shown = False
             if self.visible and self.show_val_label and in_x and label.scene() is not None:
-                x_data, y_data = line_samples(label.line) or label.line.getData()
+                x_data, y_data = line_samples(label.line) or label.line.getOriginalDataset()
                 if x_data is not None and len(x_data) > 0:
                     idx = np.searchsorted(x_data, x, side="left")
                     if 0 < idx < len(x_data) and abs(x - x_data[idx - 1]) < abs(x - x_data[idx]):
                         idx -= 1
                     idx = min(idx, len(x_data) - 1)
-                    if abs(x - x_data[idx]) < (xmax - xmin) * self.VAL_TOLERANCE:
+                    y_view = y_data[idx]
+                    if self.plot.getAxis("left").logMode:
+                        # A Y axis in log mode shows the log10 of the values, and nothing for those of 0 or less.
+                        y_view = np.log10(y_view) if y_view > 0 else None
+                    if y_view is not None and abs(x - x_data[idx]) < (xmax - xmin) * self.VAL_TOLERANCE:
                         xp = min(max(x_data[idx], xmin), xmax)
-                        yp = min(max(y_data[idx], ymin), ymax)
+                        yp = min(max(y_view, ymin), ymax)
                         anchor_x = 0.0 if (xp - xmin) < (xmax - xp) else 1.0
                         if getattr(label, "_last_anchor", None) != (anchor_x, 0.5):
                             label.setAnchor((anchor_x, 0.5))
