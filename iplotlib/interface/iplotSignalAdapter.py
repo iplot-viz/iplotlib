@@ -59,11 +59,23 @@ CONTINUOUS_RATE_THRESHOLD_HZ = 100.0
 # Dedup key (source, target, len_src, len_tgt, case): same mismatch across signals warns once.
 _TRUNCATE_WARN_KEYS: typing.Set[tuple] = set()
 
+#: The values of its row an expression reads as ${name}, besides the signals: the start and the end of the time range
+#: the table gives the row, and its pulse. Each with what the row lacks when it has no value for it.
+ROW_VALUES = {'startTime': 'a start time', 'endTime': 'an end time', 'pulseID': 'a pulse'}
+
 IplotSignalAdapterT = typing.TypeVar('IplotSignalAdapterT', bound='IplotSignalAdapter')
 
 
 class DataAccessError(Exception):
     pass
+
+
+class _RowValue:
+    """A value of the row in an expression. The parser reads the data of a variable written alone, as ${startTime},
+    or the part of an envelope it computes: the value is all of them."""
+
+    def __init__(self, value):
+        self.data = self.dmin = self.dmax = self.davg = value
 
 
 class Result:
@@ -165,6 +177,8 @@ class IplotSignalAdapter(ProcessingSignal):
         if string_classifier.is_non_empty(self.ts_end):
             self.ts_end = np.datetime64(self.ts_end, 'ns').astype('int64').item()
 
+        # The range the table gives: the expressions read it as ${startTime} and ${endTime} whatever a zoom reads.
+        self._table_range = (self.ts_start, self.ts_end)
         self.ts_relative = string_classifier.is_non_empty(self.pulse_nb)
         self._local_env = dict()
 
@@ -208,6 +222,14 @@ class IplotSignalAdapter(ProcessingSignal):
         # 5. Initialize dependencies
         self.depends_on = ParserHelper.get_dependencies([self.x_expr, self.y_expr, self.z_expr])
 
+        if self.alias in ROW_VALUES:
+            # The expressions would read the value of the row instead of this signal.
+            self.status_info.reset()
+            self.status_info.msg = (f"The alias '{self.alias}' is taken: expressions read ${{{self.alias}}} as a value "
+                                    f"of the row. Choose another one.")
+            self.status_info.result = Result.INVALID
+            logger.warning(self.status_info.msg)
+
         if self.status_info.result == Result.INVALID:
             return
         else:
@@ -220,6 +242,20 @@ class IplotSignalAdapter(ProcessingSignal):
 
     def calculate_data_hash(self):
         return hash_code(self, ["ts_start", "ts_end", "pulse_nb", "calibrated"])
+
+    def row_values(self, names) -> dict:
+        """The values of the row (see ROW_VALUES) among the variables `names` of an expression, to evaluate it: the
+        time range the table gives the signal, which a zoom leaves as it is, and its pulse. Raises InvalidExpression
+        for one the row has no value for."""
+        start, end = self._table_range
+        values = {'startTime': start, 'endTime': end, 'pulseID': self.pulse_nb}
+        bound = {}
+        for name in ROW_VALUES.keys() & set(names):
+            if values[name] is None or values[name] == '':
+                raise InvalidExpression(f"${{{name}}} has no value: neither the row nor the time range gives "
+                                        f"{ROW_VALUES[name]}.")
+            bound[name] = _RowValue(values[name])
+        return bound
 
     def get_data(self):
         # 1. Populate time, data_primary, data_secondary (if needed)
@@ -510,7 +546,7 @@ class IplotSignalAdapter(ProcessingSignal):
         if not p.is_valid:
             return
 
-        keys = set(p.var_map.keys())
+        keys = set(p.var_map.keys()).difference(ROW_VALUES)  # the values of the row are not signals to read
         keys.discard('self')  # don't bother with self here.
         for key in keys:
             value = ParserHelper.env.get(key)
@@ -737,6 +773,7 @@ class IplotSignalAdapter(ProcessingSignal):
 
             # 2.3 Evaluate 'self.name'. It is an expression combining multiple other signals
             try:
+                tmp_local_env.update(self.row_values(Parser.get_var_expression(self.name)))
                 p = Parser()
                 p.inject(Parser.get_member_list(type(self)))
                 p.inject(self.alias_map)
@@ -1535,6 +1572,7 @@ class ParserHelper:
 
         p.clear_expr()
         p.set_expression(expression, True)
+        tmp_local_env.update(signal.row_values(p.var_map))
         p.substitute_var(tmp_local_env, ParserHelper.dict_result)
         p.eval_expr()
         if p.has_time_units:
@@ -1634,4 +1672,5 @@ class ParserHelper:
                 replc = 'X'
                 expr = expr.replace(match, replc)
                 dependencies.add(var)
-        return dependencies
+        # The values of the row are not signals to depend on.
+        return dependencies.difference(ROW_VALUES)
