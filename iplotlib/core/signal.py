@@ -225,10 +225,16 @@ class SignalXY(Signal, IplotSignalAdapter):
             return cast(time[edge]) + (int(round(shift)) if exact else shift)
 
         lower, upper = cast(bounds[0]), cast(bounds[1])
+        # The slope is only as exact as the X values, as those of timestamps held as floats: an edge extended to within
+        # a sampling step of what was drawn is taken to it.
         if ranges[0] < x[0]:
             begin = min(max(along_edge(0, 1, ranges[0]), lower), cast(time[0]))
+            if begin - lower < abs(cast(time[1]) - cast(time[0])):
+                begin = lower
         if ranges[1] > x[-1]:
             end = max(min(along_edge(-1, -2, ranges[1]), upper), cast(time[-1]))
+            if upper - end < abs(cast(time[-1]) - cast(time[-2])):
+                end = upper
         return begin, end
 
     def _is_requested_window(self, begin, end):

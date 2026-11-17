@@ -185,6 +185,16 @@ class RebasedTimeLimitsTest(unittest.TestCase):
         s.set_limits((0, 1000))
         self.assertEqual((s.ts_start, s.ts_end), (self.START, self.END))
 
+    def test_wider_view_reaches_the_window_drawn_from_an_x_a_little_off(self):
+        # As an X of timestamps held as floats: the edge segments are a little longer than the time they span, so
+        # what they extrapolate falls short of the window drawn.
+        s = self._drawn_signal()
+        self._load(s, 1300, 1500)
+        s.x_data[1] += 0.05
+        s.x_data[-2] -= 0.05
+        s.set_limits((0, 1000))
+        self.assertEqual((s.ts_start, s.ts_end), (self.START, self.END))
+
     def test_extension_stops_at_the_window_drawn(self):
         s = self._drawn_signal()
         self._load(s, 1300, 1500)
