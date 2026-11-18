@@ -78,14 +78,11 @@ class IplotQtCanvasAssembly(QStackedWidget):
     def removeWidget(self, canvas: QWidget):
         idx = self.indexOf(canvas)
         if idx >= 0:
-            self.removeWidget(canvas)
-            removed = self._model.takeRow(idx)
-            assert len(removed) > 0
-            assert removed[0] == canvas
+            super().removeWidget(canvas)
+            self._model.removeRow(idx)
             self.canvasRemoved.emit(idx, canvas)
         else:
-            show_msg(
-                f"Cannot remove canvas: {id(canvas)}" + "Error: idx: {i} < 0", "ERROR", self)
+            show_msg(f"Cannot remove canvas {id(canvas)}: it is not in the assembly", "ERROR", self)
 
     def currentWidget(self) -> IplotQtCanvas:
         return super().currentWidget()
