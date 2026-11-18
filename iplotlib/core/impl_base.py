@@ -32,7 +32,7 @@ from iplotlib.core.canvas import Canvas
 from iplotlib.core.decimation import bucket_reduce_lines
 from iplotlib.core.limits import IplPlotViewLimits, IplAxisLimits, IplSignalLimits, IplSliderLimits
 from iplotlib.core.plot import Plot, PlotXY, PlotXYWithSlider, PlotContour, PlotImage, PlotContourWithSlider
-from iplotlib.core.signal import Signal, SignalXY, SignalContour
+from iplotlib.core.signal import Signal, SignalXY, SignalContour, X_EXPR_TIME_ACCESSOR
 import iplotLogging.setupLogger as Sl
 
 from iplotlib.core.history_manager import HistoryManager
@@ -1287,9 +1287,6 @@ class BackendParserBase(ABC):
                     return False
         return True
 
-    #: An X expression that reads a time buffer of some alias, e.g. '${T}.time'.
-    _X_EXPR_TIME_ACCESSOR = re.compile(r'\$\{[^}]+\}\.time\b')
-
     @staticmethod
     def _plot_has_time_signal(plot):
         """Whether at least one signal of ``plot`` draws its own time on X, whatever
@@ -1304,8 +1301,8 @@ class BackendParserBase(ABC):
                     return True
         return False
 
-    @classmethod
-    def _plot_x_expr_yields_time(cls, plot):
+    @staticmethod
+    def _plot_x_expr_yields_time(plot):
         """Whether every X expression of ``plot`` reads a time buffer ('${...}.time').
 
         A data-valued expression (e.g. '${T}.data') never yields times, no matter
@@ -1320,7 +1317,7 @@ class BackendParserBase(ABC):
                 if signal is None:
                     continue
                 x_expr = getattr(signal, 'x_expr', '${self}.time')
-                if cls._X_EXPR_TIME_ACCESSOR.search(x_expr) is None:
+                if X_EXPR_TIME_ACCESSOR.search(x_expr) is None:
                     return False
         return True
 
