@@ -27,7 +27,6 @@ from iplotlib.core.ruler import Ruler
 import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
 from iplotlib.qt.gui.iplotQtArrangement import LAYOUT, UNSTACK, PlotArranger
-from iplotlib.qt.gui.iplotQtMarker import IplotQtMarker
 from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
 from iplotlib.qt.utils.palette import theme_colors
 
@@ -69,11 +68,6 @@ class IplotQtCanvas(QWidget):
         self._theme_draw_pending = False
         self._staging_cmds = []  # type: List[IplotAxesRangeCmd]
         self._commitd_cmds = []  # type: List[IplotAxesRangeCmd]
-
-        # Iplotlib markers
-        self._marker_window = IplotQtMarker()
-        self._marker_window.dropMarker.connect(self.draw_marker_label)
-        self._marker_window.deleteMarker.connect(self.delete_marker_label)
 
         # Iplotlib rulers
         self._ruler_window = IplotQtRuler()
@@ -260,8 +254,6 @@ class IplotQtCanvas(QWidget):
         if self._mmode == Canvas.MOUSE_MODE_CROSSHAIR:
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_DIST:
-            self.setCursor(Qt.CursorShape.CrossCursor)
-        elif self._mmode == Canvas.MOUSE_MODE_MARKER:
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self._mmode == Canvas.MOUSE_MODE_RULER:
             self.setCursor(Qt.CursorShape.CrossCursor)
@@ -625,14 +617,6 @@ class IplotQtCanvas(QWidget):
         if preview.show_val_label != show_val_label:
             preview.set_show_val_label(show_val_label)
 
-    @abstractmethod
-    def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
-        """"""
-
-    @abstractmethod
-    def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
-        """"""
-
     def delete_ruler(self, name, plot_id, persist):
         """Remove a ruler's artists from every plot and, with persist, the model
         ruler from the plot owning it. The request may name the plot of a
@@ -709,41 +693,6 @@ class IplotQtCanvas(QWidget):
             True if visible, False if hidden
         """
         return not getattr(signal, 'hidden', False)
-
-    def check_markers(self, canvas: Canvas):
-        # Check if there are signals in the table that are no longer used
-        markers_signals = self.get_signals(canvas)
-        markers_signals_uid = [signal.uid for signal in markers_signals]
-
-        for signal_uid in self._marker_window.get_markers_signal():
-            if signal_uid not in markers_signals_uid:
-                self._marker_window.remove_signal(signal_uid)
-            else:
-                # Check signal markers stack
-                prev_stack = self._marker_window.get_stack(signal_uid)
-                idx = markers_signals_uid.index(signal_uid)
-                signal_element = markers_signals[idx]
-                current_stack = signal_element.get_stack()
-                if prev_stack != current_stack:
-                    self._marker_window.refresh_stack(signal_element, current_stack)
-
-    def get_signal_marker(self, plot_id, signal_uid):
-        # Get signal and ax
-        for idxCol, col in enumerate(self._parser.canvas.plots):
-            for idxPlot, plot in enumerate(col):
-                if not plot or [plot.col, plot.row] != plot_id:
-                    continue
-                # Get signal
-                for signals in plot.signals.values():
-                    for signal in signals:
-                        if signal.uid == signal_uid and isinstance(signal, SignalXY):
-                            ax = self._parser._signal_impl_plot_lut.get(self._parser.signal_lut_key(signal))
-                            return signal, ax
-
-    def get_marker_row(self, signal: SignalXY, marker_name: str):
-        for i, marker in enumerate(signal.markers_list):
-            if marker.name == marker_name:
-                return i
 
     def stats(self, canvas: Canvas):
         """
@@ -1078,9 +1027,6 @@ class IplotQtCanvas(QWidget):
             self._repaint_rulers_from_canvas(draw=False)
         self.stats(canvas)
         self.plotsArranged.emit(changes)
-        # The markers window knows the plot of each marker by its place, and its stack by the number the plots
-        # listed again give it (see IplotQtMainWindow.on_plots_arranged).
-        self.check_markers(canvas)
         return limits
 
     @staticmethod

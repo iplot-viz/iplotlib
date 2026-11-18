@@ -12,7 +12,6 @@ import matplotlib.style as mplstyle
 from matplotlib.axes import Axes as MPLAxes
 from matplotlib.axis import Tick, YAxis, XAxis
 from matplotlib.axis import Axis as MPLAxis
-from matplotlib.colors import to_rgb
 from matplotlib.patches import Patch
 from matplotlib.contour import QuadContourSet
 from matplotlib.figure import Figure
@@ -40,7 +39,6 @@ from iplotlib.core import (Axis,
                            Signal,
                            SignalXY,
                            SignalContour)
-from iplotlib.core.ruler import contrast_text_color
 from iplotlib.impl.matplotlib.dateFormatter import NanosecondDateFormatter, ExponentScalarFormatter, \
     NiceNanosecondLocator, RelativeTimeLocator, LinearTickLocator, is_time_label
 from iplotlib.impl.matplotlib.iplotMultiCursor import IplotMultiCursor, get_values_from_line
@@ -75,12 +73,6 @@ def apply_theme_rc(theme: Optional[dict]):
         _LIGHT_RC.update({key: mpl.rcParams[key] for key in _THEME_RC})
     mpl.rcParams.update(_LIGHT_RC if theme is None else {key: theme[color] for key, color in _THEME_RC.items()})
 
-
-def marker_label_props(color) -> dict:
-    """The look of the label of a marker of `color`: its name readable on its colour, in a frame of the text colour."""
-    r, g, b = (int(round(v * 255)) for v in to_rgb(color))
-    return dict(color=contrast_text_color((r, g, b)),
-                bbox=dict(boxstyle="round,pad=0.3", edgecolor=mpl.rcParams['text.color'], facecolor=color))
 
 # Above this point count, streamed lines are rendered via per-bucket min/max
 # decimation so the visible line preserves extremes at viewport resolution.
@@ -1651,36 +1643,6 @@ class MatplotlibParser(BackendParserBase):
             return
         return mpl_axes
 
-    def process_ipl_signal_annotations(self, signal: Signal, impl_plot: MPLAxes):
-        if not isinstance(signal, SignalXY) or isinstance(signal.parent(), PlotImage):
-            return
-
-        if impl_plot.get_lines()[0].get_marker() == 'None':
-            return
-
-        if signal.markers_list:
-            annotations_names = [child.get_text() for child in impl_plot.get_children() if
-                                 isinstance(child, plt.Annotation)]
-            for marker in signal.markers_list:
-                if marker.visible:
-                    # Draw marker with correct offset to right display
-                    x = self.transform_value(impl_plot, 0, marker.xy[0], inverse=True)
-                    y = marker.xy[1]
-
-                    # Create annotation if not present (import case)
-                    if marker.name not in annotations_names:
-                        impl_plot.annotate(text=marker.name,
-                                           xy=(x, y),
-                                           xytext=(x, y),
-                                           **marker_label_props(marker.color))
-                    else:
-                        # Update position if annotation already exists
-                        prev_annotation = [child for child in impl_plot.get_children() if isinstance(child,
-                                                                                                     plt.Annotation) and child.get_text() == marker.name]  # type: List[plt.Annotation]
-
-                        prev_annotation[0].xy = (x, y)
-                        prev_annotation[0].set_position((x, y))
-
     def get_impl_data(self, line: Line2D):
         return line.get_xdata(), line.get_ydata()
 
@@ -2059,9 +2021,6 @@ class MatplotlibParser(BackendParserBase):
         style["drawstyle"] = STEP_MAP[step]
 
         return style
-
-    def get_line_label(self, line: Line2D):
-        return line.get_label()
 
     def get_impl_x_axis(self, impl_plot: Any):
         if isinstance(impl_plot, MPLAxes):

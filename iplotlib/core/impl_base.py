@@ -1752,11 +1752,6 @@ class BackendParserBase(ABC):
     def process_ipl_signal_impl_plot(self, signal: Signal):
         """"""
 
-    @abstractmethod
-    def process_ipl_signal_annotations(self, signal: Signal, impl_plot: Any):
-        """
-        """
-
     def _draw_time_signal_data(self, signal: Signal, impl_plot: Any):
         """
         Data for redrawing `signal` while the view is being reset: the draw-time
@@ -1846,9 +1841,6 @@ class BackendParserBase(ABC):
             self.set_signal_visible(signal, False)
 
         self.update_axis_labels_with_units(impl_plot, signal)
-
-        # Check for annotations if the marker labels are visible
-        self.process_ipl_signal_annotations(signal, impl_plot)
 
     def update_axis_labels_with_units(self, impl_plot: Any, signal: Signal):
         """
@@ -2090,10 +2082,6 @@ class BackendParserBase(ABC):
     def legend_downsampled_signal(self, signal, impl_plot: Any, plot_lines: Any):
         pass
 
-    @abstractmethod
-    def get_line_label(self, line: Any):
-        """"""
-
     def set_signal_visible(self, signal: Signal, visible: bool):
         """Set visibility of signal lines."""
         pass
@@ -2288,82 +2276,6 @@ class BackendParserBase(ABC):
         override this to rebuild it now that the envelope has artists.
         """
         pass
-
-    def add_marker_scaled(self, impl_plot: Any, plot: PlotXY, x_coord, y_coord):
-        """
-        Function that returns the nearest point of the plot to create the corresponding marker.
-        As the scale of the axes is very different, a normalization of the data is done to adjust the data to a
-        common scale.
-        """
-
-        ranges = []
-        marker_signal = None
-        nearest_point = None
-        nearest_line_label = None
-        minor_dist = float('inf')
-
-        for ax_idx, ax in enumerate(plot.axes):
-            if isinstance(ax, RangeAxis):
-                ranges = ax.get_limits()
-
-        # Get the lines that are actually located in the current mpl_axes
-        signals = self._impl_plot_cache_table.get_cache_item(impl_plot).signals
-
-        # With the new X axis limits, we obtain the points within that range
-        for signal_ref in signals:
-            signal = signal_ref()
-            x_data = signal.x_data
-            for idx_line, line in enumerate(signal.lines):
-                idx1 = np.searchsorted(x_data, ranges[0])
-                idx2 = np.searchsorted(x_data, ranges[1])
-
-                if isinstance(plot, PlotXYWithSlider):
-                    x_zoom = signal.x_data[idx1:idx2]
-                    y_data = signal.data_store[1]
-                    y_zoom = y_data[self.get_slider_val(plot)][idx1:idx2]
-                else:
-                    x_zoom = signal.data_store[0][idx1:idx2]
-                    y_data = signal.data_store[1]
-                    if y_data.ndim == 1:
-                        y_zoom = y_data[idx1:idx2]
-                    else:  # ndim = 2
-                        y_zoom = y_data[idx1:idx2, idx_line]
-
-                # If the number of samples per signal is less than 100 we continue, if not the user shall keep zooming
-                if len(x_zoom) > 100:
-                    return None, len(x_zoom), None
-
-                # If there are no data points in the zoomed region, skip this signal
-                if not len(x_zoom):
-                    continue
-
-                # Get the points (x,y) for each signal
-                points = list(zip(x_zoom, y_zoom))
-
-                # Normalization of the points
-                x_min, x_max = min(x_zoom), max(x_zoom)
-                y_min, y_max = min(y_zoom), max(y_zoom)
-
-                x_range = x_max - x_min if x_max != x_min else 1
-                y_range = y_max - y_min if y_max != y_min else 1
-                scaled_points = [((px - x_min) / x_range, (py - y_min) / y_range) for px, py in points]
-
-                # Normalization of the coordinates where the user clicked
-                x_coord_transform = self.transform_value(impl_plot, 0, x_coord)
-                scaled_x = (x_coord_transform - x_min) / x_range
-                scaled_y = (y_coord - y_min) / y_range
-
-                # Get the nearest point using the Euclidian distance
-                distances = [np.sqrt((px - scaled_x) ** 2 + (py - scaled_y) ** 2) for px, py in scaled_points]
-                idx_result = np.argmin(distances)
-
-                if distances[idx_result] < minor_dist:
-                    minor_dist = distances[idx_result]
-                    nearest_point = points[idx_result]
-                    marker_signal = signal
-                    nearest_line_label = self.get_line_label(line if not isinstance(line, Collection) else line[0])
-
-        return nearest_point, marker_signal, nearest_line_label
 
     def do_impl_line_plot_image(self, signal: SignalXY, impl_plot: Any, plot: PlotImage, cache_item, data):
 

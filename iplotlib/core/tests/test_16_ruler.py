@@ -196,9 +196,8 @@ class CanvasMouseModeRulerTest(unittest.TestCase):
     def test_mouse_mode_ruler_is_distinct(self):
         modes = {Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_CROSSHAIR,
                  Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM,
-                 Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_MARKER,
-                 Canvas.MOUSE_MODE_RULER}
-        self.assertEqual(len(modes), 7)
+                 Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_RULER}
+        self.assertEqual(len(modes), 6)
 
 
 class PlotItemRulerTreeTest(unittest.TestCase):

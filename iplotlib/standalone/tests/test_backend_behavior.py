@@ -364,7 +364,7 @@ class MouseModeTest(unittest.TestCase):
 
                 for mode in (Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_CROSSHAIR,
                              Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM,
-                             Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_MARKER):
+                             Canvas.MOUSE_MODE_DIST):
                     qt_canvas.set_mouse_mode(mode)
                     self.app.processEvents()
                     self.assertEqual(qt_canvas._mmode, mode)

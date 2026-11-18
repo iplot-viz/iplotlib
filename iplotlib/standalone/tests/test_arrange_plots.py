@@ -438,19 +438,6 @@ class TestArrangePlots(unittest.TestCase):
                 self.assertEqual([signal.label for plot, _ in layout.slots_of(canvas)
                                   for signals in plot.signals.values() for signal in signals if signal.hidden], [])
 
-    def test_a_marker_keeps_its_plot_when_the_plot_moves(self):
-        for backend in BACKENDS:
-            with self.subTest(backend):
-                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
-                signal = next(iter(_plot(canvas, '2.0').signals.values()))[0]
-                qt_canvas._marker_window.add_marker(signal, (5.0, 5.0), signal.label)
-
-                mouse.drag(mouse.cell(2, 0), mouse.cell(0, 0))
-
-                plot_id = qt_canvas._marker_window.table.item(0, 1).data(Qt.ItemDataRole.UserRole)
-                self.assertEqual(plot_id, signal.get_id())
-                self.assertIs(qt_canvas.get_signal_marker(plot_id[:2], signal.uid)[0], signal)
-
     def test_the_rulers_window_names_a_plot_moved_by_its_new_place(self):
         for backend in BACKENDS:
             with self.subTest(backend):
@@ -1042,30 +1029,6 @@ class TestArrangePlots(unittest.TestCase):
                 self.assertIsNone(parser._focus_plot)
                 self.assertEqual([len(parser._plot_impl_plot_lut.get(id(plot), []))
                                   for plot, _ in layout.slots_of(canvas)], [1, 2])
-
-    def test_the_markers_window_shows_the_stack_a_marker_takes_in_a_joined_plot(self):
-        for backend in BACKENDS:
-            with self.subTest(backend):
-                win = IplotQtMainWindow()
-                self.addCleanup(_destroy, win)
-                self.addCleanup(win.close)
-                canvas = _canvas((3,))
-                qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
-                win.canvasStack.addWidget(qt_canvas)
-                win.show()
-                win.canvasStack.refreshLinks()
-                self.app.processEvents()
-                signal = next(iter(_plot(canvas, '2.0').signals.values()))[0]
-                qt_canvas._marker_window.add_marker(signal, (5.0, 5.0), signal.label)
-
-                qt_canvas.lay_out(1, 2)
-                self.app.processEvents()
-                self.assertEqual(qt_canvas._marker_window.table.item(0, 1).text(), '2.1.2')
-
-                qt_canvas.undo()
-                self.app.processEvents()
-                self.assertEqual(qt_canvas._marker_window.table.item(0, 1).text(), '1.3.1')
-                win.close()
 
     def test_the_mini_map_comes_with_the_one_plot_a_layout_leaves_and_goes_on_undo(self):
         win = IplotQtMainWindow()

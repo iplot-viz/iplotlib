@@ -198,7 +198,7 @@ class MinimapZoomTest(unittest.TestCase):
 
     def test_a_drag_zooms_in_every_mouse_mode_and_from_the_span_shown(self):
         modes = (Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_CROSSHAIR, Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM,
-                 Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_MARKER, Canvas.MOUSE_MODE_RULER)
+                 Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_RULER)
         for backend in BACKENDS:
             for mode in modes:
                 with self.subTest(backend=backend, mode=mode):

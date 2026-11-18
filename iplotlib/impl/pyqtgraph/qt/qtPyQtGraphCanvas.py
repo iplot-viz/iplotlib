@@ -26,7 +26,7 @@ from iplotlib.impl.pyqtgraph.dateFormatter import (
 from iplotlib.qt.gui.iplotQtCanvas import IplotQtCanvas
 from iplotlib.qt.gui.iplotSignalShiftDialog import SignalShiftDialog
 import iplotLogging.setupLogger as Sl
-from pyqtgraph import PlotItem, TextItem
+from pyqtgraph import PlotItem
 import pyqtgraph as pg
 
 logger = Sl.get_logger(__name__)
@@ -494,84 +494,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         """Gets current iplotlib canvas"""
         return self._parser.canvas
 
-    def draw_marker_label(self, marker_name, plot_id, signal_uid, xy, color, modify):
-        signal, ax = self.get_signal_marker(plot_id, signal_uid)  # type: PlotItem
-
-        # Creation of the annotations
-        if isinstance(signal, SignalXY) and ax:
-            if not modify:
-                # Create and draw marker
-                x = self._parser.transform_value(ax, 0, xy[0], inverse=True)
-                y = xy[1]
-                # Marker coordinates are data-space; the log-mode view is log10.
-                if ax.getAxis('left').logMode and y > 0:
-                    y = np.log10(y)
-
-                marker_text = TextItem(anchor=(0.5, 0.5),
-                                       html=f"""<div style="
-                                       background-color:{color};
-                                       color:black;
-                                       border:1px solid black;
-                                       border-radius:4px;
-                                       padding:2px 5px;
-                                       font-size:12pt;
-                                       text-align:center;
-                                        ">{marker_name}</div>""")
-                marker_text.setPos(x, y)
-                ax.addItem(marker_text)
-
-                # Get marker row
-                row = self.get_marker_row(signal, marker_name)
-
-                # Set marker visibility
-                signal.markers_list[row].visible = True
-                signal.markers_list[row].color = color
-            else:
-                # Change marker color when it is visible
-                annotations = [child for child in ax.items if isinstance(child, TextItem)]
-                if annotations:
-                    for annotation in annotations:
-                        if annotation.toPlainText() == marker_name:
-                            # Set new color property
-                            new_html = f"""<div style="
-                                            background-color:{color};
-                                            color:black;
-                                            border:1px solid black;
-                                            border-radius:4px;
-                                            padding:2px 5px;
-                                            font-size:12pt;
-                                            text-align:center;
-                                        ">{marker_name}</div>"""
-
-                            annotation.setHtml(new_html)
-                            annotation.update()
-
-                            # Get marker row
-                            row = self.get_marker_row(signal, marker_name)
-                            signal.markers_list[row].color = color
-
-    def delete_marker_label(self, marker_name, plot_id, signal_uid, delete):
-        signal, ax = self.get_signal_marker(plot_id, signal_uid)
-
-        # Get annotations from the axis
-        annotations = [child for child in ax.items if isinstance(child, TextItem)]
-
-        # Get marker row
-        row = self.get_marker_row(signal, marker_name)
-
-        # Indicate if the marker will be removed or hidden
-        if delete:
-            signal.delete_marker(row)
-        else:
-            signal.markers_list[row].visible = False
-
-        # Remove annotations
-        if annotations:
-            for annotation in annotations:
-                if annotation.toPlainText() == marker_name:
-                    ax.removeItem(annotation)
-                    return
-
     def _get_plot_by_id(self, plot_id):
         return self._plot_at_canvas_position(plot_id)
 
@@ -907,15 +829,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._disconnect_preview_scene()
 
         self._apply_view_box_mode(mode)
-        if mode == Canvas.MOUSE_MODE_MARKER:
-            if not self._marker_window.isVisible():
-                self._marker_window.show()
-            elif self._marker_window.isMinimized():
-                self._marker_window.showNormal()
-            else:
-                self._marker_window.raise_()
-                self._marker_window.activateWindow()
-        elif mode == Canvas.MOUSE_MODE_RULER:
+        if mode == Canvas.MOUSE_MODE_RULER:
             self._connect_preview_scene()
             if not self._ruler_window.isVisible():
                 self._ruler_window.show()
@@ -935,8 +849,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._parser.set_view_box_pan(impl_plots)
         elif mode == Canvas.MOUSE_MODE_ZOOM:
             self._parser.set_view_box_zoom(impl_plots)
-        elif mode in (Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_MARKER,
-                      Canvas.MOUSE_MODE_RULER):
+        elif mode in (Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_DIST, Canvas.MOUSE_MODE_RULER):
             self._parser.set_view_box(impl_plots)
 
     def _connect_view_boxes(self):
@@ -1080,40 +993,6 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     self._add_ruler_at(impl_plot, plot, system_coord.x(), system_coord.y())
                     event.accept()
                 return
-            if self._mmode == Canvas.MOUSE_MODE_MARKER:
-                if event.button() == Qt.MouseButton.RightButton:
-                    return
-
-                if isinstance(plot, (PlotContour, PlotContourWithSlider)):
-                    logger.warning(f"Markers creation is not supported for {type(plot).__name__}")
-                    return
-
-                # Markers can only be created if the property 'marker' is not None
-                if impl_plot.listDataItems()[0].opts['symbol'] is not None:
-                    # Maps from scene coordinates to the coordinate system displayed inside the ViewBox
-                    system_coord = view_box.mapSceneToView(event.scenePos())
-                    x_value = system_coord.x()
-                    y_value = self._view_to_data_y(impl_plot, system_coord.y())
-
-                    new_marker, marker_signal, label_line = self._parser.add_marker_scaled(impl_plot, plot, x_value,
-                                                                                           y_value)
-                    if new_marker is not None:
-                        if new_marker not in self._marker_window.get_markers():
-                            self._marker_window.add_marker(marker_signal, new_marker, label_line)
-                            if not self._marker_window.isVisible():
-                                self._marker_window.show()
-                            elif self._marker_window.isMinimized():
-                                self._marker_window.showNormal()
-                            else:
-                                self._marker_window.raise_()
-                                self._marker_window.activateWindow()
-                        else:
-                            logger.warning(f"The marker {new_marker} is already created")
-                    else:
-                        logger.warning(
-                            f"Cannot add marker {new_marker}: found {marker_signal} samples, but the maximum allowed is 100")
-                else:
-                    logger.warning("Markers must be enabled in the plot to create signal markers")
         else:
             # Single click handling
             if self._mmode in [Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_PAN]:
@@ -1300,7 +1179,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
     @staticmethod
     def _view_to_data_y(impl_plot, y_value):
         """ViewBox Y coordinates are log10 of the data when the axis is in log
-        mode; interaction values (markers, distances, shifts) are data-space."""
+        mode; interaction values (distances, shifts) are data-space."""
         if impl_plot.getAxis('left').logMode:
             return 10.0 ** min(y_value, 300.0)
         return y_value
