@@ -4,6 +4,7 @@ view reaches past them, the data first drawn. A turn ends when the wheel rests, 
 plots read the window it left once, ahead of it, unless the data in memory show it as finely already, and the turn is
 one zoom to undo. While streaming it zooms nothing (mint#211)."""
 
+import time
 import unittest
 from types import SimpleNamespace
 
@@ -125,6 +126,14 @@ class WheelZoomTest(unittest.TestCase):
                         NOTCH if notches > 0 else -NOTCH)
 
     @staticmethod
+    def _wait_for(condition, timeout_s=10):
+        """Process events until `condition` holds, or `timeout_s` passes: a timer due while the event loop is busy,
+        as late in a whole test run, has its turn after a fixed wait has already ended."""
+        deadline = time.monotonic() + timeout_s
+        while not condition() and time.monotonic() < deadline:
+            QTest.qWait(10)
+
+    @staticmethod
     def _drawn_samples(parser, impl_plot) -> int:
         lines, _, _ = parser.get_impl_lines(impl_plot)
         return len(parser.get_impl_data(lines[0])[0])
@@ -169,13 +178,14 @@ class WheelZoomTest(unittest.TestCase):
                 qt_canvas, parser, (first, second) = self._show(backend, plots=2)
                 self.da.reads.clear()
                 self._turn(qt_canvas, parser, first, 3)
+                begin, end = self._times(parser, first)
+                self.assertAlmostEqual((end - begin) / HOUR, IN ** 3, places=3)
                 self.assertEqual(self.da.reads, [])
-                np.testing.assert_allclose(self._times(parser, second), self._times(parser, first),
-                                           rtol=0, atol=1e-6 * HOUR)
+                np.testing.assert_allclose(self._times(parser, second), (begin, end), rtol=0, atol=1e-6 * HOUR)
 
                 # The wheel rests: a shorter rest, set while the turn waits for it, restarts it.
                 qt_canvas._wheel_rest.setInterval(50)
-                QTest.qWait(500)
+                self._wait_for(lambda: len(self.da.reads) >= 2)
 
                 self.assertEqual(sorted(read.name for read in self.da.reads), ['VAR0', 'VAR1'])
                 for read in self.da.reads:
