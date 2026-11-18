@@ -82,6 +82,9 @@ class WheelZoomTest(unittest.TestCase):
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=core)
         self.addCleanup(qt_canvas.deleteLater)
         self.addCleanup(qt_canvas.close)
+        # A turn a test leaves going lives on until the canvas is deleted: its rest would end it inside a later test,
+        # and read into that test's data access.
+        self.addCleanup(qt_canvas._drop_wheel_turn)
         qt_canvas._wheel_rest.setInterval(rest_ms)
         qt_canvas.set_canvas(core)
         qt_canvas.resize(1200, 800)
