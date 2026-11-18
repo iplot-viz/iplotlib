@@ -1032,6 +1032,8 @@ class AccessHelper:
 
     @staticmethod
     def construct_da_params(signal: IplotSignalAdapter):
+        # How many samples a decimated read gives: a signal may ask for more than the screen holds (read_samples).
+        samples = getattr(signal, 'read_samples', None) or AccessHelper.num_samples
         params = dict(data_s_name=signal.data_source,
                       varname=signal.name,
                       tsS=AccessHelper.uda_ts(signal, signal.ts_start),
@@ -1040,8 +1042,10 @@ class AccessHelper:
                       pulse=signal.pulse_nb,
                       envelope=signal.envelope,
                       extremities=signal.extremities,
-                      nbp=AccessHelper.num_samples if AccessHelper.num_samples_override else -1
+                      nbp=samples if AccessHelper.num_samples_override else -1
                       )
+        if samples != AccessHelper.num_samples:
+            params['samples'] = samples
         # retType is UDA-specific; IMAS has no notion of calibrated data
         if signal.calibrated:
             ds = AccessHelper.da.get_data_source(signal.data_source) if AccessHelper.da else None
@@ -1310,6 +1314,7 @@ class AccessHelper:
         ts_e = da_params.get('tsE')
         pulse = da_params.get('pulse')
         envelope = da_params.get('envelope')
+        samples = da_params.pop('samples', AccessHelper.num_samples)
         t_relative = da_params.get('tsFormat') == 'relative'
         # indicate if the signal was downsampled
         ds = False
@@ -1334,13 +1339,13 @@ class AccessHelper:
                 (d_env) = da.get_envelope(**da_params)
                 if d_env.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval,' \
                                     ' use decimation or read data by chunks.':
-                    da_params.update({'nbp': AccessHelper.num_samples})
+                    da_params.update({'nbp': samples})
                     (d_env) = da.get_envelope(**da_params)
                     ds = True
                 if d_env.errcode < 0:
                     if d_env.errcode < 0:
                         message = f"ErrCode: {d_env.errcode} | getEnvelope (minimum) failed for -1 and" \
-                                  f" {AccessHelper.num_samples} samples. {da_params}"
+                                  f" {samples} samples. {da_params}"
                         raise DataAccessError(message)
 
                 xdata = np_nvl(d_env.xdata if d_env else None) if t_relative else np_nvl(
@@ -1369,7 +1374,7 @@ class AccessHelper:
                 if raw.errcode < 0:
                     if raw.errdesc == 'Number of samples in reply exceeds available limit. Reduce request interval,' \
                                       ' use decimation or read data by chunks.':
-                        da_params.update({'nbp': AccessHelper.num_samples})
+                        da_params.update({'nbp': samples})
                         raw = da.get_data(**da_params)
                         ds = True
                     # if raw.errcode < 0: # try with fallback no. of points.

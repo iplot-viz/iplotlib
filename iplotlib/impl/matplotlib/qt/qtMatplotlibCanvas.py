@@ -154,6 +154,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     # Implement basic superclass functionality
     def set_canvas(self, canvas: Canvas):
         """Sets new iplotlib canvas and redraw"""
+        self._drop_wheel_turn()
         prev_canvas = self._parser.canvas
 
         if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
@@ -846,10 +847,12 @@ class QtMatplotlibCanvas(IplotQtCanvas):
             self.window().raise_()
 
     def undo(self):
+        self.end_wheel_turn()
         self._parser.undo()
         self._render_restored_view()
 
     def redo(self):
+        self.end_wheel_turn()
         self._parser.redo()
         self._render_restored_view()
 
@@ -1301,6 +1304,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
     def _mpl_mouse_press_handler(self, event: MouseEvent):
         """Additional callback to allow for focusing on one plot and returning home after double click"""
         self._debug_log_event(event, "Mouse pressed")
+        self.end_wheel_turn()
 
         if self._press_legend(event):
             return

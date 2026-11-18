@@ -145,6 +145,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._minimap_plot.getAxis(side).setTextPen(*(() if theme is None else (theme['text'],)))
 
     def set_canvas(self, canvas):
+        self._drop_wheel_turn()
         prev_canvas = self._parser.canvas
 
         if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
@@ -968,9 +969,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._update_minimap()
 
     def undo(self):
+        self.end_wheel_turn()
         self._parser.undo()
 
     def redo(self):
+        self.end_wheel_turn()
         self._parser.redo()
 
     def _grid_bounds(self):
@@ -1056,6 +1059,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
 
     def _impl_mouse_press_handler(self, view_box, event):
         """Handle mouse press events in PyQtGraph."""
+        self.end_wheel_turn()
         impl_plot = view_box.parentItem()
         if not impl_plot:
             return
