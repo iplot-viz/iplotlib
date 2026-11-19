@@ -97,6 +97,16 @@ class TestLegendCustomisation(unittest.TestCase):
     def _legend_of_plot(plot):
         return plot.legend_anchor, plot.legend_width, plot.legend_collapsed
 
+    def test_a_plot_of_an_older_workspace_that_says_same_as_canvas_follows_the_canvas(self):
+        old = _canvas_with_a_customised_legend().to_dict()
+        old['plots'][0][0].update(legend_position='same as canvas', legend_layout='same as canvas')
+        merged = _canvas_with_a_customised_legend()
+        merged.merge(old)
+        for read, canvas in (('from_dict', Canvas.from_dict(old)), ('merge', merged)):
+            with self.subTest(read=read):
+                plot = canvas.plots[0][0]
+                self.assertEqual((plot.legend_position, plot.legend_layout), (None, None))
+
 
 if __name__ == '__main__':
     unittest.main()
