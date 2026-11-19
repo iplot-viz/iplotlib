@@ -340,6 +340,16 @@ class BackendParserBase(ABC):
     def get_impl_lines(self, impl_plot: Any):
         pass
 
+    def impl_line_shown(self, line) -> bool:
+        """Whether `line` shows, or was hidden from its legend."""
+        return True
+
+    def shown_impl_lines(self, impl_plot: Any):
+        """The lines of `impl_plot` not hidden from the legend, with its X range (see get_impl_lines). With all of them
+        hidden, every line, so the plot keeps the range they span."""
+        lines, lo, hi = self.get_impl_lines(impl_plot)
+        return [line for line in lines if self.impl_line_shown(line)] or lines, lo, hi
+
     @abstractmethod
     def autoscale_y_axis(self, impl_plot: Any, padding=0.1):
         """
@@ -348,7 +358,7 @@ class BackendParserBase(ABC):
         # A plot whose view is still read fits its Y range again once those data are drawn, as it would had they
         # been read at once.
         self._view_fits.update(owner for owner, plot in self._view_plots.items() if plot is impl_plot)
-        lines, lo, hi = self.get_impl_lines(impl_plot)
+        lines, lo, hi = self.shown_impl_lines(impl_plot)
         bot, top = np.inf, -np.inf
 
         for line in lines:
@@ -2231,6 +2241,10 @@ class BackendParserBase(ABC):
             drawn = self._signal_vertical_lines_lut.get(id(signal))
             if drawn is not None:
                 self.set_vertical_lines_visible(drawn[1], not hidden)
+        # With autoscale on, the Y range fits the signals that show, as after a zoom.
+        impl_plot = self._signal_impl_plot_lut.get(self.signal_lut_key(signal))
+        if impl_plot is not None and self._pm.get_value(self.canvas, 'autoscale'):
+            self.autoscale_y_axis(impl_plot)
 
     def register_dynamic_signal(self, impl_plot: Any, plot: Plot, signal: Signal):
         """Register a dynamically added signal and update legend. Default implementation does nothing."""
