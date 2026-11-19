@@ -191,10 +191,10 @@ class RenderingTest(unittest.TestCase):
                 core_canvas.add_plot(plot, 0)
                 self._render(backend, core_canvas, "canvas_legend")
 
-    def _render_simple_canvas(self, backend: str, out_name: str, **canvas_kwargs):
+    def _render_simple_canvas(self, backend: str, out_name: str, plot_kwargs=None, **canvas_kwargs):
         core_canvas = Canvas(1, 1, title=out_name, **canvas_kwargs)
         x = np.linspace(0.5, 10.0, 200)
-        plot = PlotXY()
+        plot = PlotXY(**(plot_kwargs or {}))
         signal = SignalXY(label="s")
         signal.set_data([x, np.sin(x) + 2.0])  # positive so log_scale is valid
         plot.add_signal(signal)
@@ -208,10 +208,10 @@ class RenderingTest(unittest.TestCase):
                 self._render_simple_canvas(backend, "pref_grid_off", grid=False)
 
     def test_14_preference_log_scale(self):
-        """Canvas with log_scale=True must render Y axis on a log scale."""
+        """A plot with log_scale=True must render its Y axis on a log scale."""
         for backend in BACKENDS:
             with self.subTest(backend=backend):
-                self._render_simple_canvas(backend, "pref_log_scale", log_scale=True)
+                self._render_simple_canvas(backend, "pref_log_scale", plot_kwargs=dict(log_scale=True))
 
     def test_15_preference_font_size_large(self):
         """Canvas with a larger font_size must render bigger tick/title text."""

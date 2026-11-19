@@ -134,7 +134,6 @@ class Canvas(ABC):
     background_color: str = None
     tick_number: int = None
     round_hour: bool = None
-    log_scale: bool = None
     line_style: str = None
     line_size: int = None
     marker: str = None
@@ -220,7 +219,6 @@ class Canvas(ABC):
         self.font_color = Canvas.font_color
         self.background_color = Canvas.background_color
         self.tick_number = Canvas.tick_number
-        self.log_scale = Canvas.log_scale
         self.line_style = Canvas.line_style
         self.line_size = Canvas.line_size
         self.marker = Canvas.marker
@@ -273,7 +271,6 @@ class Canvas(ABC):
         self.font_color = old_canvas['font_color']
         self.background_color = old_canvas['background_color']
         self.tick_number = old_canvas['tick_number']
-        self.log_scale = old_canvas['log_scale']
         self.line_style = old_canvas['line_style']
         self.line_size = old_canvas['line_size']
         self.marker = old_canvas['marker']
