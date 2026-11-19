@@ -37,7 +37,6 @@ from iplotlib.core import (Axis,
 from iplotlib.impl.pyqtgraph.pyQtCrosshair import pyQtCrosshair
 from iplotlib.impl.pyqtgraph.pyQtRuler import pyQtRuler
 from iplotlib.impl.pyqtgraph.dateFormatter import MirroredAxisItem, NanosecondDateFormatter, is_time_label
-from iplotlib.impl.pyqtgraph.svgExportPatch import patch_closed_paths
 from iplotlib.qt.utils.icon_loader import svg_icon_image
 from iplotlib.qt.utils.palette import theme_colors
 
@@ -62,7 +61,6 @@ use_open_gl = IPLOT_PYQTGRAPH_OPENGL in ("1", "true", "yes") if IPLOT_PYQTGRAPH_
 
 # OpenGL is turned on only once a graphics card is known to draw it: see opengl_in_use.
 pg.setConfigOptions(antialias=True, useOpenGL=False)
-patch_closed_paths()
 
 # What OpenGL reports when the processor draws it instead of a graphics card, as in remote
 # desktops without a GPU driver: there each repaint takes seconds instead of milliseconds.
