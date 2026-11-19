@@ -1109,8 +1109,10 @@ class MatplotlibParser(BackendParserBase):
                                       step=STEP_MAP[style['drawstyle']])
 
         lines = [line_1 + line_2 + line_3 + [area]]
-        for new, old in zip(lines, signal.lines):
-            new.set_visible(old.get_visible())
+        # Each part of the envelope shows as the one it was drawn with before did, as an export draws it again.
+        for new_parts, old_parts in zip(lines, signal.lines):
+            for new, old in zip(new_parts, old_parts if isinstance(old_parts, Collection) else [old_parts]):
+                new.set_visible(old.get_visible())
 
         return lines
 
