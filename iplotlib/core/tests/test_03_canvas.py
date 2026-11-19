@@ -64,5 +64,28 @@ class TestCanvas(unittest.TestCase):
         self.assertEqual(len(c.plots[0][0].signals), 1)
 
 
+
+class TestMergeOfSignalsWithoutUid(unittest.TestCase):
+    """A workspace saved before signals had a uid gives a canvas whose signals are those of no row: a Draw that merges
+    it into the canvas of the rows takes the properties of its plots, and of none of its signals."""
+
+    def test_signals_without_a_uid_merge_with_none(self):
+        old = Canvas()
+        old_plot = PlotXY(plot_title="saved")
+        old_plot.add_signal(SignalXY(label="signal_a", line_style="Dashed", hidden=True))
+        old.add_plot(old_plot, 0)
+        new = Canvas()
+        plot = PlotXY()
+        plot.add_signal(SignalXY(label="signal_a", uid="row-1"))
+        plot.add_signal(SignalXY(label="signal_b"))  # without a uid either
+        new.add_plot(plot, 0)
+
+        new.merge(old.to_dict())
+
+        self.assertEqual(plot.plot_title, "saved")
+        self.assertEqual([(signal.line_style, signal.hidden) for signal in plot.signals[1]],
+                         [(SignalXY.line_style, False)] * 2)
+
+
 if __name__ == "__main__":
     unittest.main()
