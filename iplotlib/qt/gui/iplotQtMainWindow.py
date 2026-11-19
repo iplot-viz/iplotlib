@@ -351,11 +351,8 @@ class IplotQtMainWindow(QMainWindow):
     @staticmethod
     def _plots_with_log_scale_change(canvas, prev: dict) -> list:
         """
-        Plots whose effective log_scale differs from the last applied preferences.
-        log_scale resolves per plot with a canvas-level fallback, so changes at either
-        level are caught.
+        Plots whose log_scale differs from the last applied preferences.
         """
-        prev_canvas_log = prev.get('log_scale')
         prev_plots = prev.get('plots') or []
         changed = []
         for i, col in enumerate(canvas.plots):
@@ -363,12 +360,9 @@ class IplotQtMainWindow(QMainWindow):
             for j, plot in enumerate(col):
                 if plot is None or not plot.axes:
                     continue
-                cur_log = plot.log_scale if plot.log_scale is not None else canvas.log_scale
                 prev_plot = prev_col[j] if j < len(prev_col) else None
                 prev_log = prev_plot.get('log_scale') if isinstance(prev_plot, dict) else None
-                if prev_log is None:
-                    prev_log = prev_canvas_log
-                if bool(cur_log) != bool(prev_log):
+                if bool(plot.log_scale) != bool(prev_log):
                     changed.append(plot)
         return changed
 

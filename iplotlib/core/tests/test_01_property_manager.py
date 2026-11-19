@@ -26,7 +26,6 @@ class TestPropertyManager(unittest.TestCase):
             legend_position='upper right',
             legend_layout='horizontal',
             grid=False,
-            log_scale=False,
             line_style="Solid",
             line_size=4,
             marker='x',
@@ -69,7 +68,6 @@ class TestPropertyManager(unittest.TestCase):
         self.assertEqual(f("legend_position"), self.canvas.legend_position)
         self.assertEqual(f("legend_layout"), self.canvas.legend_layout)
         self.assertEqual(f("grid"), self.canvas.grid)
-        self.assertEqual(f("log_scale"), self.canvas.log_scale)
         self.assertEqual(f("line_style"), self.canvas.line_style)
         self.assertEqual(f("line_size"), self.canvas.line_size)
         self.assertEqual(f("marker"), self.canvas.marker)
@@ -90,7 +88,6 @@ class TestPropertyManager(unittest.TestCase):
         self.assertEqual(f("legend_position"), self.canvas.legend_position)
         self.assertEqual(f("legend_layout"), self.canvas.legend_layout)
         self.assertEqual(f("grid"), self.canvas.grid)
-        self.assertEqual(f("log_scale"), self.canvas.log_scale)
         self.assertEqual(f("contour_filled"), self.canvas.contour_filled)
         self.assertEqual(f("legend_format"), self.canvas.legend_format)
         self.assertEqual(f("equivalent_units"), self.canvas.equivalent_units)
@@ -153,6 +150,19 @@ class TestConfigPathResolution(unittest.TestCase):
         with patch.object(property_manager, 'IPLOT_CANVAS_CONFIG', None), \
                 patch.object(property_manager.os.path, 'isfile', lambda p: False):
             self.assertEqual(property_manager._resolve_config_path(), property_manager.file_name)
+
+
+class TestSavedPreferencesLogScale(unittest.TestCase):
+    """The log scale is chosen per plot: one saved with the canvas preferences, as they could be saved before, turns
+    no plot to a log scale."""
+
+    def test_a_log_scale_saved_with_the_canvas_preferences_is_left_out(self):
+        self.assertEqual(property_manager._per_plot_log_scale({'log_scale': True, 'grid': False}),
+                         {'log_scale': False, 'grid': False})
+
+    def test_the_rest_is_kept_as_saved(self):
+        saved = {'log_scale': False, 'grid': False, 'font_size': 12}
+        self.assertEqual(property_manager._per_plot_log_scale(dict(saved)), saved)
 
 
 class TestPropertyManagerDisplayScale(unittest.TestCase):

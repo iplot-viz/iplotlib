@@ -50,8 +50,6 @@ class CanvasForm(IplotPreferencesForm):
              "widget": self.create_lineedit()},
             {"label": "Y max value", "property": "canvas_end",
              "widget": self.create_lineedit()},
-            {"label": "Log scale", "property": "log_scale",
-             "widget": self.create_checkbox()},
             {"label": "Grid", "property": "grid",
              "widget": self.create_checkbox()},
             {"label": "Grid spacing label", "property": "grid_spacing_label",
