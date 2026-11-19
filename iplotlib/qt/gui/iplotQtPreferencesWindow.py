@@ -32,6 +32,23 @@ from iplotLogging import setupLogger as Sl
 
 logger = Sl.get_logger(__name__, 'INFO')
 
+#: What the mouse sets on a canvas rather than its preferences: the place, width and folding of a legend, and the
+#: signals hidden from it.
+_PLOT_GESTURES = ('legend_anchor', 'legend_width', 'legend_collapsed')
+_SIGNAL_GESTURES = ('hidden',)
+
+
+def _gesture_owners(canvas: Canvas):
+    """The plots and signals of a canvas, each with the names of what the mouse sets on it."""
+    for column in canvas.plots:
+        for plot in column:
+            if isinstance(plot, Plot):
+                yield plot, _PLOT_GESTURES
+                for stack in plot.signals.values():
+                    for signal in stack:
+                        if isinstance(signal, SignalXY):
+                            yield signal, _SIGNAL_GESTURES
+
 
 class IplotQtPreferencesWindow(QMainWindow):
     """
@@ -56,6 +73,7 @@ class IplotQtPreferencesWindow(QMainWindow):
         canvas_assembly.rowsInserted.connect(self.treeView.expandAll)
         self._applyTime = time.time_ns()
         self.current_canvas = dict()
+        self._legend_positions_chosen = []  # the objects whose legend position was picked, until applied
 
         self._forms = {
             Canvas: CanvasForm(self),
@@ -75,6 +93,7 @@ class IplotQtPreferencesWindow(QMainWindow):
             if isinstance(form, IplotPreferencesForm):
                 form.onApply.connect(self.onApply.emit)
                 form.onReset.connect(self.onReset.emit)
+                form.legendPositionChosen.connect(self._legend_positions_chosen.append)
 
         index = list(self._forms.keys()).index(Canvas)
         self.formsStack.setCurrentIndex(index)
@@ -100,6 +119,12 @@ class IplotQtPreferencesWindow(QMainWindow):
     def post_applied(self):
         self._applyTime = time.time_ns()
         self._refresh_signal_icons()
+
+    def take_legend_positions_chosen(self) -> list:
+        """The canvas and plots whose legend position the user picked since this was last asked, even where it was."""
+        chosen = list(self._legend_positions_chosen)
+        self._legend_positions_chosen.clear()
+        return chosen
 
     def set_canvas_from_preferences(self):
         # Get the current canvas in order to preserve the preferences if these are reset
@@ -179,7 +204,14 @@ class IplotQtPreferencesWindow(QMainWindow):
         canvas = self.treeView.model().item(idx, 0).data(Qt.ItemDataRole.UserRole)
         if not isinstance(canvas, Canvas):
             return
+        # What the mouse did on the canvas meanwhile is not a preference to discard: a legend dragged, sized or
+        # folded, a signal hidden from its legend.
+        gestures = [(item, {name: getattr(item, name) for name in names}) for item, names in _gesture_owners(canvas)]
         canvas.merge(self.current_canvas)
+        for item, values in gestures:
+            for name, value in values.items():
+                setattr(item, name, value)
+        self._legend_positions_chosen.clear()
 
     def manual_reset(self, idx: int):
         canvas = self.treeView.model().item(idx, 0).data(Qt.ItemDataRole.UserRole)
