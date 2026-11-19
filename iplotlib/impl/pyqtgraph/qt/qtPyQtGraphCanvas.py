@@ -145,6 +145,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             self._minimap_plot.getAxis(side).setTextPen(*(() if theme is None else (theme['text'],)))
 
     def set_canvas(self, canvas):
+        self._drop_wheel_turn()
         prev_canvas = self._parser.canvas
 
         if prev_canvas != canvas and prev_canvas is not None and canvas is not None:
@@ -863,6 +864,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                     vb.dragged.connect(self._impl_mouse_drag_handler)
                     vb.dragStarted.connect(self._impl_mouse_drag_started_handler)
                     vb.dragFinished.connect(self._impl_mouse_drag_finished_handler)
+                    vb.wheeled.connect(self._impl_wheel_handler)
                     # Ruler labels are positioned in scene coordinates; a widget
                     # resize moves the axes without a range change, so re-project.
                     vb.sigResized.connect(self._on_viewbox_resized)
@@ -880,9 +882,11 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self._update_minimap()
 
     def undo(self):
+        self.end_wheel_turn()
         self._parser.undo()
 
     def redo(self):
+        self.end_wheel_turn()
         self._parser.redo()
 
     def _grid_bounds(self):
@@ -958,8 +962,17 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         self.stats(self.get_canvas())
         self.focusChanged.emit()
 
+    def _impl_wheel_handler(self, view_box, event, axis):
+        """Zoom the time axis with the wheel, around the mouse (see wheel_zoom); over the Y axis it zooms nothing."""
+        impl_plot = view_box.parentItem()
+        if impl_plot is None or axis == 1:
+            return
+        if self.wheel_zoom(impl_plot, view_box.mapSceneToView(event.scenePos()).x(), event.delta()):
+            event.accept()
+
     def _impl_mouse_press_handler(self, view_box, event):
         """Handle mouse press events in PyQtGraph."""
+        self.end_wheel_turn()
         impl_plot = view_box.parentItem()
         if not impl_plot:
             return
