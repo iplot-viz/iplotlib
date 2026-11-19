@@ -29,8 +29,9 @@ class IplotQtCanvasAssembly(QStackedWidget):
 
     def __init__(self, parent: typing.Optional[QWidget] = None):
         super().__init__(parent=parent)
+        # The rows go to the model itself. A Python wrapper kept of its root item, which Qt creates and deletes with the
+        # model, would outlive it, and shiboken could hand it back for another object made at the same address.
         self._model = QStandardItemModel(parent=self)
-        self._parentItem = self._model.invisibleRootItem()
 
     def refreshLinks(self):
         """
@@ -58,7 +59,7 @@ class IplotQtCanvasAssembly(QStackedWidget):
             self.setCurrentIndex(idx)
             canvasItem = CanvasItem(f'Canvas {idx + 1}')
             canvasItem.setEditable(False)
-            self._parentItem.appendRow(canvasItem)
+            self._model.appendRow(canvasItem)
             self.set_canvas_data(idx, canvas)
             self.canvasAdded.emit(idx, canvas)
 
@@ -70,21 +71,18 @@ class IplotQtCanvasAssembly(QStackedWidget):
             super().insertWidget(idx, canvas)
             canvasItem = CanvasItem(f'Canvas {idx + 1}')
             canvasItem.setEditable(False)
-            self._parentItem.insertRow(idx, canvasItem)
+            self._model.insertRow(idx, canvasItem)
             self.set_canvas_data(idx, canvas)
             self.canvasAdded.emit(idx, canvas)
 
     def removeWidget(self, canvas: QWidget):
         idx = self.indexOf(canvas)
         if idx >= 0:
-            self.removeWidget(canvas)
-            removed = self._parentItem.takeRow(idx)
-            assert len(removed) > 0
-            assert removed[0] == canvas
+            super().removeWidget(canvas)
+            self._model.removeRow(idx)
             self.canvasRemoved.emit(idx, canvas)
         else:
-            show_msg(
-                f"Cannot remove canvas: {id(canvas)}" + "Error: idx: {i} < 0", "ERROR", self)
+            show_msg(f"Cannot remove canvas {id(canvas)}: it is not in the assembly", "ERROR", self)
 
     def currentWidget(self) -> IplotQtCanvas:
         return super().currentWidget()
