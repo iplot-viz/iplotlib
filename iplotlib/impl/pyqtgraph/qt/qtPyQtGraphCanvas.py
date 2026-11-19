@@ -563,7 +563,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         if color is None:
             color = self._ruler_window.next_color(name)
         x_abs = self._parser.transform_value(impl_plot, 0, x)
-        y_abs = self._parser.transform_value(impl_plot, 1, y)
+        y_abs = self._parser.ruler_y(impl_plot, y)
         show_label, show_val_label = self._ruler_window.labels_for_new_ruler()
         ruler = Ruler(name=name, xy=(x_abs, y_abs), color=color, visible=True,
                       show_label=show_label, show_val_label=show_val_label)
@@ -600,7 +600,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
         impl_plot, _, ruler = self._ruler_drag
         view_pos = view_box.mapSceneToView(scene_pos)
         x_abs = self._parser.transform_value(impl_plot, 0, view_pos.x())
-        y_abs = self._parser.transform_value(impl_plot, 1, view_pos.y())
+        y_abs = self._parser.ruler_y(impl_plot, view_pos.y())
         ruler.abs_x = x_abs
         ruler.abs_y = y_abs
         ruler.xy = (view_pos.x(), view_pos.y())
@@ -609,7 +609,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
             echo.abs_x = x_abs
             echo.abs_y = y_abs
             echo.xy = (self._parser.transform_value(echo.plot, 0, x_abs, inverse=True),
-                       self._parser.transform_value(echo.plot, 1, y_abs, inverse=True))
+                       self._parser.ruler_view_y(echo.plot, y_abs))
             echo.refresh_labels()
 
     def _end_ruler_drag(self):
@@ -657,7 +657,7 @@ class QtPyQtGraphCanvas(IplotQtCanvas):
                          if r.name == self._PREVIEW_RULER_NAME), None)
         if existing is not None and self._preview_ruler_plot is impl_plot:
             existing.abs_x = self._parser.transform_value(impl_plot, 0, x)
-            existing.abs_y = self._parser.transform_value(impl_plot, 1, y)
+            existing.abs_y = self._parser.ruler_y(impl_plot, y)
             existing.xy = (x, y)
             self._apply_new_ruler_labels(existing)
             existing.refresh_labels()

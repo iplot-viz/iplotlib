@@ -3084,6 +3084,14 @@ class BackendParserBase(ABC):
         float when offset is int)
         """
 
+    def ruler_y(self, impl_plot: Any, y_view: float) -> float:
+        """The value of the Y axis of a plot at the height `y_view` of its view: what a ruler there keeps."""
+        return self.transform_value(impl_plot, 1, y_view)
+
+    def ruler_view_y(self, impl_plot: Any, y: float) -> float:
+        """The height in the view of a plot of the value `y` of its Y axis (see ruler_y)."""
+        return self.transform_value(impl_plot, 1, y, inverse=True)
+
     def transform_data(self, impl_plot: Any, data):
         """
         This function post processes data if it cannot be plot with matplotlib directly.

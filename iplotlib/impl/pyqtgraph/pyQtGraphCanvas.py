@@ -2332,7 +2332,7 @@ class PyQtGraphParser(BackendParserBase):
                 item = line[0] if isinstance(line, list) else line
                 if not isinstance(item, PlotDataItem):
                     continue
-                x_data, y_data = line_samples(item) or item.getData()
+                x_data, y_data = line_samples(item) or item.getOriginalDataset()
                 if x_data is None or len(x_data) == 0:
                     continue
                 # Nearest sample (searchsorted+clamp, as the value labels do).
@@ -2355,7 +2355,7 @@ class PyQtGraphParser(BackendParserBase):
         ruler = pyQtRuler(plot=impl_plot, name=name, xy=(x, y), color=color, font_size=font_size,
                           value_lines=self._ruler_value_lines(impl_plot), is_echo=is_echo)
         ruler.abs_x = self.transform_value(impl_plot, 0, x)
-        ruler.abs_y = self.transform_value(impl_plot, 1, y)
+        ruler.abs_y = self.ruler_y(impl_plot, y)
         self._rulers.append(ruler)
         return ruler
 
@@ -2369,7 +2369,7 @@ class PyQtGraphParser(BackendParserBase):
             if sibling is origin_impl_plot:
                 continue
             x_view = self.transform_value(sibling, 0, x_abs, inverse=True)
-            y_view = self.transform_value(sibling, 1, y_abs, inverse=True)
+            y_view = self.ruler_view_y(sibling, y_abs)
             self.add_ruler(sibling, name, x_view, y_view, color, is_echo=True)
 
     @BackendParserBase.run_in_one_thread
@@ -2398,7 +2398,7 @@ class PyQtGraphParser(BackendParserBase):
         for r in self._rulers:
             if impl_plot is None or r.plot is impl_plot:
                 r.xy = (self.transform_value(r.plot, 0, r.abs_x, inverse=True),
-                        self.transform_value(r.plot, 1, r.abs_y, inverse=True))
+                        self.ruler_view_y(r.plot, r.abs_y))
                 r.refresh_labels()
 
     def get_rulers(self, impl_plot: PlotItem = None) -> List[pyQtRuler]:
@@ -2534,3 +2534,16 @@ class PyQtGraphParser(BackendParserBase):
         """Adds or subtracts axis offset from value trying to preserve type of offset (ex: does not convert to
         float when offset is int)"""
         return self._impl_plot_cache_table.transform_value(impl_plot, ax_idx, value, inverse=inverse)
+
+    def ruler_y(self, impl_plot: PlotItem, y_view: float) -> float:
+        # A Y axis in log mode shows the log10 of the values. Clamped so float ** cannot raise OverflowError.
+        if impl_plot.getAxis('left').logMode:
+            y_view = 10.0 ** min(y_view, 300.0)
+        return super().ruler_y(impl_plot, y_view)
+
+    def ruler_view_y(self, impl_plot: PlotItem, y: float) -> float:
+        y = super().ruler_view_y(impl_plot, y)
+        if impl_plot.getAxis('left').logMode:
+            # A value the axis cannot show lies below any view: a NaN breaks the auto range of the view box.
+            return math.log10(y) if y > 0 else -300.0
+        return y

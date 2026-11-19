@@ -559,7 +559,7 @@ class IplotQtCanvas(QWidget):
         the time axis and list it in the window; without `draw`, list it only."""
         x_view = self._parser.transform_value(impl_plot, 0, ruler.xy[0], inverse=True)
         if draw:
-            y_view = self._parser.transform_value(impl_plot, 1, ruler.xy[1], inverse=True)
+            y_view = self._parser.ruler_view_y(impl_plot, ruler.xy[1])
             self._parser.add_ruler(impl_plot, ruler.name, x_view, y_view, ruler.color)
             self._parser.create_ruler_echoes(impl_plot, ruler.name, ruler.xy[0], ruler.xy[1], ruler.color)
         for entry in self._ruler_window_rows(impl_plot, x_view, ruler.xy):
@@ -574,7 +574,7 @@ class IplotQtCanvas(QWidget):
         count = 0
         for sibling in self._parser._impl_plots_sharing_x(plot):
             x_view = self._parser.transform_value(sibling, 0, ruler.xy[0], inverse=True)
-            y_view = self._parser.transform_value(sibling, 1, ruler.xy[1], inverse=True)
+            y_view = self._parser.ruler_view_y(sibling, ruler.xy[1])
             self._parser.add_ruler(sibling, ruler.name, x_view, y_view, ruler.color, is_echo=True)
             entry = self._ruler_window_row(sibling, (ruler.xy[0], None),
                                            self._parser._ruler_signal_values(sibling, x_view))
