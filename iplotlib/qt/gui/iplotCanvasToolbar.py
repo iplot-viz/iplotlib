@@ -67,7 +67,7 @@ class IplotQtCanvasToolbar(FontScaledIcons, QToolBar):
         self.addSeparator()
 
         # Statistics
-        self.statistics = self._packaged_action('stats_icon', 'png', 'Statistics')
+        self.statistics = self._packaged_action('stats', 'svg', 'Statistics')
         self.addAction(self.statistics)
 
         self.minimapAction = self._packaged_action('minimap', 'svg', 'Mini-map')
