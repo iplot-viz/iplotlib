@@ -43,6 +43,7 @@ class JSONExporter:
 
     @staticmethod
     def make_compatible(d, klass):
+        from iplotlib.core.canvas import Canvas
         from iplotlib.core.signal import Signal
         if issubclass(klass, Signal):
             try:
@@ -50,6 +51,14 @@ class JSONExporter:
                 d.update({'label': label})
             except KeyError:
                 pass
+        elif issubclass(klass, Canvas):
+            # The log scale is chosen per plot. One saved for the whole canvas goes to the plots that left it to the
+            # canvas, so they open as they were saved.
+            if d.pop('log_scale', None):
+                for column in d.get('plots') or []:
+                    for plot in column or []:
+                        if isinstance(plot, dict) and plot.get('log_scale') is None:
+                            plot['log_scale'] = True
 
     def dataclass_from_dict(self, d, klass=None):
         """

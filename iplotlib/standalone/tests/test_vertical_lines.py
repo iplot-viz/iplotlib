@@ -27,10 +27,11 @@ class VerticalLinesTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = ensure_qapp()
 
-    def _draw(self, backend, x, y=None, level='canvas', vertical_lines='Solid', canvas_options=None, **signal_options):
+    def _draw(self, backend, x, y=None, level='canvas', vertical_lines='Solid', canvas_options=None, plot_options=None,
+              **signal_options):
         """A canvas with a signal sampled at `x`, asking for vertical lines at `level`, drawn by `backend`."""
         canvas = Canvas(1, 1, title='vertical lines', **(canvas_options or {}))
-        plot = PlotXY()
+        plot = PlotXY(**(plot_options or {}))
         signal = SignalXY(label='s', **signal_options)
         signal.data_access_enabled = False
         y = np.arange(len(x), dtype=float) if y is None else np.asarray(y, dtype=float)
@@ -105,7 +106,7 @@ class VerticalLinesTest(unittest.TestCase):
                     for vertical_lines in ('None', 'Solid'):
                         qt_canvas, signal = self._draw(backend, [1.0, 2.0, 3.0], y=[5.0, 6.0, 5.5],
                                                        vertical_lines=vertical_lines,
-                                                       canvas_options=dict(log_scale=log_scale))
+                                                       plot_options=dict(log_scale=log_scale))
                         parser = qt_canvas._parser
                         impl_plot = parser._signal_impl_plot_lut.get(parser.signal_lut_key(signal))
                         ranges.append(impl_plot.getViewBox().viewRange()[1] if backend == 'pyqt'
@@ -186,7 +187,7 @@ class VerticalLinesTest(unittest.TestCase):
                 self.assertEqual(self._lines(qt_canvas, signal)[0], [3.0, 4.0])
             with self.subTest(backend=backend, scale='log'):
                 qt_canvas, signal = self._draw(backend, [1.0, 2.0, 3.0, 4.0], y=[-1.0, 0.0, 5.0, 6.0],
-                                               canvas_options=dict(log_scale=True))
+                                               plot_options=dict(log_scale=True))
 
                 self.assertEqual(self._lines(qt_canvas, signal)[0], [3.0, 4.0])
 
