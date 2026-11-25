@@ -5,8 +5,8 @@ import unittest
 
 from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.layout import Arrangement, Slot, arrange, current, grid_size, laid_out, moved, resized, slots_of, \
-    unstacked
+from iplotlib.core.layout import Arrangement, Slot, arrange, current, grid_size, laid_out, moved, removed, resized, \
+    slots_of, unstacked
 from iplotlib.core.plot import PlotXY, PlotXYWithSlider
 from iplotlib.core.ruler import Ruler
 from iplotlib.core.signal import SignalXY
@@ -677,6 +677,68 @@ class TestUnstack(unittest.TestCase):
 
 def _titles(canvas: Canvas) -> list:
     return [[plot.plot_title if plot is not None else None for plot in column] for column in canvas.plots]
+
+
+class TestRemove(unittest.TestCase):
+
+    def test_the_plot_leaves_its_cells_empty_and_the_others_stay_where_they_are(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 2, 1), 'C': (3, 0, 1, 1), 'D': (0, 1, 4, 1)})
+
+        arrangement = removed(canvas, _plot(canvas, 'B'))
+
+        self.assertEqual(_places(arrangement), {'A': (0, 0, 1, 1), 'C': (3, 0, 1, 1), 'D': (0, 1, 4, 1)})
+        self.assertEqual((arrangement.rows, arrangement.cols), (4, 2))
+        self.assertEqual(arrangement.changes, [(Slot(1, 0, 2, 1), None)])
+
+    def test_the_grid_shrinks_as_the_one_built_from_where_the_other_plots_are(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1), 'C': (0, 1, 1, 1)})
+        roomy = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1)}, rows=3)
+
+        self.assertEqual(grid_size(canvas), (2, 2))
+        below = removed(canvas, _plot(canvas, 'B'))
+        self.assertEqual((below.rows, below.cols), (1, 2))
+        right = removed(canvas, _plot(canvas, 'C'))
+        self.assertEqual((right.rows, right.cols), (2, 1))
+        # A grid with room beyond its plots keeps it.
+        kept = removed(roomy, _plot(roomy, 'B'))
+        self.assertEqual((kept.rows, kept.cols), (3, 1))
+
+    def test_the_grid_chosen_for_the_plots_stays(self):
+        canvas = _canvas({'A': (0, 0, 1, 1), 'B': (1, 0, 1, 1)})
+        canvas.layout_rows, canvas.layout_cols = 2, 1
+
+        arrangement = removed(canvas, _plot(canvas, 'B'))
+
+        self.assertEqual((arrangement.rows, arrangement.cols, arrangement.layout), (2, 1, (2, 1)))
+
+    def test_the_reserved_slots_stay_where_they_are(self):
+        canvas = _canvas(COLUMN)
+
+        arrangement = removed(canvas, _plot(canvas, 'B'), reserved=[Slot(4, 0), Slot(0, 1)])
+
+        self.assertEqual(arrangement.reserved, [Slot(4, 0), Slot(0, 1)])
+        self.assertEqual(arrangement.changes, [(Slot(1, 0), None)])
+
+    def test_the_only_plot_and_a_plot_not_on_the_canvas_are_not_removed(self):
+        alone = _canvas({'A': (0, 0, 1, 1)})
+        canvas = _canvas(COLUMN)
+
+        self.assertIsNone(removed(alone, _plot(alone, 'A'), reserved=[Slot(1, 0)]))
+        self.assertIsNone(removed(canvas, PlotXY(plot_title='B')))
+
+    def test_going_back_gives_the_plot_its_place_back(self):
+        canvas = _stacked(_canvas(COLUMN), {'B': 2})
+        b = _plot(canvas, 'B')
+        before = current(canvas)
+
+        arrange(canvas, removed(canvas, b))
+        self.assertEqual(_titles(canvas), [['A', None, 'C', 'D']])
+
+        arrange(canvas, before)
+        self.assertEqual(_titles(canvas), [['A', 'B', 'C', 'D']])
+        self.assertIs(canvas.plots[0][1], b)
+        self.assertEqual(sorted(b.signals), [1, 2])
+        self.assertTrue(all(signal.parent() is b for signals in b.signals.values() for signal in signals))
 
 
 if __name__ == '__main__':

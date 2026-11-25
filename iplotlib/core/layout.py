@@ -62,8 +62,9 @@ class Arrangement:
     # application that keeps the place of each plot elsewhere, as the table of MINT does, moves what it keeps there.
     # When plots are joined into one (see laid_out), their changes carry stack offsets: a change takes, from its slot
     # before, the stacks numbered past its offset that no change from the same slot with a higher offset takes, and
-    # numbers them past the offset of its slot after. Undone, this gives each joined plot its stacks back.
-    changes: List[Tuple[Slot, Slot]]
+    # numbers them past the offset of its slot after. Undone, this gives each joined plot its stacks back. A plot
+    # removed goes to None, and one that comes back comes from None (see removed).
+    changes: List[Tuple[Optional[Slot], Optional[Slot]]]
     # Where the reserved slots go.
     reserved: List[Slot] = field(default_factory=list)
     # The rows and columns of the grid chosen for the plots, which the grid keeps at least: None for none (see
@@ -254,6 +255,18 @@ def unstacked(canvas: Canvas, plot: Plot, reserved: Iterable[Slot] = (), order: 
     return Arrangement(plots, before.rows, before.cols, changes, before.reserved, before.layout)
 
 
+def removed(canvas: Canvas, plot: Plot, reserved: Iterable[Slot] = ()) -> Optional[Arrangement]:
+    """The plots of the canvas without `plot`, whose cells are left empty: the other plots and the reserved slots stay
+    where they are, and the grid shrinks only as the one built from where they are would. None if the plot is not on
+    the canvas or is its only plot.
+
+    The plot is left as it was, to come back to its slot."""
+    slots = _occupants(canvas, reserved)
+    if _slot(slots, plot) is None or all(other is plot or isinstance(other, _Reserved) for other, _ in slots):
+        return None
+    return _arrangement(canvas, slots, {}, plot)
+
+
 def arrange(canvas: Canvas, arrangement: Arrangement):
     """Lay the plots of the canvas out as the arrangement says, as an application building the canvas would: each
     column lists its plots down to its last one, with None where no plot starts."""
@@ -379,11 +392,14 @@ def _reordered(canvas: Canvas, slots: List[Tuple[object, Slot]], lane: List[Tupl
     return _arrangement(canvas, slots, places)
 
 
-def _arrangement(canvas: Canvas, slots: List[Tuple[object, Slot]], places: dict) -> Arrangement:
-    """The arrangement with the plots and reserved slots in `places` (by id) moved there, the others where they are."""
+def _arrangement(canvas: Canvas, slots: List[Tuple[object, Slot]], places: dict, removed: Plot = None) \
+        -> Arrangement:
+    """The arrangement with the plots and reserved slots in `places` (by id) moved there, the others where they are,
+    but the plot `removed`."""
     rows, cols = grid_size(canvas)
-    new_slots = [(other, places.get(id(other), slot)) for other, slot in slots]
-    changes = [(slot, places[id(other)]) for other, slot in slots if id(other) in places]
+    new_slots = [(other, places.get(id(other), slot)) for other, slot in slots if other is not removed]
+    changes = [(slot, places[id(other)]) for other, slot in slots if id(other) in places] + \
+        [(slot, None) for other, slot in slots if removed is not None and other is removed]
     drawn = [slot for other, slot in slots if not isinstance(other, _Reserved)]
     plots = [(other, slot) for other, slot in new_slots if not isinstance(other, _Reserved)]
     # A grid that ends with its plots, as an application builds it from where they are, still does; one that keeps
