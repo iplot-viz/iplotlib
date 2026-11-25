@@ -1176,6 +1176,10 @@ class MatplotlibParser(BackendParserBase):
         # own, and contours and images a colorbar beside them: those plots are drawn again.
         if self._focus_plot is not None:
             return False
+        # The axes of a plot no longer on the canvas would stay where it was.
+        on_canvas = {id(plot) for column in self.canvas.plots for plot in column if plot is not None}
+        if any(axes and key not in on_canvas for key, axes in self._plot_impl_plot_lut.items()):
+            return False
         grid = self.figure.add_gridspec(self.canvas.rows, self.canvas.cols)
         places = []
         for col, column in enumerate(self.canvas.plots):

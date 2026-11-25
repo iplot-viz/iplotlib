@@ -52,7 +52,8 @@ class HistoryManager:
         try:
             cmd = self._undo_stack.pop()  # type: IplotCommand
             cmd.undo()
-            if cmd.name in ('Zoom', 'Select', 'Dist', 'Shift', 'Move plot', 'Resize plot', 'Layout', 'Unstack'):
+            if cmd.name in ('Zoom', 'Select', 'Dist', 'Shift', 'Move plot', 'Resize plot', 'Layout', 'Unstack',
+                            'Remove plot'):
                 self._redo_stack.append(cmd)
             logger.debug(f"Undo {cmd.name}")
             logger.debug(f"UndoStack: {self._undo_stack}")
