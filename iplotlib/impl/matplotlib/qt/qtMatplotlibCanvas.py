@@ -1436,6 +1436,7 @@ class QtMatplotlibCanvas(IplotQtCanvas):
         else:
             autoscale_menu.addAction("Unfocus plot", self._full_screen_mode_off)
         self._add_unstack_action(autoscale_menu, event.inaxes)
+        self._add_remove_action(autoscale_menu, event.inaxes)
         autoscale_menu.addSeparator()
         if ci:
             autoscale_menu.addAction("Preferences",

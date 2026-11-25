@@ -26,7 +26,7 @@ from iplotlib.core.layout import Arrangement
 from iplotlib.core.ruler import Ruler
 import iplotLogging.setupLogger as Sl
 from iplotlib.qt.gui.IplotQtStatistics import IplotQtStatistics
-from iplotlib.qt.gui.iplotQtArrangement import LAYOUT, UNSTACK, PlotArranger
+from iplotlib.qt.gui.iplotQtArrangement import LAYOUT, REMOVE, UNSTACK, PlotArranger
 from iplotlib.qt.gui.iplotQtRuler import IplotQtRuler
 from iplotlib.qt.utils.palette import theme_colors
 
@@ -51,8 +51,9 @@ class IplotQtCanvas(QWidget):
     signalShiftUndone = Signal(str, float, float, str)   # (signal_uid, dx, dy, source)
     signalShiftPulseApplied = Signal(str, str, float, float, str)  # (signal_uid, pulse_id, dx, dy, source)
     signalShiftPulseUndone = Signal(str, str, float, float)  # (signal_uid, pulse_id, previous_dx, previous_dy)
-    # The plots moved or took another size on the grid, by the mouse or by undo/redo: the slot before and after of
-    # each plot, and of each reserved slot, that moved (see iplotlib.core.layout.Arrangement.changes).
+    # The plots moved, took another size, or were removed or came back on the grid, by the mouse, the context menu or
+    # undo/redo: the slot before and after of each plot, and of each reserved slot, that moved (see
+    # iplotlib.core.layout.Arrangement.changes).
     plotsArranged = Signal(object)
     # Something the application takes, such as variables of its variable browser, was dropped on the grid: where
     # (see DropInfo and IplotQtMainWindow.accepts_drop).
@@ -954,6 +955,28 @@ class IplotQtCanvas(QWidget):
         plot = cache_item.plot() if hasattr(cache_item, 'plot') else None
         action = menu.addAction("Unstack", lambda: self.unstack(plot))
         action.setEnabled(plot is not None and self.unstack_arrangement(plot) is not None)
+
+    def remove_arrangement(self, plot) -> Optional[Arrangement]:
+        """Where the plots go when `plot` is removed (see iplotlib.core.layout.removed); None if it cannot be now."""
+        if not self._layout_allowed():
+            return None
+        return layout.removed(self.get_canvas(), plot, self.reserved_slots())
+
+    def remove_plot(self, plot):
+        """Remove `plot` from the canvas, as a command that undo takes back. Nothing happens if it cannot be now."""
+        arrangement = self.remove_arrangement(plot)
+        if arrangement is None:
+            return
+        if self._arranger is not None:
+            self._arranger.cancel()
+        self._apply_arrangement(REMOVE, arrangement, layout.current(self.get_canvas()))
+
+    def _add_remove_action(self, menu: QMenu, impl_plot):
+        """Offer in the context menu of a plot to remove it, greyed out unless it can be now."""
+        cache_item = self._parser._impl_plot_cache_table.get_cache_item(impl_plot)
+        plot = cache_item.plot() if hasattr(cache_item, 'plot') else None
+        action = menu.addAction("Remove plot", lambda: self.remove_plot(plot))
+        action.setEnabled(plot is not None and self.remove_arrangement(plot) is not None)
 
     def _drop_allowed(self, source, mime) -> bool:
         """Whether what is dragged over the canvas can be dropped on a cell of its grid now: something the

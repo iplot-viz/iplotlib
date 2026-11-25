@@ -23,7 +23,7 @@ HANDLE = ScaledPixels(14)
 # Width of the strokes of the grip drawn there.
 _STROKE = ScaledPixels(1.5)
 
-MOVE, RESIZE, LAYOUT, UNSTACK = 'Move plot', 'Resize plot', 'Layout', 'Unstack'
+MOVE, RESIZE, LAYOUT, UNSTACK, REMOVE = 'Move plot', 'Resize plot', 'Layout', 'Unstack', 'Remove plot'
 
 # A corner of a plot, as whether it is a top one and whether it is a left one.
 Corner = Tuple[bool, bool]

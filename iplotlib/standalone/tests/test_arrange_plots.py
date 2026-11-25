@@ -1006,6 +1006,65 @@ class TestArrangePlots(unittest.TestCase):
                 point = (qt_canvas.width() * 0.3, qt_canvas.height() * 0.2)
                 self.assertFalse(self._menu_action(mouse, point, 'Unstack').isEnabled())
 
+    @staticmethod
+    def _drawn_count(qt_canvas) -> int:
+        """How many plots the backend draws."""
+        parser = qt_canvas._parser
+        return len(parser._cell_gl) if hasattr(parser, '_cell_gl') else len(parser.figure.axes)
+
+    def test_remove_plot_in_the_menu_removes_the_plot_and_undo_and_redo_take_it_back_and_forth(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                canvas, qt_canvas, mouse, arranged = self._qt_canvas(backend)
+                parser = qt_canvas._parser
+                gone = _plot(canvas, '1.0')
+                parser.set_oaw_axis_limits(self._impl(qt_canvas, canvas, '2.0'), 0, (3.0, 6.0))
+                qt_canvas._flush_view()
+                self.app.processEvents()
+                view = parser.get_oaw_axis_limits(self._impl(qt_canvas, canvas, '1.0'), 0)
+
+                remove = self._menu_action(mouse, mouse.cell(1, 0), 'Remove plot')
+                texts = [action.text() for action in remove.parent().actions()]
+                self.assertEqual(texts.index('Remove plot'), texts.index('Unstack') + 1)
+                self.assertTrue(remove.isEnabled())
+                remove.trigger()
+                self.app.processEvents()
+
+                self.assertEqual(_titles(canvas), [['0.0', None, '2.0']])
+                self.assertEqual(arranged[-1], [(layout.Slot(1, 0), None)])
+                self.assertEqual(qt_canvas.get_next_undo_cmd_name(), 'Remove plot')
+                self.assertEqual(self._drawn_count(qt_canvas), 2)
+                self.assertFalse(parser._plot_impl_plot_lut.get(id(gone)))
+                for title, place in (('0.0', (0, 0, 1, 1)), ('2.0', (2, 0, 1, 1))):
+                    self.assertEqual(self._drawn_place(qt_canvas, self._impl(qt_canvas, canvas, title)), place)
+                np.testing.assert_allclose(parser.get_oaw_axis_limits(self._impl(qt_canvas, canvas, '2.0'), 0),
+                                           (3.0, 6.0))
+
+                qt_canvas.undo()
+                self.app.processEvents()
+                self.assertIs(canvas.plots[0][1], gone)
+                self.assertEqual(arranged[-1], [(None, layout.Slot(1, 0))])
+                self.assertEqual(self._drawn_count(qt_canvas), 3)
+                self.assertEqual(self._drawn_place(qt_canvas, self._impl(qt_canvas, canvas, '1.0')), (1, 0, 1, 1))
+                np.testing.assert_allclose(parser.get_oaw_axis_limits(self._impl(qt_canvas, canvas, '1.0'), 0), view)
+
+                qt_canvas.redo()
+                self.app.processEvents()
+                self.assertEqual(_titles(canvas), [['0.0', None, '2.0']])
+                self.assertEqual(self._drawn_count(qt_canvas), 2)
+
+    def test_remove_plot_is_greyed_out_for_the_only_plot_and_while_a_plot_has_the_focus(self):
+        for backend in BACKENDS:
+            with self.subTest(backend):
+                _, qt_canvas, mouse, _ = self._qt_canvas(backend, columns=(1,))
+                self.assertFalse(self._menu_action(mouse, mouse.cell(0, 0), 'Remove plot').isEnabled())
+
+                canvas, qt_canvas, mouse, _ = self._qt_canvas(backend)
+                qt_canvas._full_screen_mode_on(self._impl(qt_canvas, canvas, '0.0'))
+                self.app.processEvents()
+                point = (qt_canvas.width() * 0.3, qt_canvas.height() * 0.2)
+                self.assertFalse(self._menu_action(mouse, point, 'Remove plot').isEnabled())
+
     def test_undo_or_redo_that_takes_the_plot_in_focus_away_shows_all_the_plots(self):
         for backend in BACKENDS:
             with self.subTest(backend):

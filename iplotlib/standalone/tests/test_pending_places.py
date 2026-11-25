@@ -286,6 +286,29 @@ class PendingPlacesTest(unittest.TestCase):
                 drawn = self._drawn(qt_canvas)
                 self.assertEqual([len(stacks) for stacks in drawn], [0, 0, 1])
 
+    def test_a_plot_removed_while_others_wait_for_their_data_leaves_them_waiting(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = _canvas()
+                qt_canvas = self._qt_canvas(backend, canvas, _places(canvas))
+                tall = canvas.plots[1][0]
+                qt_canvas.draw_plot(tall)
+                self.app.processEvents()
+
+                qt_canvas.remove_plot(tall)
+                self.app.processEvents()
+
+                self.assertFalse(self._shown(qt_canvas, tall))
+                self.assertEqual(self._pending_shown(qt_canvas), {(0, 0), (0, 1)})
+                for plot in canvas.plots[0]:
+                    self.assertTrue(qt_canvas.draw_plot(plot))
+                self.app.processEvents()
+                self.assertEqual(self._pending_shown(qt_canvas), set())
+                self.assertEqual([len(stacks) for stacks in self._drawn(qt_canvas)], [1, 2])
+                qt_canvas.undo()
+                self.app.processEvents()
+                self.assertEqual([len(stacks) for stacks in self._drawn(qt_canvas)], [1, 2, 1])
+
     def test_another_canvas_is_drawn_whole(self):
         for backend in BACKENDS:
             with self.subTest(backend=backend):
