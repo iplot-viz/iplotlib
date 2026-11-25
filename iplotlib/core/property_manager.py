@@ -42,6 +42,17 @@ except Exception as e:
     properties = file_name
 
 
+def _per_plot_log_scale(config):
+    """The configuration with no log scale of its own: each plot chooses it in its preferences, and one saved with the
+    canvas preferences, as they could be saved before, would turn it on for every plot with no way to turn it off."""
+    if isinstance(config, dict) and config.get('log_scale'):
+        config['log_scale'] = False
+    return config
+
+
+properties = _per_plot_log_scale(properties)
+
+
 def _configure_display_scale(config: dict):
     """Seed the UI scale from the canvas configuration file.
 

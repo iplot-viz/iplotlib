@@ -470,14 +470,6 @@ class LogScaleInvalidationTest(unittest.TestCase):
         prev = canvas.to_dict()
         self.assertEqual(IplotQtMainWindow._plots_with_log_scale_change(canvas, prev), [])
 
-    def test_canvas_level_toggle_flags_all_plots(self):
-        canvas = self._two_plot_canvas()
-        prev = canvas.to_dict()
-        canvas.log_scale = True
-        changed = IplotQtMainWindow._plots_with_log_scale_change(canvas, prev)
-        self.assertEqual({id(p) for p in changed},
-                         {id(canvas.plots[0][0]), id(canvas.plots[0][1])})
-
     def test_plot_level_toggle_flags_only_that_plot(self):
         canvas = self._two_plot_canvas()
         prev = canvas.to_dict()
@@ -485,15 +477,13 @@ class LogScaleInvalidationTest(unittest.TestCase):
         changed = IplotQtMainWindow._plots_with_log_scale_change(canvas, prev)
         self.assertEqual([id(p) for p in changed], [id(canvas.plots[0][1])])
 
-    def test_explicit_plot_override_not_flagged_by_canvas_toggle(self):
-        # Plot pins log_scale=True explicitly, so a canvas-level None->True change does
-        # not alter its effective value and it must not be flagged.
+    def test_a_plot_back_to_linear_is_flagged(self):
         canvas = self._two_plot_canvas()
         canvas.plots[0][0].log_scale = True
         prev = canvas.to_dict()
-        canvas.log_scale = True
+        canvas.plots[0][0].log_scale = False
         changed = IplotQtMainWindow._plots_with_log_scale_change(canvas, prev)
-        self.assertEqual([id(p) for p in changed], [id(canvas.plots[0][1])])
+        self.assertEqual([id(p) for p in changed], [id(canvas.plots[0][0])])
 
 
 class MinimapFontSizeTest(unittest.TestCase):
