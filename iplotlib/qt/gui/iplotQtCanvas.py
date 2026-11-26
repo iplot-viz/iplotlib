@@ -68,6 +68,15 @@ class IplotQtCanvas(QWidget):
         self._theme_draw_pending = False
         self._staging_cmds = []  # type: List[IplotAxesRangeCmd]
         self._commitd_cmds = []  # type: List[IplotAxesRangeCmd]
+        # The implementation plot a turn of the wheel zooms, until the turn ends (see wheel_zoom). Qt tells the end of a
+        # scroll only on macOS (QWheelEvent.phase), and a mouse wheel never does: a turn ends when the wheel rests, as
+        # Qt Quick's WheelHandler.activeTimeout and pyqtgraph's SignalProxy take it, or at once on any other input.
+        self._wheel_turn = None
+        self._wheel_span = 0.0  # what the time axis of the plot showed when the turn began
+        self._wheel_rest = QTimer(self)
+        self._wheel_rest.setSingleShot(True)
+        self._wheel_rest.setInterval(self.WHEEL_REST_MS)
+        self._wheel_rest.timeout.connect(self.end_wheel_turn)
 
         # Iplotlib rulers
         self._ruler_window = IplotQtRuler()
@@ -248,6 +257,7 @@ class IplotQtCanvas(QWidget):
     def set_mouse_mode(self, mode: str):
         """Sets mouse mode of this canvas"""
         logger.debug(f"MMode change {self._mmode} -> {mode}")
+        self.end_wheel_turn()
         if self._arranger is not None:
             self._arranger.cancel()
         self._mmode = mode
@@ -818,24 +828,102 @@ class IplotQtCanvas(QWidget):
         Show [begin, end] on the time axis of a plot, and of the plots that share it, as one
         undoable zoom. The data of the new range are read as for any zoom.
         """
+        self.end_wheel_turn()
         self.stage_view_lim_cmd(impl_plot, name='Zoom')
         # As a zoom made with the mouse, on the offset the view has: the view moves and the plots follow it. A new
         # offset first would put a range as wide as the one shown at the same place of a pyqtgraph view, which then
         # tells nothing (see set_plot_limits).
         view = [self._parser.transform_value(impl_plot, 0, value, inverse=True) for value in (begin, end)]
         self._parser.set_impl_x_axis_limits(impl_plot, tuple(view))
-        if self._parser._pm.get_value(self.get_canvas(), 'autoscale'):
-            # A zoom made with the mouse sets the Y axis too, which fits it to the data then. Each stack, since
-            # pyqtgraph tells nothing of a Y range that stays the same.
-            plot = self._parser._impl_plot_cache_table.get_cache_item(impl_plot).plot()
-            for stack in self._parser._plot_impl_plot_lut.get(id(plot)):
-                self._parser.autoscale_y_axis(stack)
+        self._fit_y_after_x_zoom(impl_plot)
         while len(self._staging_cmds):
             self.commit_view_lim_cmd(impl_plot)
         while len(self._commitd_cmds):
             self.push_view_lim_cmd()
         self._flush_view()
         self.stats(self.get_canvas())
+
+    def _fit_y_after_x_zoom(self, impl_plot):
+        """With autoscale on, fit the Y axis of the plot, and of the plots that share its time axis, to what they show
+        after a zoom of their time axis alone: a zoom made with the mouse sets the Y axis too, which fits it then."""
+        canvas = self.get_canvas()
+        if not self._parser._pm.get_value(canvas, 'autoscale'):
+            return
+        group = (self._parser._get_all_shared_axes(impl_plot) if self._parser._pm.get_value(canvas, 'shared_x_axis')
+                 else [impl_plot])
+        for member in group or [impl_plot]:
+            cache_item = self._parser._impl_plot_cache_table.get_cache_item(member)
+            plot = cache_item.plot() if hasattr(cache_item, 'plot') else None
+            # Each stack, since pyqtgraph tells nothing of a Y range that stays the same.
+            for stack in self._parser._plot_impl_plot_lut.get(id(plot), []) if plot is not None else []:
+                self._parser.autoscale_y_axis(stack)
+
+    #: The time axis shows 1.02 ** 15, about 1.35 times, less or more of itself at each notch of the wheel (an angle of
+    #: 120): the step pyqtgraph zooms by.
+    WHEEL_STEP = 1.02 ** (1 / 8)
+    #: How long, in milliseconds, the wheel rests before its turn ends: the 0.3 s pyqtgraph's SignalProxy waits for a
+    #: wheel, long enough to join the flicks of one zoom, short next to a read of the archive.
+    WHEEL_REST_MS = 300
+
+    def wheel_zoom(self, impl_plot, x: float, angle: int) -> bool:
+        """Zoom the time axis of a plot, and of the plots that share it, around `x`, in the coordinates of its view: in
+        as the wheel turns away from the user by `angle` (in eighths of a degree), out as it turns back. While the wheel
+        turns, the plots show the data in memory; the turn reads once it ends, and is one zoom to undo (see
+        end_wheel_turn). False where the wheel zooms nothing: while streaming, on a contour, during a drag or another
+        zoom."""
+        canvas = self.get_canvas()
+        cache_item = self._parser._impl_plot_cache_table.get_cache_item(impl_plot) if self._parser else None
+        plot = cache_item.plot() if hasattr(cache_item, 'plot') else None
+        if (not angle or canvas is None or canvas.streaming or not isinstance(plot, PlotXY)
+                or QApplication.mouseButtons() != Qt.MouseButton.NoButton):
+            return False
+        lo, hi = self._parser.get_impl_x_axis_limits(impl_plot)
+        if self._wheel_turn is not impl_plot:
+            self.end_wheel_turn()
+            if self._staging_cmds:
+                return False
+            self.stage_view_lim_cmd(impl_plot, name='Zoom')
+            self._parser.begin_wheel_turn()
+            self._wheel_turn, self._wheel_span = impl_plot, hi - lo
+        scale = self.WHEEL_STEP ** -angle
+        self._parser.set_impl_x_axis_limits(impl_plot, (x - (x - lo) * scale, x + (hi - x) * scale))
+        self._flush_view_soon()
+        self._wheel_rest.start()
+        return True
+
+    def end_wheel_turn(self):
+        """End the turn of the wheel in progress, if any: the plots read the data of the window it left, once, and fit
+        their Y axis to them; the turn is one zoom to undo."""
+        self._wheel_rest.stop()
+        impl_plot, self._wheel_turn = self._wheel_turn, None
+        if impl_plot is None:
+            return
+        lo, hi = self._parser.get_impl_x_axis_limits(impl_plot)
+        self._parser.end_wheel_turn(zoomed_in=hi - lo < self._wheel_span)
+        self._fit_y_after_x_zoom(impl_plot)
+        while len(self._staging_cmds):
+            self.commit_view_lim_cmd(impl_plot)
+        while len(self._commitd_cmds):
+            self.push_view_lim_cmd()
+        self._flush_view()
+        self.stats(self.get_canvas())
+
+    def _drop_wheel_turn(self):
+        """Forget the turn of the wheel in progress without reading, as when another canvas replaces this one."""
+        self._wheel_rest.stop()
+        if self._wheel_turn is None:
+            return
+        self._wheel_turn = None
+        self._staging_cmds.clear()
+        self._parser.cancel_interactive_pan()
+
+    def leaveEvent(self, event):
+        self.end_wheel_turn()
+        super().leaveEvent(event)
+
+    def _flush_view_soon(self):
+        """Redraw after a view-limit change, once the events waiting are done: a turn of the wheel brings several."""
+        self._flush_view()
 
     def reset_all_views(self):
         """
@@ -844,6 +932,7 @@ class IplotQtCanvas(QWidget):
         """
         if self._parser is None or self.get_canvas() is None:
             return
+        self.end_wheel_turn()
         old_limits = self._parser.get_all_plot_limits()
         if not old_limits:
             return

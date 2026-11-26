@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from functools import partial, wraps
 import logging
 import math
+import numbers
 import numpy as np
 from queue import Empty, Queue
 import re
@@ -202,6 +203,10 @@ class BackendParserBase(ABC):
         self._previewing = False
         self._interactive_pan = False
         self._interactive_pan_pending = None
+        # While the view a turn of the wheel left reads, the margin it reads on each side (see end_wheel_turn).
+        self._wheel_reads = None  # type: Optional[float]
+        # From the first notch of a turn of the wheel to the read of its end (see begin_wheel_turn).
+        self._wheel_turning = False
         self._streaming_impl_plot_lut = defaultdict(lambda: [None, None])
         self._pending_signal_refs = {}  # type: Dict[Any, weakref.ref]
         self._pending_signal_lock = threading.Lock()
@@ -698,7 +703,9 @@ class BackendParserBase(ABC):
             # from the other signals' buffers, so those must be refetched over the
             # new time window first.
             reprocess_followers = []
-            for impl_plot in shared_plots if only is None else only:
+            # The plot the user changed reads first.
+            members = sorted(shared_plots if only is None else only, key=lambda member: member is not current_plot)
+            for impl_plot in members:
                 plot = self._impl_plot_cache_table.get_cache_item(impl_plot).plot()
 
                 if isinstance(plot, PlotXYWithSlider) and len(shared_plots) > 1:
@@ -731,7 +738,7 @@ class BackendParserBase(ABC):
                         # is still redrawn on every move — skipping the redraw is what
                         # emptied the plots of sources that hold the whole pulse.
                         if not isinstance(plot, PlotXYWithSlider) and not self._interactive_pan:
-                            signal.set_limits((new_start, new_end))
+                            self._set_read_limits(signal, new_start, new_end)
                         self._process_view_change(self.signal_lut_key(signal), impl_plot,
                                                   partial(self.process_ipl_signal, signal))
 
@@ -779,6 +786,72 @@ class BackendParserBase(ABC):
             if owner not in self._view_reads:
                 draw()
         return pending is not None
+
+    #: Once a turn of the wheel ends, a signal that reads its new window reads twice the samples a pixel needs, as the
+    #: Phoebus data browser does, and after a zoom in, this much more of the time axis on each side, as a fraction of
+    #: the window, as Perfetto does: the next turns, which mostly zoom a little in or back out, find their data in
+    #: memory. A zoom out reads no more than its window: wide windows are the reads the archive takes longest over.
+    WHEEL_READ_MARGIN = 0.5
+    WHEEL_READ_DENSITY = 2
+
+    def begin_wheel_turn(self):
+        """begin_interactive_pan() for a turn of the wheel: until it ends, where the view reaches past the data in
+        memory, the plots draw the data they were first drawn with (see _with_draw_time_margins)."""
+        self.begin_interactive_pan()
+        self._wheel_turning = True
+
+    def end_wheel_turn(self, zoomed_in: bool) -> bool:
+        """end_interactive_pan() for a turn of the wheel (see begin_wheel_turn): a signal whose data in memory show the
+        window it left as finely as a read would reads nothing, and one that reads reads ahead (see
+        _set_read_limits). The plots keep their margins drawn until the data arrive."""
+        self._wheel_reads = self.WHEEL_READ_MARGIN if zoomed_in else 0.0
+        try:
+            return self.end_interactive_pan()
+        finally:
+            self._wheel_reads = None
+            self._wheel_turning = False
+
+    def cancel_interactive_pan(self):
+        """Forget a drag or a turn of the wheel in progress without reading anything, as when another canvas replaces
+        the one it moved."""
+        self._interactive_pan = False
+        self._interactive_pan_pending = None
+        self._arrived_in_pan = {}
+        self._wheel_turning = False
+
+    def _set_read_limits(self, signal: Signal, begin, end):
+        """Make `signal` read the data to show (begin, end) of its time axis. Once a turn of the wheel ends, it reads
+        nothing if the data in memory show it already as finely as a read would, and else more samples, and a margin on
+        each side after a zoom in (see WHEEL_READ_MARGIN)."""
+        samples = None
+        if self._wheel_reads is not None and isinstance(signal, SignalXY) and not signal._x_maps_samples_to_time():
+            if self._shows_finely(signal, begin, end):
+                return
+            if not signal.children:
+                margin = (end - begin) * self._wheel_reads
+                if isinstance(begin, numbers.Integral) and isinstance(end, numbers.Integral):
+                    margin = int(margin)
+                begin, end = begin - margin, end + margin
+                samples = round(AccessHelper.num_samples * self.WHEEL_READ_DENSITY * (1 + 2 * self._wheel_reads))
+        if isinstance(signal, IplotSignalAdapter):
+            signal.read_samples = samples
+        signal.set_limits((begin, end))
+
+    @staticmethod
+    def _shows_finely(signal: IplotSignalAdapter, begin, end) -> bool:
+        """Whether the data in memory of a signal whose X is its time hold (begin, end), raw or with a sample per pixel
+        at least, as many as a decimated read gives."""
+        x = signal.x_data
+        if not hasattr(x, '__len__') or len(x) < 2 or begin is None or end is None:
+            return False
+        try:
+            if not x[0] <= begin <= end <= x[-1]:
+                return False
+        except TypeError:
+            return False
+        if not signal.isDownsampled:
+            return True
+        return np.searchsorted(x, end, 'right') - np.searchsorted(x, begin, 'left') >= AccessHelper.num_samples
 
     def _process_view_change(self, owner: Any, impl_plot: Any, step: Callable[[], None]):
         """Run `step`, which draws signals of `impl_plot` over the new range of its view.
@@ -1778,6 +1851,31 @@ class BackendParserBase(ABC):
         restore = getattr(signal, 'restore_minimap_snapshot', None)
         return restore() if restore is not None else None
 
+    @staticmethod
+    def _with_draw_time_margins(signal: Signal, data: list) -> list:
+        """The data to draw of a signal while those of its new range are read: where the view reaches past the data in
+        memory, the data it was first drawn with fill it, coarser, as a map shows coarse tiles until the fine ones
+        arrive, instead of nothing. Only for an X that is the time (see restore_minimap_snapshot)."""
+        names = ('_minimap_x_data', '_minimap_y_data', '_minimap_y_max_data', '_minimap_y_avg_data')
+        first = [getattr(signal, name, None) for name in names]
+        x, first_x = data[0] if data else None, first[0]
+        if (x is None or len(x) == 0 or first_x is None or len(first_x) < 2
+                or getattr(signal, 'x_expr', None) != IplotSignalAdapter.x_expr):
+            return data
+        before, after = first_x < x[0], first_x > x[-1]
+        if not before.any() and not after.any():
+            return data
+        filled = []
+        for values, first_values in zip(data, first + [None] * (len(data) - len(first))):
+            if values is None or len(values) != len(x):
+                filled.append(values)
+            elif first_values is None or len(first_values) != len(first_x):
+                return data
+            else:
+                first_values = np.asarray(first_values)
+                filled.append(np.concatenate((first_values[before], np.asarray(values), first_values[after])))
+        return filled
+
     @run_in_one_thread
     def process_ipl_signal(self, signal: Signal):
         """
@@ -1805,6 +1903,8 @@ class BackendParserBase(ABC):
         else:
             # All good, make a data access request
             signal_data = signal.get_data()
+            if self._wheel_turning:
+                signal_data = self._with_draw_time_margins(signal, signal_data)
 
         # Apply shift offsets if present (persisted in signal metadata)
         # This ensures offset survives any rebuild/refresh cycle

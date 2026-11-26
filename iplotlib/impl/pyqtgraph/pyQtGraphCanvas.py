@@ -149,6 +149,7 @@ class QtViewBox(pg.ViewBox):
     # also emitted through sigRangeChangedManually on every intermediate move.
     dragStarted = QtSignal(object)
     dragFinished = QtSignal(object)
+    wheeled = QtSignal(object, object, object)  # the view box, the wheel event, and 0 or 1 over the X or Y axis
 
     def __init__(self, parent=None):
         super().__init__(parent=parent, enableMenu=False)
@@ -197,7 +198,10 @@ class QtViewBox(pg.ViewBox):
             self.released.emit(self, ev)
 
     def wheelEvent(self, ev, axis=None):
+        # The canvas zooms with the wheel (see IplotQtCanvas.wheel_zoom) and accepts the event if it did; pyqtgraph's
+        # own zoom, on both axes and out of the history, stays off.
         ev.ignore()
+        self.wheeled.emit(self, ev, axis)
 
 
 def legend_frame() -> tuple:
