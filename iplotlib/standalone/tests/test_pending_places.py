@@ -12,7 +12,8 @@ import numpy as np
 
 from iplotlib.core.axis import LinearAxis
 from iplotlib.core.canvas import Canvas
-from iplotlib.core.impl_base import PENDING_PLACE_TEXT, PENDING_PROGRESS_TEXT, BackendParserBase
+from iplotlib.core.impl_base import (PENDING_CANCELLED_TEXT, PENDING_PLACE_TEXT, PENDING_PROGRESS_TEXT,
+                                     BackendParserBase)
 from iplotlib.core.plot import PlotXY, PlotXYWithSlider
 from iplotlib.core.ruler import Ruler
 from iplotlib.core.signal import SignalXY
@@ -258,6 +259,30 @@ class PendingPlacesTest(unittest.TestCase):
         if hasattr(parser, '_pending_texts'):
             return {place: text.get_text() for place, text in parser._pending_texts.items()}
         return {place: cell.getItem(0, 0).text for place, cell in parser._pending_cells.items()}
+
+    def test_the_places_whose_data_are_read_no_more_say_so_until_the_canvas_is_drawn_anew(self):
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                canvas = _canvas()
+                qt_canvas = self._qt_canvas(backend, canvas, _places(canvas))
+                qt_canvas.draw_plot(canvas.plots[0][1])
+                finished = []
+                qt_canvas._finish_drawing = finished.append
+
+                qt_canvas.cancel_pending_places()
+                self.app.processEvents()
+
+                self.assertEqual(self._pending_texts(qt_canvas), {(0, 0): PENDING_CANCELLED_TEXT,
+                                                                  (1, 0): PENDING_CANCELLED_TEXT})
+                self.assertEqual(PENDING_CANCELLED_TEXT, "Cancelled")
+                self.assertEqual(qt_canvas._parser.pending_places, {})
+                self.assertEqual(finished, [canvas])
+                qt_canvas.show_pending_progress(0, 0, 1, 2)
+                self.assertEqual(self._pending_texts(qt_canvas)[(0, 0)], PENDING_CANCELLED_TEXT)
+
+                qt_canvas.set_canvas(canvas)
+                self.app.processEvents()
+                self.assertEqual(self._pending_texts(qt_canvas), {})
 
     def test_a_place_dropped_shows_nothing(self):
         for backend in BACKENDS:

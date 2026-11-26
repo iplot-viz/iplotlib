@@ -7,7 +7,7 @@ This module defines the `Canvas` object.
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import List, Union, Dict
+from typing import List, Optional, Union, Dict
 
 from iplotLogging import setupLogger
 from iplotlib.core.persistence import JSONExporter
@@ -317,15 +317,18 @@ class Canvas(ABC):
         self._merge_plot(plot, column, row, old_canvas, self._old_signals(old_canvas))
 
     @staticmethod
-    def _signal_key(computed_signal: Union[Signal, dict]) -> str:
-        # Consider signal is same if it has the same row uid, name
+    def _signal_key(computed_signal: Union[Signal, dict]) -> Optional[str]:
+        """The same signal has the same row uid and name. None for a signal without a uid, as those of the workspaces
+        saved before signals had one: it is the signal of no row."""
         if isinstance(computed_signal, Signal):
-            return computed_signal.uid + ";" + computed_signal.name
-        return computed_signal['uid'] + ";" + computed_signal['name']
+            uid, name = computed_signal.uid, computed_signal.name
+        else:
+            uid, name = computed_signal.get('uid'), computed_signal.get('name')
+        return None if uid is None else uid + ";" + name
 
     @staticmethod
     def _old_signals(old_canvas: dict) -> Dict[str, dict]:
-        """The signals of `old_canvas`, by _signal_key()."""
+        """The signals of `old_canvas` that have a _signal_key(), by it."""
         map_old_signals: Dict[str, dict] = {}
         for columns in old_canvas['plots']:
             for old_plot in columns:
@@ -333,7 +336,9 @@ class Canvas(ABC):
                     continue
                 for old_signals in old_plot['signals'].values():
                     for old_signal in old_signals:
-                        map_old_signals[Canvas._signal_key(old_signal)] = old_signal
+                        key = Canvas._signal_key(old_signal)
+                        if key is not None:
+                            map_old_signals[key] = old_signal
         return map_old_signals
 
     @staticmethod
