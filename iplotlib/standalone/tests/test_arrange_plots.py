@@ -45,6 +45,15 @@ def _destroy(widget):
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
+def _close_windows_left_shown():
+    """Close the windows a test left shown, this one or one run before: QTest moves the mouse of the platform, which
+    goes to the window under it, and a window left over the canvas would take its events."""
+    for window in QApplication.topLevelWidgets():
+        if window.isVisible():
+            window.close()
+    QApplication.processEvents()
+
+
 def _canvas(columns, labels: dict = None, points: int = 10, empty=()) -> Canvas:
     """A canvas with a column of plots for each count of plots in `columns`: each plot draws a rising line of
     `points` points from 0 to 9, which leaves its top left corner empty, and is titled by its place. `labels` names
@@ -129,14 +138,9 @@ class TestArrangePlots(unittest.TestCase):
         cls.app = ensure_qapp()
 
     def _qt_canvas(self, backend, columns=(3,), labels: dict = None, points: int = 10, empty=()):
-        # One canvas shown at a time: the mouse of another, left over the same place, would take its events.
-        previous = getattr(self, '_shown', None)
-        if previous is not None:
-            previous.close()
-            self.app.processEvents()
+        _close_windows_left_shown()
         canvas = _canvas(columns, labels, points, empty)
         qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
-        self._shown = qt_canvas
         self.addCleanup(_destroy, qt_canvas)
         self.addCleanup(qt_canvas.close)
         qt_canvas.resize(800, 900)
@@ -1183,13 +1187,9 @@ class TestArrangePlots(unittest.TestCase):
     def test_a_grid_picked_for_a_canvas_with_no_plot_takes_drops_on_its_cells(self):
         for backend in BACKENDS:
             with self.subTest(backend):
-                previous = getattr(self, '_shown', None)
-                if previous is not None:
-                    previous.close()
-                    self.app.processEvents()
+                _close_windows_left_shown()
                 canvas = Canvas(mouse_mode=Canvas.MOUSE_MODE_SELECT)
                 qt_canvas = IplotQtCanvasFactory.new(backend, canvas=canvas)
-                self._shown = qt_canvas
                 self.addCleanup(_destroy, qt_canvas)
                 self.addCleanup(qt_canvas.close)
                 qt_canvas.resize(800, 900)
