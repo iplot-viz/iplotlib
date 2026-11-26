@@ -25,6 +25,7 @@ class IplotPreferencesForm(QWidget):
     """
     onApply = Signal()
     onReset = Signal()
+    legendPositionChosen = Signal(object)  #: the object of the form, whose legend position the user picked
 
     def __init__(self, fields: Optional[List[dict]] = None, label: str = "Preferences",
                  parent: Optional[QWidget] = None,
@@ -49,7 +50,7 @@ class IplotPreferencesForm(QWidget):
         if label == 'Canvas':
             self.exportButton = QPushButton("Save preferences")
             self.exportButton.pressed.connect(self.export_canvas_preferences)
-        self._modifiedTime = time.time_ns()
+        self._modifiedTime = 0  # nothing modified yet
 
         vlayout = QVBoxLayout()
         self.setLayout(vlayout)
@@ -87,6 +88,9 @@ class IplotPreferencesForm(QWidget):
                 widget = bean.data(BeanItem.WidgetRole)
                 if isinstance(widget, QComboBox):
                     self.widgetMapper.addMapping(widget, i, b'currentIndex')
+                    if field.get('property') == 'legend_position':
+                        # Picked even where it already is: the value does not change, but the legend should go there.
+                        widget.activated.connect(lambda *_: self.legendPositionChosen.emit(self.source()))
                 elif isinstance(widget, ColorPicker):
                     self.widgetMapper.addMapping(widget, i, b'currentColor')
                 else:
@@ -117,8 +121,15 @@ class IplotPreferencesForm(QWidget):
         This encapsulation is done in :data:`~iplotlib.qt.gui.iplotQtCanvasAssembly.IplotQtCanvasAssembly.setCanvasData`
         """
         py_object = idx.data(Qt.ItemDataRole.UserRole)
+        # Showing another object changes none of its preferences: the form keeps when it was last modified.
+        modified = self._modifiedTime
         self.widgetModel.setData(QModelIndex(), py_object, BeanItemModel.PyObjectRole)
         self.widgetMapper.toFirst()
+        self._modifiedTime = modified
+
+    def source(self):
+        """The python object the form shows."""
+        return self.widgetModel.data(QModelIndex(), BeanItemModel.PyObjectRole)
 
     @Slot()
     def reset_prefs(self):

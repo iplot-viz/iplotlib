@@ -14,7 +14,7 @@ import os
 import unittest
 
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QItemSelectionModel, Qt
 from PySide6.QtGui import QStandardItemModel
 
 from iplotlib.core.canvas import Canvas
@@ -24,6 +24,7 @@ from iplotlib.core.signal import SignalXY
 from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.gui.iplotQtMainWindow import IplotQtMainWindow
 from iplotlib.qt.gui.iplotQtPreferencesWindow import IplotQtPreferencesWindow
+from iplotlib.qt.models import BeanItem
 from iplotlib.qt.testing import ensure_qapp
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
@@ -445,6 +446,83 @@ class LegendPreferenceChangeTest(unittest.TestCase):
         prev = canvas.to_dict()
         canvas.legend_position = 'lower left'
         self.assertEqual(self._moved(canvas, prev), [id(canvas.plots[0][0])])
+
+
+class PreferencesOnTheCanvasTest(unittest.TestCase):
+    """What the Preferences do to a drawn canvas: a legend position picked puts there a dragged legend, even the
+    position shown; closing them without Apply discards what was changed in them, not what the mouse did on the canvas
+    meanwhile."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = ensure_qapp()
+
+    def setUp(self):
+        canvas = Canvas(2, 1, legend=True, legend_position='upper right', legend_layout='vertical')
+        x = np.linspace(0, 10, 50)
+        for k in range(2):
+            plot = PlotXY()
+            signal = SignalXY(label=f"s{k}", uid=f"uid-{k}")
+            signal.set_data([x, np.sin(x) + k])
+            plot.add_signal(signal)
+            canvas.add_plot(plot, 0)
+        canvas.plots[0][1].legend_position = 'lower left'
+        self.win = IplotQtMainWindow()
+        self.addCleanup(self.win.close)
+        qt_canvas = IplotQtCanvasFactory.new('matplotlib', canvas=canvas)
+        qt_canvas.set_canvas(canvas)
+        self.win.canvasStack.addWidget(qt_canvas)
+        self.canvas = qt_canvas.get_canvas()
+        self.app.processEvents()
+        self.win.prefWindow.show()
+        self.app.processEvents()
+        for plot in self.canvas.plots[0]:
+            plot.legend_anchor = {'1': [0.3, 0.4]}  # what a drag leaves
+
+    def _show(self, item):
+        tree = self.win.prefWindow.treeView
+        tree.selectionModel().select(item.index(), QItemSelectionModel.SelectionFlag.ClearAndSelect)
+        self.app.processEvents()
+        return self.win.prefWindow.formsStack.currentWidget()
+
+    def _pick_the_position_shown(self, form):
+        combo = next(form.widgetModel.item(0, i).data(BeanItem.WidgetRole)
+                     for i in range(form.widgetModel.columnCount())
+                     if form.widgetModel.item(0, i).data(BeanItem.PropertyRole) == 'legend_position')
+        combo.activated.emit(combo.currentIndex())
+
+    def test_picking_the_position_of_a_plot_shown_puts_its_dragged_legend_back(self):
+        canvas_item = self.win.prefWindow.treeView.model().item(0, 0)
+        form = self._show(canvas_item.child(0).child(0))
+        self._pick_the_position_shown(form)
+        form.applyButton.pressed.emit()
+        self.assertEqual([plot.legend_anchor for plot in self.canvas.plots[0]], [None, {'1': [0.3, 0.4]}])
+
+    def test_picking_the_position_of_the_canvas_shown_puts_back_the_legends_that_follow_it(self):
+        form = self._show(self.win.prefWindow.treeView.model().item(0, 0))
+        self._pick_the_position_shown(form)
+        form.applyButton.pressed.emit()
+        # The second plot has a position of its own, which the canvas does not change.
+        self.assertEqual([plot.legend_anchor for plot in self.canvas.plots[0]], [None, {'1': [0.3, 0.4]}])
+
+    def test_closing_them_keeps_what_the_mouse_did_on_the_canvas(self):
+        hidden = self.canvas.plots[0][0].signals[1][0]
+        hidden.hidden = True
+        self.win.prefWindow.close()
+        self.assertEqual([plot.legend_anchor for plot in self.canvas.plots[0]], [{'1': [0.3, 0.4]}] * 2)
+        self.assertTrue(hidden.hidden)
+
+    def test_closing_them_discards_a_preference_not_applied_and_keeps_the_gestures(self):
+        form = self._show(self.win.prefWindow.treeView.model().item(0, 0))
+        grid = next(i for i in range(form.widgetModel.columnCount())
+                    if form.widgetModel.item(0, i).data(BeanItem.PropertyRole) == 'grid')
+        form.widgetModel.setData(form.widgetModel.index(0, grid), not self.canvas.grid)
+        hidden = self.canvas.plots[0][0].signals[1][0]
+        hidden.hidden = True
+        self.win.prefWindow.close()
+        self.assertIsNone(self.canvas.grid)
+        self.assertEqual([plot.legend_anchor for plot in self.canvas.plots[0]], [{'1': [0.3, 0.4]}] * 2)
+        self.assertTrue(hidden.hidden)
 
 
 class LogScaleInvalidationTest(unittest.TestCase):
