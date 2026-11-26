@@ -1102,7 +1102,8 @@ class AccessHelper:
                       pulse=signal.pulse_nb,
                       envelope=signal.envelope,
                       extremities=signal.extremities,
-                      nbp=AccessHelper.num_samples if AccessHelper.num_samples_override else -1
+                      nbp=AccessHelper.num_samples if AccessHelper.num_samples_override else -1,
+                      fallback_nbp=AccessHelper.num_samples
                       )
         # retType is UDA-specific; IMAS has no notion of calibrated data
         if signal.calibrated:
@@ -1421,7 +1422,8 @@ class AccessHelper:
                 result['d1_unit'] = d_env.yunit if d_env else ''
                 result['d2_unit'] = d_env.yunit if d_env else ''
                 result['d3_unit'] = d_env.yunit if d_env else ''
-                result['isds'] = ds
+                # Data access layers that predate isdecimated only signal decimation through the retry.
+                result['isds'] = ds or getattr(d_env, 'isdecimated', False)
                 if d_env and d_env.resolved_pulse:
                     result['resolved_pulse'] = d_env.resolved_pulse
                 logger.debug(f"[UDA ] nbsMIN={len(d_env.ydata_min)} nbsMAX={len(d_env.ydata_max)}")
@@ -1462,7 +1464,7 @@ class AccessHelper:
                 result['d1_unit'] = raw.yunit if raw.yunit else ''
                 result['d2_unit'] = ''
                 result['d3_unit'] = ''
-                result['isds'] = ds
+                result['isds'] = ds or getattr(raw, 'isdecimated', False)
                 if raw.resolved_pulse:
                     result['resolved_pulse'] = raw.resolved_pulse
         else:
