@@ -35,6 +35,8 @@ from iplotlib.qt.gui.iplotQtCanvasFactory import IplotQtCanvasFactory
 from iplotlib.qt.testing import ensure_qapp
 
 BACKENDS = ('matplotlib', 'pyqt')
+MODES = (Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_PAN, Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_DIST,
+         Canvas.MOUSE_MODE_RULER)
 NAMES = ['EC-GN-P5C:R_T2_USC_AI_0_MHVPS_Voltage', 'EC-GN-P5C:R_T3_DBG_AO_1_BPS1_Feedback',
          'EC-GN-P5C:P_T4_WMAi2_EXP_BPS2_Expected', 'EC-GN-P5C:R_T2_USC_AI_1_BPS1_Voltage']
 FONT_SIZE = 12
@@ -97,9 +99,17 @@ class _MatplotlibMouse:
         self._event('button_release_event', (start[0] + dx, start[1] - dy))
         self.qt_canvas._mpl_renderer.draw()
 
-    def name(self, impl, index):
+    def name(self, impl, index, along=0.5):
+        """A point of a name, `along` its width, halfway up."""
         box = impl.get_legend().get_texts()[index].get_window_extent()
-        return (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2
+        return box.x0 + along * box.width, (box.y0 + box.y1) / 2
+
+    def takes_a_curve(self, xy):
+        """Whether a press at `xy` would take a curve to shift it, were no legend there."""
+        renderer = self.qt_canvas._mpl_renderer
+        ratio = renderer.device_pixel_ratio
+        point = renderer.mapTo(self.qt_canvas, QPointF(xy[0] / ratio, renderer.height() - xy[1] / ratio).toPoint())
+        return self.qt_canvas._press_shifts(QPointF(point))
 
     def eye_button(self, impl):
         return self.parser._legend_eyes[impl]
@@ -173,8 +183,17 @@ class _PyQtGraphMouse:
         centre = item.mapToScene(item.boundingRect().center())
         return centre.x(), centre.y()
 
-    def name(self, impl, index):
-        return self._centre(impl.legend.items[index][1])
+    def name(self, impl, index, along=0.5):
+        """A point of a name, `along` its width, halfway down."""
+        label = impl.legend.items[index][1]
+        rect = label.boundingRect()
+        point = label.mapToScene(QPointF(rect.left() + along * rect.width(), rect.center().y()))
+        return point.x(), point.y()
+
+    def takes_a_curve(self, xy):
+        """Whether a press at `xy` would take a curve to shift it, were no legend there."""
+        point = self.view.viewport().mapTo(self.qt_canvas, self.view.mapFromScene(QPointF(*xy)))
+        return self.qt_canvas._press_shifts(QPointF(point))
 
     @staticmethod
     def eye_button(impl):
@@ -302,22 +321,56 @@ class LegendInteractionTest(unittest.TestCase):
                 np.testing.assert_allclose(mouse.box(self._impl(qt_canvas)), moved, atol=0.005)
                 np.testing.assert_allclose(plot.legend_anchor['1'], [moved[0], moved[2]], atol=0.005)
 
+    def _over_the_curves(self, backend, mode):
+        """A plot drawn in `mode` with its legend over the curves, the index of a name and a point of it where a
+        press would take a curve, were the legend not there."""
+        qt_canvas, plot, mouse = self._draw(backend, PlotXY(legend_anchor={'1': [0.3, 0.3]}), mode)
+        impl = self._impl(qt_canvas)
+        spots = ((index, mouse.name(impl, index, along)) for index in range(len(NAMES))
+                 for along in np.linspace(0.1, 0.9, 17))
+        index, xy = next(((index, xy) for index, xy in spots if mouse.takes_a_curve(xy)), (None, None))
+        self.assertIsNotNone(index, 'no name of the legend lies over a curve')
+        return qt_canvas, plot, mouse, impl, index, xy
+
+    def _assert_only_the_legend_took_the_mouse(self, qt_canvas, plot, impl, limits):
+        """The mouse did nothing but work the legend: no shift, zoom or pan to undo, no ruler, no distance begun."""
+        self.assertEqual(qt_canvas._parser.get_oaw_axis_limits(impl, 0), limits)
+        self.assertFalse(qt_canvas.can_undo())
+        self.assertEqual(plot.rulers, [])
+        self.assertIsNone(qt_canvas._dist_calculator.plot1)
+
     def test_the_legend_takes_its_clicks_over_the_curves_in_every_mode(self):
-        # Over a curve, a press could start a shift or a ruler instead.
+        # Over a curve, a press could start a shift, a distance or a ruler instead.
         for backend in BACKENDS:
-            for mode in (Canvas.MOUSE_MODE_SELECT, Canvas.MOUSE_MODE_ZOOM, Canvas.MOUSE_MODE_RULER):
+            for mode in MODES:
                 with self.subTest(backend=backend, mode=mode):
-                    plot = PlotXY(legend_anchor={'1': [0.3, 0.3]})
-                    qt_canvas, plot, mouse = self._draw(backend, plot, mode)
-                    impl = self._impl(qt_canvas)
+                    qt_canvas, plot, mouse, impl, index, xy = self._over_the_curves(backend, mode)
                     limits = qt_canvas._parser.get_oaw_axis_limits(impl, 0)
 
-                    mouse.click(mouse.name(impl, 3))
-                    mouse.click(mouse.eye(impl))
+                    mouse.click(xy)
+                    self.assertEqual(self._shown(plot)[1], [k != index for k in range(len(NAMES))])
+                    self._assert_only_the_legend_took_the_mouse(qt_canvas, plot, impl, limits)
 
-                    self.assertEqual(self._shown(plot)[1], [True, True, True, False])
+                    mouse.click(mouse.eye(impl))
                     self.assertFalse(mouse.shown(self._impl(qt_canvas)))
-                    self.assertEqual(qt_canvas._parser.get_oaw_axis_limits(impl, 0), limits)
+                    self._assert_only_the_legend_took_the_mouse(qt_canvas, plot, impl, limits)
+
+    def test_a_drag_from_the_legend_over_the_curves_moves_it_in_every_mode(self):
+        # Over a curve, a shift, a pan, a zoom or a distance could take the drag instead, leaving the legend behind.
+        for backend in BACKENDS:
+            for mode in MODES:
+                with self.subTest(backend=backend, mode=mode):
+                    qt_canvas, plot, mouse, impl, _, xy = self._over_the_curves(backend, mode)
+                    limits = qt_canvas._parser.get_oaw_axis_limits(impl, 0)
+                    left, _, top = mouse.box(impl)
+
+                    mouse.drag(xy, -150, 80)
+
+                    moved = mouse.box(self._impl(qt_canvas))
+                    self.assertLess(moved[0], left - 0.1)
+                    self.assertGreater(moved[2], top + 0.1)
+                    self.assertEqual(self._shown(plot), ([True] * 4, [True] * 4))
+                    self._assert_only_the_legend_took_the_mouse(qt_canvas, plot, impl, limits)
 
     def test_the_eye_folds_the_legend_away_and_back(self):
         for backend in BACKENDS:
